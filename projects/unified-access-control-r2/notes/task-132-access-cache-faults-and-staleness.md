@@ -361,7 +361,11 @@ P11). The r1 seeds R1-R8 are in §15.
    Every live write is behind `-Apply`; every result is checkable with `-Verify`; everything else is read-only. Run from
    the repository root of the branch being verified, signed in with `az login` as an operator (not a service principal).
    The script records the deploy start and the matter's original owner in
-   `%TEMP%\task-132-live-gate.state.json`. Commands, in order:
+   `%TEMP%\task-132-live-gate.state.json` (or `-StatePath`). **The original owner is recorded ONCE per matter** (owner
+   round 48 (d), §16.8): a second `ReassignMatter -Apply` before `RestoreMatter` keeps the first one and says so; a
+   verified `RestoreMatter -Apply` marks it restored, after which the next reassign records afresh. That bookkeeping is
+   tested with no live call: `Invoke-Pester projects/unified-access-control-r2/notes/task-132-live-gate.Tests.ps1`
+   (7 / 7). Commands, in order:
 
    ```powershell
    $g = 'projects/unified-access-control-r2/notes/task-132-live-gate.ps1'
@@ -533,7 +537,7 @@ round 10 item 3 ANSWERED escalation 7 (the degraded RPA-fallback answer stays un
 moves from `completed-with-escalation` to `completed` with only the live manual gates G-1 / G-2 (§12) outstanding.
 No live write was made.
 
-### 16.1 Residual 1 — share-only changes must evict like owner changes: CLOSED, by construction
+### 16.1 Residual 1 — share-only changes must evict like owner changes: CLOSED ~~, by construction~~ (corrected in round f1-v1c-v1, §16.8: the build enforces exactly what §16.8 lists, nothing beyond it)
 
 **What a POA share stales (trace, code-read 2026-10-04).** (a) `ImpersonatedRootSetSource` — the set is an impersonated
 Dataverse query, which sees POA shares; a TEAM share changes every member's set. (b) `CachedAccessDataSource` — both
@@ -565,7 +569,10 @@ as first committed in f1 this sentence read "fails the build on a POA write that
 disproved — the f1 detector only saw a bare-identifier receiver (seeds S5 / S6 stayed green). §16.6.* *Strengthened in
 f1-v1c-v1 (§16.7): f1-v1's C3 pinned method NAMES and its behaviour proof ran only a user principal (seeds N1 / N2
 passed); C3 now proves the eviction on EVERY path through the seam's writes, and C6 / T5 read metadata, constant data and
-configuration.*
+configuration.* *Corrected in f1-v1c-v1 (§16.8): "only a name the code computes or reads at run time is beyond it" was
+false — verifier seed U (an `[UnsafeAccessor]` extern that IS the client's write: compiled, no string, nothing computed)
+and seed R (the write chosen by reflection on its SIGNATURE, no name at all) passed every rule. Both mechanisms are now
+banned (C8 / T6, C7), and the claim is restated as exactly what the build enforces.*
 `InternalShareEndpoints`' existing per-user `ImpersonatedRootSetSource.InvalidateAsync` is kept: it
 is what works where the invalidator is the Null peer (in-memory cache, Development/Testing).
 
@@ -735,6 +742,9 @@ stream or an unresolvable token):
 **Out of reach, and now SAID so instead of claimed:** a method name or action URL the code computes or reads at RUN time
 (built from non-constant pieces, or read from configuration or attribute metadata), then invoked by reflection or a raw
 HTTP call. No static scan sees a value that does not exist until the code runs; that is review's to catch.
+*Corrected in f1-v1c-v1 (§16.8): this disclosure was itself incomplete — a compiled route with no name at all (seed U,
+`[UnsafeAccessor]`) and a reflective route with no name at all (seed R, selection by signature) were neither caught nor
+disclosed. Both mechanisms are now banned; see §16.8 for exactly what the build enforces.*
 
 **Controls.** `CompiledDetector_FlagsEveryBypassShape_AndPassesTheSeam` scans never-executed control types, one bypass
 shape per type: the S5 inline-resolved receiver, an async lambda, a method group, an expression tree (C1); the SDK message
@@ -893,6 +903,10 @@ from pieces none of which is the name (fragments joined by a call, an enum value
 characters, a decoding) or read from a LIVE store no repository file holds (an App Service setting set by hand, Key Vault, Dataverse, an HTTP response). Also stated:
 POA writes made OUTSIDE the BFF (MDA sharing, flows, operator scripts) are not this guard's job — their staleness is the
 TTL-bounded out-of-band row signed off in §9 / caching-architecture.md (owner R3/R4).
+*Corrected in f1-v1c-v1 (§16.8): "what no static scan can reach" was wrong twice over — verifier seed U (an
+`[UnsafeAccessor]` extern, a COMPILED route with nothing computed at run time) and seed R (reflection that selects the
+write by its signature, with no name at all) were both statically detectable and passed all 622 ArchTests. Owner round
+48 closes the classes (C7, C8, T6) and requires the comments to state exactly what is enforced.*
 
 **Wording corrected** (each had claimed more than C3 proved): the guard header's C3 entry (now (a)/(b)/(c) as above, plus
 C6 / T5 and the narrowed disclosure); `DataverseRecordShareService`'s class remarks (now a "What the build guard proves"

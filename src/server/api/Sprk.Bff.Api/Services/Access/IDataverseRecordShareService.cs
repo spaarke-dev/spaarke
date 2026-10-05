@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Access;
 /// implementation, <see cref="DataverseRecordShareService"/>, calls
 /// <see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/> after
 /// each grant / modify / revoke. A writer therefore needs no eviction of its own — and must not reach POA any other way
-/// (the routes the build guard closes are listed on <see cref="DataverseRecordShareService"/>).</para>
+/// (exactly what the build guard enforces, and what it does not, is listed on <see cref="DataverseRecordShareService"/>).</para>
 /// </remarks>
 public interface IDataverseRecordShareService
 {
@@ -106,19 +106,28 @@ public interface IDataverseRecordShareService
 /// whether it returned or threw (a write that reports failure can have committed) — this seam calls
 /// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>: every user's impersonated root set for the
 /// record's root type and every user's access snapshots of the record. The eviction lives HERE, in the one POA client,
-/// rather than at each writer, so no share writer can be born without it. It is not bound to the caller's token
+/// rather than at each writer, so every writer that shares through this seam gets it without writing any eviction of its
+/// own (how far the build enforces "through this seam" is the next paragraph). It is not bound to the caller's token
 /// (<see cref="CancellationToken.None"/>) and never fails or changes the write's own outcome: the hook does not throw, and
 /// a defect that made it throw is caught and logged here. Reads evict nothing.</para>
 ///
-/// <para><b>What the build guard proves</b> (<c>PoaShareClientSingletonGuardTests</c>). <i>Outside this type</i>, an IL
-/// scan of every <c>src</c> assembly the BFF runs, or that can name the client, rejects: any reference to
+/// <para><b>What the build guard enforces</b> (<c>PoaShareClientSingletonGuardTests</c>) — exactly the following, and
+/// nothing beyond it (owner round 48). <i>Outside this type</i>, over every <c>src</c> assembly the BFF runs or that can
+/// name the client (derived from the csproj graph; each must load): (1) <b>every compiled call path</b> — no reference to
 /// <see cref="DataverseWebApiService"/>'s GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync, the client's own code
-/// included (whatever the receiver expression, and inside a lambda, async method, method group or expression tree); any
-/// use of the SDK's GrantAccess / ModifyAccess / RevokeAccess request messages; any POA action or POA write-method name
-/// carried by a string constant (an SDK request by name, a hand-built POST, a reflective lookup, a <c>dynamic</c> call, in
-/// any letter case), by metadata (a type, member, enum value or parameter of that name; a const, default value,
-/// attribute argument or embedded resource holding it) or by constant data (a UTF-8 literal, a byte or char array
-/// initializer). It pins the client's POA writes to exactly those three methods.
+/// included (whatever the receiver expression, and inside a lambda, async method, method group or expression tree); no
+/// use of the SDK's GrantAccess / ModifyAccess / RevokeAccess request messages; no POA action or POA write-method name
+/// carried by a string constant (an SDK request by name, a hand-built POST, a <c>dynamic</c> call, in any letter case), by
+/// metadata (a type, member, enum value or parameter of that name; a const, default value, attribute argument or
+/// embedded resource holding it), by constant data (a UTF-8 literal, a byte or char array initializer) or by the
+/// configuration the BFF is deployed with; and the client's POA writes pinned to exactly those three methods.
+/// (2) <b>No <c>[UnsafeAccessor]</c></b> (or <c>[UnsafeAccessorType]</c>) — in that compiled metadata, however spelled or
+/// aliased, and in the text of every source and MSBuild file under <c>src/server</c>. (3) <b>No method chosen or invoked
+/// by reflection</b>, on any type — so none on the Dataverse service types or on a Type obtained from them, however
+/// obtained: no method or member lookup (by name, signature or metadata token), no property or event accessor-method
+/// lookup, no name-based <c>Expression.Call</c>, no <c>MethodBase.Invoke</c>, <c>InvokeMember</c>, <c>CreateDelegate</c>,
+/// <c>MethodInvoker</c>, method function pointer, compiled expression tree or <c>dynamic</c> member access — and no code
+/// the scan cannot read (emitted IL, an assembly loaded at run time).
 /// <i>Inside this type</i>, the client's writes may be called only from the three methods the interface map binds to
 /// <see cref="IDataverseRecordShareService"/>'s writes (by metadata identity: an overload of the same name is outside
 /// them), and an IL path analysis of each — its async state machine, exceptions, suspensions and resumptions, every
@@ -127,11 +136,13 @@ public interface IDataverseRecordShareService
 /// helper, on every path, calls the invalidator with that record and awaits it. What the invalidator then evicts is
 /// proved by behaviour tests for every write, every <see cref="DataversePrincipalKind"/> and each outcome. Text rules add
 /// breadth over every <c>src/server</c> file (a write call whose receiver is not declared, only, as
-/// <see cref="IDataverseRecordShareService"/>; the SDK messages; a second POA payload; a write method named as a string)
-/// and over the configuration the BFF is deployed with. No static guard can see a method name or action URL the code
-/// assembles at run time from pieces none of which is the name (fragments joined by a call, an enum value's name plus a
-/// suffix, single characters, a decoding), or reads from a live store no repository file holds (an App Service setting
-/// set by hand, Key Vault, Dataverse); that is review's to catch.</para>
+/// <see cref="IDataverseRecordShareService"/>; the SDK messages; a second POA payload; a write method named as a string).
+/// <b>Not enforced</b> — the build proves nothing about it; it is review's to catch: a POA write by a route that uses
+/// none of those mechanisms — above all a raw HTTP call whose action URL exists only at run time (assembled from pieces
+/// none of which is the action name — fragments joined by a call, an enum value's name plus a suffix, single characters,
+/// a decoding — or read from a live store no repository file holds: an App Service setting set by hand, Key Vault,
+/// Dataverse); native code; code outside the scanned assemblies (it cannot name the client and does not run in the BFF).
+/// POA writes made outside the BFF (MDA sharing, flows, scripts) are bounded by the caches' TTLs.</para>
 /// </remarks>
 public sealed class DataverseRecordShareService : IDataverseRecordShareService
 {

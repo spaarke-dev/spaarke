@@ -24,10 +24,13 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/> after every write — returned or thrown, not
 /// bound to the caller's token, never failing the write. Every share writer (InternalShareEndpoints share/unshare,
 /// provisioning's creator share and its restore, the resume error paths, SecureChildShareSynchronizer's fan-out, …)
-/// reaches Dataverse only through that seam; <c>PoaShareClientSingletonGuardTests</c> pins that per writer, and by an IL
-/// scan of the BFF's assemblies for any compiled route around the seam. Inside the seam, that guard proves STRUCTURALLY
-/// (an IL path analysis) that every path through each of the three writes awaits the write, then calls the eviction
-/// helper with the same record and awaits it, and that the helper calls the invalidator with that record on every path.
+/// reaches Dataverse only through that seam; <c>PoaShareClientSingletonGuardTests</c> pins that per writer, and enforces
+/// exactly three things over the BFF's assemblies (owner round 48): every compiled call path to the client's POA writes,
+/// no <c>[UnsafeAccessor]</c>, and no method chosen or invoked by reflection (nor code the scan cannot read) — a route
+/// outside those (a raw HTTP call whose action URL exists only at run time) is review's. Inside the seam, that guard
+/// proves STRUCTURALLY (an IL path analysis) that every path through each of the three writes awaits the write, then
+/// calls the eviction helper with the same record and awaits it, and that the helper calls the invalidator with that
+/// record on every path.
 /// The cases below prove what that eviction DOES — the record's root sets and snapshots gone — for every write, every
 /// principal kind and each outcome, over the production seam and client.</item>
 /// <item><b>No eviction for a type no cache holds.</b> The children an Assign cascade re-owns

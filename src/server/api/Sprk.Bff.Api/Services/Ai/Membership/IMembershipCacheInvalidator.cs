@@ -153,18 +153,22 @@ public interface IMembershipCacheInvalidator
     /// <remarks>
     /// <para><b>Who calls it</b>: the ONE POA seam, <c>DataverseRecordShareService</c>, after every
     /// <c>GrantAccessAsync</c> / <c>ModifyAccessAsync</c> / <c>RevokeAccessAsync</c> — whether the write succeeded or
-    /// threw (a write that reports failure can have committed). So every share writer is covered by construction:
-    /// <c>InternalShareEndpoints</c> share/unshare, provisioning's creator share and its restore (resume and error paths
-    /// included), <c>UnsecureProjectEndpoint</c>'s revocations, <c>SecureChildShareSynchronizer</c>'s child fan-out,
-    /// the Assigned-To materializer, the No Access enforcer, Direct-thread and playbook sharing.
-    /// <c>PoaShareClientSingletonGuardTests</c> fails the build on every compiled route around the seam — an IL scan of
-    /// every <c>src</c> assembly the BFF runs, or that can name the concrete client, rejects any reference to the client's
-    /// POA writes outside the seam (whatever the receiver expression), the SDK's POA messages, and a POA action or write
-    /// name carried by a string constant or by metadata outside the client — and pins the client's write methods; inside
-    /// the seam, an IL path analysis proves every path through each of its three writes awaits the write and then this
-    /// hook's call for the same record. Text rules add breadth over every <c>src/server</c> file and the deployed
-    /// configuration. Only a name the code computes at run time, or reads from a live store, is beyond it. The routes are
-    /// listed on <c>DataverseRecordShareService</c>.</para>
+    /// threw (a write that reports failure can have committed). Every share writer reaches POA through that seam, so each
+    /// is covered: <c>InternalShareEndpoints</c> share/unshare, provisioning's creator share and its restore (resume and
+    /// error paths included), <c>UnsecureProjectEndpoint</c>'s revocations, <c>SecureChildShareSynchronizer</c>'s child
+    /// fan-out, the Assigned-To materializer, the No Access enforcer, Direct-thread and playbook sharing.
+    /// <c>PoaShareClientSingletonGuardTests</c> enforces that much — exactly these three things, and nothing beyond them
+    /// (owner round 48): (1) every COMPILED call path to the concrete client's POA writes — an IL scan of every <c>src</c>
+    /// assembly the BFF runs, or that can name the client, rejects any reference to those writes outside the seam (whatever
+    /// the receiver expression), the SDK's POA messages, and a POA action or write name carried by a string constant,
+    /// metadata, constant data or the deployed configuration, and pins the client's write methods; inside the seam, an IL
+    /// path analysis proves every path through each of its three writes awaits the write and then this hook's call for the
+    /// same record; (2) a ban on <c>[UnsafeAccessor]</c> anywhere in <c>src/server</c> (compiled metadata and source); (3) a
+    /// ban on choosing or invoking a method by reflection — on any type, so on the Dataverse service types and on any Type
+    /// obtained from them — and on running code the scan cannot read (emitted IL, an assembly loaded at run time). A POA
+    /// write by a route outside those three — above all a raw HTTP call whose action URL exists only at run time, or native
+    /// code — is not proven by the build; it is review's to catch. The exact list is on
+    /// <c>DataverseRecordShareService</c>.</para>
     /// <para>Membership resolution is NOT evicted: it is computed from lookup columns and ownership only — a share is
     /// not a membership term.</para>
     /// <para>Never throws; cancellation is not honoured (see <see cref="InvalidateUserAccessAsync"/>).</para>
