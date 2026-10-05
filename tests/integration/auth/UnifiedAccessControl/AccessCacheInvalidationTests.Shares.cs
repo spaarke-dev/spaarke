@@ -25,7 +25,8 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// bound to the caller's token, never failing the write. Every share writer (InternalShareEndpoints share/unshare,
 /// provisioning's creator share and its restore, the resume error paths, SecureChildShareSynchronizer's fan-out, …)
 /// reaches Dataverse only through that seam; <c>PoaShareClientSingletonGuardTests</c> pins that per writer, and by an IL
-/// scan for any compiled reference to the concrete client's POA writes outside the seam.</item>
+/// scan of the BFF's assemblies for any compiled route around the seam. That guard pins the seam's writes to its three
+/// methods; the cases below are what prove each of the three evicts.</item>
 /// <item><b>No eviction for a type no cache holds.</b> The children an Assign cascade re-owns
 /// (<c>sharepointdocumentlocation</c>, <c>sharepointdocument</c>) are cached by no access cache, so the owner-change hook
 /// builds no pattern for them and touches Redis not at all — while a root's eviction is unchanged.</item>

@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
@@ -112,28 +113,42 @@ public class PoaShareClientSingletonGuardTests
     // ---------------------------------------------------------------------------------------------
     // A POA grant / rights change / revoke changes who can read a record exactly as an owner change does, so the access
     // caches must be evicted after it. The eviction lives in the ONE seam (DataverseRecordShareService calls
-    // IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync after every write). It is only "by construction" if no
-    // writer can reach POA another way. The routes around the seam, and the rule that closes each:
+    // IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync after each of its three writes, returned or thrown —
+    // AccessCacheInvalidationTests.Shares proves it per write). It is only "by construction" if nothing in the BFF can
+    // write POA another way. The routes around the seam, and the rule that closes each:
     //
-    //   1. A COMPILED call to the concrete client's GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync, through ANY
-    //      receiver expression (a field, `sp.GetRequiredService<DataverseWebApiService>()`, a cast, an indexer), inside a
-    //      lambda, local function or async method, or as a method group. Closed by the IL rule
-    //      (EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams): it reads the method tokens the compiler resolved, in
-    //      every assembly that can see DataverseWebApiService, so the receiver's TYPE is known, not guessed from text.
-    //      A rule listing those assemblies would go stale, so it is derived from the csproj graph and pinned
-    //      (EveryProjectThatCanSeeTheClientIsScanned): a new project that references Spaarke.Dataverse, directly or
-    //      through Spaarke.Core / Spaarke.Scheduling / the BFF, fails the build until the scan loads it.
-    //   2. The same call written in a src/server file the IL rule cannot load. Closed by the text rule
-    //      (EveryPoaShareWriteGoesThroughTheEvictingSeam), which now flags every `.XAccessAsync(` whose receiver is
-    //      not an identifier declared in that file ONLY as IDataverseRecordShareService — an expression receiver
-    //      (task 132 verifier seed S5) and a name the file also declares as another type (seed S6) are offenders.
-    //   3. The SDK's GrantAccess/ModifyAccess/RevokeAccess messages (NoServerFileSendsSdkPoaMessages).
-    //   4. A hand-built POST of the action (task 060's PoaActionPayloadsAreBuiltInExactlyOnePlace, above).
-    //   5. Reflection by method name (NoServerFileNamesTheClientsPoaWritesAsAString).
+    // COMPILED — an IL scan (IlCallScan) of every assembly the BFF runs from src/ and every src/ assembly that can name
+    // DataverseWebApiService. The set is derived from the csproj graph, and each member must load
+    // (EveryBffOrClientReachingProjectIsScanned), so a new project cannot fall outside it unnoticed.
+    //   C1. A reference to the concrete client's GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync from ANY type
+    //       but the seam (the client included), through any receiver expression — a field,
+    //       `sp.GetRequiredService<DataverseWebApiService>()` (task 132 verifier seed S5), a cast, an indexer — inside a
+    //       lambda, local function or async method, as a method group, or as an expression tree's method handle.
+    //       (EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams)
+    //   C2. A FOURTH POA write on the client, which C1 would not know by name: the client methods that load a POA action
+    //       name are pinned to exactly those three (TheClientsPoaWritesAreExactlyTheThreeTheGuardNames).
+    //   C3. A write ON the seam that does not evict: the seam's references to the client's writes are pinned to its own
+    //       three same-named methods — the three the behaviour tests prove evict
+    //       (TheSeamWritesPoaOnlyFromItsThreeEvictingMethods).
+    //   C4. A POA action name loaded as a string constant anywhere but the client — an SDK OrganizationRequest by name, a
+    //       hand-built POST or $batch, a name the compiler folded from constant pieces — and a POA write method's name
+    //       loaded as a constant (reflection, nameof, a `dynamic` call's binder name)
+    //       (NoCompiledCodeOutsideTheClientNamesAPoaActionOrWrite).
+    //   C5. The SDK's GrantAccessRequest / ModifyAccessRequest / RevokeAccessRequest, however they are imported (a global
+    //       using defeats the text rule T2) (NoCompiledCodeUsesTheSdkPoaMessages).
+    // TEXT — every src/server .cs file, compiled into the BFF or not:
+    //   T1. A `.XAccessAsync(` call whose receiver is not an identifier the file declares ONLY as
+    //       IDataverseRecordShareService: an expression receiver (S5), a `var`, `dynamic` or undeclared name, a name the
+    //       file also declares as another type (seed S6). Conservative — it may flag a legal call; C1 is the precise rule.
+    //       (EveryPoaShareWriteGoesThroughTheEvictingSeam; per named writer: EachNamedShareWriterWritesOnlyThroughTheSeam)
+    //   T2. The SDK messages (NoServerFileSendsSdkPoaMessages). T3. A second POA payload (task 060's
+    //       PoaActionPayloadsAreBuiltInExactlyOnePlace, above). T4. A POA write method named as a string
+    //       (NoServerFileNamesTheClientsPoaWritesAsAString).
     //
-    // What these guards are NOT: a defence against deliberate obfuscation (a method name assembled from fragments, an
-    // action URL built from pieces). They catch the shapes a writer produces by accident or convenience — which is how
-    // the second POA client was born — and each has a control below that was seen to fail.
+    // OUT OF REACH, by construction: a name or route the code computes or reads at RUN time — a method name or action
+    // URL built from non-constant pieces, or read from configuration or reflection metadata — then invoked by reflection
+    // or a raw HTTP call. No static scan sees a value that does not exist until the code runs; that is review's to catch.
+    // Every rule above has a control that was seen to fail.
     // =============================================================================================
 
     /// <summary>The seam — the one file allowed to call the concrete client's POA writes.</summary>
@@ -147,40 +162,37 @@ public class PoaShareClientSingletonGuardTests
         nameof(DataverseWebApiService.RevokeAccessAsync),
     };
 
-    // ── 1. the compiled rule ─────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// The SDK's POA write messages, by FULL name (compile-checked through <c>typeof</c>): the BFF's own external-access
+    /// DTOs share the short names <c>GrantAccessRequest</c> / <c>RevokeAccessRequest</c> and are not POA writes.
+    /// </summary>
+    private static readonly HashSet<string> SdkPoaMessageTypes = new(StringComparer.Ordinal)
+    {
+        typeof(Microsoft.Crm.Sdk.Messages.GrantAccessRequest).FullName!,
+        typeof(Microsoft.Crm.Sdk.Messages.ModifyAccessRequest).FullName!,
+        typeof(Microsoft.Crm.Sdk.Messages.RevokeAccessRequest).FullName!,
+    };
 
     /// <summary>
-    /// Whether <paramref name="target"/> is one of the concrete client's POA writes: a method of that name declared on
-    /// <see cref="DataverseWebApiService"/>, a subclass of it, or a base type / interface it implements (so a POA write
-    /// later surfaced through one of the client's interfaces is still the client's write). The seam's own interface
-    /// (<see cref="IDataverseRecordShareService"/>) is none of these — the client does not implement it.
+    /// A string constant that carries a POA action name as a whole word: the bare action (the Web API route segment, the
+    /// SDK's <c>RequestName</c>), a path or URL ending in it (<c>…/RevokeAccess</c>), a qualified name
+    /// (<c>Microsoft.Dynamics.CRM.ModifyAccess</c>), a <c>$batch</c> line. Deliberately conservative: a log message that
+    /// names an action as a word is flagged too (reword it); <c>GrantAccessAsync</c> and <c>GrantAccessRequest</c> are
+    /// other words.
     /// </summary>
-    internal static bool IsTheClientsPoaWrite(MethodBase target) =>
-        PoaWriteMethodNames.Contains(target.Name)
-        && target.DeclaringType is { } declaring
-        && (typeof(DataverseWebApiService).IsAssignableFrom(declaring)
-            || declaring.IsAssignableFrom(typeof(DataverseWebApiService)));
+    private static readonly Regex PoaActionConstant = new(
+        @"\b(GrantAccess|ModifyAccess|RevokeAccess)\b",
+        RegexOptions.CultureInvariant);
+
+    // ── the compiled scan set ────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Every compiled reference, from <paramref name="types"/>, to the concrete client's POA writes that is not made by
-    /// the seam (<see cref="DataverseRecordShareService"/>) or by the client itself. Closures and async state machines
-    /// count as their outermost type.
+    /// The <c>src/**</c> projects the compiled rules scan, as (csproj path, assembly name): every project in
+    /// <c>Sprk.Bff.Api</c>'s ProjectReference closure (the process whose access caches a share write stales), and every
+    /// project whose closure reaches <c>Spaarke.Dataverse</c> (the code that can name
+    /// <see cref="DataverseWebApiService"/>) — a binary or package reference to that assembly counts as reaching it.
     /// </summary>
-    internal static IReadOnlyList<string> CompiledPoaWriteBypasses(IEnumerable<Type> types) =>
-        IlCallScan.MethodReferences(types)
-            .Where(r => IsTheClientsPoaWrite(r.Target))
-            .Select(r => (Caller: IlCallScan.Outermost(r.Caller), r.Target))
-            .Where(r => r.Caller != typeof(DataverseRecordShareService) && r.Caller != typeof(DataverseWebApiService))
-            .Select(r => $"{r.Caller.FullName} → {r.Target.DeclaringType!.Name}.{r.Target.Name}")
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(s => s, StringComparer.Ordinal)
-            .ToList();
-
-    /// <summary>
-    /// Every <c>src/**</c> project whose ProjectReference closure reaches <c>Spaarke.Dataverse</c> (itself included) —
-    /// the projects whose code can name <see cref="DataverseWebApiService"/> — as (csproj path, assembly name).
-    /// </summary>
-    internal static IReadOnlyList<(string Project, string AssemblyName)> ProjectsThatCanSeeTheClient()
+    internal static IReadOnlyList<(string Project, string AssemblyName)> ProjectsTheCompiledScanCovers()
     {
         var srcRoot = Path.Combine(SourceScan.RepoRoot, "src");
         var sep = Path.DirectorySeparatorChar;
@@ -191,15 +203,25 @@ public class PoaShareClientSingletonGuardTests
             .Select(Path.GetFullPath)
             .ToDictionary(p => p, p => XDocument.Load(p), StringComparer.OrdinalIgnoreCase);
 
-        IEnumerable<string> References(string project) =>
+        IEnumerable<string> Includes(string project, string element) =>
             projects[project].Descendants()
-                .Where(e => e.Name.LocalName == "ProjectReference")
+                .Where(e => e.Name.LocalName == element)
                 .Select(e => (string?)e.Attribute("Include"))
                 .Where(include => !string.IsNullOrWhiteSpace(include))
-                .Select(include => Path.GetFullPath(Path.Combine(
-                    Path.GetDirectoryName(project)!, include!.Replace('\\', sep))));
+                .Select(include => include!.Trim());
+
+        IEnumerable<string> References(string project) =>
+            Includes(project, "ProjectReference")
+                .Select(include => Path.GetFullPath(Path.Combine(Path.GetDirectoryName(project)!, include.Replace('\\', sep))));
+
+        bool NamesTheClientBinary(string project) =>
+            Includes(project, "Reference").Concat(Includes(project, "PackageReference"))
+                .Any(include => include == "Spaarke.Dataverse"
+                                || include.StartsWith("Spaarke.Dataverse,", StringComparison.Ordinal)
+                                || include.EndsWith("Spaarke.Dataverse.dll", StringComparison.OrdinalIgnoreCase));
 
         var client = projects.Keys.Single(p => Path.GetFileName(p) == "Spaarke.Dataverse.csproj");
+        var bff = projects.Keys.Single(p => Path.GetFileName(p) == "Sprk.Bff.Api.csproj");
         var memo = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
 
         bool Reaches(string project, HashSet<string> visiting)
@@ -219,13 +241,27 @@ public class PoaShareClientSingletonGuardTests
                 return false;
             }
 
-            var reaches = References(project).Any(r => Reaches(r, visiting));
+            var reaches = NamesTheClientBinary(project) || References(project).Any(r => Reaches(r, visiting));
             visiting.Remove(project);
             return memo[project] = reaches;
         }
 
+        var bffClosure = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<string>(new[] { bff });
+        while (pending.Count > 0)
+        {
+            var project = pending.Pop();
+            if (projects.ContainsKey(project) && bffClosure.Add(project))
+            {
+                foreach (var reference in References(project))
+                {
+                    pending.Push(reference);
+                }
+            }
+        }
+
         return projects.Keys
-            .Where(p => Reaches(p, new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
+            .Where(p => bffClosure.Contains(p) || Reaches(p, new HashSet<string>(StringComparer.OrdinalIgnoreCase)))
             .Select(p => (
                 Project: RelativePath(p),
                 AssemblyName: projects[p].Descendants().FirstOrDefault(e => e.Name.LocalName == "AssemblyName")?.Value.Trim()
@@ -234,10 +270,29 @@ public class PoaShareClientSingletonGuardTests
             .ToList();
     }
 
-    [Fact(DisplayName = "Task 132: every project that can see the concrete POA client is loaded by the compiled scan")]
-    public void EveryProjectThatCanSeeTheClientIsScanned()
+    /// <summary>Every type of every assembly the compiled rules scan (loading each; a failure to load fails the rule).</summary>
+    private static readonly Lazy<IReadOnlyList<Type>> ScannedTypes = new(() =>
+        ProjectsTheCompiledScanCovers()
+            .Select(p => Assembly.Load(new AssemblyName(p.AssemblyName)))
+            .SelectMany(a => a.GetTypes())
+            .ToList());
+
+    /// <summary>The scanned method references that touch POA: the client's writes and the SDK's POA messages.</summary>
+    private static readonly Lazy<IReadOnlyList<(Type Caller, MethodBase CallerMethod, MethodBase Target)>> ScannedPoaReferences = new(() =>
+        IlCallScan.MethodReferences(ScannedTypes.Value)
+            .Where(r => IsTheClientsPoaWrite(r.Target) || IsAnSdkPoaMessage(r.Target))
+            .ToList());
+
+    /// <summary>The scanned string constants that name a POA action or a POA write method.</summary>
+    private static readonly Lazy<IReadOnlyList<(Type Caller, MethodBase CallerMethod, string Value)>> ScannedPoaNameLoads = new(() =>
+        IlCallScan.StringLoads(ScannedTypes.Value)
+            .Where(l => NamesAPoaActionOrWrite(l.Value))
+            .ToList());
+
+    [Fact(DisplayName = "Task 132: every project the BFF runs, or that can name the concrete POA client, is loaded by the compiled scan")]
+    public void EveryBffOrClientReachingProjectIsScanned()
     {
-        var projects = ProjectsThatCanSeeTheClient();
+        var projects = ProjectsTheCompiledScanCovers();
         var unloadable = new List<string>();
         foreach (var (project, assemblyName) in projects)
         {
@@ -251,30 +306,66 @@ public class PoaShareClientSingletonGuardTests
             }
         }
 
+        var names = projects.Select(p => p.AssemblyName).ToHashSet(StringComparer.Ordinal);
         Assert.True(
-            projects.Count >= 4,
-            "precondition: Spaarke.Dataverse, Spaarke.Core, Spaarke.Scheduling and Sprk.Bff.Api can all name the client; "
-            + $"the csproj walk found only: {string.Join(", ", projects.Select(p => p.Project))}");
+            new[] { "Spaarke.Dataverse", "Spaarke.Core", "Spaarke.Scheduling", "Sprk.Bff.Api" }.All(names.Contains),
+            "precondition: the csproj walk finds the BFF and the three shared projects it runs; it found only: "
+            + string.Join(", ", projects.Select(p => p.Project)));
         Assert.True(
             unloadable.Count == 0,
-            "a project that can name DataverseWebApiService is not loadable by the compiled POA-write scan, so a share write "
-            + "in it that skips the access-cache eviction (task 132) would pass unseen. Add a ProjectReference to it in "
-            + "tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj."
+            "a project the BFF runs, or that can name DataverseWebApiService, is not loadable by the compiled POA-write scan, "
+            + "so a share write in it that skips the access-cache eviction (task 132) would pass unseen. Add a "
+            + "ProjectReference to it in tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj."
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", unloadable)}");
     }
+
+    // ── C1. the client's POA writes are called only by the seam ──────────────────────────────────
+
+    /// <summary>
+    /// Whether <paramref name="target"/> is one of the concrete client's POA writes: a method of that name declared on
+    /// <see cref="DataverseWebApiService"/>, a subclass of it, or a base type / interface it implements (so a POA write
+    /// later surfaced through one of the client's interfaces is still the client's write). The seam's own interface
+    /// (<see cref="IDataverseRecordShareService"/>) is none of these — the client does not implement it.
+    /// </summary>
+    internal static bool IsTheClientsPoaWrite(MethodBase target) =>
+        PoaWriteMethodNames.Contains(target.Name)
+        && target.DeclaringType is { } declaring
+        && (typeof(DataverseWebApiService).IsAssignableFrom(declaring)
+            || declaring.IsAssignableFrom(typeof(DataverseWebApiService)));
+
+    /// <summary>Whether <paramref name="target"/> is a member of one of the SDK's POA write messages.</summary>
+    internal static bool IsAnSdkPoaMessage(MethodBase target) =>
+        target.DeclaringType?.FullName is { } name && SdkPoaMessageTypes.Contains(name);
+
+    /// <summary>Whether a string constant names a POA action (<see cref="PoaActionConstant"/>) or a POA write method.</summary>
+    internal static bool NamesAPoaActionOrWrite(string value) =>
+        PoaActionConstant.IsMatch(value) || PoaWriteMethodNames.Contains(value);
+
+    /// <summary>
+    /// Every reference in <paramref name="references"/> to the concrete client's POA writes that is not made by the seam
+    /// (<see cref="DataverseRecordShareService"/>) — the client itself included, so a client method that wraps one is a
+    /// bypass too. Closures and async state machines count as their outermost type.
+    /// </summary>
+    internal static IReadOnlyList<string> CompiledPoaWriteBypasses(
+        IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> references) =>
+        references
+            .Where(r => IsTheClientsPoaWrite(r.Target))
+            .Select(r => (Caller: IlCallScan.Outermost(r.Caller), r.Target))
+            .Where(r => r.Caller != typeof(DataverseRecordShareService))
+            .Select(r => $"{r.Caller.FullName} → {r.Target.DeclaringType!.Name}.{r.Target.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
 
     [Fact(DisplayName = "Task 132: only the evicting seam references the concrete client's POA writes (compiled)")]
     public void EveryCompiledReferenceToTheClientsPoaWritesIsTheSeams()
     {
-        var assemblies = ProjectsThatCanSeeTheClient()
-            .Select(p => Assembly.Load(new AssemblyName(p.AssemblyName)))
-            .ToList();
-        var types = assemblies.SelectMany(a => a.GetTypes()).ToList();
+        var references = ScannedPoaReferences.Value;
 
         // Vacuity check: the scan must SEE the sanctioned calls — the seam's three writes, made from inside its async
         // state machines — or "no bypass found" means nothing.
-        var seamCalls = IlCallScan.MethodReferences(types.Where(t => IlCallScan.Outermost(t) == typeof(DataverseRecordShareService)))
-            .Where(r => IsTheClientsPoaWrite(r.Target))
+        var seamCalls = references
+            .Where(r => IlCallScan.Outermost(r.Caller) == typeof(DataverseRecordShareService) && IsTheClientsPoaWrite(r.Target))
             .Select(r => r.Target.Name)
             .ToHashSet(StringComparer.Ordinal);
         Assert.True(
@@ -282,7 +373,7 @@ public class PoaShareClientSingletonGuardTests
             "precondition: the compiled scan sees DataverseRecordShareService call all three client POA writes; it saw "
             + string.Join(", ", seamCalls));
 
-        var bypasses = CompiledPoaWriteBypasses(types);
+        var bypasses = CompiledPoaWriteBypasses(references);
 
         Assert.True(
             bypasses.Count == 0,
@@ -292,31 +383,187 @@ public class PoaShareClientSingletonGuardTests
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", bypasses)}");
     }
 
-    [Fact(DisplayName = "Task 132: the compiled detector flags every bypass shape and passes the seam")]
+    // ── C2. the client has exactly three POA writes ──────────────────────────────────────────────
+
+    /// <summary>
+    /// The source methods, among <paramref name="loads"/>, that load a POA action name — on the client, its POA writes.
+    /// A load inside a lambda is reported under its closure, never under a source method's name.
+    /// </summary>
+    internal static IReadOnlyList<string> PoaActionSenders(IEnumerable<(Type Caller, MethodBase CallerMethod, string Value)> loads) =>
+        loads
+            .Where(l => PoaActionConstant.IsMatch(l.Value))
+            .Select(l => IlCallScan.SourceMethodName(l.Caller, l.CallerMethod))
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 132: the concrete client's POA writes are exactly the three the guard names")]
+    public void TheClientsPoaWritesAreExactlyTheThreeTheGuardNames()
+    {
+        var senders = PoaActionSenders(IlCallScan.StringLoads(IlCallScan.WithNested(typeof(DataverseWebApiService))));
+
+        Assert.True(
+            senders.Count == PoaWriteMethodNames.Count && senders.All(PoaWriteMethodNames.Contains),
+            "the client methods that send a POA action must be exactly GrantAccessAsync / ModifyAccessAsync / "
+            + "RevokeAccessAsync: the compiled rule above recognises a client POA write BY THOSE NAMES, so a fourth would be "
+            + "a write any type could call without the seam's eviction (task 132). Expose it through "
+            + "IDataverseRecordShareService (which evicts) and add its name to PoaWriteMethodNames — a review decision."
+            + $"{Environment.NewLine}  found: {string.Join(", ", senders)}");
+    }
+
+    // ── C3. the seam writes only from its three evicting methods ─────────────────────────────────
+
+    /// <summary>
+    /// The seam's writes, as <c>"{seam method} → {client write}"</c>: which of the seam's source methods (async state
+    /// machines mapped back to their method; a lambda reported under its closure) calls which client POA write.
+    /// </summary>
+    internal static IReadOnlyList<string> SeamPoaWrites(IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> references) =>
+        references
+            .Where(r => IsTheClientsPoaWrite(r.Target))
+            .Select(r => $"{IlCallScan.SourceMethodName(r.Caller, r.CallerMethod)} → {r.Target.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 132: the seam writes POA only from its three evicting methods, each its own write")]
+    public void TheSeamWritesPoaOnlyFromItsThreeEvictingMethods()
+    {
+        var writes = SeamPoaWrites(IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(DataverseRecordShareService))));
+
+        Assert.True(
+            writes.SequenceEqual(new[]
+            {
+                "GrantAccessAsync → GrantAccessAsync",
+                "ModifyAccessAsync → ModifyAccessAsync",
+                "RevokeAccessAsync → RevokeAccessAsync",
+            }),
+            "the seam may write POA only from GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync — the three whose "
+            + "eviction (returned, thrown or cancelled) AccessCacheInvalidationTests.Shares proves. A write anywhere else in "
+            + "the seam is a write C1 trusts without that proof (task 132): route it through one of the three, or add its "
+            + "eviction cases to those tests and its name here — a review decision."
+            + $"{Environment.NewLine}  found: {string.Join(", ", writes)}");
+    }
+
+    // ── C4. POA actions and write methods named as constants ─────────────────────────────────────
+
+    /// <summary>
+    /// Every string constant in <paramref name="loads"/> that names a POA action or a POA write method outside the
+    /// client — the one place a POA action may be named (task 060) and the one type that declares those methods.
+    /// </summary>
+    internal static IReadOnlyList<string> CompiledPoaNameLoads(IEnumerable<(Type Caller, MethodBase CallerMethod, string Value)> loads) =>
+        loads
+            .Where(l => NamesAPoaActionOrWrite(l.Value))
+            .Select(l => (Caller: IlCallScan.Outermost(l.Caller), l.Value))
+            .Where(l => l.Caller != typeof(DataverseWebApiService))
+            .Select(l => $"{l.Caller.FullName}: \"{l.Value}\"")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 132: no compiled code outside the client names a POA action or POA write method as a constant")]
+    public void NoCompiledCodeOutsideTheClientNamesAPoaActionOrWrite()
+    {
+        var loads = ScannedPoaNameLoads.Value;
+
+        // Vacuity check: the scan must see the client's own three action names.
+        Assert.True(
+            PoaActionSenders(loads.Where(l => IlCallScan.Outermost(l.Caller) == typeof(DataverseWebApiService)))
+                .SequenceEqual(PoaWriteMethodNames.OrderBy(s => s, StringComparer.Ordinal)),
+            "precondition: the compiled scan sees the client's three POA writes load their action names");
+
+        var offenders = CompiledPoaNameLoads(loads);
+
+        Assert.True(
+            offenders.Count == 0,
+            "naming a POA action (GrantAccess / ModifyAccess / RevokeAccess) or a client POA write method as a constant "
+            + "outside the client is how a write reaches Dataverse without the seam — an SDK OrganizationRequest by name, a "
+            + "hand-built POST, a reflective call — and without the access-cache eviction (task 132). Call "
+            + "IDataverseRecordShareService."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
+    }
+
+    // ── C5. the SDK's POA messages ───────────────────────────────────────────────────────────────
+
+    /// <summary>Every use, in <paramref name="references"/>, of a member of the SDK's POA write messages.</summary>
+    internal static IReadOnlyList<string> CompiledSdkPoaMessageUses(
+        IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> references) =>
+        references
+            .Where(r => IsAnSdkPoaMessage(r.Target))
+            .Select(r => $"{IlCallScan.Outermost(r.Caller).FullName} → {r.Target.DeclaringType!.Name}.{r.Target.Name}")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+
+    [Fact(DisplayName = "Task 132: no compiled code uses the SDK's GrantAccess/ModifyAccess/RevokeAccess messages")]
+    public void NoCompiledCodeUsesTheSdkPoaMessages()
+    {
+        var offenders = CompiledSdkPoaMessageUses(ScannedPoaReferences.Value);
+
+        Assert.True(
+            offenders.Count == 0,
+            "an SDK POA message bypasses the one seam — and with it the access-cache eviction (task 132) and the payload "
+            + "consolidation (task 060). Use IDataverseRecordShareService."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
+    }
+
+    /// <summary>Negative and positive controls for the compiled detectors (C1, C4, C5) and the pins' mapping (C2, C3).</summary>
+    [Fact(DisplayName = "Task 132: the compiled detectors flag every bypass shape and pass the seam")]
     public void CompiledDetector_FlagsEveryBypassShape_AndPassesTheSeam()
     {
-        static IEnumerable<Type> WithNested(Type type) =>
-            new[] { type }.Concat(type.GetNestedTypes(BindingFlags.Public | BindingFlags.NonPublic).SelectMany(WithNested));
-
-        var bypasses = CompiledPoaWriteBypasses(WithNested(typeof(PoaWriteBypassControls)));
+        var writeControls = new[]
+        {
+            typeof(PoaBypassControl_ResolvedInline),
+            typeof(PoaBypassControl_AsyncLambda),
+            typeof(PoaBypassControl_MethodGroup),
+            typeof(PoaBypassControl_ExpressionTree),
+        };
+        var writeReferences = IlCallScan.MethodReferences(writeControls.SelectMany(IlCallScan.WithNested)).ToList();
 
         Assert.Equal(
             new[]
             {
-                $"{typeof(PoaWriteBypassControls).FullName} → DataverseWebApiService.GrantAccessAsync",
-                $"{typeof(PoaWriteBypassControls).FullName} → DataverseWebApiService.ModifyAccessAsync",
-                $"{typeof(PoaWriteBypassControls).FullName} → DataverseWebApiService.RevokeAccessAsync",
+                $"{typeof(PoaBypassControl_AsyncLambda).FullName} → DataverseWebApiService.GrantAccessAsync",
+                $"{typeof(PoaBypassControl_ExpressionTree).FullName} → DataverseWebApiService.RevokeAccessAsync",
+                $"{typeof(PoaBypassControl_MethodGroup).FullName} → DataverseWebApiService.ModifyAccessAsync",
+                $"{typeof(PoaBypassControl_ResolvedInline).FullName} → DataverseWebApiService.RevokeAccessAsync",
             },
-            bypasses);
+            CompiledPoaWriteBypasses(writeReferences));
 
-        var sanctioned = WithNested(typeof(PoaWriteThroughSeamControl)).ToList();
-        Assert.True(
-            IlCallScan.MethodReferences(sanctioned).Count(r => PoaWriteMethodNames.Contains(r.Target.Name)) == 3,
-            "precondition: the scan sees the three seam writes inside the control's async state machine");
-        Assert.Empty(CompiledPoaWriteBypasses(sanctioned));
+        Assert.Equal(
+            new[] { $"{typeof(PoaBypassControl_SdkMessage).FullName} → GrantAccessRequest..ctor" },
+            CompiledSdkPoaMessageUses(IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(PoaBypassControl_SdkMessage)))));
+
+        var nameControl = typeof(PoaBypassControl_NamedAsConstants);
+        Assert.Equal(
+            new[]
+            {
+                $"{nameControl.FullName}: \"/RevokeAccess\"",
+                $"{nameControl.FullName}: \"GrantAccess\"",
+                $"{nameControl.FullName}: \"ModifyAccessAsync\"",
+                $"{nameControl.FullName}: \"POST Microsoft.Dynamics.CRM.ModifyAccess HTTP/1.1\"",
+                $"{nameControl.FullName}: \"RevokeAccessAsync\"",
+            },
+            CompiledPoaNameLoads(IlCallScan.StringLoads(IlCallScan.WithNested(nameControl))));
+
+        // The pins' source-method mapping: an async method's state machine maps back to the method; a lambda does not
+        // borrow its enclosing method's name.
+        var lambdaWrites = SeamPoaWrites(IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(PoaBypassControl_AsyncLambda))));
+        Assert.Single(lambdaWrites);
+        Assert.DoesNotContain(lambdaWrites, w => w.StartsWith(nameof(PoaBypassControl_AsyncLambda.InsideAnAsyncLambda) + " →", StringComparison.Ordinal));
+        Assert.Equal(
+            new[] { "AllThreeWrites", "AllThreeWrites", "AllThreeWrites" },
+            IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(PoaWriteThroughSeamControl)))
+                .Where(r => PoaWriteMethodNames.Contains(r.Target.Name))
+                .Select(r => IlCallScan.SourceMethodName(r.Caller, r.CallerMethod)));
+
+        // The sanctioned shape — every write through the seam's interface — is none of these.
+        var sanctioned = IlCallScan.WithNested(typeof(PoaWriteThroughSeamControl)).ToList();
+        Assert.Empty(CompiledPoaWriteBypasses(IlCallScan.MethodReferences(sanctioned)));
+        Assert.Empty(CompiledSdkPoaMessageUses(IlCallScan.MethodReferences(sanctioned)));
+        Assert.Empty(CompiledPoaNameLoads(IlCallScan.StringLoads(sanctioned)));
     }
 
-    // ── 2. the text rule (every src/server file) ─────────────────────────────────────────────────
+    // ── T1-T4. the text rules (every src/server file) ────────────────────────────────────────────
 
     private static readonly Regex PoaWriteInvocation = new(
         @"\.\s*(?<method>GrantAccessAsync|ModifyAccessAsync|RevokeAccessAsync)\s*\(",
@@ -398,9 +645,9 @@ public class PoaShareClientSingletonGuardTests
     /// <c>RevokeAccessAsync(</c>, with whether it provably goes through the seam — its receiver is an identifier
     /// (<c>_owner._recordShare</c> resolves to the last one) that the file declares, and declares ONLY as an
     /// <c>IDataverseRecordShareService</c>. An expression receiver (<c>sp.GetRequiredService&lt;X&gt;()</c>,
-    /// <c>(dv)</c>, <c>clients[0]</c>), an undeclared one, a <c>var</c> one and one the file also declares as another type
-    /// are not provably the seam, so they are offenders. Line comments are stripped first. Crude by design (see
-    /// <see cref="SourceScan"/>); the compiled rule is the precise one. Paired with
+    /// <c>(dv)</c>, <c>clients[0]</c>), an undeclared one, a <c>var</c> or <c>dynamic</c> one and one the file also
+    /// declares as another type are not provably the seam, so they are offenders. Line comments are stripped first.
+    /// Crude by design (see <see cref="SourceScan"/>); the compiled rule C1 is the precise one. Paired with
     /// <see cref="Detector_FlagsAWriteOnTheConcreteClient_AndPassesAWriteThroughTheSeam"/>.
     /// </summary>
     internal static IReadOnlyList<(string Receiver, string Method, bool ThroughSeam)> PoaWriteCalls(string text)
@@ -563,6 +810,10 @@ public class PoaShareClientSingletonGuardTests
             var recordShare = sp.GetRequiredService<DataverseWebApiService>();
             await recordShare.RevokeAccessAsync(set, id, p, ct);
             """;
+        const string dynamicLocal = """
+            dynamic recordShare = client;
+            await recordShare.RevokeAccessAsync(set, id, p, ct);
+            """;
         const string undeclared = """
             Task U() => recordShare.GrantAccessAsync(set, id, p, "ReadAccess", ct);
             """;
@@ -578,6 +829,7 @@ public class PoaShareClientSingletonGuardTests
         Assert.Equal(new[] { (ExpressionReceiver, "RevokeAccessAsync", false) }, PoaWriteCalls(indexerReceiver));
         Assert.Equal(new[] { ("_recordShare", "GrantAccessAsync", false) }, PoaWriteCalls(s6SameNameOtherType));
         Assert.Equal(new[] { ("recordShare", "RevokeAccessAsync", false) }, PoaWriteCalls(inferredLocal));
+        Assert.Equal(new[] { ("recordShare", "RevokeAccessAsync", false) }, PoaWriteCalls(dynamicLocal));
         Assert.Equal(new[] { ("recordShare", "GrantAccessAsync", false) }, PoaWriteCalls(undeclared));
 
         Assert.True(UsesSdkPoaMessages("using Microsoft.Crm.Sdk.Messages;\nvar r = new GrantAccessRequest { Target = t };"));
@@ -591,7 +843,6 @@ public class PoaShareClientSingletonGuardTests
         Assert.False(NamesAPoaWriteAsAString("/// <see cref=\"GrantAccessAsync\"/>\napp.MapPost(\"/grant\", GrantAccessAsync);"),
             "a doc-comment cref and a method-group reference are not names-as-strings (the compiled rule sees the latter)");
     }
-
     [Fact(DisplayName = "Task 060: PlaybookSharingService holds no private POA client")]
     public void PlaybookSharingServiceDelegatesRatherThanDuplicating()
     {
@@ -614,25 +865,69 @@ public class PoaShareClientSingletonGuardTests
     }
 }
 
-/// <summary>
-/// Negative control for the compiled rule — never executed, only scanned. Each member reaches the concrete client's POA
-/// writes in a shape the original text detector could not see: an inline-resolved receiver (task 132 verifier seed S5),
-/// a call inside an async lambda (a closure type), and a method-group conversion (<c>ldftn</c>, no call at all).
-/// </summary>
-internal static class PoaWriteBypassControls
+// ── Controls for the compiled rules — never executed, only scanned. One bypass shape per type, because the compiled
+//    rules report a bypass by its outermost type; each shape is one the original text detector could not see.
+
+/// <summary>Task 132 verifier seed S5's shape: the concrete client resolved inline — a receiver no text rule can type.</summary>
+internal static class PoaBypassControl_ResolvedInline
 {
     internal static Task ResolvedInline(IServiceProvider sp) =>
         sp.GetRequiredService<DataverseWebApiService>()
             .RevokeAccessAsync("sprk_projects", Guid.Empty, DataversePrincipalRef.User(Guid.Empty));
+}
 
+/// <summary>A write inside an async lambda — compiled into a closure's state machine, not the method that holds it.</summary>
+internal static class PoaBypassControl_AsyncLambda
+{
     internal static Func<Task> InsideAnAsyncLambda(DataverseWebApiService client) =>
         async () => await client.GrantAccessAsync("sprk_projects", Guid.Empty, DataversePrincipalRef.User(Guid.Empty), "ReadAccess");
+}
 
+/// <summary>A method-group conversion — an <c>ldftn</c>, no call instruction, and no <c>(</c> for a text rule to find.</summary>
+internal static class PoaBypassControl_MethodGroup
+{
     internal static Func<string, Guid, DataversePrincipalRef, string, CancellationToken, Task> AsAMethodGroup(DataverseWebApiService client) =>
         client.ModifyAccessAsync;
 }
 
-/// <summary>Positive control for the compiled rule — the sanctioned shape: every write through the seam's interface.</summary>
+/// <summary>An expression tree — an <c>ldtoken</c> of the method, compiled and invoked at run time.</summary>
+internal static class PoaBypassControl_ExpressionTree
+{
+    internal static Expression<Func<Task>> AsAnExpressionTree(DataverseWebApiService client) =>
+        () => client.RevokeAccessAsync("sprk_projects", Guid.Empty, DataversePrincipalRef.User(Guid.Empty), CancellationToken.None);
+}
+
+/// <summary>The SDK's POA message — however its namespace is imported.</summary>
+internal static class PoaBypassControl_SdkMessage
+{
+    internal static object SdkGrant() => new Microsoft.Crm.Sdk.Messages.GrantAccessRequest();
+}
+
+/// <summary>
+/// POA actions and write methods named as string constants — and, as the positive half, constants that only share a
+/// prefix with one (other words, not names).
+/// </summary>
+internal static class PoaBypassControl_NamedAsConstants
+{
+    private const string Grant = "Grant";
+
+    /// <summary>Folded by the compiler into ONE constant, <c>"GrantAccess"</c> — invisible to a text rule.</summary>
+    internal static string FoldedFromConstants() => Grant + "Access";
+
+    internal static string ActionUrl(string baseUrl) => $"{baseUrl}/RevokeAccess";
+
+    internal static string BatchLine() => "POST Microsoft.Dynamics.CRM.ModifyAccess HTTP/1.1";
+
+    internal static string WriteMethodName() => nameof(DataverseWebApiService.ModifyAccessAsync);
+
+    /// <summary>A <c>dynamic</c> call: its member name is a binder string, not a method token — C4 sees the string.</summary>
+    internal static Task ThroughDynamic(object client) =>
+        ((dynamic)client).RevokeAccessAsync("sprk_projects", Guid.Empty, DataversePrincipalRef.User(Guid.Empty));
+
+    internal static string OtherWords() => "GrantAccessRequest rejected; RevokeAccessAsyncHandler, ModifyAccessible";
+}
+
+/// <summary>Positive control for the compiled rules — the sanctioned shape: every write through the seam's interface.</summary>
 internal static class PoaWriteThroughSeamControl
 {
     internal static async Task AllThreeWrites(IDataverseRecordShareService seam)

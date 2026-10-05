@@ -107,13 +107,18 @@ public interface IDataverseRecordShareService
 /// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>: every user's impersonated root set for the
 /// record's root type and every user's access snapshots of the record. The eviction lives HERE, in the one POA client,
 /// rather than at each writer, so no share writer can be born without it. <c>PoaShareClientSingletonGuardTests</c> fails
-/// the build on each route around this seam it can see: a COMPILED reference to <see cref="DataverseWebApiService"/>'s
-/// GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync from any type but this one and the client itself (an IL scan
-/// of every project that can name the client, so any receiver expression, lambda, async method or method group); a
-/// <c>.…AccessAsync(</c> call in any <c>src/server</c> file whose receiver is not declared, only, as
-/// <see cref="IDataverseRecordShareService"/>; the SDK's POA messages; a second POA payload; and a POA write method named
-/// as a string (reflection). A name assembled from fragments to defeat a scan is outside what any guard sees; that is
-/// review's to catch. It is not bound to the caller's token
+/// the build on every route around this seam that exists in compiled code. An IL scan of every <c>src</c> assembly the BFF
+/// runs, or that can name the client, rejects: any reference to <see cref="DataverseWebApiService"/>'s
+/// GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync outside this type, the client's own code included (whatever
+/// the receiver expression, and inside a lambda, async method, method group or expression tree); any use of the SDK's
+/// GrantAccess / ModifyAccess / RevokeAccess request messages; and any POA action or POA write-method name loaded as a
+/// string constant outside the client (an SDK request by name, a hand-built POST, a reflective lookup, a <c>dynamic</c>
+/// call). It also pins the client's POA writes to exactly those three methods, and this type's writes to its own three
+/// evicting methods. Text rules over every <c>src/server</c> file add breadth: a POA write call whose receiver is not
+/// declared, only, as <see cref="IDataverseRecordShareService"/>; the SDK messages; a second POA payload; a write method
+/// named as a string. No static guard can see a method name or action URL the code computes or reads at run time (from
+/// non-constant pieces, configuration or reflection metadata); that is review's to catch. It is not bound to the caller's
+/// token
 /// (<see cref="CancellationToken.None"/>) and never fails or changes the write's own outcome: the hook does not throw, and
 /// a defect that made it throw is caught and logged here. Reads evict nothing.</para>
 /// </remarks>
