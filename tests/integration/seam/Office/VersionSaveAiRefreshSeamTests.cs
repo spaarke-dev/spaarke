@@ -549,6 +549,11 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             IEnumerable<KnowledgeDocument> documents, CancellationToken cancellationToken = default) =>
             IndexDocumentsBatchAsync(documents, null, cancellationToken);
 
+        // Not on the version-save path (it belongs to the relocation of a file between containers, task 166 f1-v1).
+        public Task<int> DeleteSupersededFileChunksAsync(
+            string tenantId, string speFileId, string? onlyForDocumentId, string? searchIndexName, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<RagSearchResponse> SearchAsync(string query, RagSearchOptions options, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 

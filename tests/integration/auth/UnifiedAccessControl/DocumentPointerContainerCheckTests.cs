@@ -333,15 +333,20 @@ public class DocumentPointerContainerCheckTests
         (await Check(world, CustomerAContainer)).Should().BeFalse("an item that cannot be verified is never followed");
     }
 
-    [Fact]
-    public async Task APersonsRow_WhoseItemTheBffUploadedAppOnly_IsRefused()
+    [Theory]
+    [InlineData(CustomerAContainer, true)]    // the unfiled document's derived container (its owner unit's)
+    [InlineData(CustomerA1Container, false)]  // another container of the same customer: the container half admits it, the
+                                              // derived-container test does not
+    public async Task APersonsRow_WhoseItemTheBffUploadedAppOnly_IsServedOnlyInItsDerivedContainer(string drive, bool served)
     {
-        // Round 23: the BFF identity is accepted only for rows the BFF created.
+        // Round 23 accepted the BFF identity only for rows the BFF created. Owner round 37 item 3 (task 166 f1-v1, F1):
+        // the interim rule ALSO serves a BFF-identity item on a person's row when the pointer passes the STRICT derived-
+        // container test — a file the relocator placed — and nothing wider.
         var world = Environment();
         world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, owner: CustomerA);
-        world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("file.pdf", null, BffApplicationId);
+        world.Items[(drive, Item)] = new SpeItemCreator("file.pdf", null, BffApplicationId);
 
-        (await Check(world, CustomerAContainer)).Should().BeFalse();
+        (await Check(world, drive)).Should().Be(served);
     }
 
     [Fact]

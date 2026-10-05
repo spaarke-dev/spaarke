@@ -107,6 +107,13 @@ public static class AnalysisServicesModule
             configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
         services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
+        // unified-access-control-r2 task 166 f1-v1 (owner round 37 item 1) — the PublicContracts facade through which
+        // DocumentContainerRelocator (CRUD code, ADR-013) re-indexes a MOVED file and removes the old item's chunks.
+        // TRULY UNCONDITIONAL like the enqueuer it wraps: the relocator serves the unconditionally mapped
+        // POST /api/v1/documents/{id}/file (bff-extensions.md §F.1); with AI off NullRagService settles the delete step.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IRelocatedFileIndexing,
+                           Sprk.Bff.Api.Services.Ai.PublicContracts.RelocatedFileIndexing>();
+
         // FR-P1-03 (ai-architecture-redesign-r1 task 022) — Event-path BOUNDS infrastructure,
         // TRULY UNCONDITIONAL. These three registrations have NO AI dependencies:
         //  - EventRulesOptions: platform-setting bounds (daily cap, M4 threshold, opt-out TTL).

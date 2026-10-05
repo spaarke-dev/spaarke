@@ -180,4 +180,51 @@ public sealed class RagServiceChunkTrimTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("1 of 2 leftover chunk(s) could not be deleted*");
     }
+
+    // ── unified-access-control-r2 task 166 f1-v1 (owner round 37 item 1): the chunks of a SUPERSEDED item ──────────
+
+    [Fact]
+    public async Task DeleteSupersededFileChunks_RemovesEveryChunkOfThePipelinesShape_FromChunkZero()
+    {
+        // The document now names another item: ALL of the old item's chunks go (unlike the trim, which keeps 0..N-1) —
+        // but never another writer's chunks for the same file.
+        _matchingRows = new List<KnowledgeDocument>
+        {
+            Chunk($"{SpeFileId}_0", 0),
+            Chunk($"{SpeFileId}_1", 1),
+            Chunk("doc-166_knowledge_0", 0),
+        };
+
+        var deleted = await CreateService().DeleteSupersededFileChunksAsync(Tenant, SpeFileId, onlyForDocumentId: null, RoutedIndex);
+
+        deleted.Should().Be(2);
+        _deleteBatches.Should().ContainSingle().Which.Should().BeEquivalentTo(new[] { $"{SpeFileId}_0", $"{SpeFileId}_1" });
+        _queries.Should().ContainSingle().Which.Filter.Should().Be(
+            $"tenantId eq '{Tenant}' and speFileId eq '{SpeFileId}' and chunkIndex ge 0");
+    }
+
+    [Fact]
+    public async Task DeleteSupersededFileChunks_ForOneDocument_FiltersOnThatDocument_InLowerCase()
+    {
+        // While the old item is still another record's file, only the moved document's chunks of it are removed.
+        _matchingRows = new List<KnowledgeDocument> { Chunk($"{SpeFileId}_0", 0) };
+
+        await CreateService().DeleteSupersededFileChunksAsync(Tenant, SpeFileId, "1D000000-0000-4000-8000-0000000016F1", searchIndexName: null);
+
+        _queries.Should().ContainSingle().Which.Filter.Should().Be(
+            $"tenantId eq '{Tenant}' and speFileId eq '{SpeFileId}' and chunkIndex ge 0 and documentId eq '1d000000-0000-4000-8000-0000000016f1'",
+            "the indexer stores the document id lower-case");
+        _deployment.Verify(d => d.GetSearchClientAsync(Tenant, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task DeleteSupersededFileChunks_WhenAChunkIsRejected_ThrowsSoTheRelocationRetries()
+    {
+        _matchingRows = new List<KnowledgeDocument> { Chunk($"{SpeFileId}_0", 0), Chunk($"{SpeFileId}_1", 1) };
+        _deleteSucceeds = key => key != $"{SpeFileId}_1";
+
+        var act = () => CreateService().DeleteSupersededFileChunksAsync(Tenant, SpeFileId, null, RoutedIndex);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("1 of 2 superseded chunks could not be deleted*");
+    }
 }

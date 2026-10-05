@@ -17,10 +17,18 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// the round-23 INTERIM rule that is in force and the STRICT derived-container rule waiting behind
 /// <see cref="RecordContainerResolver.StrictDerivedContainerKey"/>.</para>
 /// <para><b>The flip gate.</b> A document the interim rule SERVES and the strict rule would REFUSE is a document the flip
-/// would newly refuse (<c>wouldNewlyRefuse</c>). A pass with zero of those, zero planned moves and zero failures is the
-/// evidence that the flag may be flipped: <c>scripts/Invoke-DocumentContainerMigration.ps1 -Verify</c> exits 0 only then.
-/// Documents BOTH rules refuse (a file that is not verifiably the row's own, a missing item) are listed for an
-/// administrator; the flip changes nothing for them.</para>
+/// would newly refuse (<c>wouldNewlyRefuse</c>). A pass with zero of those, zero planned moves, zero failures, zero
+/// relocations still owing a step (<c>pending</c>: a source delete, a re-key or the index — task 166 f1-v1, owner round
+/// 37) and zero relocated files the rule in force refuses (<c>relocatedButRefused</c>; round 37 item 3 makes every
+/// relocated file servable under the interim rule) is the evidence that the flag may be flipped:
+/// <c>scripts/Invoke-DocumentContainerMigration.ps1 -Verify</c> exits 0 only then. Documents BOTH rules refuse (a file that
+/// is not verifiably the row's own, a missing item) are listed for an administrator; the flip changes nothing for them.
+/// Documents the interim rule refuses and the strict rule would serve (<c>servedOnlyAfterFlip</c> — the census classes the
+/// interim rule refuses by design) are counted and listed, so no disagreement between the two rules is invisible. Every
+/// source kept because rows of other records still use it is listed (<c>sourceKeptForOtherRecords</c>).</para>
+/// <para><b>Re-entry.</b> Each document's relocation ledger is settled when the pass reaches it (write mode): a source
+/// whose delete failed, a source kept for a row that is now gone, a re-key or an index step that did not complete — so a
+/// repeat pass completes what an earlier one (or a Make Secure call) left owing.</para>
 /// <para><b>The script decides nothing</b> (148's <c>Invoke-SecureChildBackfill.ps1</c> precedent): it triggers this job
 /// through <c>POST /api/admin/jobs/document-container-migration/trigger</c> (SystemAdmin) and reads the run reports. No
 /// Graph or Dataverse logic lives in PowerShell.</para>
@@ -131,23 +139,26 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
         report.PassComplete = passComplete;
 
         var duration = _timeProvider.GetElapsedTime(started);
-        // "Nothing left to do" for this batch: no planned move, no failure, and no document the flip would newly refuse.
-        var clean = report.WouldNewlyRefuse == 0
-                    && report.Counts.GetValueOrDefault(nameof(RelocationState.Failed)) == 0
-                    && report.Counts.GetValueOrDefault(nameof(RelocationState.WouldRelocate)) == 0;
+        // "Nothing left to do" for this batch: no planned move, no failure, nothing still owed by a move, no relocated file
+        // the rule in force refuses, and no document the flip would newly refuse.
+        var clean = report.IsClean;
 
         // THE HEARTBEAT (ADR-036 A1 rule 5).
         _logger.Log(
             clean ? LogLevel.Information : LogLevel.Warning,
             "[DOCUMENT-MIGRATION] heartbeat mode={Mode} examined={Examined} wouldNewlyRefuse={WouldNewlyRefuse} "
+            + "relocatedButRefused={RelocatedButRefused} pending={Pending} servedOnlyAfterFlip={ServedOnlyAfterFlip} "
             + "counts={Counts} passComplete={PassComplete} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} "
             + "runId={RunId} correlationId={CorrelationId}",
-            report.Mode, report.Examined, report.WouldNewlyRefuse, JsonSerializer.Serialize(report.Counts), passComplete,
+            report.Mode, report.Examined, report.WouldNewlyRefuse, report.RelocatedButRefused, report.Pending,
+            report.ServedOnlyAfterFlip, JsonSerializer.Serialize(report.Counts), passComplete,
             context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         return new JobRunResult(
             Success: clean,
             ErrorMessage: clean ? null : $"{report.WouldNewlyRefuse} document(s) the strict rule would newly refuse; "
+                                         + $"{report.RelocatedButRefused} relocated file(s) the rule in force refuses; "
+                                         + $"{report.Pending} relocation(s) still owing a step; "
                                          + $"{report.Counts.GetValueOrDefault(nameof(RelocationState.WouldRelocate))} planned "
                                          + $"move(s); {report.Counts.GetValueOrDefault(nameof(RelocationState.Failed))} failed.",
             ProcessedItems: report.Examined,
@@ -177,9 +188,7 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
         if (outcome.State is not (RelocationState.NoFile or RelocationState.Failed))
         {
             // The pointer the row ends with: the new one after a move, the current one otherwise.
-            var (drive, item) = outcome.State is RelocationState.Relocated or RelocationState.RelocatedSourceKept
-                ? (outcome.TargetDrive, outcome.TargetItem)
-                : (outcome.SourceDrive, outcome.SourceItem);
+            var (drive, item) = outcome.FinalPointer;
             interim = await resolver.IsAllowedUnderInterimRuleAsync(documentId, drive, item, ct).ConfigureAwait(false);
             // A planned move ends in the derived container by construction, so the strict rule is asked of the pointer
             // only when nothing is planned.
@@ -187,7 +196,7 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
                 || await resolver.IsAllowedUnderStrictRuleAsync(documentId, drive, item, ct).ConfigureAwait(false);
         }
 
-        report.Add(outcome, interim, strict);
+        report.Add(outcome, interim, strict, resolver.StrictDerivedContainerMode);
     }
 
     /// <summary>The next batch of pointered documents after <paramref name="after"/>, in id order.</summary>
@@ -229,13 +238,43 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
         public Guid? EndAt { get; set; }
         public bool PassComplete { get; set; }
         public int Examined { get; private set; }
+
+        /// <summary>The interim rule serves it, the strict rule would refuse it — the flip would break it.</summary>
         public int WouldNewlyRefuse { get; private set; }
+
+        /// <summary>Both rules refuse it (an administrator's repair; the flip changes nothing for it).</summary>
         public int RefusedByBoth { get; private set; }
+
+        /// <summary>
+        /// The interim rule refuses it, the strict rule would serve it: the census classes the interim rule refuses by
+        /// design (task 166 note §20.5). Counted and listed so no such disagreement is invisible (task 166 f1-v1, F1).
+        /// </summary>
+        public int ServedOnlyAfterFlip { get; private set; }
+
+        /// <summary>
+        /// A file this relocation (or an earlier one) moved, which the rule IN FORCE refuses. Owner round 37 item 3 makes
+        /// a relocated file servable under the interim rule; one that is not is a defect, and the run is not clean.
+        /// </summary>
+        public int RelocatedButRefused { get; private set; }
+
+        /// <summary>Documents whose move still owes a step (source delete, re-key, index) — the next pass settles them.</summary>
+        public int Pending { get; private set; }
+
+        /// <summary>Other rows moved along with a document because they named the same file.</summary>
+        public int MovedAlong { get; private set; }
+
         public Dictionary<string, int> Counts { get; } = new(StringComparer.Ordinal);
         public List<object> Rows { get; } = [];
+        public List<object> SourceKeptForOtherRecords { get; } = [];
         public int RowsTotal { get; private set; }
 
-        public void Add(DocumentRelocationOutcome outcome, bool? interim, bool? strict)
+        /// <summary>Nothing left for the migration to do in this batch, and nothing the flip would newly refuse.</summary>
+        public bool IsClean
+            => WouldNewlyRefuse == 0 && RelocatedButRefused == 0 && Pending == 0
+               && Counts.GetValueOrDefault(nameof(RelocationState.Failed)) == 0
+               && Counts.GetValueOrDefault(nameof(RelocationState.WouldRelocate)) == 0;
+
+        public void Add(DocumentRelocationOutcome outcome, bool? interim, bool? strict, bool strictInForce = false)
         {
             Examined++;
             var key = outcome.State.ToString();
@@ -252,7 +291,45 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
                 RefusedByBoth++;
             }
 
-            if (outcome.State is RelocationState.InPlace && !newlyRefused && interim == true)
+            var servedOnlyAfterFlip = interim == false && strict == true;
+            if (servedOnlyAfterFlip)
+            {
+                ServedOnlyAfterFlip++;
+            }
+
+            var moved = outcome.State is RelocationState.Relocated or RelocationState.RelocatedSourceKeptForOtherRecords
+                or RelocationState.RelocationPending;
+            var refusedInForce = (strictInForce ? strict : interim) == false;
+            var relocatedButRefused = moved && refusedInForce;
+            if (relocatedButRefused)
+            {
+                RelocatedButRefused++;
+            }
+
+            var owes = outcome.Pending.Count > 0
+                       || outcome.MovedAlong.Any(m => !DocumentRelocationBatchResult.IsSettled(m));
+            if (owes)
+            {
+                Pending++;
+            }
+
+            MovedAlong += outcome.MovedAlong.Count;
+            foreach (var kept in outcome.KeptForOtherRecords.Concat(outcome.MovedAlong.SelectMany(m => m.KeptForOtherRecords)))
+            {
+                if (SourceKeptForOtherRecords.Count < MaxListedPerRun)
+                {
+                    SourceKeptForOtherRecords.Add(new
+                    {
+                        documentId = kept.DocumentId,
+                        sourceDrive = kept.SourceDrive,
+                        sourceItem = kept.SourceItem,
+                        keptFor = kept.KeptFor,
+                    });
+                }
+            }
+
+            if (outcome.State is RelocationState.InPlace && !newlyRefused && interim == true && !owes
+                && outcome.KeptForOtherRecords.Count == 0)
             {
                 return; // healthy: counted, not listed
             }
@@ -267,10 +344,14 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
                     interim,
                     strict,
                     wouldNewlyRefuse = newlyRefused,
+                    servedOnlyAfterFlip,
+                    relocatedButRefused,
                     sourceDrive = outcome.SourceDrive,
                     sourceItem = outcome.SourceItem,
                     targetDrive = outcome.TargetDrive,
                     targetItem = outcome.TargetItem,
+                    pending = outcome.Pending,
+                    movedAlong = outcome.MovedAlong.Select(m => new { documentId = m.DocumentId, state = m.State.ToString(), m.TargetItem }),
                     detail = outcome.Detail,
                 });
             }
@@ -285,7 +366,12 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
             examined = Examined,
             wouldNewlyRefuse = WouldNewlyRefuse,
             refusedByBoth = RefusedByBoth,
+            servedOnlyAfterFlip = ServedOnlyAfterFlip,
+            relocatedButRefused = RelocatedButRefused,
+            pending = Pending,
+            movedAlong = MovedAlong,
             counts = Counts,
+            sourceKeptForOtherRecords = SourceKeptForOtherRecords,
             rowsTotal = RowsTotal,
             rowsListed = Rows.Count,
             rows = Rows,

@@ -216,11 +216,20 @@ internal static class TestRecordContainerResolver
         /// <summary>Every app-only UPDATE the built resolver's entity service received (the relocator's re-point).</summary>
         public List<(string Entity, Guid Id, Dictionary<string, object> Fields)> Updates { get; } = new();
 
-        /// <summary>How many OTHER documents the relocator's "does another row point at this file?" read finds.</summary>
-        public int OtherDocumentsReferencingTheFile { get; set; }
+        /// <summary>
+        /// The environment does not have <c>sprk_document.sprk_relocationpending</c> yet (task 166 f1-v1: the relocation
+        /// ledger's schema gate) — any read naming it throws, as Dataverse does.
+        /// </summary>
+        public bool RelocationLedgerColumnMissing { get; init; }
 
-        /// <summary>The drive those other documents name (the relocator compares it with the source drive).</summary>
-        public string? ReferencedDrive { get; set; }
+        /// <summary>
+        /// A query of this entity faults (Dataverse unavailable) — e.g. <c>sprk_communicationattachment</c> to make the
+        /// relocator's re-key or reference read fail.
+        /// </summary>
+        public string? FaultQueriesOf { get; set; }
+
+        /// <summary>Every RetrieveMultiple query the entity service answered, in order.</summary>
+        public List<QueryExpression> Queries { get; } = new();
 
         /// <summary>How many business-unit HIERARCHY reads the built resolver made (task 166 f1: one per scope).</summary>
         public int HierarchyReads { get; private set; }
@@ -281,6 +290,12 @@ internal static class TestRecordContainerResolver
                             "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_createdbyperson'.");
                     }
 
+                    if (entity == "sprk_document" && RelocationLedgerColumnMissing && columns.Contains("sprk_relocationpending"))
+                    {
+                        throw new InvalidOperationException(
+                            "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_relocationpending'.");
+                    }
+
                     if (Rows.TryGetValue((entity, id), out var row) || people.TryGetValue((entity, id), out row))
                     {
                         return row;
@@ -315,7 +330,14 @@ internal static class TestRecordContainerResolver
                     {
                         foreach (var (column, value) in fields)
                         {
-                            updated[column] = value;
+                            if (value is DBNull)
+                            {
+                                updated.Attributes.Remove(column); // the generic seam's explicit CLEAR
+                            }
+                            else if (value is not null)
+                            {
+                                updated[column] = value;
+                            }
                         }
                     }
 
@@ -324,38 +346,35 @@ internal static class TestRecordContainerResolver
             entityService.Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((QueryExpression query, CancellationToken _) =>
                 {
+                    Queries.Add(query);
                     if (RetrieveMultipleFault is not null)
                     {
                         throw RetrieveMultipleFault;
                     }
 
-                    var collection = new EntityCollection();
-                    if (query.EntityName == "sprk_document"
-                        && query.Criteria.Conditions.Any(c => c.AttributeName == "sprk_graphitemid" && c.Operator == ConditionOperator.NotNull))
+                    if (FaultQueriesOf is not null && query.EntityName == FaultQueriesOf)
                     {
-                        // The legacy migration's keyset batch (task 166 f1): pointered documents after the cursor, in id order.
-                        var after = query.Criteria.Conditions
-                            .FirstOrDefault(c => c.AttributeName == "sprk_documentid" && c.Operator == ConditionOperator.GreaterThan)?
-                            .Values.FirstOrDefault() as Guid?;
-                        foreach (var document in Rows
-                                     .Where(r => r.Key.Item1 == "sprk_document"
-                                                 && !string.IsNullOrWhiteSpace(r.Value.GetAttributeValue<string>("sprk_graphitemid"))
-                                                 && (after is null || r.Key.Item2.CompareTo(after.Value) > 0))
-                                     .OrderBy(r => r.Key.Item2)
-                                     .Take(query.TopCount ?? int.MaxValue))
-                        {
-                            collection.Entities.Add(new Entity("sprk_document", document.Key.Item2));
-                        }
-
-                        return collection;
+                        throw new TimeoutException($"Dataverse unavailable (scripted fault on {FaultQueriesOf})");
                     }
 
-                    if (query.EntityName == "sprk_document")
+                    var collection = new EntityCollection();
+                    if (query.EntityName is "sprk_document" or "sprk_communicationattachment")
                     {
-                        // The relocator's "does another document point at this file?" read (task 166 f1).
-                        for (var i = 0; i < OtherDocumentsReferencingTheFile; i++)
+                        // The relocator's and the migration's row queries (task 166 f1 / f1-v1): answered from Rows by the
+                        // query's own AND-conditions — the keyset batch, the "who else names this file?" read, the child
+                        // and attachment re-key reads.
+                        var idColumn = query.EntityName + "id";
+                        var matches = Rows
+                            .Where(r => r.Key.Item1 == query.EntityName
+                                        && query.Criteria.Conditions.All(c => ConditionHolds(r.Value, r.Key.Item2, idColumn, c)));
+                        if (query.Orders.Any(o => o.AttributeName == idColumn))
                         {
-                            collection.Entities.Add(new Entity("sprk_document", Guid.NewGuid()) { ["sprk_graphdriveid"] = ReferencedDrive });
+                            matches = matches.OrderBy(r => r.Key.Item2);
+                        }
+
+                        foreach (var match in matches.Take(query.TopCount ?? int.MaxValue))
+                        {
+                            collection.Entities.Add(match.Value);
                         }
 
                         return collection;
@@ -447,6 +466,37 @@ internal static class TestRecordContainerResolver
                 registry.Object, entityService.Object, NullLogger<RecordContainerResolver>.Instance, options,
                 NoItemReader ? null : speFiles.Object, configuration);
         }
+    }
+
+    /// <summary>One AND-condition of a row query, against a modelled row (lookups compare by id, the key column by row id).</summary>
+    private static bool ConditionHolds(Entity row, Guid rowId, string idColumn, ConditionExpression condition)
+    {
+        object? actual = condition.AttributeName == idColumn
+            ? rowId
+            : row.Contains(condition.AttributeName) ? row[condition.AttributeName] : null;
+        if (actual is EntityReference reference)
+        {
+            actual = reference.Id;
+        }
+
+        var expected = condition.Values.FirstOrDefault();
+        return condition.Operator switch
+        {
+            ConditionOperator.Equal => Same(actual, expected),
+            ConditionOperator.NotEqual => !Same(actual, expected),
+            ConditionOperator.NotNull => actual is not null && !(actual is string s && string.IsNullOrWhiteSpace(s)),
+            ConditionOperator.Null => actual is null || (actual is string t && string.IsNullOrWhiteSpace(t)),
+            ConditionOperator.GreaterThan => actual is Guid g && expected is Guid e && g.CompareTo(e) > 0,
+            _ => throw new NotSupportedException($"The test world does not model {condition.Operator} on {condition.AttributeName}."),
+        };
+
+        static bool Same(object? a, object? b) => a switch
+        {
+            null => b is null,
+            Guid g => b is Guid h && g == h,
+            string s => b is string t && string.Equals(s, t, StringComparison.Ordinal),
+            _ => Equals(a, b),
+        };
     }
 
     private static readonly IReadOnlySet<string> DocumentWorldEntities =

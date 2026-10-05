@@ -221,6 +221,15 @@ public sealed partial class RecordContainerResolver
     /// <para><b>Residual exposure until the strict check (recorded by owner round 23):</b> a pointer to ANOTHER
     /// legitimately uploaded item of the same creator, inside the owner's own customer subtree — for a BFF-created row
     /// "the same creator" is the BFF identity.</para>
+    /// <para><b>A file the BFF placed (owner round 37 item 3, task 166 f1-v1).</b> When those two halves refuse an item
+    /// that the BFF IDENTITY uploaded app-only — a file <c>DocumentContainerRelocator</c> copied into the document's
+    /// derived container (the legacy migration and every Make Secure move), whose uploader can never be the row's
+    /// person — the interim rule ALSO serves it, but only when the pointer passes the STRICT derived-container test
+    /// (<see cref="StrictRefusalAsync"/>: the drive is the container derived for this document and the item is in it).
+    /// That disjunct admits nothing the strict rule refuses, so the interim rule is never weaker than the strict rule; its
+    /// residual is the strict rule's (a pre-lock forged pointer to another BFF-placed item of the SAME derived container).
+    /// Without it every relocated file was refused for app-only download from the migration's <c>-Apply</c> until the
+    /// strict flip, and every Make Secure move while the interim rule is in force.</para>
     /// </remarks>
     internal async Task<bool> IsAllowedUnderInterimRuleAsync(
         Guid documentId, string? pointerDriveId, string? pointerItemId, CancellationToken ct = default)
@@ -253,40 +262,30 @@ public sealed partial class RecordContainerResolver
                 return Refuse(documentId, "the item is not in the drive the row names");
             }
 
-            // (1) The CONTAINER.
-            var secureOwner = await ResolveOwningRecordAsync(drive, ct).ConfigureAwait(false);
-            if (secureOwner is not null)
+            var refusal = await InterimRefusalAsync(documentId, row, drive, creator, ct).ConfigureAwait(false);
+            if (refusal is null)
             {
-                if (!await DocumentHangsOffAsync(documentId, secureOwner, drive, depth: 0, ct).ConfigureAwait(false))
-                {
-                    return Refuse(documentId,
-                        $"the pointer names the OWN container of secure {secureOwner.EntityLogicalName} {secureOwner.RecordId}, "
-                        + "but the document does not belong to that record");
-                }
-            }
-            else
-            {
-                // The archive may ALSO be a business unit's container (on dev, Communication:ArchiveContainerId is the
-                // "Spaarke Demo" unit's), so either rule may admit the pointer: the archive path for the archive's own
-                // records, the owner's customer subtree for everything else.
-                var onTheArchivePath = !string.IsNullOrWhiteSpace(_archiveContainerId)
-                                       && IsSameContainer(_archiveContainerId, drive)
-                                       && IsArchivePathItem(row, creator);
-                if (!onTheArchivePath && !await IsBusinessUnitContainerInOwnersSubtreeAsync(row, drive, ct).ConfigureAwait(false))
-                {
-                    return Refuse(documentId,
-                        "the pointer names neither the archive's own record of this item nor a container in the document "
-                        + "owner's customer subtree (another customer's, a child unit's for a root-owned row, or none)");
-                }
+                return true;
             }
 
-            // (2) The ITEM.
-            if (!await ItemWasCreatedByTheRowsCreatorAsync(documentId, row, creator, ct).ConfigureAwait(false))
+            // Round 37 item 3: a file the BFF identity placed is served when — and only when — the strict rule would
+            // serve it. Anything the strict test refuses (another container, an undecidable document) stays refused.
+            if (IsUploadedByTheBffIdentity(creator))
             {
-                return Refuse(documentId, "the item was not created by the document's creator");
+                var strictRefusal = await StrictRefusalAsync(documentId, drive, item, creator, ct).ConfigureAwait(false);
+                if (strictRefusal is null)
+                {
+                    _logger.LogInformation(
+                        "[DOCUMENT-POINTER] served under the interim rule: document {DocumentId}'s item {Item} was placed by the "
+                        + "BFF identity in the document's derived container {Drive} (owner round 37 item 3).",
+                        documentId, item, drive);
+                    return true;
+                }
+
+                refusal = $"{refusal}; and, uploaded by the BFF identity, it fails the derived-container test ({strictRefusal})";
             }
 
-            return true;
+            return Refuse(documentId, refusal);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -317,29 +316,8 @@ public sealed partial class RecordContainerResolver
         var item = pointerItemId.Trim();
         try
         {
-            if (_speFiles is null)
-            {
-                return Refuse(documentId, "no SharePoint Embedded reader is available to verify the item");
-            }
-
-            var derivation = await DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
-            if (!derivation.Decided)
-            {
-                return Refuse(documentId, $"its container cannot be derived ({derivation.Reason})");
-            }
-
-            if (!derivation.Allows(drive))
-            {
-                return Refuse(documentId,
-                    $"the pointer names a container that is not the one derived for the document ({derivation.Reason})");
-            }
-
-            if (await _speFiles.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false) is null)
-            {
-                return Refuse(documentId, "the item is not in the drive the row names");
-            }
-
-            return true;
+            var refusal = await StrictRefusalAsync(documentId, drive, item, knownItem: null, ct).ConfigureAwait(false);
+            return refusal is null || Refuse(documentId, refusal);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -360,6 +338,86 @@ public sealed partial class RecordContainerResolver
             "[DOCUMENT-POINTER] REFUSED: document {DocumentId} — {Reason}. Not served app-only.", documentId, reason);
         return false;
     }
+
+    /// <summary>
+    /// The round-23 interim rule's two halves for an item that EXISTS in <paramref name="drive"/>: why it refuses, or
+    /// <see langword="null"/> when both halves hold. Faults propagate (the caller refuses).
+    /// </summary>
+    private async Task<string?> InterimRefusalAsync(
+        Guid documentId, Entity row, string drive, SpeItemCreator creator, CancellationToken ct)
+    {
+        // (1) The CONTAINER.
+        var secureOwner = await ResolveOwningRecordAsync(drive, ct).ConfigureAwait(false);
+        if (secureOwner is not null)
+        {
+            if (!await DocumentHangsOffAsync(documentId, secureOwner, drive, depth: 0, ct).ConfigureAwait(false))
+            {
+                return $"the pointer names the OWN container of secure {secureOwner.EntityLogicalName} {secureOwner.RecordId}, "
+                       + "but the document does not belong to that record";
+            }
+        }
+        else
+        {
+            // The archive may ALSO be a business unit's container (on dev, Communication:ArchiveContainerId is the
+            // "Spaarke Demo" unit's), so either rule may admit the pointer: the archive path for the archive's own
+            // records, the owner's customer subtree for everything else.
+            var onTheArchivePath = !string.IsNullOrWhiteSpace(_archiveContainerId)
+                                   && IsSameContainer(_archiveContainerId, drive)
+                                   && IsArchivePathItem(row, creator);
+            if (!onTheArchivePath && !await IsBusinessUnitContainerInOwnersSubtreeAsync(row, drive, ct).ConfigureAwait(false))
+            {
+                return "the pointer names neither the archive's own record of this item nor a container in the document "
+                       + "owner's customer subtree (another customer's, a child unit's for a root-owned row, or none)";
+            }
+        }
+
+        // (2) The ITEM.
+        return await ItemWasCreatedByTheRowsCreatorAsync(documentId, row, creator, ct).ConfigureAwait(false)
+            ? null
+            : "the item was not created by the document's creator";
+    }
+
+    /// <summary>
+    /// The STRICT derived-container test: why it refuses, or <see langword="null"/> when the pointer's drive is a
+    /// container derived for the document and the item exists in it. <paramref name="knownItem"/> is the item's Graph
+    /// facts when the caller already read them from that drive (no second read). Faults propagate (the caller refuses).
+    /// </summary>
+    private async Task<string?> StrictRefusalAsync(
+        Guid documentId, string drive, string item, SpeItemCreator? knownItem, CancellationToken ct)
+    {
+        if (_speFiles is null)
+        {
+            return "no SharePoint Embedded reader is available to verify the item";
+        }
+
+        var derivation = await DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
+        if (!derivation.Decided)
+        {
+            return $"its container cannot be derived ({derivation.Reason})";
+        }
+
+        if (!derivation.Allows(drive))
+        {
+            return $"the pointer names a container that is not the one derived for the document ({derivation.Reason})";
+        }
+
+        if ((knownItem ?? await _speFiles.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false)) is null)
+        {
+            return "the item is not in the drive the row names";
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Did the BFF IDENTITY upload this item app-only? Graph reports no user and an application id under
+    /// <see cref="BffApplicationIdKeys"/>. Owner round 37 item 3: such an item is one the BFF placed — a relocation copy —
+    /// and the interim rule serves it when the strict derived-container test passes.
+    /// </summary>
+    private bool IsUploadedByTheBffIdentity(SpeItemCreator item)
+        => (!Guid.TryParse(item.UserObjectId, out var user) || user == Guid.Empty)
+           && Guid.TryParse(item.ApplicationId, out var application)
+           && _bffApplicationIds.Contains(application);
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
     // THE DERIVED CONTAINER (task 166 f1) — where a document's file BELONGS, by the same answers that place content.

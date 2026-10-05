@@ -495,6 +495,11 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   strict derived-container rule, and is set to `true` only after `scripts/Invoke-DocumentContainerMigration.ps1 -Verify`
   passes on that environment (task 166 note §20). `DocumentContainerMigration__WritesEnabled` is set only by that
   script's `-Apply`, for the run.
+- ⚠️ **Schema before any file relocation** (task 166 f1-v1): run `scripts/Set-DocumentRelocationSchema.ps1 -Apply` then
+  `-Verify` on the environment's Dataverse before the migration's `-Apply` and before Make Secure is used. It creates
+  `sprk_document.sprk_relocationpending`, the row's relocation ledger (what a moved file still owes: a source delete, a
+  re-key, the index); every relocation reads it and fails closed — nothing moves — until it exists.
+  `scripts/Set-DocumentPointerFieldSecurity.ps1` then locks it with the pointer columns (BFF-written only).
 - `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
   enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
 

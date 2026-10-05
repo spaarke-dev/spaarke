@@ -298,8 +298,9 @@ public class DocumentContainerStrictRuleTests
     public async Task Strict_DecidesByContainer_NotByUploader_ARelocatedOrBffSavedFileInItsDerivedContainerIsServed()
     {
         // Round 21's strict rule is the CONTAINER check: once the pointer columns are locked, only the BFF writes them.
-        // A file the BFF relocated (uploaded app-only) for a PERSON's row is in the derived container and is served; the
-        // interim rule refuses it (the item half compares uploader and creator).
+        // A file the BFF relocated (uploaded app-only) for a PERSON's row is in the derived container and is served. Owner
+        // round 37 item 3 (task 166 f1-v1, F1): the INTERIM rule serves it too — a BFF-identity item that passes the strict
+        // derived-container test — so a relocated file stays downloadable before the strict flip.
         var interim = Environment();
         interim.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, links: ("sprk_matter", "sprk_matter", PlainMatter));
         interim.Items[(CustomerA1Container, Item)] = new SpeItemCreator(
@@ -309,8 +310,50 @@ public class DocumentContainerStrictRuleTests
         strict.Items[(CustomerA1Container, Item)] = new SpeItemCreator(
             "file.pdf", null, TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D"));
 
-        (await interim.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeFalse();
+        (await interim.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeTrue(
+            "round 37 item 3: the interim rule also serves a BFF-identity item in the document's derived container");
         (await strict.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(CustomerAContainer)]   // the owner's own customer — the interim rule's container half admits it
+    [InlineData(CustomerBContainer)]   // another customer's
+    public async Task Interim_ABffIdentityItemOutsideTheDerivedContainer_IsRefused(string drive)
+    {
+        // The round-37 disjunct is never wider than the strict rule: a BFF-placed item in ANY other container — even one
+        // the interim container half admits — is refused (a forged pointer to another record's BFF-saved file).
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, links: ("sprk_matter", "sprk_matter", PlainMatter));
+        world.Items[(drive, Item)] = new SpeItemCreator(
+            "another-records-office-save.docx", null, TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D"));
+
+        (await world.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, drive, Item)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Interim_AnAppOnlyItemOfAnotherApplication_InTheDerivedContainer_IsRefused()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, links: ("sprk_matter", "sprk_matter", PlainMatter));
+        world.Items[(CustomerA1Container, Item)] = new SpeItemCreator("file.pdf", null, Guid.NewGuid().ToString("D"));
+
+        (await world.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, CustomerA1Container, Item)).Should().BeFalse(
+            "only the BFF identity's own uploads are 'placed by the BFF'");
+    }
+
+    [Fact]
+    public async Task Interim_ABffIdentityItemOfAnUndecidableDocument_IsRefused()
+    {
+        // No derived container, no strict pass: the disjunct cannot serve it.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(DocumentId, links:
+        [
+            ("sprk_matter", "sprk_matter", SecureMatter), ("sprk_project", "sprk_project", SecureProject),
+        ]);
+        world.Items[(SecureContainer, Item)] = new SpeItemCreator(
+            "file.pdf", null, TestRecordContainerResolver.PointerWorldBffApplicationId.ToString("D"));
+
+        (await world.Build().IsDocumentPointerContainerAllowedAsync(DocumentId, SecureContainer, Item)).Should().BeFalse();
     }
 
     [Theory]

@@ -45,9 +45,9 @@ public class DocumentContainerMigrationJobTests
     }
 
     private static (DocumentContainerMigrationJob Job, Rig Rig) Arrange(
-        TestRecordContainerResolver.DocumentPointerWorld world, bool writes = false, int? batch = null, string? sourceDrive = null)
+        TestRecordContainerResolver.DocumentPointerWorld world, bool writes = false, int? batch = null, Rig? rig = null)
     {
-        var rig = new Rig(world) { SourceDrive = sourceDrive };
+        rig ??= new Rig(world);
         var services = new ServiceCollection()
             .AddSingleton(world.EntityService!)
             .AddSingleton(rig.Resolver)
@@ -101,16 +101,92 @@ public class DocumentContainerMigrationJobTests
     {
         var world = Environment();
         world.Rows[("sprk_document", Misplaced)] = Document(Misplaced, PlainMatter, CustomerBContainer, Item);
-        var (job, rig) = Arrange(world, writes: true, sourceDrive: CustomerBContainer);
+        var (job, rig) = Arrange(world, writes: true);
 
         var first = await RunAsync(job);
         var second = await RunAsync(job);
 
-        JsonNode.Parse(first.ResultJson!)!["counts"]!["Relocated"]!.GetValue<int>().Should().Be(1);
-        world.Updates.Should().ContainSingle().Which.Fields["sprk_graphdriveid"].Should().Be(CustomerA1Container);
+        var report = JsonNode.Parse(first.ResultJson!)!;
+        report["counts"]!["Relocated"]!.GetValue<int>().Should().Be(1);
+        world.Updates.First().Fields["sprk_graphdriveid"].Should().Be(CustomerA1Container);
+        // F1 / owner round 37 item 3: the moved file is SERVED by the interim rule in force — not merely by the strict one.
+        var row = report["rows"]!.AsArray().Should().ContainSingle().Subject!;
+        row["interim"]!.GetValue<bool>().Should().BeTrue("a relocated file stays downloadable before the strict flip");
+        row["strict"]!.GetValue<bool>().Should().BeTrue();
+        report["relocatedButRefused"]!.GetValue<int>().Should().Be(0);
+        report["servedOnlyAfterFlip"]!.GetValue<int>().Should().Be(0);
+        report["pending"]!.GetValue<int>().Should().Be(0);
+        first.Success.Should().BeTrue();
         second.Success.Should().BeTrue("a re-run repeats nothing: the moved file is now in place");
         JsonNode.Parse(second.ResultJson!)!["counts"]!["InPlace"]!.GetValue<int>().Should().Be(1);
         rig.Steps.Count(s => s.StartsWith("upload", StringComparison.Ordinal)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AWriteRun_WhoseMoveStillOwesAStep_IsNotClean_AndTheNextWriteRunSettlesIt()
+    {
+        // Round 37 / F2: the job is a repeat caller too — a source delete that failed is settled by the next pass.
+        var world = Environment();
+        world.Rows[("sprk_document", Misplaced)] = Document(Misplaced, PlainMatter, CustomerBContainer, Item);
+        var (job, rig) = Arrange(world, writes: true);
+        rig.DeleteFails = (drive, item) => drive == CustomerBContainer && item == Item;
+
+        var first = await RunAsync(job);
+
+        first.Success.Should().BeFalse("a relocation that still owes its source delete is work left to do");
+        var report = JsonNode.Parse(first.ResultJson!)!;
+        report["counts"]!["RelocationPending"]!.GetValue<int>().Should().Be(1);
+        report["pending"]!.GetValue<int>().Should().Be(1);
+        report["rows"]!.AsArray().Should().ContainSingle().Which!["pending"]!.AsArray()
+            .Select(p => p!.GetValue<string>()).Should().Contain(p => p.StartsWith("source-pending", StringComparison.Ordinal));
+
+        rig.DeleteFails = (_, _) => false;
+        var second = await RunAsync(job);
+
+        second.Success.Should().BeTrue();
+        JsonNode.Parse(second.ResultJson!)!["counts"]!["InPlace"]!.GetValue<int>().Should().Be(1);
+        world.ItemFacts(CustomerBContainer, Item).Should().BeNull("the second pass deleted the source the first one could not");
+    }
+
+    [Fact]
+    public async Task TheReport_CountsAndListsADocumentOnlyTheStrictRuleWouldServe()
+    {
+        // F1: interim refuses, strict serves — no longer invisible. A BFF-created row (no recorded person) whose item a
+        // person uploaded, in its derived container: a census class the interim rule refuses by design.
+        var world = Environment();
+        var row = TestRecordContainerResolver.DocumentPointerWorld.Document(InPlace, TestRecordContainerResolver.PointerWorldBffUser, CustomerA1);
+        row["sprk_matter"] = new EntityReference("sprk_matter", PlainMatter);
+        row["sprk_graphdriveid"] = CustomerA1Container;
+        row["sprk_graphitemid"] = "01PERSONUPLOAD";
+        world.Rows[("sprk_document", InPlace)] = row;
+        var (job, _) = Arrange(world);
+
+        var result = await RunAsync(job);
+
+        var report = JsonNode.Parse(result.ResultJson!)!;
+        report["servedOnlyAfterFlip"]!.GetValue<int>().Should().Be(1);
+        report["wouldNewlyRefuse"]!.GetValue<int>().Should().Be(0);
+        var listed = report["rows"]!.AsArray().Should().ContainSingle().Subject!;
+        listed["servedOnlyAfterFlip"]!.GetValue<bool>().Should().BeTrue();
+        listed["interim"]!.GetValue<bool>().Should().BeFalse();
+        result.Success.Should().BeTrue("the flip would SERVE it — it does not block the flip");
+    }
+
+    [Fact]
+    public async Task ARelocatedFileTheRuleInForceRefuses_MakesTheRunUnclean()
+    {
+        // The guard behind round 37 item 3: if a relocated file were refused by the rule in force, the run is not clean
+        // and -Verify fails. Modelled with a copy Graph reports as uploaded by an application that is not the BFF.
+        var world = Environment();
+        world.Rows[("sprk_document", Misplaced)] = Document(Misplaced, PlainMatter, CustomerBContainer, Item);
+        var rig = new Rig(world, copyFacts: source => source with { UserObjectId = null, ApplicationId = Guid.NewGuid().ToString("D") });
+        var (job, _) = Arrange(world, writes: true, rig: rig);
+
+        var result = await RunAsync(job);
+
+        var report = JsonNode.Parse(result.ResultJson!)!;
+        report["relocatedButRefused"]!.GetValue<int>().Should().Be(1);
+        result.Success.Should().BeFalse();
     }
 
     [Fact]

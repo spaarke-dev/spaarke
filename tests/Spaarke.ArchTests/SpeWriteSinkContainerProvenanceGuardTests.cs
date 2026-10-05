@@ -780,12 +780,16 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         new SinkSite("Services/Documents/DocumentContainerRelocator.cs", "DeleteFileAsync", 1,
             Provenance.ServerDerivedRecord, "166",
             "(drive, item) of either the copy THIS relocation just created (a failed verify / re-point) or the "
-            + "source named by the sprk_document row's own sprk_graphdriveid / sprk_graphitemid",
+            + "source named by the sprk_document row's own sprk_graphdriveid / sprk_graphitemid — recorded, in the "
+            + "same update as the re-point, in the row's BFF-written relocation ledger (sprk_relocationpending, "
+            + "task 166 f1-v1) when the delete is owed to a repeat call",
             "The relocation's two deletes share one helper: the unverified/unattached COPY this same call "
-            + "created, or the SOURCE after the row was re-pointed — and the source only when no OTHER "
-            + "sprk_document still points at it (an unreadable answer keeps it), so a delete can never break "
-            + "another row (ADR-003; ADR-007). The drive is never caller-named: it is the row's recorded "
-            + "pointer, whose legitimacy IsRelocationSourceVerifiedAsync established before the copy began."),
+            + "created, or the SOURCE after the row was re-pointed — and the source only when no row still uses "
+            + "it (another sprk_document, or a communication's own attachment record; an unreadable answer keeps "
+            + "it), so a delete can never break another row (ADR-003; ADR-007). On a REPEAT call the ledger is "
+            + "the only witness, so the source is deleted only when it is byte-identical (size and quickXorHash, "
+            + "both present) to the document's current file: a ledger entry can never delete an unrelated file. "
+            + "The drive is never caller-named."),
 
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED
