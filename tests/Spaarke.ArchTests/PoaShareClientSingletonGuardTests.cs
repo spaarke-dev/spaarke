@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
@@ -116,8 +117,9 @@ public class PoaShareClientSingletonGuardTests
     // A POA grant / rights change / revoke changes who can read a record exactly as an owner change does, so the access
     // caches must be evicted after it. The eviction lives in the ONE seam (DataverseRecordShareService calls
     // IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync after each of its three writes, returned or thrown —
-    // AccessCacheInvalidationTests.Shares proves it per write). It is only "by construction" if nothing in the BFF can
-    // write POA another way. The routes around the seam, and the rule that closes each:
+    // AccessCacheInvalidationTests.Shares proves it per write). That covers a share write only if it reaches POA through the
+    // seam. WHAT THIS GUARD ENFORCES — exactly the rules below, and nothing beyond them (owner round 48 (c)): every compiled
+    // call path to the client's POA writes, a ban on UnsafeAccessor, and a ban on choosing or invoking a method by reflection.
     //
     // COMPILED — an IL scan (IlCallScan) of every assembly the BFF runs from src/ and every src/ assembly that can name
     // DataverseWebApiService. The set is derived from the csproj graph, and each member must load
@@ -155,6 +157,19 @@ public class PoaShareClientSingletonGuardTests
     //       name in a const field, a default parameter value, a custom attribute argument, an embedded resource, or constant
     //       DATA — a UTF-8 literal (`"…"u8`) or a byte / char array initializer, an RVA field's bytes
     //       (NoCompiledMetadataOutsideTheClientNamesAPoaAction).
+    //   C7. No method CHOSEN or INVOKED by reflection, and no code the compiled scan cannot read — on ANY type, so on the
+    //       Dataverse service types and on any Type obtained from them, however obtained (typeof, GetType() on the client,
+    //       a type parameter, a type found by enumeration): no method or member lookup on Type / TypeInfo / IReflect, their
+    //       extension spellings or a Module (by name, signature or metadata token), no property or event accessor method,
+    //       no name-based Expression.Call, no MethodBase.Invoke, InvokeMember, Delegate / MethodInfo.CreateDelegate,
+    //       MethodInvoker / ConstructorInvoker, method function pointer, compiled expression tree or `dynamic` member access,
+    //       no System.Reflection.Emit, no assembly loaded at run time (NoCompiledCodeChoosesOrInvokesAMethodByReflection;
+    //       task 132 f1-v1c-v1 verifier seed R chose RevokeAccessAsync by its SIGNATURE and invoked it — owner round 48 (b)).
+    //       Not banned, because none of it reaches a method: reading properties, fields and attributes, a type's name,
+    //       constructing by type, embedded resources, an expression tree a LINQ provider translates.
+    //   C8. No [UnsafeAccessor] / [UnsafeAccessorType] in the compiled metadata of the scan set, however the attribute was
+    //       spelled or aliased, generated code included (NoCompiledCodeCarriesAnUnsafeAccessor; verifier seed U: an
+    //       UnsafeAccessor extern that IS the client's RevokeAccessAsync, a call C1 cannot see — owner round 48 (a)).
     // TEXT — every src/server .cs file, compiled into the BFF or not:
     //   T1. A `.XAccessAsync(` call whose receiver is not an identifier the file declares ONLY as
     //       IDataverseRecordShareService: an expression receiver (S5), a `var`, `dynamic` or undeclared name, a name the
@@ -165,13 +180,16 @@ public class PoaShareClientSingletonGuardTests
     //       (NoServerFileNamesTheClientsPoaWritesAsAString).
     //   T5. A POA action or write name in the configuration the BFF is deployed with — src/server configuration files and
     //       the Bicep / ARM under infra/ and infrastructure/bicep/ (NoDeployedConfigurationNamesAPoaAction).
+    //   T6. UnsafeAccessor named in any .cs / .csproj / .props / .targets file under src/server — the projects outside the
+    //       compiled scan set included — or in the Directory.Build files above it (NoServerSourceNamesUnsafeAccessor).
     //
-    // OUT OF REACH, by construction: a value that exists only at RUN time — a method name or action URL assembled from
-    // pieces none of which is the name (fragments joined by a call, an enum value's name plus a runtime suffix, single
-    // characters, a decoding), or read from a LIVE store no file in this repository holds (an App Service setting set by hand, Key Vault, Dataverse, an HTTP response) —
-    // then invoked by reflection or a raw HTTP call. No static scan sees a value that does not exist until the code runs;
-    // that is review's to catch. Also out of reach, and not this guard's job: POA writes made OUTSIDE the BFF (MDA sharing,
-    // flows, operator scripts) — their staleness is bounded by the caches' TTLs (caching-architecture.md, owner R3/R4).
+    // NOT ENFORCED — the build proves nothing about these; they are review's to catch: a POA write by any route that uses
+    // none of the mechanisms above — above all a raw HTTP call whose action URL exists only at RUN time (assembled from
+    // pieces none of which is the action name — fragments joined by a call, an enum value's name plus a runtime suffix,
+    // single characters, a decoding — or read from a LIVE store no file in this repository holds: an App Service setting
+    // set by hand, Key Vault, Dataverse, an HTTP response); native code; code outside the scan set (it cannot name the
+    // client and does not run in the BFF). Not this guard's job: POA writes made OUTSIDE the BFF (MDA sharing, flows,
+    // operator scripts) — their staleness is bounded by the caches' TTLs (caching-architecture.md, owner R3/R4).
     // Every rule above has a control that was seen to fail.
     // =============================================================================================
 
@@ -828,6 +846,298 @@ public class PoaShareClientSingletonGuardTests
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 
+    // ── C7. no method chosen or invoked by reflection, and no code the compiled scan cannot read ──────
+    //
+    // C1 reads the method tokens the COMPILER resolved. A method the code chooses at RUN time has no such token: task 132
+    // f1-v1c-v1 verifier seed R found the client's RevokeAccessAsync by its signature (`typeof(DataverseWebApiService)
+    // .GetMethods().First(x => <4 parameters, the third a DataversePrincipalRef, returns Task>)`) and invoked it — no name,
+    // no constant, all 622 ArchTests green. Owner round 48 (b): close the CLASS. The rule bans the mechanism — choosing a
+    // method by reflection, invoking one reflectively, or bringing in code the scan cannot read — on ANY type, so where the
+    // Type came from (typeof, GetType() on the client, a type parameter, a type found by enumeration) does not matter.
+
+    private const string ChoosesAMethod = "chooses a method by reflection";
+    private const string InvokesReflectively = "invokes reflectively";
+    private const string RunsUnscannedCode = "runs code the compiled scan cannot read";
+
+    /// <summary>Member lookups on <see cref="Type"/> / <c>TypeInfo</c> / <see cref="IReflect"/> that can return a method.</summary>
+    private static readonly HashSet<string> TypeMethodLookups = new(StringComparer.Ordinal)
+    {
+        "GetMethod", "GetMethods", "GetMember", "GetMembers", "GetDefaultMembers", "FindMembers",
+        "GetMemberWithSameMetadataDefinitionAs", "GetInterfaceMap", "get_DeclaredMethods", "get_DeclaredMembers",
+        "GetDeclaredMethod", "GetDeclaredMethods", "get_DeclaringMethod",
+    };
+
+    /// <summary>The accessor METHODS of a property or an event.</summary>
+    private static readonly HashSet<string> AccessorLookups = new(StringComparer.Ordinal)
+    {
+        "get_GetMethod", "get_SetMethod", "GetGetMethod", "GetSetMethod", "GetAccessors",
+        "get_AddMethod", "get_RemoveMethod", "get_RaiseMethod", "GetAddMethod", "GetRemoveMethod", "GetRaiseMethod", "GetOtherMethods",
+    };
+
+    /// <summary>The extension-method spellings of the same lookups (matched by full type name: the test need not reference them).</summary>
+    private static readonly HashSet<string> ReflectionExtensionTypes = new(StringComparer.Ordinal)
+    {
+        "System.Reflection.RuntimeReflectionExtensions", "System.Reflection.TypeExtensions",
+        "System.Reflection.PropertyInfoExtensions", "System.Reflection.EventInfoExtensions",
+    };
+
+    private static readonly HashSet<string> ExtensionLookups = new(StringComparer.Ordinal)
+    {
+        "GetRuntimeMethod", "GetRuntimeMethods", "GetRuntimeInterfaceMap", "GetMethodInfo",
+        "GetMethod", "GetMethods", "GetMember", "GetMembers", "GetDefaultMembers",
+        "GetGetMethod", "GetSetMethod", "GetAccessors", "GetAddMethod", "GetRemoveMethod", "GetRaiseMethod",
+    };
+
+    /// <summary>
+    /// What a reference to <paramref name="target"/> does, when it is one of the reflection APIs C7 bans; otherwise
+    /// <c>null</c>. Banned: (1) CHOOSING a method — a method or member lookup on <see cref="Type"/> / <c>TypeInfo</c> /
+    /// <see cref="IReflect"/> (<see cref="TypeMethodLookups"/>), its extension spellings, a <see cref="Module"/> lookup by
+    /// name or metadata token, a property's or event's accessor methods, a name-based <c>Expression.Call</c>, a function
+    /// pointer turned back into a handle; (2) INVOKING reflectively — <c>MethodBase.Invoke</c> (methods and constructors),
+    /// <c>InvokeMember</c>, <c>Delegate.CreateDelegate</c> / <c>MethodInfo.CreateDelegate</c>,
+    /// <c>MethodInvoker</c> / <c>ConstructorInvoker</c>, a method's function pointer, a delegate for a function pointer,
+    /// compiling an expression tree, a <c>dynamic</c> member access (the C# run-time binder); (3) RUNNING CODE THE SCAN
+    /// CANNOT READ — <c>System.Reflection.Emit</c>, an assembly loaded at run time (from bytes, a path or a name). Not
+    /// banned, because none of it reaches a method: reading properties, fields and attributes, a type's name, constructing
+    /// by type (<c>Activator.CreateInstance(Type)</c>), embedded resources, building an expression tree for a LINQ provider
+    /// to translate.
+    /// </summary>
+    internal static string? ReflectiveMethodAccess(MethodBase target)
+    {
+        if (target.DeclaringType is not { } declaring)
+        {
+            return null;
+        }
+
+        var name = target.Name;
+        var fullName = (declaring.IsGenericType ? declaring.GetGenericTypeDefinition() : declaring).FullName ?? declaring.Name;
+        bool Is<T>() => typeof(T).IsAssignableFrom(declaring);
+
+        return name switch
+        {
+            "InvokeMember" when Is<Type>() || declaring == typeof(IReflect) => InvokesReflectively,
+            _ when (Is<Type>() || declaring == typeof(IReflect)) && TypeMethodLookups.Contains(name) => ChoosesAMethod,
+            _ when (Is<PropertyInfo>() || Is<EventInfo>()) && AccessorLookups.Contains(name) => ChoosesAMethod,
+            _ when ReflectionExtensionTypes.Contains(fullName) && ExtensionLookups.Contains(name) => ChoosesAMethod,
+            "ResolveMethod" or "ResolveMember" or "GetMethod" or "GetMethods" when Is<Module>() => ChoosesAMethod,
+            "Call" when declaring == typeof(Expression) && target.GetParameters().Any(p => p.ParameterType == typeof(string)) => ChoosesAMethod,
+            "FromIntPtr" when declaring == typeof(RuntimeMethodHandle) => ChoosesAMethod,
+            "Invoke" or "CreateDelegate" when Is<MethodBase>() => InvokesReflectively,
+            "CreateDelegate" when Is<Delegate>() => InvokesReflectively,
+            "GetFunctionPointer" when declaring == typeof(RuntimeMethodHandle) => InvokesReflectively,
+            "GetDelegateForFunctionPointer" when declaring == typeof(System.Runtime.InteropServices.Marshal) => InvokesReflectively,
+            "Compile" or "CompileToMethod" when Is<LambdaExpression>() => InvokesReflectively,
+            _ when fullName is "System.Reflection.MethodInvoker" or "System.Reflection.ConstructorInvoker" => InvokesReflectively,
+            _ when fullName == "Microsoft.CSharp.RuntimeBinder.Binder" => InvokesReflectively,
+            _ when declaring.Namespace == "System.Reflection.Emit" => RunsUnscannedCode,
+            "Load" or "LoadFrom" or "LoadFile" or "UnsafeLoadFrom" or "LoadWithPartialName" or "ReflectionOnlyLoad" or "ReflectionOnlyLoadFrom"
+                when Is<Assembly>() => RunsUnscannedCode,
+            _ when Is<System.Runtime.Loader.AssemblyLoadContext>() && name.StartsWith("LoadFrom", StringComparison.Ordinal) => RunsUnscannedCode,
+            "Load" or "ExecuteAssembly" or "ExecuteAssemblyByName" or "CreateInstance" or "CreateInstanceAndUnwrap" or "CreateInstanceFrom"
+                or "CreateInstanceFromAndUnwrap" when declaring == typeof(AppDomain) => RunsUnscannedCode,
+            "CreateInstanceFrom" when declaring == typeof(Activator) => RunsUnscannedCode,
+            "CreateInstance" when declaring == typeof(Activator) && target.GetParameters() is [{ ParameterType: var first }, ..] && first == typeof(string)
+                => RunsUnscannedCode,
+            _ => null,
+        };
+    }
+
+    /// <summary>Every reference in <paramref name="references"/> to an API <see cref="ReflectiveMethodAccess"/> bans.</summary>
+    internal static IReadOnlyList<string> CompiledReflectiveMethodAccess(
+        IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> references) =>
+        references
+            .Select(r => (r.Caller, r.Target, What: ReflectiveMethodAccess(r.Target)))
+            .Where(r => r.What is not null)
+            .Select(r => $"{IlCallScan.Outermost(r.Caller).FullName} → {r.Target.DeclaringType!.Name}.{r.Target.Name} ({r.What})")
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(s => s, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>The scanned references to a reflection API C7 bans.</summary>
+    private static readonly Lazy<IReadOnlyList<(Type Caller, MethodBase CallerMethod, MethodBase Target)>> ScannedReflectiveReferences = new(() =>
+        IlCallScan.MethodReferences(ScannedTypes.Value)
+            .Where(r => ReflectiveMethodAccess(r.Target) is not null)
+            .ToList());
+
+    [Fact(DisplayName = "Task 132: no compiled code chooses or invokes a method by reflection, or runs code the scan cannot read")]
+    public void NoCompiledCodeChoosesOrInvokesAMethodByReflection()
+    {
+        var offenders = CompiledReflectiveMethodAccess(ScannedReflectiveReferences.Value);
+
+        Assert.True(
+            offenders.Count == 0,
+            "a method chosen by reflection (by name, signature, attribute or position), invoked reflectively, or run from code "
+            + "the compiled scan cannot read (emitted IL, an assembly loaded at run time) has no method token for the compiled "
+            + "rules to read — task 132 verifier seed R reached DataverseWebApiService.RevokeAccessAsync by its signature, without "
+            + "the seam's access-cache eviction. Owner round 48 (b) bans the mechanism in every assembly the BFF runs, on any type "
+            + "(so on the Dataverse service types and on any Type obtained from them, however obtained). Call the method "
+            + "directly; share through IDataverseRecordShareService. A genuine need for reflection is a review decision: name the "
+            + "site and the type it reflects over here, and that type must not be a Dataverse service type."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
+    }
+
+    // ── C8 / T6. no [UnsafeAccessor] anywhere in src/server ───────────────────────────────────────
+    //
+    // Task 132 f1-v1c-v1 verifier seed U: `[UnsafeAccessor(UnsafeAccessorKind.Method)] private static extern Task
+    // RevokeAccessAsync(DataverseWebApiService client, …)` called unqualified IS the client's write — a compiled route whose
+    // call target is declared on the probe type (C1 misses it), with no string and no reflection; it reached Dataverse with no
+    // eviction. Spaarke has no legitimate use for UnsafeAccessor: it reaches private members regardless of visibility. Owner
+    // round 48 (a): none anywhere in src/server — in the compiled metadata of the scan set (generated code included, however
+    // the attribute was spelled or aliased) and in the text of every source and MSBuild file under src/server.
+
+    /// <summary><c>[UnsafeAccessor]</c> and its companions (<c>[UnsafeAccessorType]</c>, .NET 10).</summary>
+    internal static bool IsUnsafeAccessorAttribute(Type attributeType) =>
+        attributeType.Namespace == "System.Runtime.CompilerServices"
+        && attributeType.Name.StartsWith("UnsafeAccessor", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Every place in <paramref name="types"/> and <paramref name="assemblies"/> that carries an UnsafeAccessor attribute: a
+    /// type, a member (an <c>extern</c> accessor method above all), a parameter, a return value, a generic parameter, the
+    /// assembly or a module.
+    /// </summary>
+    internal static IReadOnlyList<string> CompiledUnsafeAccessors(IEnumerable<Type> types, IEnumerable<Assembly> assemblies)
+    {
+        var found = new List<string>();
+
+        void Check(string where, IEnumerable<CustomAttributeData> attributes)
+        {
+            foreach (var attribute in attributes.Where(a => IsUnsafeAccessorAttribute(a.AttributeType)))
+            {
+                found.Add($"{where}: [{attribute.AttributeType.Name}]");
+            }
+        }
+
+        void CheckGenericParameters(string where, IEnumerable<Type> parameters)
+        {
+            foreach (var parameter in parameters)
+            {
+                Check($"{where}<{parameter.Name}>", parameter.CustomAttributes);
+            }
+        }
+
+        foreach (var type in types)
+        {
+            Check(type.FullName!, type.CustomAttributes);
+            if (type.IsGenericTypeDefinition)
+            {
+                CheckGenericParameters(type.FullName!, type.GetGenericArguments());
+            }
+
+            foreach (var member in type.GetMembers(DeclaredMembers).Where(m => m.MemberType != MemberTypes.NestedType))
+            {
+                var where = $"{type.FullName}.{member.Name}";
+                Check(where, member.CustomAttributes);
+                if (member is not MethodBase method)
+                {
+                    continue;
+                }
+
+                foreach (var parameter in method.GetParameters())
+                {
+                    Check($"{where}({parameter.Name})", parameter.CustomAttributes);
+                }
+
+                if (method is MethodInfo withReturn)
+                {
+                    Check($"{where} (return)", withReturn.ReturnParameter.CustomAttributes);
+                }
+
+                if (method.IsGenericMethodDefinition)
+                {
+                    CheckGenericParameters(where, method.GetGenericArguments());
+                }
+            }
+        }
+
+        foreach (var assembly in assemblies)
+        {
+            var name = assembly.GetName().Name!;
+            Check(name, assembly.CustomAttributes);
+            foreach (var module in assembly.GetModules())
+            {
+                Check($"{name} module {module.Name}", module.CustomAttributes);
+            }
+        }
+
+        return found.Distinct(StringComparer.Ordinal).OrderBy(s => s, StringComparer.Ordinal).ToList();
+    }
+
+    [Fact(DisplayName = "Task 132: no compiled code the BFF runs, or that can name the client, carries an UnsafeAccessor")]
+    public void NoCompiledCodeCarriesAnUnsafeAccessor()
+    {
+        var offenders = CompiledUnsafeAccessors(ScannedTypes.Value, ScannedAssemblies.Value);
+
+        Assert.True(
+            offenders.Count == 0,
+            "an [UnsafeAccessor] extern reaches a member regardless of its visibility, through a call whose target is declared "
+            + "on the accessor's own type — task 132 verifier seed U called DataverseWebApiService.RevokeAccessAsync that way, "
+            + "around the seam and its access-cache eviction, with every other rule green. Spaarke has no legitimate use for it "
+            + "(owner round 48 (a)): call the member directly, or expose what you need."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
+    }
+
+    /// <summary>
+    /// The files T6 reads: every <c>.cs</c>, <c>.csproj</c>, <c>.props</c> and <c>.targets</c> under <c>src/server</c>
+    /// (build output excluded), and the <c>Directory.Build.props</c> / <c>.targets</c> above it that those projects import
+    /// — where a global <c>using</c> alias for the attribute could otherwise hide its name from the source that uses it.
+    /// </summary>
+    internal static IReadOnlyList<string> ServerSourceAndBuildFiles()
+    {
+        var sep = Path.DirectorySeparatorChar;
+        var serverRoot = Path.Combine(SourceScan.RepoRoot, "src", "server");
+        var underServer = Directory.EnumerateFiles(serverRoot, "*", SearchOption.AllDirectories)
+            .Where(f => new[] { ".cs", ".csproj", ".props", ".targets" }.Contains(Path.GetExtension(f), StringComparer.OrdinalIgnoreCase)
+                        && !f.Contains($"{sep}bin{sep}", StringComparison.Ordinal)
+                        && !f.Contains($"{sep}obj{sep}", StringComparison.Ordinal)
+                        && !f.Contains($"{sep}node_modules{sep}", StringComparison.Ordinal));
+        var above = new[] { SourceScan.RepoRoot, Path.Combine(SourceScan.RepoRoot, "src") }
+            .SelectMany(dir => new[] { "Directory.Build.props", "Directory.Build.targets" }.Select(f => Path.Combine(dir, f)))
+            .Where(File.Exists);
+
+        return underServer.Concat(above)
+            .Select(RelativePath)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Whether a file's text names UnsafeAccessor (the attribute, its kind enum, its type companion, an alias's target)
+    /// outside a whole-line <c>//</c> comment (doc comments included). Conservative: a block comment, an XML comment or a
+    /// string that names it is flagged too — reword it.
+    /// </summary>
+    internal static bool NamesUnsafeAccessor(string text) =>
+        text.Split('\n').Any(line =>
+            !line.TrimStart().StartsWith("//", StringComparison.Ordinal)
+            && line.Contains("UnsafeAccessor", StringComparison.Ordinal));
+
+    [Fact(DisplayName = "Task 132: no source or MSBuild file under src/server names UnsafeAccessor")]
+    public void NoServerSourceNamesUnsafeAccessor()
+    {
+        var files = ServerSourceAndBuildFiles();
+        Assert.True(
+            new[]
+            {
+                "src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj",
+                "src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs",
+                "src/server/services/Sprk.Provisioning.ControlPlane.Worker/Sprk.Provisioning.ControlPlane.Worker.csproj",
+                "Directory.Build.props",
+            }.All(files.Contains),
+            "precondition: the walk reaches the BFF project, the client, a project outside the compiled scan set, and the "
+            + "repository's Directory.Build.props");
+
+        var offenders = files
+            .Where(f => NamesUnsafeAccessor(File.ReadAllText(Path.Combine(SourceScan.RepoRoot, f))))
+            .ToList();
+
+        Assert.True(
+            offenders.Count == 0,
+            "UnsafeAccessor is banned anywhere in src/server (owner round 48 (a); task 132 verifier seed U): it reaches private "
+            + "members regardless of visibility, which is how a POA write can skip the evicting seam. Call the member "
+            + "directly, or expose what you need."
+            + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
+    }
+
     // ── T5. POA action names in the configuration the BFF is deployed with ────────────────────────
 
     /// <summary>
@@ -944,12 +1254,79 @@ public class PoaShareClientSingletonGuardTests
                 .Select(m => m!.Name)
                 .Distinct());
 
+        // C8 — task 132 f1-v1c-v1 verifier seed U, verbatim: an [UnsafeAccessor] extern that IS the client's write. Every
+        // rule before C8 passes it — C1 sees a call to the control's own extern, C4 / C6 see no POA word — which is the
+        // finding; C8 flags the attribute however it is used (a method accessor, a field accessor, [UnsafeAccessorType]).
+        var seedU = IlCallScan.WithNested(typeof(PoaBypassControl_UnsafeAccessor)).ToList();
+        Assert.Empty(CompiledPoaWriteBypasses(IlCallScan.MethodReferences(seedU)));
+        Assert.Empty(CompiledPoaNameLoads(IlCallScan.StringLoads(seedU)));
+        Assert.Empty(CompiledPoaMetadata(seedU, Array.Empty<Assembly>()));
+        Assert.Equal(
+            new[] { $"{typeof(PoaBypassControl_UnsafeAccessor).FullName}.RevokeAccessAsync: [UnsafeAccessorAttribute]" },
+            CompiledUnsafeAccessors(seedU, Array.Empty<Assembly>()));
+        Assert.Equal(
+            new[]
+            {
+                $"{typeof(PoaBypassControl_UnsafeAccessorOtherShapes).FullName}.ClientOf: [UnsafeAccessorAttribute]",
+                $"{typeof(PoaBypassControl_UnsafeAccessorOtherShapes).FullName}.DisposeByTypeName(target): [UnsafeAccessorTypeAttribute]",
+                $"{typeof(PoaBypassControl_UnsafeAccessorOtherShapes).FullName}.DisposeByTypeName: [UnsafeAccessorAttribute]",
+            },
+            CompiledUnsafeAccessors(IlCallScan.WithNested(typeof(PoaBypassControl_UnsafeAccessorOtherShapes)), Array.Empty<Assembly>()));
+
+        // C7 — task 132 f1-v1c-v1 verifier seed R, verbatim: the client's write chosen by its signature and invoked. C1, C4
+        // and C6 pass it (no token for the write, no name, no constant); C7 flags the lookup and the invocation.
+        var seedR = IlCallScan.WithNested(typeof(PoaBypassControl_ReflectionBySignature)).ToList();
+        Assert.Empty(CompiledPoaWriteBypasses(IlCallScan.MethodReferences(seedR)));
+        Assert.Empty(CompiledPoaNameLoads(IlCallScan.StringLoads(seedR)));
+        var bySignature = typeof(PoaBypassControl_ReflectionBySignature).FullName;
+        Assert.Equal(
+            new[]
+            {
+                $"{bySignature} → MethodBase.Invoke ({InvokesReflectively})",
+                $"{bySignature} → Type.GetMethods ({ChoosesAMethod})",
+            },
+            CompiledReflectiveMethodAccess(IlCallScan.MethodReferences(seedR)));
+
+        // C7's other shapes: each mechanism flagged, by the API it reaches (one line per API, so each shape is asserted).
+        var reflection = typeof(PoaBypassControl_Reflection).FullName;
+        Assert.Equal(
+            new[]
+            {
+                $"{reflection} → Assembly.Load ({RunsUnscannedCode})",
+                $"{reflection} → AssemblyLoadContext.LoadFromStream ({RunsUnscannedCode})",
+                $"{reflection} → Binder.InvokeMember ({InvokesReflectively})",
+                $"{reflection} → Delegate.CreateDelegate ({InvokesReflectively})",
+                $"{reflection} → DynamicMethod..ctor ({RunsUnscannedCode})",
+                $"{reflection} → Expression.Call ({ChoosesAMethod})",
+                $"{reflection} → Expression`1.Compile ({InvokesReflectively})",
+                $"{reflection} → IReflect.GetMethods ({ChoosesAMethod})",
+                $"{reflection} → MethodInfo.CreateDelegate ({InvokesReflectively})",
+                $"{reflection} → MethodInvoker.Create ({InvokesReflectively})",
+                $"{reflection} → Module.ResolveMethod ({ChoosesAMethod})",
+                $"{reflection} → PropertyInfo.get_GetMethod ({ChoosesAMethod})",
+                $"{reflection} → RuntimeMethodHandle.GetFunctionPointer ({InvokesReflectively})",
+                $"{reflection} → RuntimeReflectionExtensions.GetRuntimeMethods ({ChoosesAMethod})",
+                $"{reflection} → Type.GetInterfaceMap ({ChoosesAMethod})",
+                $"{reflection} → Type.GetMember ({ChoosesAMethod})",
+                $"{reflection} → Type.GetMethods ({ChoosesAMethod})",
+                $"{reflection} → Type.InvokeMember ({InvokesReflectively})",
+                $"{reflection} → TypeInfo.get_DeclaredMethods ({ChoosesAMethod})",
+            },
+            CompiledReflectiveMethodAccess(IlCallScan.MethodReferences(IlCallScan.WithNested(typeof(PoaBypassControl_Reflection)))));
+
+        // ... and the reflection the BFF does use, which reaches no method, is not.
+        var permitted = IlCallScan.WithNested(typeof(PoaReflectionPermittedControl)).ToList();
+        Assert.Empty(CompiledReflectiveMethodAccess(IlCallScan.MethodReferences(permitted)));
+        Assert.Empty(CompiledUnsafeAccessors(permitted, Array.Empty<Assembly>()));
+
         // The sanctioned shape — every write through the seam's interface — is none of these.
         var sanctioned = IlCallScan.WithNested(typeof(PoaWriteThroughSeamControl)).ToList();
         Assert.Empty(CompiledPoaWriteBypasses(IlCallScan.MethodReferences(sanctioned)));
         Assert.Empty(CompiledSdkPoaMessageUses(IlCallScan.MethodReferences(sanctioned)));
         Assert.Empty(CompiledPoaNameLoads(IlCallScan.StringLoads(sanctioned)));
         Assert.Empty(CompiledPoaMetadata(sanctioned, Array.Empty<Assembly>()));
+        Assert.Empty(CompiledReflectiveMethodAccess(IlCallScan.MethodReferences(sanctioned)));
+        Assert.Empty(CompiledUnsafeAccessors(sanctioned, Array.Empty<Assembly>()));
     }
 
     /// <summary>
@@ -1330,6 +1707,18 @@ public class PoaShareClientSingletonGuardTests
         Assert.True(NamesAPoaWriteAsAString("var m = t.GetMethod(nameof(DataverseWebApiService.GrantAccessAsync));"));
         Assert.False(NamesAPoaWriteAsAString("/// <see cref=\"GrantAccessAsync\"/>\napp.MapPost(\"/grant\", GrantAccessAsync);"),
             "a doc-comment cref and a method-group reference are not names-as-strings (the compiled rule sees the latter)");
+
+        // T6 — UnsafeAccessor in source, however it is spelled: task 132 verifier seed U verbatim, the fully qualified
+        // attribute, a using alias (the alias's TARGET names it), a global using in an MSBuild file, and the kind enum an
+        // aliased attribute still needs — but not a whole-line or doc comment that only mentions it.
+        Assert.True(NamesUnsafeAccessor(
+            "[UnsafeAccessor(UnsafeAccessorKind.Method)] private static extern Task RevokeAccessAsync(DataverseWebApiService client, string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct);"));
+        Assert.True(NamesUnsafeAccessor("[System.Runtime.CompilerServices.UnsafeAccessor(System.Runtime.CompilerServices.UnsafeAccessorKind.Field)]"));
+        Assert.True(NamesUnsafeAccessor("global using Fast = System.Runtime.CompilerServices.UnsafeAccessorAttribute;"));
+        Assert.True(NamesUnsafeAccessor("<Using Include=\"System.Runtime.CompilerServices.UnsafeAccessorAttribute\" Alias=\"Fast\" />"));
+        Assert.True(NamesUnsafeAccessor("var x = \"https://h\"; [Fast((UnsafeAccessorKind)1)] static extern void M();"),
+            "a // inside a string on the line does not hide the rest of it");
+        Assert.False(NamesUnsafeAccessor("/// no [UnsafeAccessor] here\n    // nor UnsafeAccessorKind\nstatic void M() { }"));
     }
     [Fact(DisplayName = "Task 060: PlaybookSharingService holds no private POA client")]
     public void PlaybookSharingServiceDelegatesRatherThanDuplicating()

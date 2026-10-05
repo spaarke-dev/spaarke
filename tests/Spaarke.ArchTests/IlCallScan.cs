@@ -28,10 +28,13 @@ namespace Spaarke.ArchTests;
 /// that skipped what it could not read would under-report silently, which for a guard is worse than none.</para>
 ///
 /// <para><b>Not a method reference</b>: a <c>dynamic</c> call — its member name is a binder STRING, which
-/// <see cref="StringLoads"/> does see. <b>Out of its reach by construction</b>: anything decided at RUN time — a method
-/// found by a name computed from non-constant pieces or read from configuration or attribute metadata, an action URL
-/// assembled from variables. (The POA guard reads metadata, constant data and configuration by other means; what is left is
-/// review territory.)</para>
+/// <see cref="StringLoads"/> does see. <b>Not visible to a reference scan</b>: a method chosen at RUN time — found by
+/// reflection (by a name, a signature or a position), reached through an <c>[UnsafeAccessor]</c> extern declared on the
+/// caller's own type, or run from code the scan cannot read (emitted IL, an assembly loaded at run time). The POA guard
+/// does not leave those to this scan: it BANS the mechanisms themselves — the reflection, UnsafeAccessor and run-time-code
+/// APIs, through this scan's references and the assemblies' metadata (task 132, owner round 48) — and reads metadata,
+/// constant data and configuration by other means. An action URL assembled from variables at run time is beyond any
+/// static scan.</para>
 /// </remarks>
 internal static class IlCallScan
 {

@@ -1,4 +1,8 @@
 using System.Linq.Expressions;
+using System.Reflection;
+using System.Reflection.Emit;
+using System.Runtime.CompilerServices;
+using System.Runtime.Loader;
 using Microsoft.Extensions.DependencyInjection;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Access;
@@ -68,6 +72,118 @@ internal static class PoaBypassControl_NamedAsConstants
         ((dynamic)client).RevokeAccessAsync("sprk_projects", Guid.Empty, DataversePrincipalRef.User(Guid.Empty));
 
     internal static string OtherWords() => "GrantAccessRequest rejected; RevokeAccessAsyncHandler, ModifyAccessible";
+}
+
+/// <summary>
+/// Task 132 f1-v1c-v1 verifier seed U, verbatim: an <c>[UnsafeAccessor]</c> extern that IS the client's
+/// <c>RevokeAccessAsync</c>, called unqualified. The call's target is declared on THIS type, so no reference to the
+/// client's write exists for C1 to see, and nothing is a string — only C8 (no UnsafeAccessor) sees it.
+/// </summary>
+internal static class PoaBypassControl_UnsafeAccessor
+{
+    [UnsafeAccessor(UnsafeAccessorKind.Method)]
+    private static extern Task RevokeAccessAsync(DataverseWebApiService client, string entitySetName, Guid recordId, DataversePrincipalRef principal, CancellationToken ct);
+
+    internal static Task Unshare(DataverseWebApiService dv, Guid id, DataversePrincipalRef p) =>
+        RevokeAccessAsync(dv, "sprk_projects", id, p, CancellationToken.None);
+}
+
+/// <summary>
+/// Two more UnsafeAccessor shapes: a FIELD accessor that lifts the seam's private client out of it, and .NET 10's
+/// <c>[UnsafeAccessorType]</c>, which names an inaccessible type by string on a parameter (no compile-time reference to
+/// the type at all).
+/// </summary>
+internal static class PoaBypassControl_UnsafeAccessorOtherShapes
+{
+    [UnsafeAccessor(UnsafeAccessorKind.Field, Name = "_dataverse")]
+    internal static extern ref DataverseWebApiService ClientOf(DataverseRecordShareService seam);
+
+    [UnsafeAccessor(UnsafeAccessorKind.Method, Name = "Dispose")]
+    internal static extern void DisposeByTypeName([UnsafeAccessorType("System.IO.MemoryStream")] object target);
+}
+
+/// <summary>
+/// Task 132 f1-v1c-v1 verifier seed R, verbatim: the client's write chosen by its SIGNATURE — no name, no constant, no
+/// call instruction to the write — then invoked. C7 sees the lookup (<c>Type.GetMethods</c>) and the invocation
+/// (<c>MethodBase.Invoke</c>).
+/// </summary>
+internal static class PoaBypassControl_ReflectionBySignature
+{
+    internal static object? Unshare(DataverseWebApiService dv, Guid id, DataversePrincipalRef p) =>
+        typeof(DataverseWebApiService).GetMethods()
+            .First(x => x.GetParameters().Length == 4
+                        && x.GetParameters()[2].ParameterType == typeof(DataversePrincipalRef)
+                        && x.ReturnType == typeof(Task))
+            .Invoke(dv, new object[] { "sprk_projects", id, p, CancellationToken.None });
+}
+
+/// <summary>
+/// C7's other shapes — never executed, only scanned. Every way, short of the ones above, that compiled code can choose
+/// a method by reflection, invoke one reflectively, or run code the compiled scan cannot read. The Type each starts from
+/// is deliberately NOT a Dataverse service type, or is obtained without naming one: the rule bans the mechanism, so where
+/// the Type came from does not matter.
+/// </summary>
+internal static class PoaBypassControl_Reflection
+{
+    internal static object FromAnInstance(object target) => target.GetType().GetMember("RunAsync", BindingFlags.Public | BindingFlags.Instance);
+
+    internal static object ThroughIReflect(Type type) => ((IReflect)type).GetMethods(BindingFlags.Public | BindingFlags.Instance);
+
+    internal static object DeclaredMethods(Type type) => type.GetTypeInfo().DeclaredMethods;
+
+    internal static object RuntimeMethods(Type type) => type.GetRuntimeMethods();
+
+    internal static object InterfaceMap(Type type) => type.GetInterfaceMap(typeof(IDisposable)).TargetMethods;
+
+    internal static object? ByMetadataToken(Type type) => type.Module.ResolveMethod(0x06000001);
+
+    internal static object? PropertyAccessor(Type type) => type.GetProperty("Length")!.GetMethod;
+
+    internal static object? InvokeMember(Type type, object target) => type.InvokeMember("Run", BindingFlags.InvokeMethod, null, target, null);
+
+    internal static Delegate StaticCreateDelegate(MethodInfo method, object target) => Delegate.CreateDelegate(typeof(Action), target, method);
+
+    internal static Action InstanceCreateDelegate(MethodInfo method, object target) => method.CreateDelegate<Action>(target);
+
+    internal static object Invoker(MethodInfo method) => MethodInvoker.Create(method);
+
+    internal static IntPtr FunctionPointer(MethodInfo method) => method.MethodHandle.GetFunctionPointer();
+
+    internal static object CompiledTree(MethodInfo method, object target) =>
+        Expression.Lambda<Func<object?>>(Expression.Call(Expression.Constant(target), method)).Compile();
+
+    internal static object CallByName(object target) => Expression.Call(Expression.Constant(target), "Run", null);
+
+    internal static object ThroughDynamic(Type type) => ((dynamic)type).GetMethods();
+
+    internal static object Emitted() => new DynamicMethod("m", typeof(void), Type.EmptyTypes);
+
+    internal static object LoadedFromBytes(byte[] image) => Assembly.Load(image);
+
+    internal static object LoadedFromAStream(Stream image) => AssemblyLoadContext.Default.LoadFromStream(image);
+
+    /// <summary>A generic helper: the Type is a type parameter, which a caller could bind to the client.</summary>
+    internal static MethodInfo[] OfTypeParameter<T>() => typeof(T).GetMethods();
+}
+
+/// <summary>
+/// C7's positive control — reflection the BFF does use, which reaches no method: property, field and attribute reading, a
+/// type's name, constructing by type, an embedded resource, a compiler-built expression tree (handed to a LINQ provider,
+/// not compiled here). None of it is flagged.
+/// </summary>
+internal static class PoaReflectionPermittedControl
+{
+    internal static object Properties(object target) => target.GetType().GetProperties().Select(p => p.GetValue(target)).ToList();
+
+    internal static string Name(object target) => target.GetType().FullName ?? target.GetType().Name;
+
+    internal static object? Construct() => Activator.CreateInstance(typeof(List<int>));
+
+    internal static object Attributes() => typeof(PoaReflectionPermittedControl).GetCustomAttributes(false);
+
+    internal static object Resources() => Assembly.GetExecutingAssembly().GetManifestResourceNames();
+
+    internal static Expression<Func<string, bool>> TranslatedTree() => s => s.StartsWith("a", StringComparison.Ordinal);
 }
 
 /// <summary>Positive control for the compiled rules — the sanctioned shape: every write through the seam's interface.</summary>
