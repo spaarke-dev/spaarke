@@ -11,13 +11,16 @@
  * heading, muted description, `role="status"`) were converged onto it:
  *   - DailyBriefing `EmptyState.tsx` — `size="default"`, 64px vertical
  *     padding kept via `className`
- *   - SmartTodo `SmartToDo.tsx` (`TodoEmptyState`) — `size="compact"`
- *   - AI.Widgets `PlaybookGalleryWidget.tsx` — `size="compact"`
+ *   - SmartTodo `SmartToDo.tsx` (`TodoEmptyState`) — `size="compact"`, its
+ *     pre-081 look kept via `className` / `headingClassName` /
+ *     `descriptionClassName` (smaller muted heading, no vertical band)
+ *   - AI.Widgets `PlaybookGalleryWidget.tsx` — `size="compact"`, its
+ *     `spacingVerticalM` gap and 240px description width kept via classes
  *   - LegalWorkspace `NotificationPanel/EmptyState.tsx` — `size="compact"`,
  *     48px vertical padding kept via `className`
  *   - LegalWorkspace `ActivityFeed/EmptyState.tsx` — `size="compact"`, 56px
- *     vertical padding kept via `className`, its "Show all updates" button
- *     in `footer`
+ *     vertical padding kept via `className` and 300px description width via
+ *     `descriptionClassName`, its "Show all updates" button in `footer`
  *
  * Deliberately NOT hoisted: the PCF `SemanticSearchControl/components/EmptyState.tsx`.
  * It is a materially different component (query echo + a `Dismiss` button +
@@ -129,6 +132,10 @@ export interface EmptyStateProps {
    * that needs one spacing difference from its size, e.g. a taller band.
    */
   className?: string;
+  /** Extra class merged onto the heading `Text` (last, so it wins). */
+  headingClassName?: string;
+  /** Extra class merged onto the description `Text` (last, so it wins) — e.g. a different max-width. */
+  descriptionClassName?: string;
 }
 
 /**
@@ -144,6 +151,8 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   ariaLabel,
   size = 'default',
   className,
+  headingClassName,
+  descriptionClassName,
 }) => {
   const styles = useStyles();
   const compact = size === 'compact';
@@ -163,14 +172,22 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
       )}
       <Text
         size={compact ? 400 : 500}
-        className={mergeClasses(styles.heading, compact ? styles.headingCompact : styles.headingDefault)}
+        className={mergeClasses(
+          styles.heading,
+          compact ? styles.headingCompact : styles.headingDefault,
+          headingClassName
+        )}
       >
         {heading}
       </Text>
       {description && (
         <Text
           size={compact ? 200 : 300}
-          className={mergeClasses(styles.description, compact ? styles.descriptionCompact : styles.descriptionDefault)}
+          className={mergeClasses(
+            styles.description,
+            compact ? styles.descriptionCompact : styles.descriptionDefault,
+            descriptionClassName
+          )}
         >
           {description}
         </Text>

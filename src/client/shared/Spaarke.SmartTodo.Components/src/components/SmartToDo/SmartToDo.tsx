@@ -158,6 +158,21 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
 
+  // ── Empty state (pre-081 look on top of the shared compact EmptyState) ──
+  emptyStateContainer: {
+    flex: '1 1 0',
+    paddingTop: 0,
+    paddingBottom: 0,
+  },
+  emptyStateHeading: {
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
+    color: tokens.colorNeutralForeground3,
+  },
+  emptyStateDescription: {
+    maxWidth: 'none',
+  },
+
   // ── Kanban board area ─────────────────────────────────────────────────────
   boardContainer: {
     flex: '1 1 0',
@@ -180,13 +195,19 @@ const useStyles = makeStyles({
 // description shape.
 // ---------------------------------------------------------------------------
 
-const TodoEmptyState: React.FC = () => (
-  <EmptyState
-    size="compact"
-    heading="All caught up"
-    description="No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here."
-  />
-);
+const TodoEmptyState: React.FC = () => {
+  const styles = useStyles();
+  return (
+    <EmptyState
+      size="compact"
+      className={styles.emptyStateContainer}
+      headingClassName={styles.emptyStateHeading}
+      descriptionClassName={styles.emptyStateDescription}
+      heading="All caught up"
+      description="No to-do items at the moment. Items flagged from the Updates Feed or system-generated tasks will appear here."
+    />
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Column ID to TodoColumn mapping

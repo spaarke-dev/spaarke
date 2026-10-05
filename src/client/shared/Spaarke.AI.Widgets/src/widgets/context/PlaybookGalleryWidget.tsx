@@ -252,6 +252,19 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground4,
     fontSize: '48px',
   },
+  // Pre-081 spacing / widths kept on top of the shared compact size.
+  emptyStateContainer: {
+    flex: 1,
+    gap: tokens.spacingVerticalM,
+  },
+  emptyStateHeading: {
+    lineHeight: tokens.lineHeightBase300,
+  },
+  emptyStateDescription: {
+    maxWidth: '240px',
+    // pre-081 body was a default (size 300) Text with only the font-size reduced
+    lineHeight: tokens.lineHeightBase300,
+  },
 
   // Error state
   errorText: {
@@ -294,6 +307,9 @@ const PlaybookGallerySkeletons: React.FC<{ styles: ReturnType<typeof useStyles> 
 const PlaybookGalleryEmptyState: React.FC<{ styles: ReturnType<typeof useStyles> }> = ({ styles }) => (
   <EmptyState
     size="compact"
+    className={styles.emptyStateContainer}
+    headingClassName={styles.emptyStateHeading}
+    descriptionClassName={styles.emptyStateDescription}
     icon={<AppsRegular className={styles.emptyStateIcon} />}
     heading="No playbooks available"
     description="No AI playbooks have been configured for your workspace. Contact your administrator to enable playbooks."

@@ -9,8 +9,8 @@
  * Renders the shared `EmptyState` from `@spaarke/ui-components` (task 081 /
  * C-11 — this was a hand-rolled copy of the same icon + heading + description
  * shape). Only the feed's copy, icon and "Show all updates" button live here;
- * `emptyStateSpacing` keeps the pre-081 56px band and `spacingVerticalM` gap
- * on top of the shared compact size.
+ * `emptyStateSpacing` keeps the pre-081 56px band and `spacingVerticalM` gap,
+ * and `description` its 300px width, on top of the shared compact size.
  */
 
 import * as React from "react";
@@ -33,6 +33,9 @@ const useStyles = makeStyles({
   },
   icon: {
     color: tokens.colorNeutralForeground4,
+  },
+  description: {
+    maxWidth: "300px",
   },
 });
 
@@ -74,6 +77,7 @@ export const ActivityFeedEmptyState: React.FC<IActivityFeedEmptyStateProps> = ({
     <EmptyState
       size="compact"
       className={styles.emptyStateSpacing}
+      descriptionClassName={styles.description}
       ariaLabel={heading}
       icon={isNoMatch ? <FilterRegular className={styles.icon} /> : <ListRegular className={styles.icon} />}
       heading={heading}

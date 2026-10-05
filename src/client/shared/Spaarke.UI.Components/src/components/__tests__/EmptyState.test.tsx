@@ -63,6 +63,21 @@ describe('EmptyState', () => {
     expect(region.className).toContain('caller-band');
   });
 
+  it('merges headingClassName / descriptionClassName onto the heading and description (L4 parity hooks)', () => {
+    renderInTheme(
+      <EmptyState
+        size="compact"
+        heading="H"
+        description="D"
+        headingClassName="caller-h"
+        descriptionClassName="caller-d"
+      />
+    );
+    expect(screen.getByText('H').className).toContain('caller-h');
+    expect(screen.getByText('D').className).toContain('caller-d');
+    expect(screen.getByText('H').className).not.toContain('caller-d');
+  });
+
   it('renders in the dark theme (ADR-021 — tokens only, no hard-coded colours)', () => {
     renderInTheme(<EmptyState size="compact" heading="Dark" description="mode" />, webDarkTheme);
     expect(screen.getByRole('status')).toHaveTextContent('Dark');
