@@ -11,6 +11,29 @@
 > (CreateEventWizard's `sprk_Event` bind), round 35 item 6 (147 Q2 = round 28 item 1 as written), **round 36** (the event's
 > ONE re-file route in 159's family, filing only, with the child pass; communications likewise in 161's family).
 > **Status: COMPLETED in code.** Nothing deployed; every live action was a GET. Live writes are the manual gates in §8.
+>
+> **Run r1c-v1** (2026-10-05): branch `task/uac-r2-147-r1c-v1` from `task/uac-r2-147-r1c` @ `149fffd9d`; verifier items 1-15 of
+> the r1c verification — §0. Every live action a GET.
+
+## 0. Run r1c-v1 — verifier items 1-15
+
+| # | Item | State |
+|---|---|---|
+| 1 (HIGH) | Every browser re-file that clears a lookup fails live: `MapWebApiPayloadAsync` turned `{Nav}@odata.bind: null` into `"<lookup logical name>": null`, which the Web API refuses (0x80060888) | **Fixed at the one mapper.** `DataverseWriteItemMapper.MapCoreAsync` (behind both `MapAsync` — the chat tools — and `MapWebApiPayloadAsync` — the browser routes) writes a `null` on a LOOKUP column as its metadata navigation property's null bind (`sprk_RegardingMatter@odata.bind: null`); `ClearedColumns` stays keyed by logical name (the re-file core reads it); a `null` on any other column stays that column's null. A polymorphic lookup is cleared through its first navigation property by ordinal name (deterministic; every one binds the same column) — **live, read-only GET 2026-10-05: on all eleven browser tables (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event, communication) the ONLY polymorphic lookup is `ownerid`, which the routes refuse**, so the browser path never clears one. One value per column: a lookup named twice (navigation properties differing in case, a plain key beside its bind, two clears) is a 400. The browser path reads the table's relationships once (it read them twice). Scope closed: (a) the RegardingResolver's sibling pre-clear on every saved-host selection and its clear (to-do, event, report card forms), (b) Connections' unlink and clear-primary, (c) the event side pane's clears, (d) the chat update tool's clears — and (e) a create payload carrying a clear (the app-only create's fields). **The fake now refuses the broken shape**: `ScriptedUserClient.UndeclaredPropertyIn` — a PATCH or POST as the caller, and the app-only create, whose body names a lookup by its logical name or binds a navigation property the type does not declare (case-sensitive) is refused 400 `0x80060888 Could not find a property named …`, as Dataverse refuses it (`RefusedBodies`). Tests pinning the BODY: `EventFiling_TheRegardingLookupsAndTheResolverFields_…` (the reviewer's probe, now asserted), `ChildRefile_TheResolversSetAndPreClear_ReachDataverseAsNavigationPropertyBinds_NeverALogicalName` (set + clear), `ChildRefile_AClearOnlyMoveOutOfASecureMatter_…_ReturnsTheRowToItsBusinessUnit_AndTakesTheMirrorOff` (clear only, AC3 move out), `CommunicationFiling_AConnectionsUnlink_ClearsThroughTheNavigationProperty`, `UpdateTool_ClearingALookupByItsLogicalName_…`, `UpdateTool_ClearingAPolymorphicLookup_…_TheFirstByName`, `ChildCreate_APayloadClearingALookup_CreatesWithTheNavigationPropertysNullBind`, `ChildRefile_APayloadNamingOneLookupTwice_IsRefused400_…` (×4). Seeds S1 (clears by logical name: **7 fail**), S4 (one-value rule off: **4**), S5 (polymorphic order flipped: **1**). Redundant code removed rather than left unseedable: a second "bound twice" check in `MapWebApiPayloadAsync` (seed S3 survived because the one-value rule already covers it) and a client-navigation-property pass-through (identical to the metadata's on every browser table, live) |
+| 2 | `UpdateAsync` maps a 403 row read to the uniform 404, untested (seed V3 survived) | **Pinned.** The fake models a row the caller may not read as Dataverse does (403, `UnreadableRows`) beside a missing row (404). `ARowTheCallerMayNotRead_AnswersExactlyAsARowThatDoesNotExist` × 3 entry points of the ONE re-file (`PATCH /api/v1/child-records/{table}/{id}`, the event filing handler, the communication filing core): same status, title, detail and reason code; nothing written. Seed V3 now bites (**3 fail**) |
+| 3 | The watermark holding while > 1,000 rows are carried is untested (seed V5 survived) | **Pinned end to end**: `MoreUnplacedRowsThanTheJobCarries_HoldTheWatermark_SoTheRowPastTheCapIsNeverDropped` — 1,000 events under one record flagged secure but not isolated fill the carried set (`sprk_event` lists before `sprk_todo`), the 1,001st unplaced row is a to-do under a SECOND such record; run 1 `pendingOverflow`, 1,000 carried; run 2 re-lists all 1,001; once both records are isolated, the to-do past the cap is corrected (sweep report-only, manual trigger: nothing else can reach it). Seed V5 bites (**1**), and the variant with run 2's assertion relaxed still fails on the to-do left user-owned — the drop the reviewer named |
+| 4 | "A carried record no longer flagged secure is dropped" is untested (seed V9 survived) | **Pinned, and reported**: `ACarriedRecordNoLongerFlaggedSecure_IsDropped_NotReconciledAgain_AndReported` (a refused re-own carried; the record unsecured before the next run; that run reconciles nothing — `ProcessedItems 0`, `examined 0`, no owner write — and carries nothing on). The run report no longer lists such a record under `retriedRoots` (it was not looked at again); it is named in a new additive `recentChanges.droppedRoots` and logged, so a record never leaves the carried set silently. Seed V9 bites (**1**) |
+| 5 | `-Apply` imports into pac's ACTIVE profile, not `-EnvironmentUrl` | **Fixed**: `pac solution import --environment $EnvironmentUrl --path … --publish-changes` (pac 1.46 help: `--environment` = target, else the active profile's). Guard `TheDeployScriptsPacCalls_ThatReachAnEnvironment_NameEnvironmentUrlExplicitly` (ArchTests; `pac solution pack` is local and exempt); seed A8 (import without it) bites (**1**). Script parses (PowerShell parser, 0 errors) |
+| 6 | The side pane wrote the other fields BEFORE the filing (a refused re-file left a partial save); untested — the package had no jest | **Fixed and tested**: `saveEvent` writes the filing through the BFF FIRST (a refusal writes nothing and shows the server's message), then every other field as the caller (a failure after a saved filing says "What the event is filed under was saved, but the other changes were not: …"); the split is the seam's `splitFilingPayload` (one filing rule). **Jest harness added to the package** (`jest.config.cjs`, devDependencies `jest`, `ts-jest`, `@types/jest` — the DocumentUploadWizard pattern; `@spaarke/ui-components` mapped to the seam module's source, the MSAL transport mocked): `eventService.saveEvent.test.ts` **6/6**. Seeds C6-1 (a refused re-file still writes the rest: **1/6**), C6-2 (rest before filing: **3/6**). `tsc --noEmit` and `vite build` green |
+| 7 | Verified clean | — (re-confirmed by this run's final suites, §7) |
+| 8 | Seeds that bite | — (V1/V2/V4/V6/V7/V8: code unchanged by this run) |
+| 9 | Process: `e19a5f4ab` has no attribution line; `220bce6de` used `--no-verify` | Both are pushed history on the task branch and are not rewritten (no force push). Every r1c-v1 commit ran the pre-commit hook and carries the attribution line |
+| 10 | AC3 not met (re-file clears rejected live) | **Met in code** (item 1): a move in, a move out through a set or a CLEAR, and a move between records all reach Dataverse in the shape it accepts, pinned by the body tests against a fake that refuses the broken shape. Live confirmation is G147-4 (§8, now with the clear / unlink / chat-clear steps that would have exposed it) |
+| 11 | AC13 not a real guard (no PATCH body checked) | **Met**: the re-parent and clear cases assert the body (item 1) |
+| 12 | AC9 not pinned for the child-records PATCH | **Met** (item 2) |
+| 13 | AC11 — ui-components full jest has 13 pre-existing failures (#1290) | **Proved not this task's, and closed by the owning fix.** This branch: 3,559 = 3,546 passed + **13 failed in 8 suites** — exactly #1290's set (RecordHeader `configResolution`, WorkspaceShell `buildDynamicWorkspaceConfig`, FilePreview `RichFilePreview`, ConversationView forward / emailInFlow, `todoScoreMappings`, `TimelineComposeBox`, `surfaceLaunchRegistry`), none in a file 147 changes. With PR #1293's fix (`origin/fix/ui-components-jest-1290` @ `230f6091e`) applied in the working tree (not committed): **3,558/3,559** — the one left is `todoScoreMappings`' hash pin, stale on the integration base (it pins a `todoScoring.ts` that master's #1118 changed; #1293 re-pins master's); with master's #1118 `todoScoring.ts` and #1293's pin as well: **3,559/3,559**. So the suite is green as soon as the integration branch takes master + #1293, with no 147 change. Not fixed here: #1293 owns those files (the precedent `8c5297792` withdrew a duplicate fix of the same six files); a second fix would be two mechanisms. Every other changed client package: tests and builds green (§7) |
+| 14 | AC5 live grant | Manual gate (live write): G146-1 (applied 2026-10-03) + **G147-5** (HARD pre-deploy), exact commands §8 |
+| 15 | AC12 manual live gate | Manual gates G147-2 to G147-6, §8; G147-4 now names the clear / unlink / chat-clear read-backs |
 
 ## 1. Outcome — this round's items 1-25
 
@@ -117,7 +140,8 @@ updates, event ribbon bulk status, document summary / flags / type (`DocumentRec
 - `Api/ChildRecordEndpoints.cs`: `POST /api/v1/child-records/{table}` (ten tables) and
   `PATCH /api/v1/child-records/{table}/{id}`, plus the shared `UpdateAsync` used by `PATCH /api/v1/events/{id}/filing` and
   `PATCH /api/communications/{id}/filing`. Payload mapped as the caller (`DataverseWriteItemMapper.MapWebApiPayloadAsync`:
-  every `@odata.bind` resolved from metadata — an unknown navigation property is a 400), server-owned / creator-person /
+  every `@odata.bind` resolved from metadata — an unknown navigation property is a 400; r1c-v1: a clear reaches Dataverse
+  as the metadata navigation property's null bind, never the lookup's logical name, and a column named twice is a 400), server-owned / creator-person /
   field-secured columns refused (403), `OwnedChildWrite.CreateAsync` / `RefileAsync`, restamp, mirror. Uniform 404.
   r1c: DI parameters `[FromServices]` on the three handlers.
 - **Round 36 — the event's re-file in 159's family**: `PATCH /api/v1/events/{id}/filing` (`EventEndpoints.RefileEventAsync`)
@@ -213,7 +237,10 @@ the L4 walk and the resolver follow lineage lookups, not stamps.
   (the backfill script's review run); stands aside while the sweep writes; advances only in a run that wrote. **Deploy
   order (G147-2)**: the task 148 backfill is applied and verified in an environment before a task 147 BFF reaches it, so the
   catch-up only ever finds drift.
-- **Watermark**: moves only past a completed listing, in a run whose recent pass wrote, and not while carried rows overflow.
+- **Watermark**: moves only past a completed listing, in a run whose recent pass wrote, and not while carried rows overflow
+  (r1c-v1: pinned end to end — the row past the 1,000 cap is still corrected).
+- **Dropped records (r1c-v1)**: a carried record no longer flagged secure is not reconciled again and not carried on; it is
+  named in `recentChanges.droppedRoots` (and no longer listed under `retriedRoots`).
 - **Standing correction report**: `ResultJson.changes[]` (`pass`: `recent` / `catch-up` / `sweep`) and
   `recentChanges.{mode, corrected, retriedRoots, retriedRows, carriedRoots, carriedRows, pendingOverflow, catchUp}`.
 
@@ -233,7 +260,25 @@ the L4 walk and the resolver follow lineage lookups, not stamps.
 
 ## 7. Tests, seeds, quality gates
 
-**Final suites, run ONCE on the merged branch (`e19a5f4ab` + the test fix below):**
+**r1c-v1 final suites, run ONCE on `e7f405e1f` (2026-10-05; other agents' suites ran concurrently, no failure needed a re-run):**
+
+| Suite | Result |
+|---|---|
+| BFF unit (`tests/unit/Sprk.Bff.Api.Tests`, full) | **16,476: 16,422 passed, 54 skipped, 0 failed** |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **609/609** (608 + the pac guard) |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | **87/87** |
+| `tests/integration/Spe.Integration.Tests` (full) | 398: **373 passed, 25 skipped, 0 failed** |
+| Affected BFF classes during the round (`SecureChildOwnership*`, `ClientChildFixUp*`, `DataverseUpdate/CreateRecordHandler*`, `EmailDraftToolHandler*`) | **354/354**; `SecureChildNewCommandAgreementTests` 9/9 |
+| EventDetailSidePane jest (new harness) | **6/6**; `tsc --noEmit` ✓; `vite build` ✓ |
+| `@spaarke/ui-components` full jest | this branch 3,559: 3,546 passed, **13 failed — the 8 #1290 suites only**; with PR #1293's fix applied (uncommitted) **3,558/3,559** (the integ-stale `todoScoreMappings` pin); plus master's #1118 `todoScoring.ts` **3,559/3,559** (§0 item 13). `tsc` build ✓; package-lock unchanged |
+
+**Publish size (CLAUDE.md §10)** — fresh short-path worktrees (`C:\wt147v1m`, `C:\wt147v1b`, removed after), `dotnet restore` +
+`dotnet publish -c Release --no-restore`, PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*`,
+PDBs INCLUDED (4 each): base `149fffd9d` **35.55 MB (37,280,009 B), 190 files**; branch `e7f405e1f` **35.55 MB (37,281,073 B),
+190 files**, identical file lists → **delta +1,064 B (+0.00 MB)**; uncompressed +3,664 B. Ceiling ≤ 60 MB met. **CVE**:
+`dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` — no vulnerable packages (no BFF package change).
+
+**Final suites of r1c, run ONCE on the merged branch (`e19a5f4ab` + the test fix below):**
 
 | Suite | Result |
 |---|---|
@@ -330,16 +375,31 @@ on `Sprk.Bff.Api` — no vulnerable packages.
 | **C36-4** | association status back inside the re-file payload | 1/16 |
 | **C36-5** | unlink / clear pick the first lookup to the table, not the regarding one | 2/16 |
 
-Not seeded, with reason: the side pane's split (`saveEvent`) has no test harness in that package (no jest config); it
-calls the seam's `isFilingKey`, which C36-2 covers. The documents route / chat tool running the step AFTER the re-stamp is
-an ordering, not a guard: no test in the in-memory worlds observes a stamp the rule reads.
+Not seeded, with reason: the documents route / chat tool running the step AFTER the re-stamp is an ordering, not a guard:
+no test in the in-memory worlds observes a stamp the rule reads. (r1c's other unseeded item — the side pane's split, then
+without a test harness — is seeded in r1c-v1: C6-1, C6-2.)
+
+**r1c-v1 seeds** (each one mutation, run, restored from a byte copy compared with `cmp`, touched; every one BITES):
+
+| Seed | Mutation | Failing tests observed |
+|---|---|---|
+| S1 | mapper writes a lookup clear by its logical name | 7 (every body test) |
+| S4 | one-value-per-column rule off | 4 (`…NamingOneLookupTwice…` ×4) |
+| S5 | polymorphic clear picks the LAST navigation property | 1 |
+| V3 | a 403 row read answered with the caller's own failure | 3 (`ARowTheCallerMayNotRead…` ×3) |
+| V5 | watermark moves while carried rows overflow | 1 (and the variant with run 2's re-list assertion relaxed: 1, the row past the cap left user-owned) |
+| V9 | carried records reconciled whether or not still flagged | 1 |
+| A8 | `pac solution import` without `--environment` | 1 (arch) |
+| C6-1 | side pane: a refused re-file still writes the other fields | 1/6 |
+| C6-2 | side pane: the other fields written before the filing | 3/6 |
+| S3 (survived → code removed) | `MapWebApiPayloadAsync`'s own "bound twice" check off | 0 — the one-value rule covers it, so the duplicate check was deleted, not kept unseedable |
 
 ## 8. Manual live gates (main session; dry run → apply → verify each)
 
 - **G147-5 (HARD pre-deploy)** — `& ./scripts/Set-ChildRecordCreatorPersonSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c` (dry run), then `-Apply`, then `-Verify` (exit 0): adds `sprk_createdbyperson` to `sprk_memo`, `sprk_reportcard`, `sprk_budget`, `sprk_kpiassessment`, `sprk_billingevent`. A BFF carrying 147 writes the column on those creates.
 - **G147-2 (deploy + schedule)** — PRECONDITION: the task 148 backfill applied and verified in the environment (SECURE-PROJECT-ENVIRONMENT-SETUP §7c.1, `-Verify` exit 0). Deploy the BFF; `/api/admin/jobs/secure-child-reconciliation/status` shows `*/2`, enabled; the first runs report `recentChanges.catchUp.ran = true` until `complete`. Out-of-product probe: as a non-admin test user shared on secure project `65a3fab2`, `POST /api/data/v9.2/sprk_todos` as the user regarding the project; record its owner before and after the next run and the run's `recentChanges`; a non-sharee cannot open it; delete the probe.
 - **G147-3 (stamp backfill)** — `pwsh scripts/Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry run: expect 4 to write, the two §4 rows unresolvable), `-Apply -AcknowledgeEscalation` (§4 is the review), dry run again (expect 0 to write and the same two root-less rows).
-- **G147-4 (per-writer live sequence, POML step 8)** — on each of the three secure root types: each §2a writer → owner read back = Secure Record Owners, sharee can open, non-sharee cannot; RegardingResolver on a saved host and Connections re-file in and out (out: BU team, mirror gone); probes deleted and recorded.
+- **G147-4 (per-writer live sequence, POML step 8)** — on each of the three secure root types: each §2a writer → owner read back = Secure Record Owners, sharee can open, non-sharee cannot; RegardingResolver on a saved host and Connections re-file in and out (out: BU team, mirror gone); probes deleted and recorded. **r1c-v1 (verifier item 1) — the clear shapes, each must answer 204 and read back**: (i) RegardingResolver on a SAVED to-do, event and report card: select a different parent (the payload pre-clears every sibling lookup), then use the control's clear; (ii) Connections on a communication: unlink, and clear primary; (iii) the event side pane: clear the regarding and save; (iv) the chat `dataverse.update_record` clearing `sprk_regardingmatter` on a probe to-do (and, as a polymorphic probe, `regardingobjectid` on a probe task). Before r1c-v1 each of these was refused live with `0x80060888 Could not find a property named '<lookup>' …`; record the response of each.
 - **G147-6 (E2 ribbon)** — after task 142's helper web resources: `& ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com` (dry run) → export the dedicated ribbon solution (`SpaarkeSecureChildRibbons`, the nine tables, ribbon only) and `-ExportDir <unpacked> -Apply` → `-Verify` → by hand on a secure and an ordinary record of each root and on one child form (an event of a secure project: its To Do subgrid).
 - **G147-1** (A2 write probe) — **withdrawn**: round 28 rejected A2.
 
@@ -380,6 +440,8 @@ cores; the chat handler calling the synchronizer is AI → CRUD, the permitted d
 | client `bffChildWriteAdapter.ts` (+ `OWNERSHIP_CHILD_TABLES`), `BffChildRecordDataverseClient.ts`, per-host auth bootstrap files | `bffDataServiceAdapter.ts` (no child route behind it) | one seam of decorators | each writer hand-rolls fetch and error parsing; a host control re-files an ownership child as the user |
 | `sprk_secure_child_ribbon.js`, `SecureChildRibbons/`, `Deploy-SecureChildNewCommands.ps1` | AccessRibbons (142/150) | same pattern; child subgrids, not root flyouts | the platform "+ New" creates user-owned children under or through a secure record |
 | `SecureChildNewCommandAgreementTests`, `secureChildRibbonScript.test.ts` | none spans the files | — | the four files and the C#/TS lists drift silently |
+| r1c-v1: additive `ResultJson.recentChanges.droppedRoots` (job) | `retriedRoots` / `carriedRoots` | one field in the existing report | a carried record unsecured between runs leaves the carried set with no trace, and was listed as "retried" though it was not |
+| r1c-v1: EventDetailSidePane jest harness (`jest.config.cjs`; devDependencies `jest`, `ts-jest`, `@types/jest`, the versions DocumentUploadWizard / Notepad / SmartTodo already use) | those packages' harnesses; the shared seam's jest suite (covers the seam, not the pane's own `saveEvent`) | the same pattern in one more package; dev-only, nothing in the bundle | the pane's write order (filing first, a refused re-file writes nothing) stays unpinned — the defect verifier item 6 found was invisible to every test |
 
 ## 11. `.claude/**` edits needed
 

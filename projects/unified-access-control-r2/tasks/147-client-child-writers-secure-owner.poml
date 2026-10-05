@@ -438,5 +438,63 @@ THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-fi
         G147-6 (G147-5 HARD pre-deploy) in note section 8.</live>
       <claude-edits>none</claude-edits>
     </run>
+    <run date="2026-10-05" branch="task/uac-r2-147-r1c-v1" base="149fffd9d" outcome="completed">
+      <summary>Closed the r1c verification's items 1-15 (note section 0). The HIGH defect: every browser re-file that cleared a
+        lookup was refused live, because the one mapper wrote a clear as the lookup's LOGICAL name, which the Web API does not
+        declare; it now writes the metadata navigation property's null bind, and the record-ownership fake refuses the broken
+        shape the way Dataverse does. Owner and main-session rounds 1-43 applied; no new decision needed.</summary>
+      <done>
+        <item>Item 1: DataverseWriteItemMapper.MapCoreAsync (behind MapAsync and MapWebApiPayloadAsync) writes a null on a
+          lookup column as {Nav}@odata.bind: null (ClearedColumns keyed by logical name; a polymorphic lookup through its first
+          navigation property by ordinal name - on the eleven browser tables the only polymorphic lookup is ownerid, refused,
+          live GET 2026-10-05); one value per column (400); relationships read once. Covers the RegardingResolver pre-clear and
+          clear, Connections unlink and clear-primary, the side pane's clears, the chat update tool's clears and a create
+          carrying a clear. The fake refuses a body naming an undeclared property on PATCH, POST and the app-only create.
+          Tests pin the body (set + clear, clear-only move out, unlink, chat clear, polymorphic clear, create, named twice x4).</item>
+        <item>Item 2: a row the caller may not read (Dataverse 403) answers exactly as a missing row on the child-records
+          PATCH, the event filing handler and the communication filing core (fake UnreadableRows).</item>
+        <item>Items 3-4: the watermark holding while carried rows overflow is pinned end to end (the row past the 1,000 cap is
+          still corrected); a carried record no longer flagged secure is dropped, no longer listed as retried, and named in the
+          new additive recentChanges.droppedRoots.</item>
+        <item>Item 5: Deploy-SecureChildNewCommands.ps1 -Apply runs pac solution import --environment $EnvironmentUrl; ArchTests
+          guard on every environment-reaching pac call of the script.</item>
+        <item>Item 6: EventDetailSidePane saveEvent writes the filing through the BFF first (a refused re-file writes nothing),
+          then the other fields; the split is the seam's splitFilingPayload. Jest harness added to the package (6 tests).</item>
+        <item>Item 13: ui-components full jest on this branch = 13 failed in the 8 #1290 suites only, none in a 147 file; with PR
+          #1293's fix applied 3,558/3,559 (the integ-only stale todoScoreMappings pin), with master's #1118 todoScoring.ts too
+          3,559/3,559 - green when the integration branch takes master + #1293; not duplicated here (#1293 owns those files).</item>
+        <item>Docs: DATAVERSE-WRITE-PATH-ARCHITECTURE section 4.3 re-file bullet and the I-2 row; SECURE-PROJECT-ENVIRONMENT-SETUP
+          section 7c job row. Note: section 0, seeds table, G147-4 clear read-backs, section 10 rows.</item>
+      </done>
+      <justification-new-surface>
+        <item name="ResultJson.recentChanges.droppedRoots (SecureChildReconciliationJob)">
+          <existing>retriedRoots / carriedRoots in the same report.</existing>
+          <extension>One additive field in the existing report; no new job, option or service.</extension>
+          <cost-of-doing-nothing>a carried record unsecured between runs leaves the carried set with no trace, and was listed as
+            retried although it was not looked at again.</cost-of-doing-nothing>
+        </item>
+        <item name="EventDetailSidePane jest harness (jest.config.cjs; devDependencies jest, ts-jest, @types/jest)">
+          <existing>the same harness in DocumentUploadWizard, Notepad and SmartTodo; the ui-components seam suite (covers the seam,
+            not the pane's own saveEvent).</existing>
+          <extension>The existing pattern in one more package; dev-only, nothing reaches the bundle (package-lock: 286 dev
+            packages added, no production version changed).</extension>
+          <cost-of-doing-nothing>the pane's write order stays unpinned - the partial-save defect of verifier item 6 was invisible
+            to every test.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF changes are inside existing members (the mapper, the job); no new service, DI registration, endpoint,
+          option, job, column, PCF or runtime package; no plugin (ADR-002); fail closed unchanged (ADR-003).</placement>
+      </justification-new-surface>
+      <tests>Final suites run once on e7f405e1f: BFF unit 16,476 (16,422 passed, 54 skipped, 0 failed); NetArchTest 609/609;
+        Sprk.Bff.Api.IntegrationTests 87/87; Spe.Integration.Tests 398 (373 passed, 25 skipped, 0 failed). Affected BFF classes
+        354/354. EventDetailSidePane jest 6/6, tsc and vite build green. ui-components full jest: 13 failed in the 8 #1290
+        suites only (none a 147 file); 3,558/3,559 with PR #1293's fix applied, 3,559/3,559 with master's #1118 todoScoring.ts
+        as well. Seeds (note section 7): S1 7, S4 4, S5 1, V3 3, V5 1, V9 1, A8 1, C6-1 1/6, C6-2 3/6 - every one bites; S3
+        survived, so the duplicate check it mutated was deleted. Publish size (fresh short-path worktrees, Compress-Archive
+        Optimal, PDBs included): base 149fffd9d 35.55 MB (37,280,009 B) / 190 files; branch e7f405e1f 35.55 MB (37,281,073 B)
+        / 190 files; delta +1,064 B. CVE scan: no vulnerable packages.</tests>
+      <live>READ-ONLY only (one GET of the lookup attribute metadata of the eleven browser tables). Pending manual gates G147-2 to
+        G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-4 now names the clear / unlink / chat-clear read-backs.</live>
+      <claude-edits>none</claude-edits>
+    </run>
   </execution>
 </task>
