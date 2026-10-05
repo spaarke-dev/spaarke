@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 
@@ -98,8 +100,17 @@ internal sealed class ExternalGrantRow
     /// <para><c>sprk_expiresdate</c> is <b>Date Only</b> in live metadata, which is why this is
     /// <see cref="DateOnly"/> and not <see cref="DateTime"/> — and why the expiry read filter compares
     /// with bare <c>yyyy-MM-dd</c> (task 007's <c>ExpiryPredicate</c>).</para>
+    /// <para><b>⚠️ Its WIRE shape is not <c>yyyy-MM-dd</c></b> (unified-access-control-r2 task 140, read live
+    /// 2026-10-05). The column's <i>format</i> is DateOnly but its <i>behaviour</i> is <b>TimeZoneIndependent</b>
+    /// (task 098 §2.3), and the Web API returns a TimeZoneIndependent value as a full timestamp —
+    /// <c>"2026-12-10T00:00:00Z"</c>. System.Text.Json's own <see cref="DateOnly"/> converter accepts only
+    /// <c>yyyy-MM-dd</c> and THROWS on that, so every read of a row carrying an expiry (which, since task 097, is
+    /// every row the BFF writes) failed with a <see cref="JsonException"/>: the grant core's re-grant,
+    /// <c>/revoke</c> (its target read, its delegation-rule pre-read and its sweep), and
+    /// <c>set-record-share-expiry</c>. <see cref="DataverseDateOnlyJsonConverter"/> reads both shapes.</para>
     /// </remarks>
     [JsonPropertyName("sprk_expiresdate")]
+    [JsonConverter(typeof(DataverseDateOnlyJsonConverter))]
     public DateOnly? ExpiresDate { get; set; }
 
     [JsonPropertyName("_sprk_contact_value")]
@@ -119,6 +130,58 @@ internal sealed class ExternalGrantRow
 
     /// <summary>Dataverse active state for this table.</summary>
     public bool IsActive => StateCode is null or 0;
+}
+
+/// <summary>
+/// Reads a Dataverse date-only column in BOTH shapes the Web API returns: <c>yyyy-MM-dd</c> (a column whose behaviour is
+/// DateOnly) and <c>yyyy-MM-ddT00:00:00Z</c> (a DateOnly-FORMAT column whose behaviour is TimeZoneIndependent —
+/// <c>sprk_externalrecordaccess.sprk_expiresdate</c>, live-verified 2026-10-05). Writes <c>yyyy-MM-dd</c>.
+/// </summary>
+/// <remarks>
+/// <para><b>The calendar date is the leading ten characters, as written.</b> A TimeZoneIndependent value is stored and
+/// returned with no time-zone conversion — the <c>Z</c> is how the Web API renders it, not an instant to convert — so the
+/// stored date is exactly the date part. Converting to a local date would move a midnight value to the previous day
+/// anywhere west of UTC. The SDK path reads the same column as a <see cref="DateTime"/> and takes its date the same
+/// way (<c>ExternalAccessReconciliationJob</c>, <c>GrantExpiryReminderJob</c>).</para>
+/// <para>Anything else — a number, a malformed string — is a <see cref="JsonException"/>, never a guessed date.</para>
+/// <para>§11: <i>Existing</i> — System.Text.Json's own <see cref="DateOnly"/> converter, which reads only
+/// <c>yyyy-MM-dd</c> and is the defect. <i>Extension</i> — it cannot be configured to accept the timestamp shape, and
+/// changing the property to <see cref="DateTime"/> would change every consumer of a value that is a date. <i>Cost of doing
+/// nothing</i> — every read of a dated grant row throws (unified-access-control-r2 task 140 note §12).</para>
+/// </remarks>
+internal sealed class DataverseDateOnlyJsonConverter : JsonConverter<DateOnly?>
+{
+    /// <inheritdoc />
+    public override bool HandleNull => true;
+
+    /// <inheritdoc />
+    public override DateOnly? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+            return null;
+
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException($"A Dataverse date must be a JSON string, not {reader.TokenType}.");
+
+        var text = reader.GetString() ?? string.Empty;
+        if (text.Length >= 10
+            && (text.Length == 10 || text[10] == 'T')
+            && DateOnly.TryParseExact(text.AsSpan(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return date;
+        }
+
+        throw new JsonException($"'{text}' is not a Dataverse date (yyyy-MM-dd, or yyyy-MM-ddT… from a TimeZoneIndependent column).");
+    }
+
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, DateOnly? value, JsonSerializerOptions options)
+    {
+        if (value is { } date)
+            writer.WriteStringValue(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        else
+            writer.WriteNullValue();
+    }
 }
 
 /// <summary>
