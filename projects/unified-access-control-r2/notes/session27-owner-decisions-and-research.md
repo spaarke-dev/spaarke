@@ -832,6 +832,24 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Drop "no method chosen or invoked by reflection" and every other claim the guards cannot back.
 3. **The Unicode-escape `[UnsafeAccessor]` outside the scan set** (seed U5) is caught by scanning the compiled IL of EVERY `src/server` project, not the source text.
 
+## Owner round 56 (2026-10-05). BINDING. The bar for finishing a lane, and over-engineering. REPLACES round 15's "never defer, never sideline" standard from now on.
+
+The owner, verbatim: "it is important that we address issues that impact the quality, performance, and maintainability and extendability of the solution … However, the other risk is 'overengineering' and this is also a risk because it introduces complexity and unnecessary cost. This project has already exceeded the budget by 10x." The owner adopted the rule below and the round cap from now on, and chose to KEEP all work already decided or built (rounds 1–55 stand; nothing is reverted or simplified retroactively).
+
+1. **Every finding is classified first.**
+   - **FIX in the lane:**
+     - **(a) Runtime defects:** wrong behaviour that a real user, operator or job path can trigger. That includes security gaps, fail-open, data loss and cross-customer exposure.
+     - **(b) Maintainability defects that compound:** duplicate mechanisms, docs or comments that contradict the code, important behaviour with no behaviour test, fragile coupling.
+     - **(c) Performance problems** with real, measurable impact.
+   - **RECORD as a known limit** (one line each in the task note's "Known limits" section and the PR description; no fix round):
+     - **(d)** guard or static-analysis bypasses that only deliberately adversarial code in our own repository can reach (reflection, late binding, unsafe accessors, unusual spellings);
+     - **(e)** rare edges that already fail closed and have no realistic trigger;
+     - **(f)** requests to seed-prove minor, non-security branches.
+2. **The over-engineering check.** Any NEW column, job, setting, abstraction, service or guard must pass CLAUDE.md §11's three questions against a realistic failure. A fix is never bigger than the problem it solves. When two fixes work, choose the simpler one. Verifiers report over-engineering as a finding.
+3. **The round cap.** From now on, each lane gets at most ONE more fix round after its current one. Whatever remains at the cap is classified: (a)–(c) items are escalated to the main session, and (d)–(f) items go to Known limits.
+4. **Process.** Verifiers classify each finding (a)–(f) and lead with (a)–(c). Fixers fix (a)–(c) and record (d)–(f) as known limits, without building new machinery for them.
+5. **Batch 5:** scope review before starting (owner, 2026-10-05). For each of the 29 tasks: what it delivers, its risk if dropped, and keep / merge / cut. The owner decides.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
