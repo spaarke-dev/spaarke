@@ -513,6 +513,25 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Version v1.1.1, bumped in all four places. Jest cases, plus a seed proving each override bites.
    - The grid configuration script is unchanged.
 
+## Round 39 (2026-10-05). BINDING. Main-session decisions under round 15. Task 158, from its second verification.
+
+1. **Unsecuring a parent ends what it passed on (option b).** Interpretation xiii in note §6 is reversed.
+   - Unsecure Step 4 revokes each explicit share on the parent. For each sharee it revokes, round 30's reverse rule then runs on the secure records filed under the parent.
+   - **Ended:** only the UNMODIFIED inherited share.
+   - **Kept:**
+     - a direct share;
+     - a raised mask;
+     - a share another secure parent still justifies;
+     - the record's last reader. Owner round 3 S5: never strand a record.
+   - Failures report through `children_incomplete`, as round 30's do.
+   - **Why:** after the unsecure, the filed records are still secure. A sharee's access to them came only from the parent share that was just revoked. Round 30 calls that "a former sharee with access they should have lost". Seeing the now-ordinary parent through its business unit gives no access to a still-secure filed record, so option (c)'s exception does not apply.
+   - Tests and seeds per kept/ended case, plus the fault case.
+2. **DIRECT shares on a filed secure record honour every secure parent's No Access list too (option b).** This extends round 31 item 1, which covered the creator, to every share.
+   - It applies to `/share-user`, and to colleagues named in `/provision-project` on a filed root.
+   - The check runs against the record's own list AND every secure parent's list. It refuses with the existing No Access codes and round 29's copy, and an unverifiable list fails closed.
+   - Use ONE guard entry point (`SecureShareNoAccessGuard`), never a second copy of the parent walk.
+   - Tests and seeds.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
