@@ -274,6 +274,97 @@ public class RuleBodySchemaValidatorTests
         act.Should().Throw<NotSupportedException>();
     }
 
+    [Theory]
+    [InlineData(RuleType.Threshold, null)]
+    [InlineData(RuleType.Switch, "{ not valid json")]
+    public void Validate_WithRuleTypeHavingNoAuthoredSchemaYet_ThrowsWhateverTheBody(RuleType ruleType, string? body)
+    {
+        // Task 022 rework round 2, finding F9: the documented throwing contract is about the TYPE, so it must
+        // not depend on the body -- previously a blank or malformed body returned a Failure for these types
+        // while "{}" threw, which made the doc's "never throws for ANY input" claim false in both directions.
+        var act = () => _sut.Validate(ruleType, body);
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
+    // =====================================================================================
+    // Task 022 rework round 2, finding F2: the length cap runs BEFORE parse and schema evaluation (the schema
+    // evaluation holds a process-wide lock; a 0.9 MB body was measured holding it ~3.7 s).
+    // =====================================================================================
+
+    [Fact]
+    public void Validate_WithOversizedBodyThatIsAlsoInvalidJson_ReturnsTheSizeError_NotTheJsonError()
+    {
+        var body = "{ not valid json " + new string('x', RuleBodySchemaValidator.MaxRuleBodyLength);
+
+        var result = _sut.Validate(RuleType.Existence, body);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Equal(RuleBodySchemaValidator.RuleBodyTooLongMessage(body.Length));
+    }
+
+    // =====================================================================================
+    // Task 022 rework round 2, finding F7: 'when' shares the clause filters' per-value grammar.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("""{"sprk_amount":1e999999}""")]
+    [InlineData("""{"sprk_name":"$commitment.x"}""")]
+    [InlineData("""{"sprk_name":{"between":[1,2]}}""")]
+    [InlineData("""{"sprk_name":{">=":1,"<=":2}}""")]
+    public void Validate_WithWhenValueBreakingTheFilterValueGrammar_IsRefused(string when)
+    {
+        var body = """{"type":"Existence","subject":"sprk_matter","when":""" + when +
+                   ""","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"a":"b"}}]}""";
+
+        var act = () => _sut.Validate(RuleType.Existence, body);
+
+        act.Should().NotThrow().Subject.IsValid.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Validate_WithEmptyWhen_StillMeansAllSubjects()
+    {
+        // 'when' uses filterConditions WITHOUT the clause filter's minProperties:1 -- {} stays legal.
+        _sut.Validate(RuleType.Existence, ValidExistenceBody).IsValid.Should().BeTrue();
+        ValidExistenceBody.Should().Contain("\"when\": {}");
+    }
+
+    // =====================================================================================
+    // Task 022 rework round 2, finding F8: a message template is never accepted inside the rule body.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("""{"messageTemplate":"Unreconciled against its budget {{sprk_budgetamount}}"}""", "/then/messageTemplate")]
+    [InlineData("""{"MESSAGETEMPLATE":"x"}""", "/then/MESSAGETEMPLATE")]
+    [InlineData("""{"proposedAction":{"messageTemplate":"x"}}""", "/then/proposedAction/messageTemplate")]
+    public void Validate_WithMessageTemplateInsideBody_IsRefused_NamingItsLocation(string then, string pointer)
+    {
+        var body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"a":"b"}}],"then":""" +
+                   then + "}";
+
+        var result = _sut.Validate(RuleType.Existence, body);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().StartWith(pointer + ":");
+    }
+
+    // =====================================================================================
+    // Task 022 rework round 2, finding F13: numeric rule types parse as digits only.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData(" +100000002 ")]
+    [InlineData("+100000002")]
+    [InlineData(" 100000002")]
+    [InlineData("100000002\n")]
+    [InlineData("100,000,002")]
+    public void TryParseRuleType_WithSignWhitespaceOrSeparators_IsRefused(string ruleTypeRaw)
+    {
+        // The plain-digits positive case is ValidateRaw_WithKnownExistenceRuleTypeByDataverseOptionValue_*.
+        RuleBodySchemaValidator.TryParseRuleType(ruleTypeRaw, out _).Should().BeFalse();
+    }
+
     // =====================================================================================
     // Task 022 rework (review finding #1): pathological-but-syntactically-valid JSON must be REFUSED, never
     // thrown. Both cases previously escaped as unhandled ArgumentException/FormatException.

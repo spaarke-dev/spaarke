@@ -354,6 +354,27 @@ public class SignalWriterTests
         act.Should().Throw<SignalSentenceTemplateException>().WithMessage("*unsubstituted*");
     }
 
+    // Task 022 rework round 2, finding F5: the "both sides" half of review finding #3 -- the RENDERER refuses the
+    // same malformed shapes PolicyVersionValidator refuses, even when every well-formed key is present, so a
+    // policy version that skipped validation still cannot render stray brace text into a Signal (F12 adds the
+    // lone-literal-brace and full-width-brace shapes).
+    [Theory]
+    [InlineData("Flagged by {{sprk-x}}.")]
+    [InlineData("Flagged by {{a b}}.")]
+    [InlineData("Flagged by {{}}.")]
+    [InlineData("Flagged by {{x")]
+    [InlineData("Flagged by {{{x}}}")]
+    [InlineData("Flagged (see {policy}).")]
+    [InlineData("Flagged by \uFF5B\uFF5Bx\uFF5D\uFF5D.")]
+    public void RenderSentence_MalformedPlaceholder_Throws(string template)
+    {
+        var facts = new Dictionary<string, object?> { ["x"] = "v", ["a"] = "v", ["b"] = "v", ["policy"] = "v" };
+
+        var act = () => SignalWriter.RenderSentence(template, facts);
+
+        act.Should().Throw<SignalSentenceTemplateException>().WithMessage("*malformed*");
+    }
+
     [Fact]
     public async Task WriteAsync_TemplateReferencesUnreadField_Escalates_AndWritesNothing()
     {

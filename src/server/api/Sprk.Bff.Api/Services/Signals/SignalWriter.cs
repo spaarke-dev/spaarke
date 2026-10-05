@@ -48,7 +48,14 @@ public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, dou
 /// fit <c>sprk_sentence</c>'s 2000-character limit.</param>
 /// <param name="FactValues">The detection-time facts the predicate actually read — becomes
 /// <c>sprk_factsnapshot</c> verbatim (JSON) AND is the only source <see cref="MessageTemplate"/> may draw on.
-/// A null value for a referenced key is refused (§0.3 — a null fact is not evidence).</param>
+/// A null value for a referenced key is refused (§0.3 — a null fact is not evidence). <b>What the evaluator
+/// (task 031) puts here for a template token</b> — every token is in
+/// <see cref="CompiledPredicate.TemplateEligibleFields"/> (enforced at validation, task 022 rework round 2,
+/// finding F3), and its value is: for a field read by the subject's own <c>when</c> filter, the firing
+/// subject's own value of that field; for a field read by an <c>exists</c> clause, <b>the clause's pinned
+/// literal</b> (the one value the clause's <c>eq</c> / single-element <c>in</c> condition fixes it to — every
+/// matching related row carries exactly that value, so it is the read value). Never a value from a
+/// <c>notExists</c> clause, and never a value picked from one of several matching related rows.</param>
 /// <param name="EvidenceRefs">Optional typed evidence refs — becomes <c>sprk_evidencerefs</c> (JSON array,
 /// <c>[]</c> when omitted).</param>
 public sealed record SignalWriteRequest(
@@ -176,10 +183,11 @@ public sealed class SignalSentenceTemplateException : Exception
 /// rendering it blank would assert the field's absence as though it had been read), and (3) requires the fully
 /// rendered string to contain NO remaining <c>{{…}}</c> placeholder. Any of the three failing throws
 /// <see cref="SignalSentenceTemplateException"/> rather than writing a partially- or wrongly-rendered sentence.
-/// <b>For 031 and 022</b>: <see cref="SignalWriteRequest.FactValues"/> must be exactly the compiled predicate's
-/// read set (never a superset gathered "just in case") — and 022's save-time rule-body validation should
-/// reject a message-template token that names a field outside the rule body's own read fields, so a mismatch
-/// is caught at AUTHORING time, not at the first evaluation that happens to exercise it.</para>
+/// <b>For 031</b>: <see cref="SignalWriteRequest.FactValues"/> must hold only values the predicate read (never a
+/// superset gathered "just in case") — see that parameter's doc for exactly which value each token takes.
+/// <see cref="PolicyVersionValidator"/> (task 022) refuses a template token outside
+/// <see cref="CompiledPredicate.TemplateEligibleFields"/>, so a mismatch is caught when the policy version is
+/// validated, not at the first evaluation that happens to exercise it.</para>
 /// <para><b>Ids.</b> Every id written to a text resolver field is <c>Guid.ToString("D").ToLowerInvariant()</c> —
 /// lowercase, no braces (the audit's §8.3 U1 finding: two divergent regexes were in circulation).</para>
 /// </remarks>
@@ -650,8 +658,9 @@ public sealed partial class SignalWriter
             // itself contain a literal brace character.
             throw new SignalSentenceTemplateException(
                 "sprk_sentence template contains a malformed {{...}} placeholder (unbalanced braces, an empty " +
-                "token, or a character outside [A-Za-z0-9_.] in the field name) that would otherwise render " +
-                "as literal text instead of substituting.");
+                "token, a character outside [A-Za-z0-9_.] in the field name, or a lone literal or full-width " +
+                "brace -- braces are reserved for {{field}} placeholders) that would otherwise render as " +
+                "literal text instead of substituting.");
         }
 
         var rendered = SentenceToken().Replace(template, match =>
@@ -710,20 +719,28 @@ public sealed partial class SignalWriter
     /// <see cref="RenderSentence"/> unflagged and would have rendered with stray literal brace text.
     /// </summary>
     /// <remarks>
-    /// Checks for ANY leftover single <c>{</c> or <c>}</c> after removing every well-formed match — not only a
+    /// <para>Checks for ANY leftover single <c>{</c> or <c>}</c> after removing every well-formed match — not only a
     /// literal residual <c>{{</c>/<c>}}</c> pair — because <c>{{{x}}}</c> matches <see cref="SentenceToken"/>'s
     /// INNER <c>{{x}}</c> (regex is not anchored), leaving only single stray braces (<c>{</c> ... <c>}</c>)
-    /// behind; a doubled-brace-only check would miss exactly that case. Ordinary rendered prose (the shipped
-    /// message templates) never contains a bare curly brace, so this is not expected to false-positive on
-    /// legitimate authored text.
+    /// behind; a doubled-brace-only check would miss exactly that case.</para>
+    /// <para><b>Authoring rule (task 022 rework round 2, finding F12): curly braces are RESERVED for
+    /// <c>{{field}}</c> placeholders.</b> A single literal brace in prose — e.g. <c>"(see {policy})"</c> — is
+    /// therefore refused as <c>template_malformed</c>, deliberately: it is indistinguishable from a mistyped
+    /// placeholder, and a template has no escape syntax. Write the prose without braces. Full-width braces
+    /// (U+FF5B <c>｛</c> / U+FF5D <c>｝</c>) are refused the same way, so a placeholder typed with an IME or pasted
+    /// from a CJK document cannot pass as prose and render literally.</para>
     /// </remarks>
     internal static bool HasMalformedPlaceholder(string template)
     {
         ArgumentNullException.ThrowIfNull(template);
         var withoutWellFormedTokens = SentenceToken().Replace(template, string.Empty);
-        return withoutWellFormedTokens.Contains('{', StringComparison.Ordinal)
-            || withoutWellFormedTokens.Contains('}', StringComparison.Ordinal);
+        return withoutWellFormedTokens.AsSpan().IndexOfAny(ReservedBraces) >= 0;
     }
+
+    /// <summary>The characters <see cref="HasMalformedPlaceholder"/> refuses outside a well-formed token: ASCII
+    /// braces and their full-width forms U+FF5B / U+FF5D (finding F12).</summary>
+    private static readonly System.Buffers.SearchValues<char> ReservedBraces =
+        System.Buffers.SearchValues.Create("{}\uFF5B\uFF5D");
 
     private static string FormatFactValue(object value) => value switch
     {

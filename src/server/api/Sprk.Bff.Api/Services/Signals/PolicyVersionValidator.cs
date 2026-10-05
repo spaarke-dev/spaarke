@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <param name="IsValid">True only if every check passed.</param>
 /// <param name="Errors">Field-level error strings. Empty when <see cref="IsValid"/> is true.</param>
 /// <param name="Reason">One of <see cref="OntologyWriterFailureReason"/>'s policy-validation sub-reasons
-/// (<c>RuleTypeUnsupported</c> / <c>SchemaInvalid</c> / <c>CompileRefused</c> /
+/// (<c>RuleTypeUnsupported</c> / <c>RuleBodyTooLarge</c> / <c>SchemaInvalid</c> / <c>CompileRefused</c> /
 /// <c>TemplateTokenOutsideReadSet</c> / <c>TemplateMalformed</c> / <c>InternalError</c>). <c>null</c> when
 /// <see cref="IsValid"/> is true.</param>
 public sealed record PolicyVersionValidationResult(bool IsValid, IReadOnlyList<string> Errors, string? Reason)
@@ -41,7 +41,7 @@ public sealed record PolicyVersionSnapshot(
 /// <summary>
 /// The single, reusable, fail-closed validation seam for a <c>sprk_policyversion</c>'s <c>sprk_rulebody</c> +
 /// <c>sprk_messagetemplate</c> — built on top of <see cref="RuleBodySchemaValidator"/> (task 020, shape) and
-/// <see cref="PredicateCompiler"/> (task 021, compiles AND exposes the predicate's positive read set), per the
+/// <see cref="PredicateCompiler"/> (task 021, compiles AND defines the template-eligible field set), per the
 /// owner decision recorded in task 022's POML (2026-10-03/04), reworked 2026-10-04 after an independent review
 /// (findings #1-#10) and the coordinator's two settled design decisions (F5, F6 below).
 /// </summary>
@@ -58,32 +58,23 @@ public sealed record PolicyVersionSnapshot(
 /// <see cref="ValidateForSave"/> (renamed from the task's first-pass "Validate" — review finding #6) for any
 /// BFF write path that comes to exist for <c>sprk_policyversion</c> (none does today — verified by grep across
 /// <c>Sprk.Bff.Api/Api/**</c> and <c>Sprk.Bff.Api/Services/**</c>, 2026-10-04).</para>
-/// <para><b>Could <see cref="PredicateCompiler.Compile"/> itself be made non-public to force this?</b> No,
-/// without a contortion that costs more than it buys (F6's own escape hatch — "otherwise say why not"):
-/// <see cref="PredicateCompiler"/>, this class, and the future evaluator (task 031) all live in the SAME
-/// <c>Sprk.Bff.Api</c> assembly, so marking <c>Compile</c> <c>internal</c> would not stop the evaluator from
-/// calling it directly — <c>internal</c> only blocks a DIFFERENT assembly, which was never the actual risk.
-/// Achieving true single-path enforcement at the language level would mean nesting <see cref="PredicateCompiler"/>
-/// as a private class inside this one, which would break its own standalone, already-tested public contract
-/// (<c>PredicateCompilerTests.cs</c>, task 021's maintain-class tests) and its independent DI registration for
-/// no real gain. The coordinator's own mitigation — a POML constraint on tasks 031/032 requiring this gate,
-/// enforced at code-review time — is the right-sized control for what is fundamentally an intra-assembly
-/// discipline question, not a trust-boundary one.</para>
-/// <para><b>F5 — the §0.3 template vocabulary is POSITIVE fields only (coordinator decision, 2026-10-04).</b>
-/// A <c>sprk_messagetemplate</c> token may reference ONLY a field read by the subject's own <c>when</c> filter
-/// or by an <c>exists</c> clause — never a <c>notExists</c> clause, because a firing subject has, by
-/// definition, no matching <c>notExists</c> row, so that clause's filter VALUES cannot be read for it (only
-/// the fact of absence is known; literal template text can still describe that). A field name appearing on
-/// MORE than one distinct positive entity is also refused — the value would be ambiguous. See
-/// <see cref="CompiledPredicate.PositiveReadFields"/> / <see cref="CompiledPredicate.AmbiguousPositiveFields"/>
-/// for where this is computed. <b>What task 031 must put in <c>SignalWriteRequest.FactValues</c></b>: exactly
-/// the values read for the FIRING SUBJECT from its positive clauses (the subject's own field values for a
-/// <c>when</c>-filtered field; the matched related row's field values for an <c>exists</c>-clause field) —
-/// never a value sourced from a <c>notExists</c> clause, and never a value for an ambiguous field name without
-/// first disambiguating by entity.</para>
+/// <para><b>Why <see cref="PredicateCompiler.Compile"/> is not non-public — and what enforces the single path
+/// instead.</b> <see cref="PredicateCompiler"/>, this class and the future evaluator (task 031) all live in the
+/// SAME <c>Sprk.Bff.Api</c> assembly, so <c>internal</c> would not stop the evaluator calling it; nesting the
+/// compiler privately here would break its standalone tested contract (task 021's
+/// <c>PredicateCompilerTests</c>). The single path is enforced by an architecture test instead —
+/// <c>tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs</c> (task 022 rework round 2, finding F11)
+/// fails the build if any <c>Sprk.Bff.Api</c> method other than this class (and the compiler itself) calls a
+/// <c>PredicateCompiler.Compile*</c> method.</para>
+/// <para><b>The §0.3 template vocabulary</b> is <see cref="CompiledPredicate.TemplateEligibleFields"/>, defined
+/// once, in the compiler (coordinator decisions F5, 2026-10-04, and F3, rework round 2): a subject <c>when</c>
+/// field (any operator — the subject is one row), or an <c>exists</c>-clause field the clause PINS to exactly
+/// one value (<c>eq</c>, or a one-element <c>in</c>); never a <c>notExists</c> field, never an ambiguous one.
+/// <b>What task 031 must put in <c>SignalWriteRequest.FactValues</c></b> is documented on that parameter: the
+/// subject's own value for a <c>when</c> token, and the clause's pinned literal for an <c>exists</c> token.</para>
 /// <para><b>Component justification (CLAUDE.md §11).</b> <b>Existing</b> — <see cref="RuleBodySchemaValidator"/>
 /// checks shape only (ADR-013: no logging, no Dataverse, no policy-version identity); <see cref="PredicateCompiler"/>
-/// compiles a FetchXML query and exposes the positive/ambiguous read-field sets. Neither owns "is this whole
+/// compiles a FetchXML query and defines the template-eligible field sets. Neither owns "is this whole
 /// policy version usable, and if not, say so loudly with a stable identity attached" — that is a distinct
 /// responsibility (orchestration + telemetry + logging) that would otherwise be hand-rolled independently by
 /// a future save path and the task 031 evaluator, risking the exact EventId/reason-vocabulary drift CLAUDE.md's
@@ -98,7 +89,13 @@ public sealed record PolicyVersionSnapshot(
 /// validator's own error strings — only the policy version id, the policy code, and the bounded-cardinality
 /// reason tag (owner's no-silent-failure directive, 2026-10-04; mirrors <see cref="SignalWriter"/>'s own
 /// refusal-logging discipline).</para>
-/// <para><b>"Never throws" is enforced at TWO layers (review finding #1).</b> <see cref="ValidateInternal"/>
+/// <para><b>Contract violations throw; authored content never does.</b> Exactly two caller bugs throw from
+/// <see cref="TryPrepareForEvaluation"/>, both BEFORE any validation so they are never logged or metered as an
+/// invalid policy: a null snapshot (<see cref="ArgumentNullException"/>) and a <c>subjectId</c> of
+/// <see cref="Guid.Empty"/> (<see cref="ArgumentException"/>, task 022 rework round 2, finding F1 — previously it
+/// reached the compiler, was refused as <c>compile_refused</c>, and logged EventId 50301 blaming a VALID policy
+/// for the caller's bug). Everything about the policy version's own content is a <c>false</c> return.</para>
+/// <para><b>"Never throws" for content is enforced at TWO layers (review finding #1).</b> <see cref="ValidateInternal"/>
 /// wraps its own body in a catch-all that converts ANY exception — including ones not yet discovered, the way
 /// duplicate-JSON-keys and <c>1e999999</c> were discovered by the reviewer's probe — into a bounded
 /// <see cref="OntologyWriterFailureReason.InternalError"/> failure, logging/metering only the exception's
@@ -145,17 +142,28 @@ public sealed class PolicyVersionValidator
     /// <see cref="PolicyVersionSnapshot.PolicyVersionId"/> + <see cref="PolicyVersionSnapshot.PolicyCode"/> +
     /// the bounded reason — never rule body, template, or error text), records
     /// <see cref="OntologyWriterTelemetry.RecordPolicyInvalid"/>, sets <paramref name="compiled"/> to
-    /// <c>null</c>, and returns <c>false</c> — never throws, so the caller's own loop over many policy
-    /// versions is never aborted by one bad one (review finding #1, two-layer catch — see class remarks).
+    /// <c>null</c>, and returns <c>false</c> — never throws for anything about the policy version's content, so
+    /// the caller's own loop over many policy versions is never aborted by one bad one (review finding #1,
+    /// two-layer catch — see class remarks).
     /// </summary>
     /// <param name="pv">The policy version's identity + the four column values this check needs.</param>
     /// <param name="subjectId">Optional: narrow the compiled predicate to one subject record (event-triggered
-    /// runs) — passed straight through to <see cref="PredicateCompiler.Compile"/>.</param>
+    /// runs). <c>null</c> = all subjects; <see cref="Guid.Empty"/> is a caller bug and throws.</param>
     /// <param name="compiled">The compiled predicate on success; <c>null</c> on refusal.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="pv"/> is null (a caller bug).</exception>
+    /// <exception cref="ArgumentException"><paramref name="subjectId"/> is <see cref="Guid.Empty"/> (a caller bug,
+    /// finding F1) — thrown before any validation, so nothing is logged or metered against the policy.</exception>
     public bool TryPrepareForEvaluation(
         PolicyVersionSnapshot pv, Guid? subjectId, [NotNullWhen(true)] out CompiledPredicate? compiled)
     {
         ArgumentNullException.ThrowIfNull(pv);
+        if (subjectId == Guid.Empty)
+        {
+            // Finding F1: a contract violation by the CALLER must be loud, and must never be counted as an
+            // invalid POLICY -- so it is checked here, outside the validation (and its catch-all) entirely.
+            throw new ArgumentException(
+                "subjectId must not be Guid.Empty; pass null to evaluate every subject.", nameof(subjectId));
+        }
 
         PolicyVersionValidationResult result;
         try
@@ -196,10 +204,10 @@ public sealed class PolicyVersionValidator
 
     /// <summary>
     /// The shared validation body for both <see cref="ValidateForSave"/> and
-    /// <see cref="TryPrepareForEvaluation"/>: schema shape, then (for <see cref="RuleType.Existence"/>) full
-    /// compilation, then the malformed-placeholder check, then the positive-read-set / ambiguity check.
-    /// Returns the compiled predicate alongside a success result so <see cref="TryPrepareForEvaluation"/>
-    /// never has to compile twice.
+    /// <see cref="TryPrepareForEvaluation"/>: rule type, then the length cap (before any parse — finding F2),
+    /// then schema shape (evaluated ONCE — finding F2), then full compilation without re-evaluating the schema,
+    /// then the malformed-placeholder check, then the template-eligibility check. Returns the compiled predicate
+    /// alongside a success result so <see cref="TryPrepareForEvaluation"/> never has to compile twice.
     /// </summary>
     private (PolicyVersionValidationResult Result, CompiledPredicate? Compiled) ValidateInternal(
         string? ruleTypeRaw, string? ruleBodyJson, string? messageTemplate, Guid? subjectId)
@@ -228,6 +236,15 @@ public sealed class PolicyVersionValidator
                     "validated (task 020 scope: Existence only)."), null);
             }
 
+            // Finding F2: the length cap BEFORE any parse or schema evaluation, so an oversized row never holds
+            // the schema validator's process-wide lock, and is reported as what it is (rule_body_too_large),
+            // not as whatever the parser would say about its content.
+            if (ruleBodyJson is not null && ruleBodyJson.Length > RuleBodySchemaValidator.MaxRuleBodyLength)
+            {
+                return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.RuleBodyTooLarge,
+                    RuleBodySchemaValidator.RuleBodyTooLongMessage(ruleBodyJson.Length)), null);
+            }
+
             // ruleType is Existence here, so RuleBodySchemaValidator.Validate never throws NotSupportedException
             // for it -- the try/catch is defensive only, in case that contract ever changes.
             RuleBodyValidationResult schemaResult;
@@ -249,7 +266,10 @@ public sealed class PolicyVersionValidator
             CompiledPredicate compiled;
             try
             {
-                compiled = _compiler.Compile(ruleBodyJson!, subjectId);
+                // Finding F2: the schema was evaluated just above -- do not evaluate it a second time inside
+                // the compiler. This is the ONLY production caller of a PredicateCompiler.Compile* method
+                // (PredicateCompilerCallerGuardTests).
+                compiled = _compiler.CompileSchemaValidated(ruleBodyJson!, subjectId);
             }
             catch (PredicateCompilationException ex)
             {
@@ -266,15 +286,18 @@ public sealed class PolicyVersionValidator
                     return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.TemplateMalformed,
                         "sprk_messagetemplate contains a malformed {{...}} placeholder (unbalanced braces, an " +
                         "empty token, or a character outside [A-Za-z0-9_.] in the field name) that would " +
-                        "otherwise render as literal text."), null);
+                        "otherwise render as literal text. Curly braces are reserved for {{field}} " +
+                        "placeholders: a single literal brace in prose (e.g. \"(see {policy})\") or a full-width " +
+                        "brace is refused too -- write the prose without braces."), null);
                 }
 
                 var tokens = SignalWriter.ExtractTemplateTokens(messageTemplate);
-                var outsideReadSet = tokens.Where(t => !compiled.PositiveReadFields.Contains(t)).ToArray();
-                if (outsideReadSet.Length > 0)
+                var refused = tokens.Where(t => !compiled.TemplateEligibleFields.Contains(t)).ToArray();
+                if (refused.Length > 0)
                 {
-                    var ambiguous = outsideReadSet.Where(t => compiled.AmbiguousPositiveFields.Contains(t)).ToArray();
-                    var unknown = outsideReadSet.Except(ambiguous).ToArray();
+                    var ambiguous = refused.Where(compiled.AmbiguousTemplateFields.Contains).ToArray();
+                    var unpinned = refused.Where(compiled.UnpinnedTemplateFields.Contains).ToArray();
+                    var unknown = refused.Except(ambiguous).Except(unpinned).ToArray();
                     var detail = new List<string>();
                     if (unknown.Length > 0)
                     {
@@ -282,16 +305,24 @@ public sealed class PolicyVersionValidator
                                    $"'notExists' clause's fields can never be read for a firing subject): [{string.Join(", ", unknown)}]");
                     }
 
+                    if (unpinned.Length > 0)
+                    {
+                        detail.Add("read by an 'exists' clause that does not pin it to exactly one value (a " +
+                                   "range, '<>' or multi-value list can match several rows with different " +
+                                   "values, so the value is not defined; pin it with a single value, or remove " +
+                                   $"it from the template): [{string.Join(", ", unpinned)}]");
+                    }
+
                     if (ambiguous.Length > 0)
                     {
-                        detail.Add("ambiguous -- read by more than one distinct positive entity, so the value " +
-                                   $"is not well defined: [{string.Join(", ", ambiguous)}]");
+                        detail.Add("ambiguous -- read on more than one entity or row, or pinned to different " +
+                                   $"values by different clauses, so the value is not well defined: [{string.Join(", ", ambiguous)}]");
                     }
 
                     return (PolicyVersionValidationResult.Failure(OntologyWriterFailureReason.TemplateTokenOutsideReadSet,
                         "sprk_messagetemplate references {{...}} field(s) " + string.Join("; ", detail) +
                         ". Section 0.3 is binding: the sentence may assert only what the predicate actually " +
-                        "read for the firing subject, from a positive ('when' / 'exists') clause."), null);
+                        "read for the firing subject."), null);
                 }
             }
 

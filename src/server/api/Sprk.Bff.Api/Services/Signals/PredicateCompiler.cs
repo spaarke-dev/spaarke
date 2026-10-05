@@ -17,34 +17,37 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// <c>IGenericEntityService.RetrieveMultipleAsync(new FetchExpression(FetchXml))</c>.</param>
 /// <param name="WindowAnchorUtc">The instant every relative-date token (<c>now</c>, <c>now-30d</c>) was resolved
 /// against. Recorded so a caller can state, truthfully, which window a Signal was evaluated over (§0.3).</param>
-/// <param name="ConditionFields">Every field name used as a filter-condition ATTRIBUTE KEY somewhere in the
-/// body — the union of the <c>when</c> filter's keys and every clause's <c>filter</c> keys, across BOTH
-/// <c>exists</c> AND <c>notExists</c> clauses, flat (no entity prefix). Task 022 review finding #4: this is
-/// narrower than "everything the predicate reads" — it says nothing about which entity a name belongs to, and
-/// critically it includes <c>notExists</c> fields, whose VALUE can never be read for a firing subject (no
-/// matching row exists). Do NOT use this set to decide what a <c>sprk_messagetemplate</c> token may safely
-/// reference — use <see cref="PositiveReadFields"/> for that.</param>
-/// <param name="PositiveReadFields">The subset of field names that are safe for a <c>sprk_messagetemplate</c>
-/// token to reference under section 0.3: a field read by the subject's own <c>when</c> filter, or by an
-/// <c>exists</c> clause's filter — NEVER a <c>notExists</c> clause (task 022 review finding #5: a firing
-/// subject has, by definition, no matching <c>notExists</c> row, so that clause's filter VALUES cannot be
-/// read for it; only the fact of absence is known, which literal template text can state). A field name is
-/// excluded from this set (and instead lands in <see cref="AmbiguousPositiveFields"/>) when it appears on MORE
-/// THAN ONE distinct positive entity (the subject's own entity for <c>when</c>, or a clause's related entity
-/// for <c>exists</c>) — the value would not be well defined.</param>
-/// <param name="AmbiguousPositiveFields">Field names that appear in a positive position (<c>when</c> or an
-/// <c>exists</c> clause) on MORE than one distinct entity — e.g. the subject's own <c>sprk_name</c> AND an
-/// <c>exists</c> clause's related entity's <c>sprk_name</c>. <see cref="PolicyVersionValidator"/> refuses a
-/// <c>sprk_messagetemplate</c> token naming one of these with a specific "ambiguous" message rather than the
-/// generic "not read" message it gives for a field absent from both sets.</param>
+/// <param name="TemplateEligibleFields">The field names a <c>sprk_messagetemplate</c> <c>{{token}}</c> may
+/// reference — the ONE definition of the §0.3 template vocabulary (task 022 rework round 2, finding F3,
+/// coordinator decision). A token's value must be exactly ONE well-defined value for the firing subject, so a
+/// field is eligible only when:
+/// <list type="bullet">
+/// <item>it is read by the subject's own <c>when</c> filter — with ANY operator, because the subject is one row
+/// whose own value the evaluator reads; or</item>
+/// <item>it is read by an <c>exists</c> clause that PINS it to exactly one value — a bare scalar, <c>{"=": v}</c>,
+/// or an <c>in</c> list of exactly one element. A range/<c>&lt;&gt;</c>/multi-value <c>in</c> filter can match N
+/// related rows carrying N different values, so "the" value would be undefined. For such a token the value IS
+/// the clause's pinned literal. If the field is read by more than one <c>exists</c> clause, EVERY occurrence
+/// must pin it and all pins must agree.</item>
+/// </list>
+/// Never a <c>notExists</c> clause's field: a firing subject has, by definition, no matching row there, so
+/// only the fact of absence is known (literal template text can state that).</param>
+/// <param name="AmbiguousTemplateFields">Field names refused as ambiguous: read in a positive position (<c>when</c>
+/// or an <c>exists</c> clause) on MORE than one distinct entity, read by BOTH the subject's <c>when</c> and an
+/// <c>exists</c> clause (two different rows even if the same table), or pinned by two <c>exists</c> clauses to
+/// DIFFERENT values. Disjoint from the other two sets; consumed by <see cref="PolicyVersionValidator"/> to give
+/// the author a specific "ambiguous" refusal.</param>
+/// <param name="UnpinnedTemplateFields">Field names read only by <c>exists</c> clause(s), on one entity, where at
+/// least one occurrence does NOT pin the field to exactly one value (finding F3). Disjoint from the other two
+/// sets; consumed by <see cref="PolicyVersionValidator"/> to give the author a specific "not pinned" refusal.</param>
 public sealed record CompiledPredicate(
     string SubjectEntity,
     string SubjectIdAttribute,
     string FetchXml,
     DateTimeOffset WindowAnchorUtc,
-    IReadOnlySet<string> ConditionFields,
-    IReadOnlySet<string> PositiveReadFields,
-    IReadOnlySet<string> AmbiguousPositiveFields);
+    IReadOnlySet<string> TemplateEligibleFields,
+    IReadOnlySet<string> AmbiguousTemplateFields,
+    IReadOnlySet<string> UnpinnedTemplateFields);
 
 /// <summary>
 /// Thrown when a rule body cannot be compiled into a single FetchXML filter. The message names the offending
@@ -174,10 +177,10 @@ public sealed partial class PredicateCompiler
     /// <summary>Dataverse's limit on <c>link-entity</c> elements in one query. One clause = one link.</summary>
     public const int MaxClauses = 15;
 
-    /// <summary>Task 022 review finding #9 (bounded refusal): the shipped Path B body is ~0.6 KB
-    /// (<c>tests/fixtures/signals/pathb-existence.rulebody.json</c>); 32 KB is over 50x that while still
-    /// bounding how much a pathological rule body can cost to parse and compile before any other check runs.</summary>
-    public const int MaxRuleBodyLength = 32_768;
+    /// <summary>Task 022 review finding #9 (bounded refusal). An alias of
+    /// <see cref="RuleBodySchemaValidator.MaxRuleBodyLength"/> — one number for every layer (rework round 2,
+    /// finding F2, which also moved the check ahead of schema evaluation in every caller).</summary>
+    public const int MaxRuleBodyLength = RuleBodySchemaValidator.MaxRuleBodyLength;
 
     /// <summary>Task 022 review finding #9 (bounded refusal): the shipped example's one <c>in</c> list holds 2
     /// values; 200 is far beyond any realistic authored rule while bounding both the resulting FetchXML
@@ -204,36 +207,19 @@ public sealed partial class PredicateCompiler
     /// <param name="subjectId">Optional: restrict evaluation to one subject record (event-triggered runs).</param>
     /// <exception cref="PredicateCompilationException">The body is invalid or uses a construct that cannot be
     /// expressed as one FetchXML filter. Never returns a partial query.</exception>
+    /// <remarks>
+    /// <b>Who may call this.</b> Within <c>Sprk.Bff.Api</c>, only <see cref="PolicyVersionValidator"/> may call
+    /// any <c>Compile*</c> method of this class (it uses <see cref="CompileSchemaValidated"/>, so the schema is
+    /// evaluated once). Pinned by the architecture test <c>PredicateCompilerCallerGuardTests</c> (task 022
+    /// rework round 2, finding F11): the evaluator (task 031) must obtain a predicate via
+    /// <see cref="PolicyVersionValidator.TryPrepareForEvaluation"/>, never here. Public for its own
+    /// maintain-class tests (<c>PredicateCompilerTests</c>).
+    /// </remarks>
     public CompiledPredicate Compile(string ruleBodyJson, Guid? subjectId = null)
     {
-        // Bounded refusal BEFORE any parsing (review finding #9): reject a pathological body by length alone,
-        // cheaply, rather than pay JSON-parse + schema-evaluation cost first.
-        if ((ruleBodyJson?.Length ?? 0) > MaxRuleBodyLength)
-        {
-            throw new PredicateCompilationException(
-                $"Rule body is {ruleBodyJson!.Length} characters, exceeding the {MaxRuleBodyLength}-character limit.");
-        }
+        using var doc = ParseBounded(ruleBodyJson);
 
-        // Parse strictly FIRST: duplicate keys are refused here, so the schema validator and this compiler can never
-        // see two different objects in the same text.
-        JsonDocument doc;
-        try
-        {
-            doc = JsonDocument.Parse(ruleBodyJson ?? string.Empty, StrictJson);
-        }
-        catch (JsonException ex)
-        {
-            throw new PredicateCompilationException("Rule body is not valid JSON (duplicate keys are refused): " + ex.Message);
-        }
-
-        using (doc)
-        {
-            return CompileParsed(ruleBodyJson!, doc.RootElement, subjectId);
-        }
-    }
-
-    private CompiledPredicate CompileParsed(string ruleBodyJson, JsonElement root, Guid? subjectId)
-    {
+        // Schema first (shape), then the compiler's own stricter checks.
         var validation = _validator.Validate(RuleType.Existence, ruleBodyJson);
         if (!validation.IsValid)
         {
@@ -241,6 +227,46 @@ public sealed partial class PredicateCompiler
                 "Rule body failed Existence schema validation: " + string.Join("; ", validation.Errors));
         }
 
+        return CompileParsed(doc.RootElement, subjectId);
+    }
+
+    /// <summary>
+    /// <see cref="Compile"/> minus the schema evaluation, for a caller that has ALREADY obtained
+    /// <c>IsValid == true</c> from <see cref="RuleBodySchemaValidator.Validate"/> for this exact text — task 022
+    /// rework round 2, finding F2: <see cref="PolicyVersionValidator"/> evaluated the schema and then
+    /// <see cref="Compile"/> evaluated it again, doubling the time spent under the schema validator's
+    /// process-wide lock. Internal; its only caller is <see cref="PolicyVersionValidator"/> (pinned by
+    /// <c>PredicateCompilerCallerGuardTests</c>). The length cap, strict parse, and every compiler-level
+    /// refusal (including the <c>$</c>-reference and numeric-range defences) still run.
+    /// </summary>
+    internal CompiledPredicate CompileSchemaValidated(string ruleBodyJson, Guid? subjectId)
+    {
+        using var doc = ParseBounded(ruleBodyJson);
+        return CompileParsed(doc.RootElement, subjectId);
+    }
+
+    private static JsonDocument ParseBounded(string? ruleBodyJson)
+    {
+        // Bounded refusal BEFORE any parsing (review finding #9): reject a pathological body by length alone.
+        if ((ruleBodyJson?.Length ?? 0) > MaxRuleBodyLength)
+        {
+            throw new PredicateCompilationException(RuleBodySchemaValidator.RuleBodyTooLongMessage(ruleBodyJson!.Length));
+        }
+
+        // Parse strictly: duplicate keys are refused here, so the schema validator and this compiler can never see
+        // two different objects in the same text.
+        try
+        {
+            return JsonDocument.Parse(ruleBodyJson ?? string.Empty, StrictJson);
+        }
+        catch (JsonException ex)
+        {
+            throw new PredicateCompilationException("Rule body is not valid JSON (duplicate keys are refused): " + ex.Message);
+        }
+    }
+
+    private CompiledPredicate CompileParsed(JsonElement root, Guid? subjectId)
+    {
         // Resolved once, so every clause in the query shares one anchor (to whole seconds, for a stable text).
         var nowUtc = TruncateToSeconds(_timeProvider.GetUtcNow().ToUniversalTime());
 
@@ -262,11 +288,9 @@ public sealed partial class PredicateCompiler
             new XElement("order", new XAttribute("attribute", subjectIdAttribute)));
 
         var rootConditions = new List<XElement>();
-        var conditionFields = new HashSet<string>(StringComparer.Ordinal);
-        // Field name -> distinct positive entities it was read on (subject entity for "when"; related entity
-        // for an "exists" clause). NEVER populated for a "notExists" clause (review finding #5) -- its filter
-        // fields still land in conditionFields above, but never here.
-        var positiveFieldEntities = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+        // Field name -> how it is read in POSITIVE positions ("when" / "exists"). NEVER populated for a
+        // "notExists" clause: a firing subject has no matching row there, so its values are never readable.
+        var positiveUses = new Dictionary<string, PositiveFieldUse>(StringComparer.Ordinal);
 
         if (subjectId is { } id)
         {
@@ -280,8 +304,8 @@ public sealed partial class PredicateCompiler
 
         if (root.TryGetProperty("when", out var when) && when.ValueKind == JsonValueKind.Object)
         {
-            rootConditions.AddRange(
-                CompileFilterConditions(subject, when, nowUtc, "when", conditionFields, positiveFieldEntities));
+            rootConditions.AddRange(CompileFilterConditions(subject, when, nowUtc, "when",
+                (field, _) => UseOf(positiveUses, field).RecordWhen(subject)));
         }
 
         var index = 0;
@@ -296,12 +320,10 @@ public sealed partial class PredicateCompiler
                 RequireIdentifier(relatedRaw, where + (isExists ? ".exists" : ".notExists")),
                 where + (isExists ? ".exists" : ".notExists"));
             // Filter first, so an FR-07 violation is reported as FR-07 even where the join is also unverified.
-            // Positive-field tracking (the 3rd arg) is passed ONLY for an exists clause -- a notExists clause's
-            // filter fields still populate conditionFields (inside CompileFilterConditions, unconditionally)
-            // but must never be treated as readable for a firing subject (review finding #5).
+            // Positive-field tracking is passed ONLY for an exists clause (review finding #5).
             var linkFilter = new XElement("filter", new XAttribute("type", "and"),
                 CompileFilterConditions(related, clause.GetProperty("filter"), nowUtc, where + ".filter",
-                    conditionFields, isExists ? positiveFieldEntities : null));
+                    isExists ? (field, pin) => UseOf(positiveUses, field).RecordExists(related, pin) : null));
 
             var path = RequireVerifiedJoin(
                 subject, related, RequireIdentifier(clause.GetProperty("path").GetString(), where + ".path"), where + ".path");
@@ -344,51 +366,111 @@ public sealed partial class PredicateCompiler
             throw new PredicateCompilationException("Rule body contains a character that cannot appear in XML: " + ex.Message);
         }
 
-        // Split the positive-field map (built during the walk above) into the safe, unambiguous set and the
-        // ambiguous (same name, >1 distinct positive entity) set -- review finding #5 + #10 (FrozenSet).
-        var positiveReadFields = positiveFieldEntities
-            .Where(kv => kv.Value.Count == 1)
-            .Select(kv => kv.Key)
-            .ToFrozenSet(StringComparer.Ordinal);
-        var ambiguousPositiveFields = positiveFieldEntities
-            .Where(kv => kv.Value.Count > 1)
-            .Select(kv => kv.Key)
-            .ToFrozenSet(StringComparer.Ordinal);
+        var eligible = new List<string>();
+        var ambiguous = new List<string>();
+        var unpinned = new List<string>();
+        foreach (var (field, use) in positiveUses)
+        {
+            switch (use.Classify())
+            {
+                case TemplateFieldClass.Eligible: eligible.Add(field); break;
+                case TemplateFieldClass.Ambiguous: ambiguous.Add(field); break;
+                default: unpinned.Add(field); break;
+            }
+        }
 
         return new CompiledPredicate(
             SubjectEntity: subject,
             SubjectIdAttribute: subjectIdAttribute,
             FetchXml: fetchXml,
             WindowAnchorUtc: nowUtc,
-            ConditionFields: conditionFields.ToFrozenSet(StringComparer.Ordinal),
-            PositiveReadFields: positiveReadFields,
-            AmbiguousPositiveFields: ambiguousPositiveFields);
+            TemplateEligibleFields: eligible.ToFrozenSet(StringComparer.Ordinal),
+            AmbiguousTemplateFields: ambiguous.ToFrozenSet(StringComparer.Ordinal),
+            UnpinnedTemplateFields: unpinned.ToFrozenSet(StringComparer.Ordinal));
     }
 
-    /// <param name="positiveFieldEntities">Non-null ONLY when <paramref name="filter"/> is a POSITIVE filter
-    /// (the body's own "when", or an "exists" clause) -- null for a "notExists" clause, so its fields are
-    /// added to <paramref name="conditionFields"/> (unconditionally, below) but never tracked as positively
-    /// readable (review finding #5).</param>
+    private static PositiveFieldUse UseOf(Dictionary<string, PositiveFieldUse> uses, string field)
+    {
+        if (!uses.TryGetValue(field, out var use))
+        {
+            use = new PositiveFieldUse();
+            uses[field] = use;
+        }
+
+        return use;
+    }
+
+    private enum TemplateFieldClass
+    {
+        Eligible,
+        Ambiguous,
+        Unpinned,
+    }
+
+    /// <summary>
+    /// How one field name is read in POSITIVE positions. <see cref="Classify"/> is the single definition of the
+    /// §0.3 template vocabulary documented on <see cref="CompiledPredicate.TemplateEligibleFields"/> (task 022
+    /// rework round 2, finding F3).
+    /// </summary>
+    private sealed class PositiveFieldUse
+    {
+        private readonly HashSet<string> _entities = new(StringComparer.Ordinal);
+        private readonly List<string?> _existsPins = new();
+        private bool _readByWhen;
+
+        public void RecordWhen(string subjectEntity)
+        {
+            _readByWhen = true;
+            _entities.Add(subjectEntity);
+        }
+
+        /// <param name="pin">The single value the clause pins the field to, or <c>null</c> if it does not.</param>
+        public void RecordExists(string relatedEntity, string? pin)
+        {
+            _entities.Add(relatedEntity);
+            _existsPins.Add(pin);
+        }
+
+        public TemplateFieldClass Classify()
+        {
+            // Two entities, or the subject's own row AND a related row (different rows even on the same table):
+            // a flat {{field}} token cannot say which one it means.
+            if (_entities.Count > 1 || (_readByWhen && _existsPins.Count > 0))
+            {
+                return TemplateFieldClass.Ambiguous;
+            }
+
+            if (_readByWhen)
+            {
+                // The subject is one row: its own value is defined whatever the operator.
+                return TemplateFieldClass.Eligible;
+            }
+
+            if (_existsPins.Any(p => p is null))
+            {
+                // A range / <> / multi-value 'in' can match N rows carrying N values.
+                return TemplateFieldClass.Unpinned;
+            }
+
+            return _existsPins.Distinct(StringComparer.Ordinal).Count() == 1
+                ? TemplateFieldClass.Eligible
+                : TemplateFieldClass.Ambiguous; // two clauses pinning DIFFERENT values
+        }
+    }
+
+    /// <param name="recordPositive">Non-null ONLY when <paramref name="filter"/> is a POSITIVE filter (the body's
+    /// own "when", or an "exists" clause); called once per field with the single value the condition pins the
+    /// field to (a scalar, <c>{"=": v}</c>, or a one-element <c>in</c>), or <c>null</c> when it does not.</param>
     private static IEnumerable<XElement> CompileFilterConditions(
         string entityName, JsonElement filter, DateTimeOffset nowUtc, string where,
-        ISet<string> conditionFields, Dictionary<string, HashSet<string>>? positiveFieldEntities)
+        Action<string, string?>? recordPositive)
     {
         var conditions = new List<XElement>();
 
         foreach (var field in filter.EnumerateObject())
         {
             var attribute = RequireIdentifier(field.Name, where);
-            conditionFields.Add(attribute);
-            if (positiveFieldEntities is not null)
-            {
-                if (!positiveFieldEntities.TryGetValue(attribute, out var entities))
-                {
-                    entities = new HashSet<string>(StringComparer.Ordinal);
-                    positiveFieldEntities[attribute] = entities;
-                }
-
-                entities.Add(entityName);
-            }
+            string? pin = null;
 
             var at = $"{where}.{field.Name}";
 
@@ -420,6 +502,7 @@ public sealed partial class PredicateCompiler
                         new XAttribute("attribute", attribute),
                         new XAttribute("operator", "in"),
                         values.Select(v => new XElement("value", v))));
+                    pin = values.Count == 1 ? values[0] : null; // 'in' of exactly one value pins the field
                     break;
 
                 case JsonValueKind.Object:
@@ -429,13 +512,20 @@ public sealed partial class PredicateCompiler
                         throw new PredicateCompilationException($"{at}: a comparison object must hold exactly one operator.");
                     }
 
-                    conditions.Add(Condition(attribute, MapOperator(ops[0].Name, at), FormatScalar(ops[0].Value, nowUtc, at)));
+                    var op = MapOperator(ops[0].Name, at);
+                    var operand = FormatScalar(ops[0].Value, nowUtc, at);
+                    conditions.Add(Condition(attribute, op, operand));
+                    pin = op == "eq" ? operand : null; // only {"=": v} pins; ranges and <> do not
                     break;
 
                 default:
-                    conditions.Add(Condition(attribute, "eq", FormatScalar(value, nowUtc, at)));
+                    var scalar = FormatScalar(value, nowUtc, at);
+                    conditions.Add(Condition(attribute, "eq", scalar));
+                    pin = scalar; // a bare scalar is eq
                     break;
             }
+
+            recordPositive?.Invoke(attribute, pin);
         }
 
         return conditions;
@@ -490,6 +580,17 @@ public sealed partial class PredicateCompiler
                 return s;
 
             case JsonValueKind.Number:
+                // Task 022 rework round 2, finding F7 (defence in depth over the schema, which now applies the
+                // same per-value rules to 'when'): a number must be representable as System.Decimal -- the same
+                // bound the schema library's numeric evaluation enforces (it reads values via GetDecimal). Without
+                // this, "1e999999" reached FetchXML verbatim as value="1e999999".
+                if (!value.TryGetDecimal(out _))
+                {
+                    throw new PredicateCompilationException(
+                        $"{at}: numeric literal {value.GetRawText()} is outside the supported range (it must be " +
+                        "representable as a System.Decimal).");
+                }
+
                 return value.GetRawText();
 
             case JsonValueKind.True:

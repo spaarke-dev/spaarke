@@ -115,7 +115,7 @@ public static class OntologyWriterFailureReason
     public const string SentenceTemplateInvalid = "sentence_template_invalid";
 
     // ── sprk_policyversion validation sub-reasons (task 022 rework, review finding #7) ─────────────────────
-    // Replaces the single bucket "policy_version_rule_body_invalid" with six bounded, mutually-exclusive
+    // Replaces the single bucket "policy_version_rule_body_invalid" with bounded, mutually-exclusive
     // sub-reasons so an alert/dashboard can distinguish "nobody has authored a Threshold policy's schema yet"
     // from "an admin typo'd a field name in the message template" without parsing free-text error strings.
 
@@ -124,25 +124,33 @@ public static class OntologyWriterFailureReason
     /// <see cref="Sprk.Bff.Api.Services.Signals.RuleType.Switch"/>, task 020 scope).</summary>
     public const string RuleTypeUnsupported = "rule_type_unsupported";
 
+    /// <summary>The <c>sprk_rulebody</c> exceeds
+    /// <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator.MaxRuleBodyLength"/> characters. Refused
+    /// by length alone, BEFORE any parse or schema evaluation (task 022 rework round 2, finding F2), so it is its
+    /// own reason rather than being reported as whatever the parser would have said about the content.</summary>
+    public const string RuleBodyTooLarge = "rule_body_too_large";
+
     /// <summary>The <c>sprk_rulebody</c> failed <see cref="Sprk.Bff.Api.Services.Signals.RuleBodySchemaValidator"/>
-    /// — malformed JSON (incl. duplicate keys, an out-of-range number) or a JSON Schema violation.</summary>
+    /// — malformed JSON (incl. duplicate keys, an out-of-range number), a forbidden body-embedded
+    /// <c>messageTemplate</c>, or a JSON Schema violation.</summary>
     public const string SchemaInvalid = "schema_invalid";
 
     /// <summary>The <c>sprk_rulebody</c> passed schema validation but
-    /// <see cref="Sprk.Bff.Api.Services.Signals.PredicateCompiler.Compile"/> refused it — an unverified join, a
+    /// <see cref="Sprk.Bff.Api.Services.Signals.PredicateCompiler"/> refused it — an unverified join, a
     /// non-global-readable entity, a cross-clause <c>$</c>-reference, or a bounded-refusal limit (clause count,
-    /// body length, <c>in</c>-list length).</summary>
+    /// <c>in</c>-list length).</summary>
     public const string CompileRefused = "compile_refused";
 
-    /// <summary>The <c>sprk_messagetemplate</c> references a <c>{{field}}</c> token that the compiled
-    /// predicate does not read from a POSITIVE clause (the subject's own <c>when</c> filter or an <c>exists</c>
-    /// clause) — either absent entirely, present only on a <c>notExists</c> clause (whose value can never be
-    /// read for a firing subject), or ambiguous (the same field name on more than one positive entity).</summary>
+    /// <summary>The <c>sprk_messagetemplate</c> references a <c>{{field}}</c> token outside
+    /// <see cref="Sprk.Bff.Api.Services.Signals.CompiledPredicate.TemplateEligibleFields"/> — absent entirely,
+    /// present only on a <c>notExists</c> clause (whose value can never be read for a firing subject), read by an
+    /// <c>exists</c> clause that does not pin it to exactly one value, or ambiguous.</summary>
     public const string TemplateTokenOutsideReadSet = "template_token_outside_read_set";
 
     /// <summary>The <c>sprk_messagetemplate</c> contains a malformed <c>{{...}}</c> placeholder attempt
-    /// (unbalanced braces, an empty token, or a disallowed character) that would otherwise render as literal
-    /// text — see <see cref="Sprk.Bff.Api.Services.Signals.SignalWriter.HasMalformedPlaceholder"/>.</summary>
+    /// (unbalanced braces, an empty token, a disallowed character, a lone literal brace in prose, or a full-width
+    /// brace) that would otherwise render as literal text — see
+    /// <see cref="Sprk.Bff.Api.Services.Signals.SignalWriter.HasMalformedPlaceholder"/>.</summary>
     public const string TemplateMalformed = "template_malformed";
 
     /// <summary>An exception not covered by any of the above escaped the validator's own checks (task 022

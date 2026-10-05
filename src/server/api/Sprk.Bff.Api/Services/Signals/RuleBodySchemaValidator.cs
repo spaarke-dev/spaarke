@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Json.Schema;
@@ -45,8 +46,8 @@ public sealed record RuleBodyValidationResult(bool IsValid, IReadOnlyList<string
 /// (shape), then <see cref="PredicateCompiler"/> (strictly more than shape) on create/update of
 /// <c>sprk_policyversion</c> and again at evaluation time (the owner's fail-closed decision — a policy row
 /// can be authored directly in the Spaarke Platform app, bypassing the BFF). This class proves it refuses the
-/// CM-3 cross-clause-variable violation at the schema level (see the escalation trigger in task 020's POML)
-/// and — after task 022's rework — never throws for ANY input, however pathological.
+/// CM-3 cross-clause-variable violation at the schema level (see the escalation trigger in task 020's POML).
+/// See <see cref="Validate"/> for its exact throwing contract (one case: a rule type with no authored schema).
 /// </para>
 /// </remarks>
 public sealed class RuleBodySchemaValidator
@@ -72,18 +73,62 @@ public sealed class RuleBodySchemaValidator
     private static readonly JsonDocumentOptions StrictJson = new() { AllowDuplicateProperties = false };
 
     /// <summary>
-    /// Validates <paramref name="ruleBodyJson"/> against the schema for <paramref name="ruleType"/>. Never
-    /// throws for ANY input, however pathological — see the final catch-all below (task 022 review finding
-    /// #1): besides duplicate keys, a syntactically-valid-but-extreme number such as <c>1e999999</c> throws
-    /// <see cref="FormatException"/>/<see cref="OverflowException"/> out of the schema library's own numeric
-    /// evaluation, which is also converted to an ordinary <see cref="RuleBodyValidationResult.Failure(string)"/>
-    /// here rather than left to escape.
+    /// The longest <c>sprk_rulebody</c> (in UTF-16 chars) any validator or the compiler will parse. The shipped
+    /// Path B body is ~0.6 KB (<c>tests/fixtures/signals/pathb-existence.rulebody.json</c>); 32 KB is over 50x
+    /// that. Defined HERE — the lowest layer — so <see cref="Validate"/>, <see cref="PolicyVersionValidator"/>
+    /// and <see cref="PredicateCompiler"/> share one number (<see cref="PredicateCompiler.MaxRuleBodyLength"/>
+    /// aliases it). Task 022 rework round 2, finding F2: checked BEFORE any parse or schema evaluation, because
+    /// schema evaluation runs under the process-wide <see cref="EvaluationGate"/> lock and a 0.9 MB body was
+    /// measured holding that lock ~3.7 s per evaluation — one oversized row would stall every other caller.
     /// </summary>
+    public const int MaxRuleBodyLength = 32_768;
+
+    /// <summary>The ONE property name that may never appear anywhere inside a rule body (task 022 rework round
+    /// 2, finding F8). The sentence template's single source is the <c>sprk_policyversion.sprk_messagetemplate</c>
+    /// column (schema-draft.md §4, spec.md NFR-02); the early-draft <c>then.messageTemplate</c> location
+    /// (mvp-technical-spec.md §3.3, ontology-architecture-feedback.md §3.1) was superseded by that column and is
+    /// never read by the evaluator or checked against the predicate's read set — so a body carrying one would
+    /// hold unvalidated §0.3 prose. Matched case-insensitively at any depth.</summary>
+    public const string ForbiddenMessageTemplateProperty = "messageTemplate";
+
+    /// <summary>
+    /// The bounded refusal message for an over-length body (finding F2). Shared so every layer reports the same
+    /// text and a caller can recognise it.
+    /// </summary>
+    public static string RuleBodyTooLongMessage(int length) =>
+        $"sprk_rulebody is {length} characters, exceeding the {MaxRuleBodyLength}-character limit.";
+
+    /// <summary>
+    /// Validates <paramref name="ruleBodyJson"/> against the schema for <paramref name="ruleType"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Exactly one thing throws</b> (task 022 rework round 2, finding F9 — the previous "never throws
+    /// for ANY input" claim was false): a <paramref name="ruleType"/> with no authored schema
+    /// (<see cref="RuleType.Threshold"/> / <see cref="RuleType.Switch"/>, task 020 scope) throws
+    /// <see cref="NotSupportedException"/>, for ANY body, before the body is read — that is a caller-contract
+    /// question about the TYPE, not a property of the authored content. <see cref="PolicyVersionValidator"/>
+    /// never reaches it (it refuses those types first as <c>rule_type_unsupported</c>).</para>
+    /// <para>For <see cref="RuleType.Existence"/> it never throws for any body, however pathological: blank,
+    /// over-length (refused before parsing, finding F2), malformed or duplicate-key JSON, a forbidden
+    /// <c>messageTemplate</c> property (finding F8), or a number such as <c>1e999999</c> whose schema
+    /// evaluation throws <see cref="FormatException"/>/<see cref="OverflowException"/> inside the library — all
+    /// become an ordinary <see cref="RuleBodyValidationResult.Failure(string)"/>.</para>
+    /// </remarks>
+    /// <exception cref="NotSupportedException"><paramref name="ruleType"/> has no authored schema.</exception>
     public RuleBodyValidationResult Validate(RuleType ruleType, string? ruleBodyJson)
     {
+        // Resolved FIRST so the one throwing case does not depend on the body's content (finding F9).
+        var schema = ResolveSchema(ruleType);
+
         if (string.IsNullOrWhiteSpace(ruleBodyJson))
         {
             return RuleBodyValidationResult.Failure("sprk_rulebody is required and cannot be blank.");
+        }
+
+        // Bounded refusal BEFORE any parse or schema evaluation (finding F2) -- see MaxRuleBodyLength.
+        if (ruleBodyJson.Length > MaxRuleBodyLength)
+        {
+            return RuleBodyValidationResult.Failure(RuleBodyTooLongMessage(ruleBodyJson.Length));
         }
 
         JsonNode? node;
@@ -96,6 +141,18 @@ public sealed class RuleBodySchemaValidator
             // from the raw text again, so a duplicate can never reach JsonNode construction's unguarded
             // dictionary insert.
             using var strictDoc = JsonDocument.Parse(ruleBodyJson, StrictJson);
+
+            // Finding F8: refuse a body-embedded message template anywhere in the tree (cheap, bounded by the
+            // length cap above) before paying for schema evaluation.
+            var forbiddenAt = FindForbiddenMessageTemplate(strictDoc.RootElement, string.Empty);
+            if (forbiddenAt is not null)
+            {
+                return RuleBodyValidationResult.Failure(
+                    $"{forbiddenAt}: a message template is not permitted inside sprk_rulebody. The sentence " +
+                    "template's single source is the sprk_messagetemplate column, which is the only template " +
+                    "checked against what the predicate reads (section 0.3).");
+            }
+
             node = JsonSerializer.SerializeToNode(strictDoc.RootElement);
         }
         catch (JsonException ex)
@@ -107,8 +164,6 @@ public sealed class RuleBodySchemaValidator
         {
             return RuleBodyValidationResult.Failure("sprk_rulebody parsed to a null JSON value.");
         }
-
-        var schema = ResolveSchema(ruleType);
 
         EvaluationResults results;
         try
@@ -202,13 +257,66 @@ public sealed class RuleBodySchemaValidator
             }
         }
 
-        if (int.TryParse(ruleTypeRaw, out var numeric) && Enum.IsDefined(typeof(RuleType), numeric))
+        // Task 022 rework round 2, finding F13: NumberStyles.None + InvariantCulture -- digits only. The default
+        // int.TryParse(string) overload is NumberStyles.Integer in the CURRENT culture, which accepted
+        // " +100000002 " (leading/trailing whitespace and a sign) as Existence: the same "lenient parse widens
+        // the closed set" class of bug finding #8 closed for names.
+        if (int.TryParse(ruleTypeRaw, NumberStyles.None, CultureInfo.InvariantCulture, out var numeric)
+            && Enum.IsDefined(typeof(RuleType), numeric))
         {
             ruleType = (RuleType)numeric;
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Finding F8: the JSON Pointer of the first property named <see cref="ForbiddenMessageTemplateProperty"/>
+    /// (case-insensitive) anywhere in <paramref name="element"/>, or <c>null</c> if none. Recursion depth is
+    /// bounded by <see cref="JsonDocumentOptions.MaxDepth"/> (64 by default), already enforced by the parse.
+    /// </summary>
+    private static string? FindForbiddenMessageTemplate(JsonElement element, string pointer)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    var childPointer = pointer + "/" + property.Name.Replace("~", "~0", StringComparison.Ordinal)
+                        .Replace("/", "~1", StringComparison.Ordinal);
+                    if (string.Equals(property.Name, ForbiddenMessageTemplateProperty, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return childPointer;
+                    }
+
+                    var found = FindForbiddenMessageTemplate(property.Value, childPointer);
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+                }
+
+                return null;
+
+            case JsonValueKind.Array:
+                var index = 0;
+                foreach (var item in element.EnumerateArray())
+                {
+                    var found = FindForbiddenMessageTemplate(item, pointer + "/" + index.ToString(CultureInfo.InvariantCulture));
+                    if (found is not null)
+                    {
+                        return found;
+                    }
+
+                    index++;
+                }
+
+                return null;
+
+            default:
+                return null;
+        }
     }
 
     /// <summary>

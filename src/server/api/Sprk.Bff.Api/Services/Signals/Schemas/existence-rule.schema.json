@@ -16,8 +16,8 @@
       "minLength": 1
     },
     "when": {
-      "description": "Optional scope filter over the subject. Empty object = all subjects.",
-      "type": "object"
+      "description": "Optional scope filter over the subject. Empty object = all subjects. Shares the clause filters' per-value grammar (#/$defs/filterConditions): the same scalar/array/operator shapes, the same leading-'$' refusal and the same numeric evaluation, so a 'when' value cannot carry what a clause value may not.",
+      "$ref": "#/$defs/filterConditions"
     },
     "all": {
       "description": "Every clause must hold (AND). No cross-clause references between elements.",
@@ -28,7 +28,7 @@
       }
     },
     "then": {
-      "description": "The signal to produce when every clause holds (signalType/severity/messageTemplate/proposedAction/evidenceRefs). Validated structurally only here; semantic validation is a later task's concern.",
+      "description": "The signal to produce when every clause holds (signalType/severity/proposedAction/evidenceRefs). Validated structurally only here; semantic validation is a later task's concern. A 'messageTemplate' property is REFUSED here and anywhere else in the body by RuleBodySchemaValidator (task 022 rework round 2, F8): the sentence template's single source is the sprk_policyversion.sprk_messagetemplate column, the only template checked against the predicate's read set (section 0.3).",
       "type": "object"
     }
   },
@@ -70,9 +70,13 @@
       ]
     },
     "filter": {
-      "description": "A bounded Dataverse-filter-shaped bag of field -> value/operator constraints. Filter values are ids, never labels (mvp-technical-spec.md section 3.4a).",
+      "description": "A clause's bounded Dataverse-filter-shaped bag of field -> value/operator constraints: the shared filterConditions grammar plus at least one condition. Filter values are ids, never labels (mvp-technical-spec.md section 3.4a).",
+      "$ref": "#/$defs/filterConditions",
+      "minProperties": 1
+    },
+    "filterConditions": {
+      "description": "The field -> value/operator grammar shared by every clause 'filter' and by the subject's 'when' scope (task 022 rework round 2, F7: 'when' previously accepted any object, so its values skipped the per-value rules below).",
       "type": "object",
-      "minProperties": 1,
       "additionalProperties": {
         "$ref": "#/$defs/filterValue"
       }

@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Xml.Linq;
 using FluentAssertions;
 using Microsoft.Extensions.Time.Testing;
@@ -225,12 +224,13 @@ public class PredicateCompilerTests
     }
 
     [Fact]
-    public void Compile_DollarVariableReferenceInWhen_IsRefusedByTheCompiler()
+    public void Compile_DollarVariableReferenceInWhen_IsRefusedBySchema()
     {
-        // 'when' is schema-typed only as an object, so the compiler is its only gate.
+        // Task 022 rework round 2 (F7): 'when' now shares the clause filters' per-value grammar, so the schema
+        // refuses this first; CompileSchemaValidated_DollarVariableReferenceInWhen_* pins the compiler's own gate.
         var act = () => Compiler().Compile(Body("""{"sprk_receiveddate":{">=":"now-30d"}}""", when: """{"sprk_name":"$commitment.x"}"""));
 
-        act.Should().Throw<PredicateCompilationException>().WithMessage("*cross-clause variable reference*");
+        act.Should().Throw<PredicateCompilationException>().WithMessage("*failed Existence schema validation*");
     }
 
     [Fact]
@@ -390,52 +390,100 @@ public class PredicateCompilerTests
     }
 
     // =====================================================================================
-    // Task 022 rework (review finding #4): ConditionFields is filter-condition attributes only (both exists
-    // AND notExists) -- renamed from the first-pass "ReadFields" which overclaimed what was "read".
+    // Task 022 template vocabulary (review finding #5 + rework round 2 finding F3, coordinator decision):
+    // TemplateEligibleFields = subject 'when' fields (any operator) + exists-clause fields PINNED to exactly one
+    // value. Never notExists fields; never ambiguous ones.
     // =====================================================================================
 
     [Fact]
-    public void Compile_ConditionFields_IncludesBothExistsAndNotExistsFilterAttributes()
+    public void Compile_LivePathB_HasNoTemplateEligibleField_EveryExistsFieldIsUnpinned_NotExistsFieldIsAbsent()
     {
+        // The live body pins nothing: a two-value 'in', a range and a '<>'. Its shipped message template has zero
+        // placeholders (notes/004-seed-policy-rows.md), which is exactly why it remains valid under F3.
         var compiled = Compiler().Compile(Fixture("pathb-existence.rulebody.json"));
 
-        // exists clause fields:
-        compiled.ConditionFields.Should().Contain("sprk_triagecategory");
-        compiled.ConditionFields.Should().Contain("sprk_receiveddate");
-        compiled.ConditionFields.Should().Contain("sprk_reviewoutcome");
-        // notExists clause field -- included here (unlike PositiveReadFields below):
-        compiled.ConditionFields.Should().Contain("sprk_revisedon");
+        compiled.TemplateEligibleFields.Should().BeEmpty();
+        compiled.UnpinnedTemplateFields.Should().BeEquivalentTo("sprk_triagecategory", "sprk_receiveddate", "sprk_reviewoutcome");
+        compiled.AmbiguousTemplateFields.Should().BeEmpty();
+        compiled.UnpinnedTemplateFields.Should().NotContain("sprk_revisedon", "it is read only inside the notExists clause");
     }
 
     [Fact]
-    public void Compile_ConditionFields_And_PositiveReadFields_AreFrozenSets()
+    public void Compile_WhenFieldWithRangeFilter_IsTemplateEligible()
     {
-        // Review finding #10.
-        var compiled = Compiler().Compile(Fixture("pathb-existence.rulebody.json"));
+        // The subject is ONE row, so its own value of a 'when' field is defined whatever the operator.
+        var compiled = Compiler().Compile(Body("""{"sprk_direction":1}""", when: """{"sprk_mattertype":{">=":100000001}}"""));
 
-        compiled.ConditionFields.Should().BeAssignableTo<FrozenSet<string>>();
-        compiled.PositiveReadFields.Should().BeAssignableTo<FrozenSet<string>>();
-        compiled.AmbiguousPositiveFields.Should().BeAssignableTo<FrozenSet<string>>();
+        compiled.TemplateEligibleFields.Should().Contain("sprk_mattertype");
     }
 
-    // =====================================================================================
-    // Task 022 rework (review finding #5): PositiveReadFields excludes notExists fields entirely -- a firing
-    // subject has no matching notExists row, so that clause's filter VALUES can never be read for it.
-    // =====================================================================================
-
-    [Fact]
-    public void Compile_PositiveReadFields_ExcludesNotExistsFields_IncludesExistsAndWhenFields()
+    [Theory]
+    [InlineData("""{"sprk_direction":1}""")]              // bare scalar = eq
+    [InlineData("""{"sprk_direction":{"=":1}}""")]        // explicit eq
+    [InlineData("""{"sprk_direction":[1]}""")]            // one-element 'in'
+    public void Compile_ExistsFieldPinnedToOneValue_IsTemplateEligible(string filter)
     {
-        var compiled = Compiler().Compile(Fixture("pathb-existence.rulebody.json"));
+        var compiled = Compiler().Compile(Body(filter));
 
-        compiled.PositiveReadFields.Should().Contain("sprk_receiveddate");
-        compiled.PositiveReadFields.Should().Contain("sprk_triagecategory");
-        compiled.PositiveReadFields.Should().Contain("sprk_reviewoutcome");
-        compiled.PositiveReadFields.Should().NotContain("sprk_revisedon", "it is read only inside the notExists clause");
+        compiled.TemplateEligibleFields.Should().Contain("sprk_direction");
+    }
+
+    [Theory]
+    [InlineData("""{"sprk_receiveddate":{">=":"now-30d"}}""")] // range
+    [InlineData("""{"sprk_receiveddate":{"<>":"now"}}""")]     // not-equal
+    [InlineData("""{"sprk_receiveddate":["now","now-1d"]}""")] // two-value 'in'
+    public void Compile_ExistsFieldNotPinnedToOneValue_IsNotTemplateEligible_IsUnpinned(string filter)
+    {
+        // N matching related rows can carry N different values, so a {{sprk_receiveddate}} token is undefined.
+        var compiled = Compiler().Compile(Body(filter));
+
+        compiled.TemplateEligibleFields.Should().NotContain("sprk_receiveddate");
+        compiled.UnpinnedTemplateFields.Should().Contain("sprk_receiveddate");
     }
 
     [Fact]
-    public void Compile_PositiveReadFields_FieldAmbiguousAcrossTwoPositiveEntities_IsExcludedAndListedAsAmbiguous()
+    public void Compile_TwoExistsClausesPinningTheSameFieldToDifferentValues_IsAmbiguous()
+    {
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "all": [
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_direction": 1 } },
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_direction": 2 } }
+              ]
+            }
+            """;
+
+        var compiled = Compiler().Compile(body);
+
+        compiled.TemplateEligibleFields.Should().NotContain("sprk_direction");
+        compiled.AmbiguousTemplateFields.Should().Contain("sprk_direction");
+    }
+
+    [Fact]
+    public void Compile_TwoExistsClausesOneRangeOnePinned_FieldIsNotTemplateEligible()
+    {
+        // Every exists occurrence must pin the field: the second clause's range makes the token undefined.
+        const string body = """
+            {
+              "type": "Existence",
+              "subject": "sprk_matter",
+              "all": [
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_direction": 1 } },
+                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_direction": { ">": 0 } } }
+              ]
+            }
+            """;
+
+        var compiled = Compiler().Compile(body);
+
+        compiled.TemplateEligibleFields.Should().NotContain("sprk_direction");
+        compiled.UnpinnedTemplateFields.Should().Contain("sprk_direction");
+    }
+
+    [Fact]
+    public void Compile_FieldReadOnTwoPositiveEntities_IsNotTemplateEligible_IsAmbiguous()
     {
         // "sprk_name" appears in the subject's own "when" filter (entity sprk_matter) AND in an "exists"
         // clause's filter (entity sprk_communication) -- two DISTINCT positive entities, so the value is not
@@ -453,31 +501,39 @@ public class PredicateCompilerTests
 
         var compiled = Compiler().Compile(body);
 
-        compiled.PositiveReadFields.Should().NotContain("sprk_name");
-        compiled.AmbiguousPositiveFields.Should().Contain("sprk_name");
+        compiled.TemplateEligibleFields.Should().NotContain("sprk_name");
+        compiled.AmbiguousTemplateFields.Should().Contain("sprk_name");
+    }
+
+    // =====================================================================================
+    // Rework round 2, finding F7: the compiler's own numeric bound (defence in depth under the schema). Exercised
+    // through CompileSchemaValidated, which skips the schema, so these prove the COMPILER refuses on its own.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("""{"sprk_amount":1e999999}""")]
+    [InlineData("""{"sprk_amount":-1e300}""")]
+    public void CompileSchemaValidated_OutOfRangeNumberInWhen_IsRefusedByTheCompiler(string when)
+    {
+        var act = () => Compiler().CompileSchemaValidated(Body("""{"sprk_direction":1}""", when: when), subjectId: null);
+
+        act.Should().Throw<PredicateCompilationException>().WithMessage("*when.sprk_amount*outside the supported range*");
     }
 
     [Fact]
-    public void Compile_SameEntityReferencedByTwoExistsClauses_FieldIsNotAmbiguous()
+    public void CompileSchemaValidated_DollarVariableReferenceInWhen_IsStillRefusedByTheCompiler()
     {
-        // Two DIFFERENT exists clauses on the SAME related entity (sprk_communication) sharing a field name is
-        // NOT the ambiguity review finding #5 describes -- "more than one DISTINCT entity", not "more than one
-        // clause". Both clauses read the same entity type, so the field stays in PositiveReadFields.
-        const string body = """
-            {
-              "type": "Existence",
-              "subject": "sprk_matter",
-              "all": [
-                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_receiveddate": { ">=": "now-30d" } } },
-                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_receiveddate": { "<": "now-1d" }, "sprk_name": "x" } }
-              ]
-            }
-            """;
+        // Defence in depth: refused here even when the schema evaluation is skipped.
+        var act = () => Compiler().CompileSchemaValidated(Body("""{"sprk_direction":1}""", when: """{"sprk_name":"$commitment.x"}"""), subjectId: null);
 
-        var compiled = Compiler().Compile(body);
+        act.Should().Throw<PredicateCompilationException>().WithMessage("*cross-clause variable reference*");
+    }
 
-        compiled.PositiveReadFields.Should().Contain("sprk_receiveddate");
-        compiled.AmbiguousPositiveFields.Should().NotContain("sprk_receiveddate");
+    [Fact]
+    public void Compile_InRangeDecimalNumber_PassesThroughVerbatim()
+    {
+        Condition(Compiler().Compile(Body("""{"sprk_amount":12345.67}""")), "sprk_amount")
+            .Attribute("value")!.Value.Should().Be("12345.67");
     }
 
     // =====================================================================================
