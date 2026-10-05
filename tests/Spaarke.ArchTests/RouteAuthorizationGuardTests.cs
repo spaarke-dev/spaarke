@@ -467,7 +467,9 @@ public partial class RouteAuthorizationGuardTests
                                    + (a.Credit == Credit.AdminOnly
                                        ? adminGroup is null
                                            ? "; it is not in AdminOnlyRoutes"
-                                           : $"; its AdminOnlyRoutes group's mechanism is {adminGroup.Mechanism}, which is not an admin policy for a sweep entry"
+                                           : !SweepAdminPolicies.Contains(adminGroup.Mechanism)
+                                               ? $"; its AdminOnlyRoutes group's mechanism is {adminGroup.Mechanism}, which is not an admin policy for a sweep entry"
+                                               : $"; its AdminOnlyRoutes group is gated by {adminGroup.Mechanism}, which the route does not carry"
                                        : string.Empty)
                                    + "). An entry resolves ONLY by a credited filter, a HandlerDecision, or an AdminOnlyRoutes "
                                    + "entry whose group is gated by RequireAuthorization(\"SystemAdmin\") or the SPE admin "
@@ -3168,6 +3170,26 @@ public partial class RouteAuthorizationGuardTests
         @"\b(?:CreateAuthenticated\w*|CreateHttpClient|CreateClientWithRights|CreateReportingClient|CreateTestSession)\s*\(",
         RegexOptions.Compiled);
 
+    /// <summary>The unit's code with every parsed method BODY blanked: what remains is class-level setup — field
+    /// initializers and constructors — which applies to every test of the class. Another test method's body never
+    /// does (xUnit builds a new instance per test), so a header one test sets lends nothing to the next.</summary>
+    private static string ClassSetupCodeOf(SourceUnit unit)
+    {
+        var chars = unit.Code.ToCharArray();
+        foreach (var method in unit.Methods)
+        {
+            for (var i = method.BodyStart; i < method.BodyEnd; i++)
+            {
+                if (chars[i] != '\n')
+                {
+                    chars[i] = ' ';
+                }
+            }
+        }
+
+        return new string(chars);
+    }
+
     /// <summary>"file:line Method — why" for every test method in <paramref name="units"/> that asserts a route's
     /// PRESENCE with only an anonymous request as evidence.</summary>
     private static List<string> AnonymousPresenceProofViolations(IEnumerable<SourceUnit> units)
@@ -3175,6 +3197,7 @@ public partial class RouteAuthorizationGuardTests
         var violations = new List<string>();
         foreach (var unit in units)
         {
+            string? setup = null;
             foreach (var method in unit.Methods)
             {
                 var body = method.Body;
@@ -3190,11 +3213,14 @@ public partial class RouteAuthorizationGuardTests
                     continue;
                 }
 
-                // A client the method uses that the FILE builds signed in (e.g. `_httpClient = _fixture.CreateHttpClient();`)
-                // or that the method signs in itself (`client.DefaultRequestHeaders.Authorization = ...`).
+                // A client the method uses that is built signed in, or signed in, by the method itself or by class-level
+                // setup (e.g. `_httpClient = _fixture.CreateHttpClient();` in the constructor) — never by ANOTHER test.
+                setup ??= ClassSetupCodeOf(unit);
+                var scopes = new[] { body, setup };
                 var signedInClient = ClientCall.Matches(body).Select(m => m.Groups["client"].Value).Distinct(StringComparer.Ordinal)
-                    .Any(client => Regex.IsMatch(unit.Code, $@"(?<![\w.]){Regex.Escape(client)}\s*=\s*[^;]*?{SignedInClientFactory}")
-                                   || Regex.IsMatch(unit.Code, $@"(?<![\w.]){Regex.Escape(client)}(?:\s*\(\s*\))?\s*\.\s*DefaultRequestHeaders\s*\.\s*Authorization\s*="));
+                    .Any(client => scopes.Any(scope =>
+                        Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(client)}\s*=\s*[^;]*?{SignedInClientFactory}")
+                        || Regex.IsMatch(scope, $@"(?<![\w.]){Regex.Escape(client)}\s*\.\s*DefaultRequestHeaders\s*\.\s*Authorization\s*=")));
                 if (signedInClient)
                 {
                     continue;
@@ -3261,6 +3287,17 @@ public partial class RouteAuthorizationGuardTests
         // A file-level client built ANONYMOUSLY lends nothing.
         Assert.Single(Scan("        var r = await _httpClient!.GetAsync(\"/api/x\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.NotFound);",
             members: "    private readonly HttpClient? _httpClient = _fixture.CreateUnauthenticatedClient();\n"));
+
+        // A header ANOTHER test sets on the shared field lends nothing (xUnit builds a new instance per test) — the
+        // false negative the f2-5 seed exposed; a header the CONSTRUCTOR sets applies to every test.
+        const string otherTestSignsIn =
+            "    [Fact]\n    public async Task Other_WithAuth()\n    {\n"
+            + "        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"t\");\n    }\n";
+        Assert.Single(Scan("        var r = await _client.GetAsync(\"/api/x/1\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.MethodNotAllowed);",
+            members: "    private readonly HttpClient _client = factory.CreateClient();\n" + otherTestSignsIn));
+        Assert.Empty(Scan("        var r = await _client.GetAsync(\"/api/x/1\");\n        r.StatusCode.Should().NotBe(HttpStatusCode.MethodNotAllowed);",
+            members: "    private readonly HttpClient _client;\n    public PresenceTests(CustomWebAppFactory factory)\n    {\n"
+                     + "        _client = factory.CreateClient();\n        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(\"Bearer\", \"t\");\n    }\n"));
     }
 
     // =============================================================================================
@@ -4158,11 +4195,18 @@ public partial class RouteAuthorizationGuardTests
         const string proofFile = "tests/fake/RetiredRouteProofs.cs";
         string? Read(string path) => path == proofFile ? RetiredProofFixture : ReadRepoFile(path);
 
-        // Simulate the integration state: the route is deleted (absent from the scan) and its waiver is gone.
+        // Simulate the integration state: the route is deleted (absent from the scan) and its waiver is gone. Nothing
+        // here depends on whether the route is still on THIS branch, so the control survives the deletions landing.
+        const string seededReason = "Seeded by the round-34 item 4 control: a waiver left behind on a deleted sweep route.";
         List<string> Ledger(string route, string? resolvedBy, string? method, IReadOnlyList<Assessment>? routes = null, bool keepWaiver = false)
         {
             var assessments = routes ?? RealAssessments.Value.Where(a => a.Key != route).ToList();
-            var waivers = keepWaiver ? Waivers : Waivers.Where(w => w.Route != route).ToList();
+            var waivers = Waivers.Where(w => w.Route != route).ToList();
+            if (keepWaiver)
+            {
+                waivers.Add(Pending(route, "159", Gap.NoDecision, seededReason));
+            }
+
             var ledger = SweepFindings.Select(e => e.Route == route
                 ? e with { ResolvedBy = resolvedBy, ProofTest = method is null ? null : $"{proofFile}::{method}" }
                 : e).ToList();
@@ -4206,11 +4250,6 @@ public partial class RouteAuthorizationGuardTests
         var withTwin = RealAssessments.Value.Where(a => a.Key != "PUT /api/v1/events/{id:guid}").Concat(rekeyed).ToList();
         Assert.Contains(Ledger("PUT /api/v1/events/{id:guid}", "159", "DeletedRoutes_AreNotMapped_AndReachNothing", withTwin),
             v => v.Contains("RE-KEYED", StringComparison.Ordinal));
-
-        // The real ledger today: every sweep key is still on this branch (the deletions land with 159/160/164 at
-        // integration), so no entry depends on this rule yet.
-        var live = RealAssessments.Value.Select(a => a.Key).ToHashSet(StringComparer.Ordinal);
-        Assert.All(SweepFindings, e => Assert.Contains(e.Route, live));
     }
 
     [Fact(DisplayName = "Task 167 f2 controls: admin credit resolves a sweep entry only in a SystemAdmin or SPE-admin AdminOnlyRoutes group (round 34 item 5)")]
@@ -4232,8 +4271,10 @@ public partial class RouteAuthorizationGuardTests
                 .Where(v => v.StartsWith("S-47 ", StringComparison.Ordinal)).ToList();
         }
 
+        // The real set without this route (task 165 may pin it for real at integration), plus a seeded group for it.
+        var withoutRoute = AdminOnlyRoutes.Select(g => g with { Routes = g.Routes.Where(r => r != route).ToArray() }).ToList();
         IReadOnlyList<AdminOnlyGroup> With(string mechanism)
-            => AdminOnlyRoutes.Append(new AdminOnlyGroup("Api/Admin/RecordMatchingAdminEndpoints.cs", mechanism, reason, new[] { route })).ToList();
+            => withoutRoute.Append(new AdminOnlyGroup("Api/Admin/RecordMatchingAdminEndpoints.cs", mechanism, reason, new[] { route })).ToList();
 
         var systemAdmin = Gated(".RequireAuthorization(\"SystemAdmin\")");
         Assert.Equal(Credit.AdminOnly, systemAdmin.Credit);
@@ -4246,7 +4287,7 @@ public partial class RouteAuthorizationGuardTests
 
         // NEGATIVE — not in the pinned set; in a group whose mechanism is not an admin POLICY (the RAG machine credential,
         // the registration approver role); in a SystemAdmin group while the route carries only the RAG key.
-        Assert.Contains(Ledger(systemAdmin, AdminOnlyRoutes), v => v.Contains("not in AdminOnlyRoutes", StringComparison.Ordinal));
+        Assert.Contains(Ledger(systemAdmin, withoutRoute), v => v.Contains("not in AdminOnlyRoutes", StringComparison.Ordinal));
         var ragKey = Gated(".RequireAuthorization(AuthPolicies.RagApiKey)");
         Assert.Contains(Ledger(ragKey, With(RagApiKeyCredential)), v => v.Contains("not an admin policy for a sweep entry", StringComparison.Ordinal));
         Assert.Contains(Ledger(Gated(".AddRegistrationAuthorizationFilter()"), With(RegistrationApproverRole)),
