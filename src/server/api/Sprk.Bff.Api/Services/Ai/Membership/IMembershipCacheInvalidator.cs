@@ -160,9 +160,11 @@ public interface IMembershipCacheInvalidator
     /// <c>PoaShareClientSingletonGuardTests</c> fails the build on every compiled route around the seam — an IL scan of
     /// every <c>src</c> assembly the BFF runs, or that can name the concrete client, rejects any reference to the client's
     /// POA writes outside the seam (whatever the receiver expression), the SDK's POA messages, and a POA action or write
-    /// name loaded as a string constant outside the client — and pins the client's and the seam's write methods; text
-    /// rules add breadth over every <c>src/server</c> file. Only a name the code computes or reads at run time is beyond
-    /// it. The routes are listed on <c>DataverseRecordShareService</c>.</para>
+    /// name carried by a string constant or by metadata outside the client — and pins the client's write methods; inside
+    /// the seam, an IL path analysis proves every path through each of its three writes awaits the write and then this
+    /// hook's call for the same record. Text rules add breadth over every <c>src/server</c> file and the deployed
+    /// configuration. Only a name the code computes at run time, or reads from a live store, is beyond it. The routes are
+    /// listed on <c>DataverseRecordShareService</c>.</para>
     /// <para>Membership resolution is NOT evicted: it is computed from lookup columns and ownership only — a share is
     /// not a membership term.</para>
     /// <para>Never throws; cancellation is not honoured (see <see cref="InvalidateUserAccessAsync"/>).</para>

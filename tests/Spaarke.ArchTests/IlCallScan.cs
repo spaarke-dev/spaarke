@@ -87,12 +87,21 @@ internal static class IlCallScan
     /// for any other compiler-generated body (a lambda's closure), <c>"{nested type}.{method}"</c> — never one of the
     /// outermost type's method names, so a pin on method names cannot be satisfied by a lambda by accident.
     /// </summary>
-    internal static string SourceMethodName(Type caller, MethodBase callerMethod)
+    internal static string SourceMethodName(Type caller, MethodBase callerMethod) =>
+        SourceMethod(caller, callerMethod)?.Name ?? $"{caller.Name}.{callerMethod.Name}";
+
+    /// <summary>
+    /// The outermost type's own method a compiled body belongs to — the method itself, or the method an async / iterator
+    /// state machine was built from — or <c>null</c> for any other compiler-generated body (a lambda's closure). A pin
+    /// that compares these by METADATA identity (<see cref="MemberInfo.HasSameMetadataDefinitionAs"/>) cannot be
+    /// satisfied by an overload that shares a pinned method's name (task 132 verifier seed N2).
+    /// </summary>
+    internal static MethodBase? SourceMethod(Type caller, MethodBase callerMethod)
     {
         var outermost = Outermost(caller);
         if (caller == outermost)
         {
-            return callerMethod.Name;
+            return callerMethod;
         }
 
         var stateMachine = caller.IsGenericType ? caller.GetGenericTypeDefinition() : caller;
@@ -100,9 +109,20 @@ internal static class IlCallScan
             .SelectMany(t => t.GetMethods(Declared))
             .FirstOrDefault(m => m.GetCustomAttribute<StateMachineAttribute>()?.StateMachineType == stateMachine);
 
-        return owner is not null && owner.DeclaringType == outermost
-            ? owner.Name
-            : $"{caller.Name}.{callerMethod.Name}";
+        return owner is not null && owner.DeclaringType == outermost ? owner : null;
+    }
+
+    /// <summary>
+    /// The compiled body that runs a method's source: the <c>MoveNext</c> of its async / iterator state machine, or the
+    /// method's own body when it has none.
+    /// </summary>
+    internal static MethodBase CompiledBody(MethodInfo method)
+    {
+        var stateMachine = method.GetCustomAttribute<StateMachineAttribute>()?.StateMachineType;
+        return stateMachine is null
+            ? method
+            : stateMachine.GetMethod("MoveNext", Declared)
+              ?? throw new InvalidOperationException($"{Describe(method)}'s state machine {stateMachine.Name} has no MoveNext.");
     }
 
     /// <summary>
@@ -165,7 +185,7 @@ internal static class IlCallScan
 
     private static bool IsMethodTable(int token) => (token >> 24) is MethodDefTable or MemberRefTable or MethodSpecTable;
 
-    private static T? Resolve<T>(MethodBase method, int token, Func<Module, int, Type[]?, Type[]?, T?> resolve)
+    internal static T? Resolve<T>(MethodBase method, int token, Func<Module, int, Type[]?, Type[]?, T?> resolve)
         where T : class
     {
         var typeArgs = method.DeclaringType is { IsGenericType: true } dt ? dt.GetGenericArguments() : null;
@@ -182,17 +202,33 @@ internal static class IlCallScan
     }
 
     /// <summary>The token operands of one body: method (<c>call</c> …), token (<c>ldtoken</c>) and string (<c>ldstr</c>).</summary>
-    private static IEnumerable<(OperandType Kind, int Token)> TokenOperands(MethodBase method)
+    private static IEnumerable<(OperandType Kind, int Token)> TokenOperands(MethodBase method) =>
+        Instructions(method)
+            .Where(i => i.OpCode.OperandType is OperandType.InlineMethod or OperandType.InlineTok or OperandType.InlineString)
+            .Select(i => (i.OpCode.OperandType, i.Operand));
+
+    /// <summary>
+    /// One decoded IL instruction. <see cref="Operand"/> is the metadata token (method, field, type, string, signature,
+    /// <c>ldtoken</c>), the ABSOLUTE branch target, the local / argument index, or the integer constant — whichever the
+    /// opcode's operand is (0 for none, a 64-bit or a floating-point one); <see cref="Targets"/> are a <c>switch</c>'s
+    /// absolute targets.
+    /// </summary>
+    internal readonly record struct IlInstruction(int Offset, OpCode OpCode, int Next, int Operand, int[]? Targets);
+
+    /// <summary>Every instruction of one body, in order (empty for a body-less method). Fails loud on a stream it cannot decode.</summary>
+    internal static IReadOnlyList<IlInstruction> Instructions(MethodBase method)
     {
         var il = method.GetMethodBody()?.GetILAsByteArray();
+        var decoded = new List<IlInstruction>();
         if (il is null)
         {
-            yield break;
+            return decoded;
         }
 
         var i = 0;
         while (i < il.Length)
         {
+            var at = i;
             OpCode op;
             if (il[i] == 0xFE)
             {
@@ -212,16 +248,39 @@ internal static class IlCallScan
 
             if (op.Size == 0)
             {
-                throw new InvalidOperationException($"Unknown opcode in {Describe(method)} at IL_{i - 1:X4}.");
+                throw new InvalidOperationException($"Unknown opcode in {Describe(method)} at IL_{at:X4}.");
             }
 
-            if (op.OperandType is OperandType.InlineMethod or OperandType.InlineTok or OperandType.InlineString)
+            var size = OperandSize(op, il, i);
+            if (i + size > il.Length)
             {
-                yield return (op.OperandType, BitConverter.ToInt32(il, i));
+                throw new InvalidOperationException($"Truncated operand in {Describe(method)} at IL_{at:X4}.");
             }
 
-            i += OperandSize(op, il, i);
+            var next = i + size;
+            int[]? targets = null;
+            var operand = op.OperandType switch
+            {
+                OperandType.InlineNone or OperandType.InlineI8 or OperandType.InlineR or OperandType.ShortInlineR => 0,
+                OperandType.ShortInlineBrTarget => next + (sbyte)il[i],
+                OperandType.InlineBrTarget => next + BitConverter.ToInt32(il, i),
+                OperandType.ShortInlineI => op == OpCodes.Unaligned ? il[i] : (sbyte)il[i],
+                OperandType.ShortInlineVar => il[i],
+                OperandType.InlineVar => BitConverter.ToUInt16(il, i),
+                OperandType.InlineSwitch => BitConverter.ToInt32(il, i),
+                _ => BitConverter.ToInt32(il, i),
+            };
+
+            if (op.OperandType == OperandType.InlineSwitch)
+            {
+                targets = Enumerable.Range(0, operand).Select(k => next + BitConverter.ToInt32(il, i + 4 + (4 * k))).ToArray();
+            }
+
+            decoded.Add(new IlInstruction(at, op, next, operand, targets));
+            i = next;
         }
+
+        return decoded;
     }
 
     private static int OperandSize(OpCode op, byte[] il, int at) => op.OperandType switch
@@ -234,5 +293,5 @@ internal static class IlCallScan
         _ => 4,
     };
 
-    private static string Describe(MethodBase method) => $"{method.DeclaringType?.FullName}.{method.Name}";
+    internal static string Describe(MethodBase method) => $"{method.DeclaringType?.FullName}.{method.Name}";
 }

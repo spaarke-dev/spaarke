@@ -106,21 +106,30 @@ public interface IDataverseRecordShareService
 /// whether it returned or threw (a write that reports failure can have committed) — this seam calls
 /// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>: every user's impersonated root set for the
 /// record's root type and every user's access snapshots of the record. The eviction lives HERE, in the one POA client,
-/// rather than at each writer, so no share writer can be born without it. <c>PoaShareClientSingletonGuardTests</c> fails
-/// the build on every route around this seam that exists in compiled code. An IL scan of every <c>src</c> assembly the BFF
-/// runs, or that can name the client, rejects: any reference to <see cref="DataverseWebApiService"/>'s
-/// GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync outside this type, the client's own code included (whatever
-/// the receiver expression, and inside a lambda, async method, method group or expression tree); any use of the SDK's
-/// GrantAccess / ModifyAccess / RevokeAccess request messages; and any POA action or POA write-method name loaded as a
-/// string constant outside the client (an SDK request by name, a hand-built POST, a reflective lookup, a <c>dynamic</c>
-/// call). It also pins the client's POA writes to exactly those three methods, and this type's writes to its own three
-/// evicting methods. Text rules over every <c>src/server</c> file add breadth: a POA write call whose receiver is not
-/// declared, only, as <see cref="IDataverseRecordShareService"/>; the SDK messages; a second POA payload; a write method
-/// named as a string. No static guard can see a method name or action URL the code computes or reads at run time (from
-/// non-constant pieces, configuration or reflection metadata); that is review's to catch. It is not bound to the caller's
-/// token
+/// rather than at each writer, so no share writer can be born without it. It is not bound to the caller's token
 /// (<see cref="CancellationToken.None"/>) and never fails or changes the write's own outcome: the hook does not throw, and
 /// a defect that made it throw is caught and logged here. Reads evict nothing.</para>
+///
+/// <para><b>What the build guard proves</b> (<c>PoaShareClientSingletonGuardTests</c>). <i>Outside this type</i>, an IL
+/// scan of every <c>src</c> assembly the BFF runs, or that can name the client, rejects: any reference to
+/// <see cref="DataverseWebApiService"/>'s GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync, the client's own code
+/// included (whatever the receiver expression, and inside a lambda, async method, method group or expression tree); any
+/// use of the SDK's GrantAccess / ModifyAccess / RevokeAccess request messages; any POA action or POA write-method name
+/// carried by a string constant (an SDK request by name, a hand-built POST, a reflective lookup, a <c>dynamic</c> call, in
+/// any letter case) or by metadata (a type, member, enum value or parameter of that name; a const, default value,
+/// attribute argument or embedded resource holding it). It pins the client's POA writes to exactly those three methods.
+/// <i>Inside this type</i>, the client's writes may be called only from the three methods the interface map binds to
+/// <see cref="IDataverseRecordShareService"/>'s writes (by metadata identity: an overload of the same name is outside
+/// them), and an IL path analysis of each — its async state machine, exceptions, suspensions and resumptions, every
+/// <c>finally</c> — proves that EVERY path that makes the write awaits it, then calls <c>EvictAfterShareWriteAsync</c> with
+/// the same entity set and record id and awaits that, before the method returns, throws or is cancelled; and that the
+/// helper, on every path, calls the invalidator with that record and awaits it. What the invalidator then evicts is
+/// proved by behaviour tests for every write, every <see cref="DataversePrincipalKind"/> and each outcome. Text rules add
+/// breadth over every <c>src/server</c> file (a write call whose receiver is not declared, only, as
+/// <see cref="IDataverseRecordShareService"/>; the SDK messages; a second POA payload; a write method named as a string)
+/// and over the configuration the BFF is deployed with. No static guard can see a method name or action URL the code
+/// computes at run time (from non-constant pieces) or reads from a live store no repository file holds (an App Service
+/// setting set by hand, Key Vault, Dataverse); that is review's to catch.</para>
 /// </remarks>
 public sealed class DataverseRecordShareService : IDataverseRecordShareService
 {
