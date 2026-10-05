@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "11260631292812215939"
+      "templateHash": "8504687912189591197"
     }
   },
   "parameters": {
@@ -1158,6 +1158,12 @@
           "serviceBusQueueName": {
             "value": "sprk-provisioning-jobs"
           },
+          "adminDataverseEnvironmentUrl": {
+            "value": "[parameters('adminDataverseEnvironmentUrl')]"
+          },
+          "customerRunGuardEnabled": {
+            "value": "[parameters('customerRunGuardEnabled')]"
+          },
           "appInsightsConnectionString": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
           },
@@ -1172,7 +1178,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15868794668967312266"
+              "templateHash": "2515857833466178412"
             }
           },
           "parameters": {
@@ -1255,6 +1261,20 @@
               "defaultValue": "sprk-provisioning-jobs",
               "metadata": {
                 "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
+              }
+            },
+            "adminDataverseEnvironmentUrl": {
+              "type": "string",
+              "minLength": 1,
+              "metadata": {
+                "description": "Admin Dataverse environment URL hosting the sprk_dataverseenvironment registry. Emitted as DataverseEnvironmentRegistry__AdminEnvironmentUrl: since REG-07 the Api host registers DataverseEnvironmentRegistryClient (CreateRun sanity-checks environmentId), whose options require it, and the CustomerRunGuard falls back to it as its TargetDataverseUrl (REG-05). Same value the Worker module receives. (Added task 242b, 2026-10-05: the Api module never emitted it.)"
+              }
+            },
+            "customerRunGuardEnabled": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module's value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)"
               }
             },
             "appInsightsConnectionString": {
@@ -1347,6 +1367,14 @@
                     {
                       "name": "ManagedIdentity__ClientId",
                       "value": "[parameters('uamiClientId')]"
+                    },
+                    {
+                      "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
+                      "value": "[parameters('adminDataverseEnvironmentUrl')]"
+                    },
+                    {
+                      "name": "CustomerRunGuard__Enabled",
+                      "value": "[string(parameters('customerRunGuardEnabled'))]"
                     },
                     {
                       "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -1524,7 +1552,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "5311868584815228094"
+              "templateHash": "8209116503299698818"
             }
           },
           "parameters": {
@@ -1660,14 +1688,14 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Consumed only when customerRunGuardEnabled=true; validated at Worker boot via CustomerRunGuardOptions.Validate (customer-provisioning-orchestration-r1 task 203b, punch list row A27 / r1-gap-analysis c5-6)."
+                "description": "Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Diagnostics only since the guard authenticates as the UAMI (not validated, not used for token issuance — CustomerRunGuardOptions; task 242b restored REG-02). Task 203b, punch list row A27 / r1-gap-analysis c5-6."
               }
             },
             "customerRunGuardEnabled": {
               "type": "bool",
               "defaultValue": false,
               "metadata": {
-                "description": "Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once customerRunGuardTenantId is supplied and the bound UAMI is a Dataverse Application User on the admin env (it authenticates as the UAMI since 2026-08-27; no client secret is involved). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27)."
+                "description": "Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once customerRunGuardTenantId is supplied and the bound UAMI is a Dataverse Application User on the admin env (it authenticates as the UAMI since 2026-08-27; no client secret is involved). MUST equal the Api module's value (the Api acquires, the Worker releases). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27)."
               }
             },
             "requireSecretFreeIdentity": {

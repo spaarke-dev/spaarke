@@ -4,7 +4,7 @@
     <title>Investigate + reconcile 23 pre-existing Sprk.Provisioning.ControlPlane.Tests baseline failures surfaced post-SESSION-23 master merge</title>
     <phase>Post-STEP-1 hygiene (does NOT block INCOMING-D12-D13-REMEDIATION.md §5 Items 1-4; filed for future execution)</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Test-modifying per root CLAUDE.md §8 override (will touch tests/**) AND may modify production code depending on root-cause per class. Unconditional FULL rigor + unconditional Step 9.5 quality gates. Cross-domain investigation (KV manifest reader + CustomerRunGuardModule post-configure validation).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -150,6 +150,18 @@
     Cross-reference with INCOMING §5 Item 4: retiring `model1-*.bicep` may change what `CustomerRunGuardModule` needs to validate. Task 221 execution SHOULD wait until Items 1-4 land, so the config-key contract is stable. Consider deferring Class B fix to post-Item-4.
 
     Task 221 execution guidance: consider tackling Class A first (independent of Items 1-4) + Class B after Items 1-4 land (when config-key contract is stable). Two-phase execution acceptable if noted.
+
+    COMPLETED 2026-10-05 (session 36, during T242b step 6 — merging to master would have put these failures on master).
+    Class A (17 FileKvSecretManifestTests) was fixed by T226. Class B (the 6 CustomerRunGuardModulePostConfigureTests):
+    root cause = lost code, not stale tests. Commit 3d60b9e59 (REG-02 + REG-05, 2026-08-27) made the guard default ON,
+    dropped the TenantId requirement, fell back to DataverseEnvironmentRegistry:AdminEnvironmentUrl and cross-checked the
+    two admin URLs; a later master merge (9480f9c4e, via unified-access-control-r2) kept #847's version of
+    CustomerRunGuardOptions/Module — the managed-identity half of the same change — and silently dropped the rest.
+    Restored on top of #847's credential code. Found alongside: the L2 Api module never emitted
+    DataverseEnvironmentRegistry__AdminEnvironmentUrl although REG-07 makes the Api host require it, nor a
+    CustomerRunGuard switch although the Api acquires the lock the Worker releases — controlplane-app-service.bicep now
+    takes adminDataverseEnvironmentUrl + customerRunGuardEnabled (same values as the Worker). Also fixed: the L2 load-test
+    fixture (same REG-07 gap). ControlPlane tests 2113/2114 (0 failed), LoadTests 5/5, ArchTests 349/349.
   </notes>
 
   <execution>

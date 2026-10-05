@@ -1,4 +1,4 @@
-// -----------------------------------------------------------------------------
+﻿// -----------------------------------------------------------------------------
 // CustomerRunGuardModule.cs
 //
 // L2 CONTROL-PLANE I5 concurrency-guard DI composition (task 059, Wave C5).
@@ -44,7 +44,36 @@ public static class CustomerRunGuardModule
 
         services.Configure<CustomerRunGuardOptions>(
             configuration.GetSection(CustomerRunGuardOptions.SectionName));
-        services.PostConfigure<CustomerRunGuardOptions>(o => o.Validate());
+        services.PostConfigure<CustomerRunGuardOptions>(o =>
+        {
+            // REG-05: the guard and the registry client write the same sprk_dataverseenvironment rows, so one
+            // setting drives both — fall back to the registry's admin URL, and refuse two settings that disagree.
+            var registryAdminUrl = configuration[CustomerRunGuardOptions.RegistryAdminEnvironmentUrlKey];
+            if (string.IsNullOrWhiteSpace(o.TargetDataverseUrl))
+            {
+                o.TargetDataverseUrl = registryAdminUrl;
+            }
+            else if (!string.IsNullOrWhiteSpace(registryAdminUrl)
+                && Uri.TryCreate(o.TargetDataverseUrl, UriKind.Absolute, out var guardUri)
+                && Uri.TryCreate(registryAdminUrl, UriKind.Absolute, out var registryUri)
+                && !string.Equals(guardUri.Host, registryUri.Host, StringComparison.OrdinalIgnoreCase))
+            {
+                // A relative/invalid TargetDataverseUrl is left to Validate(), which names it.
+                throw new InvalidOperationException(
+                    $"Configuration mismatch — '{CustomerRunGuardOptions.SectionName}:TargetDataverseUrl' host " +
+                    $"'{guardUri.Host}' does not match '{CustomerRunGuardOptions.RegistryAdminEnvironmentUrlKey}' host " +
+                    $"'{registryUri.Host}'. Both MUST point at the same admin Dataverse environment (they read and write " +
+                    "the same sprk_dataverseenvironment rows). See REG-05.");
+            }
+
+            // REG-02: the guard signs in as the L2 UAMI, the same identity the rest of the host uses.
+            if (string.IsNullOrWhiteSpace(o.ManagedIdentityClientId))
+            {
+                o.ManagedIdentityClientId = configuration["ManagedIdentity:ClientId"];
+            }
+
+            o.Validate();
+        });
 
         // Named HttpClient — the store owns per-request Timeout + auth header
         // application, but IHttpClientFactory manages the connection pool.

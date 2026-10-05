@@ -430,6 +430,9 @@ module appService 'modules/controlplane-app-service.bicep' = {
     // DS-5 C5.1: MI-only FQNS + queue name, NOT a KV-ref connection string.
     serviceBusNamespaceName: effectiveServiceBusNamespaceName
     serviceBusQueueName: 'sprk-provisioning-jobs'
+    // Task 242b: the Api host needs the registry URL (REG-07) and the SAME guard switch as the Worker.
+    adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
+    customerRunGuardEnabled: customerRunGuardEnabled
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }
