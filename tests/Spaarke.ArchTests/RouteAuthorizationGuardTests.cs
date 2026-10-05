@@ -660,13 +660,26 @@ public class RouteAuthorizationGuardTests
             + "BFF application user holding prvActOnBehalfOfAnotherUser; without it the route errors rather "
             + "than leaking. A per-resource filter is not applicable: the route names no single resource."),
 
-        // NEW from master (spaarkeai-word-add-in-r1 task 038). First measured by this census at the
-        // 2026-09-30 merge — master never governed Api/Office/*, so it never had to pass Rule A there.
-        new Waiver("GET /api/office/search/matter-types", WaiverKind.Permanent, "-",
-            "REFERENCE-DATA READ. Returns the active sprk_mattertype_ref rows — a small, load-once lookup list "
-            + "behind the pane's required Matter Type field (5 rows in dev), not customer record content — and "
-            + "takes no id, so a per-resource filter has no subject. If this route ever takes a record id or "
-            + "returns customer rows, this waiver is WRONG and the route needs a gate."),
+        // NEW from master (spaarkeai-word-add-in-r1 task 038) as /search/matter-types. First measured by this census
+        // at the 2026-09-30 merge — master never governed Api/Office/*, so it never had to pass Rule A there.
+        // GENERALIZED by spaarkeai-word-add-in-r1 task 100 into ONE parameterized route (CLAUDE.md §11) rather than
+        // three near-identical ones; /search/matter-types is now this route with {list} = matter-types (same URL).
+        new Waiver("GET /api/office/search/{list}", WaiverKind.Permanent, "-",
+            "REFERENCE-DATA READ. Returns the active rows of one create-form reference list — matter-types "
+            + "(sprk_mattertype_ref), practice-areas (sprk_practicearea_ref), project-types (sprk_projecttype_ref): "
+            + "small, load-once, organization-owned lookup lists, not customer record content. {list} is a list NAME "
+            + "looked up in the CLOSED OfficeSearchService.ReferenceLists table (anything else is 404), not a record id, "
+            + "so a per-resource filter has no subject. If this route ever takes a record id, lets the caller name a "
+            + "table, or returns customer rows, this waiver is WRONG and the route needs a gate."),
+
+        // NEW (spaarkeai-word-add-in-r1 task 100). The "+ New" form's prefill.
+        new Waiver("GET /api/office/quickcreate/defaults", WaiverKind.Permanent, "-",
+            "CALLER'S OWN IDENTITY. Returns the caller's own linked contact (task 141's user-contact link, resolved "
+            + "from the caller's own systemuserid — never a client-supplied value) as the Assigned To prefill. Takes "
+            + "no id and reads nothing about anyone else, so a per-resource filter has no subject. The contact the "
+            + "pane then POSTS is gated: POST /quickcreate's QuickCreateSourceAccessFilter requires Read on "
+            + "assignedToContactId. If this route ever takes an id or returns another person's data, this waiver is "
+            + "WRONG and the route needs a gate."),
 
         // The four Pending waivers for the Office STUB routes (document search and recent items, #1023; share
         // links and share attach, #1024) were DELETED 2026-09-30 WITH THE ROUTES by spaarkeai-word-add-in-r1

@@ -13,8 +13,7 @@
       3. Deploy-SpeAdminApp.ps1           — sprk_speadmin (HTML)
       4. Deploy-WizardCodePages.ps1       — 12 wizard/code page web resources
       5. Deploy-EventsPage.ps1            — sprk_eventspage.html
-      6. Deploy-PCFWebResources.ps1       — PCF bundle.js + CSS
-      7. Deploy-RibbonIcons.ps1           — 3 SVG ribbon icons
+      6. Deploy-RibbonIcons.ps1           — 3 SVG ribbon icons
 
     Each sub-script handles its own authentication, encoding, and error handling.
     Failures in individual components do not stop the overall run.
@@ -26,7 +25,7 @@
 .PARAMETER SkipComponent
     Array of component names to skip. Valid values:
       CorporateWorkspace, ExternalWorkspaceSpa, SpeAdminApp,
-      WizardCodePages, EventsPage, PCFWebResources, RibbonIcons
+      WizardCodePages, EventsPage, RibbonIcons
 
 .PARAMETER WhatIf
     Pass -WhatIf to preview which components would be deployed without executing.
@@ -35,7 +34,7 @@
     .\scripts\Deploy-AllWebResources.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com
 
 .EXAMPLE
-    .\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons,PCFWebResources
+    .\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons
 
 .EXAMPLE
     .\scripts\Deploy-AllWebResources.ps1 -WhatIf
@@ -46,7 +45,7 @@ param(
 
     [ValidateSet(
         'CorporateWorkspace', 'ExternalWorkspaceSpa', 'SpeAdminApp',
-        'WizardCodePages', 'EventsPage', 'PCFWebResources', 'RibbonIcons'
+        'WizardCodePages', 'EventsPage', 'RibbonIcons'
     )]
     [string[]]$SkipComponent = @()
 )
@@ -100,12 +99,6 @@ $components = @(
         Name       = 'EventsPage'
         Script     = 'Deploy-EventsPage.ps1'
         Desc       = 'sprk_eventspage.html'
-        Args       = @{ DataverseUrl = $DataverseUrl }
-    },
-    @{
-        Name       = 'PCFWebResources'
-        Script     = 'Deploy-PCFWebResources.ps1'
-        Desc       = 'PCF bundle.js + CSS'
         Args       = @{ DataverseUrl = $DataverseUrl }
     },
     @{

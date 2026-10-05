@@ -1783,8 +1783,10 @@ public class OfficeService : IOfficeService
 
     /// <inheritdoc />
     /// <remarks>Delegates to <see cref="OfficeSearchService"/> (task 059).</remarks>
-    public Task<MatterTypeListResponse> GetMatterTypesAsync(CancellationToken cancellationToken = default)
-        => _search.GetMatterTypesAsync(cancellationToken);
+    public Task<ReferenceListResponse> GetReferenceListAsync(
+        OfficeReferenceList list,
+        CancellationToken cancellationToken = default)
+        => _search.GetReferenceListAsync(list, cancellationToken);
 
     /// <inheritdoc />
     /// <remarks>
@@ -1793,15 +1795,14 @@ public class OfficeService : IOfficeService
     /// return null (endpoint 403s) until built out.</para>
     /// <para><b>Matter</b> (task 030, FR-13) and <b>Project</b> (task 031, FR-13) are created complete by
     /// <see cref="RecordCreationService"/>: the caller as a <b>load-bearing</b> owner, business-unit defaults, the
-    /// Field Mapping Framework, and for Matter the matter-type lookup when supplied. Neither writes its entity's
-    /// number — <c>sprk_matternumber</c> and <c>sprk_projectnumber</c> are both left to a planned separate
-    /// server-side numbering component (owner decisions 2026-09-11 and 2026-09-17). Both are their entity's PRIMARY
-    /// NAME attribute, so until that component exists a record created here shows a blank name in lookups and grids;
-    /// that is expected, not a defect (<c>notes/031-project-semantics.md</c>).
+    /// Field Mapping Framework, the matter-type and practice-area lookups (Matter) or the project-type lookup
+    /// (Project) when supplied, and the Assigned To contact (task 100). Neither writes its entity's number — the
+    /// platform's autonumber assigns <c>sprk_matternumber</c> / <c>sprk_projectnumber</c> (task 076, interim).
     /// A refusal surfaces as <see cref="Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException"/> (no row
     /// written); see <see cref="QuickCreateViaCreationServiceAsync"/>.</para>
     /// <para><b>Invoice</b> keeps the minimal path: the generic Dataverse create
-    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name only. It is owned by the caller's business-unit
+    /// (<see cref="IGenericEntityService.CreateAsync"/>) with the name, the description and the Assigned To contact
+    /// (task 100). It is owned by the caller's business-unit
     /// default owner team (task 080, invariant I-6), and REFUSED with <see cref="OfficeErrorCodes.RecordOwnerUnresolved"/>
     /// when no team resolves — no longer best-effort, which left an unresolved caller's invoice app-owned in ROOT.
     /// There is no impersonated-create helper in the BFF, so ownership is set via the <c>ownerid</c> lookup rather
@@ -1847,7 +1848,7 @@ public class OfficeService : IOfficeService
                 .ConfigureAwait(false);
         }
 
-        // Invoice only. Name-only: no description field is verified to exist on sprk_invoice.
+        // Invoice only: name, description and Assigned To (task 100, owner UAT round 5 item 3).
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
 
         var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
@@ -1855,6 +1856,21 @@ public class OfficeService : IOfficeService
         // "sprk_invoicename", which sprk_invoice does not have, so Dataverse refused every invoice quick-create
         // (#1079, task 085). sprk_billingevent is the entity that has a sprk_invoicename column.
         entity["sprk_name"] = name;
+
+        // Task 100 — both columns verified against live metadata (spaarkedev1, 2026-10-05): sprk_description (Memo,
+        // "Description") and sprk_assignedto1 (contact lookup, "Assigned To 1" — the invoice's first Assigned To slot;
+        // sprk_invoice has no sprk_assignedtointernal). The contact id was authorized (caller holds Read) by
+        // QuickCreateSourceAccessFilter before this runs. An invoice has NO server default assignee: absent means
+        // unassigned (unlike Matter/Project, which name the maker — unified-access-control-r2 task 152).
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity[InvoiceDescriptionAttribute] = request.Description.Trim();
+        }
+
+        if (request.AssignedToContactId is { } invoiceAssignee && invoiceAssignee != Guid.Empty)
+        {
+            entity[InvoiceAssignedToAttribute] = new Microsoft.Xrm.Sdk.EntityReference("contact", invoiceAssignee);
+        }
 
         // Ownership (ADR-034 — ownership is what confers access; NOT ADR-024, which is the polymorphic RESOLVER
         // pattern and says nothing about ownerid, a miscitation corrected 2026-09-22). Task 080 (invariant I-6): the
@@ -1916,8 +1932,8 @@ public class OfficeService : IOfficeService
     /// Office ProblemDetails shape. <see cref="RecordCreationService"/> itself returns the failure as data — that is
     /// the contract the wizard-migration evaluation consumes.</para>
     /// <para>Owner attribution is LOAD-BEARING for both (an unresolved caller is refused, 403), unlike the
-    /// best-effort posture the Invoice leg keeps. <c>MatterTypeId</c> is passed through for both and ignored by the
-    /// Project path, which has no type lookup in r1.</para>
+    /// best-effort posture the Invoice leg keeps. Every optional field is passed through for both; each path reads
+    /// only its own (<c>MatterTypeId</c> / <c>PracticeAreaId</c> on a Matter, <c>ProjectTypeId</c> on a Project).</para>
     /// </remarks>
     private async Task<QuickCreateResponse?> QuickCreateViaCreationServiceAsync(
         QuickCreateEntityType entityType,
@@ -1936,6 +1952,9 @@ public class OfficeService : IOfficeService
                 CallerUserId = userId,
                 OwnerSystemUserId = ownerSystemUserId,
                 MatterTypeId = request.MatterTypeId,
+                PracticeAreaId = request.PracticeAreaId,
+                ProjectTypeId = request.ProjectTypeId,
+                AssignedToContactId = request.AssignedToContactId,
                 SourceEntityLogicalName = request.SourceEntityType,
                 SourceRecordId = request.SourceRecordId,
             },
@@ -1961,6 +1980,12 @@ public class OfficeService : IOfficeService
             Url = null
         };
     }
+
+    /// <summary><c>sprk_invoice</c> description column (Memo, "Description"; live metadata 2026-10-05, task 100).</summary>
+    internal const string InvoiceDescriptionAttribute = "sprk_description";
+
+    /// <summary><c>sprk_invoice</c> "Assigned To 1" contact lookup — the invoice's Assigned To (live metadata 2026-10-05, task 100).</summary>
+    internal const string InvoiceAssignedToAttribute = "sprk_assignedto1";
 
     /// <summary>HTTP status for each creation refusal. Every refusal means no row was written.</summary>
     internal static int MapCreationFailureStatus(RecordCreationFailureKind kind) => kind switch

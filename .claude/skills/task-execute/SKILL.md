@@ -90,7 +90,7 @@ IF invoked for multiple tasks:
       d. Aggregate results (success/failure per task)
       e. **MANDATORY BUILD VERIFICATION**:
          - If any wave task modified `.cs` files: `dotnet build src/server/api/Sprk.Bff.Api/`
-         - If any wave task modified `.ts`/`.tsx`: **`npm run build:prod` for PCF** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1); `npm run build` for non-PCF packages without a `:prod` script
+         - If any wave task modified `.ts`/`.tsx`: **`npm run build:prod` for PCF, run through `scripts/Invoke-PcfBuildProd.ps1`** (NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1; and `pcf-scripts` exits 0 on a failed build, so judge the result from the output); `npm run build` for non-PCF packages without a `:prod` script
          - If build fails: STOP. Report breakage. Do not start next wave.
       f. Update TASK-INDEX.md statuses (🔲 → ✅ for success, 🔄 for retry)
       g. Proceed to next wave
@@ -425,7 +425,7 @@ THEN:
   NOTE scripts to use instead of writing new automation
 
 COMMON SCRIPT MATCHES:
-  - PCF deployment → Deploy-PCFWebResources.ps1
+  - PCF build → Invoke-PcfBuildProd.ps1 (build:prod + fails on a failed build); deploy via the pcf-deploy skill
   - API testing → Test-SdapBffApi.ps1
   - Health checks → test-sdap-api-health.js
   - Custom page deploy → Deploy-CustomPage.ps1
@@ -1064,8 +1064,8 @@ When task has `pcf`, `react`, or `fluent-ui` tags:
 - [ ] Version bumped in Solution.xml
 - [ ] Version bumped in extracted ControlManifest.xml
 - [ ] Version shown in UI footer
-- [ ] Build succeeds: `npm run build:prod` (PCF prod build — NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1)
-- [ ] If deploying: Use `pac pcf push` or solution import
+- [ ] Build succeeds via `scripts/Invoke-PcfBuildProd.ps1` (`npm run build:prod` — NOT `npm run build`, per root CLAUDE.md §12 / FAILURE-MODES AP-1 — and `pcf-scripts` exits 0 even when the build fails)
+- [ ] If deploying: solution import via the `pcf-deploy` skill (NEVER `pac pcf push`: it rebuilds in development mode)
 - [ ] current-task.md updated with files modified
 
 ---

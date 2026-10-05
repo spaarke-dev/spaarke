@@ -124,7 +124,8 @@ The owner, on the §4 question: *"yes we can follow your recommendation - ensure
    lines); (b) the live checks: the Word tab sends the user's own document, and a foreign document id is refused with
    `sdap.access.deny.communication.send`.
 4. **Coordination:** UAC-r2 is told that this project depends on 161 for the Word Email tab and owns the archive fix
-   after 146 (so the two do not collide).
+   after 146 (so the two do not collide). **Done 2026-10-04**: the owner passed this note to the UAC-r2 session, which
+   noted both dependencies and will report back when 161 and 146 are done.
 
 **Order:**
 

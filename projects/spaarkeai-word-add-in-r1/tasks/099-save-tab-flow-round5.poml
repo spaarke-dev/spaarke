@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="099" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 5 (1, 2, 4, 5, 6) — a focused Save tab: no icon in the lookup placeholder, "+ New" shows only the create form, selecting a record collapses the search, the name is edited in the Document header, and the post-save view is the confirmation + profile with refresh</title>
+    <phase>6 UAT round 5 (2026-10-05)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`RelatedToPicker.tsx`, `SaveFlow.tsx`, the Document header, the profile section) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only flow and layout changes, fully decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT5-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 098 (disjoint: 099 edits only `src/client/office-addins/**`). Runs BEFORE 100, which edits the same `RelatedToPicker.tsx` / `SaveFlow.tsx`. Client-only; runs no `dotnet`; does NOT run `npm run build` (the main session does).</parallel-reason>
+    <deps>095</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 5 (2026-10-05), items 1, 2, 4, 5, 6 + decision A, and the ADR-012 amendment (reuse the shared library). Record: `notes/042-uat-round5-2026-10-05.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>The Save tab shows only what the current step needs: search or create a record, then name and save the document, then see the finished save (confirmation, filed-to record, profile) — with no redundant icons, sections or buttons.</goal>
+
+  <context>
+    <background>
+      - **Owner, round 5** (see the note §1 for full text): (1) remove the search icon from the lookup's placeholder — it
+        is redundant with the search button; (2) after **+ New**, hide Document Details, Profile and Cancel/Save until
+        the new record is created; (4) after selecting a searched record, remove the other options so the area collapses
+        and the user can edit the document name; the selected pill's **x** re-shows the search results; (5) edit the
+        document name in the top "Document" header instead of the separate Document Details card (remove that header and
+        the name-with-pencil card); (6) after a save, keep the saved confirmation (**View Document**, **Copy Link**) and
+        the Profile, with a **refresh** button instead of "Generate Profile"; refresh shows the finished save: document
+        name, the record it is filed to, and the profile. Cancel / Open Document / Save are removed from the post-save view.
+      - **Decision A (owner)**: after a save there is no Save button until the document is edited (task 094's change
+        detection, `documentChangeDetectionService.ts`); then Save appears and saves a new version (round 4 rule).
+      - **Item 5 + round 4**: after a save the name in the header is locked (task 094), with the quiet "Save as new
+        document" link (task 095) that unlocks it.
+      - **Shared library first** (ADR-012 amended 2026-10-05): before writing new UI, check `@spaarke/ui-components`
+        for a fitting component and consume it by exact-path alias (task 096's mechanism in `webpack.config.js` /
+        `jest.config.js`); never the barrel. Also replace the local `shared/taskpane/utils/cleanGuid.ts` with the shared
+        `cleanGuid` by exact-path alias (spec ADR-044 row); keep its gated test pointed at the shared implementation.
+      - **Today**: screenshots in the round-5 note. `RelatedToPicker.tsx` (095 layout), `SaveFlow.tsx`,
+        `SaveModeSection.tsx`, `DocumentProfileSection.tsx`, the "Document" header. Read `notes/094-…`, `notes/095-…` first.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 1">The lookup placeholder is text only ("Look up related {Type}..."), no leading search icon; the search icon BUTTON stays (accessible name "Search").</constraint>
+    <constraint source="owner item 2">While the create form is open (after "+ New"): the Document name editing, Profile and the Cancel/Save buttons are hidden; they appear once the record is created (and selected), or when the user cancels "+ New".</constraint>
+    <constraint source="owner item 4">Selecting a record hides the type pills, the lookup box, the results list and "+ New", leaving the selected record (with its x). The x clears the selection and restores the search box with the previous query and results (no new request needed if the results are still in hand).</constraint>
+    <constraint source="owner item 5">The document name is edited in the "Document" header; the "Document Details" header and the name card with the pencil are removed. Name lock (094) and "Save as new document" (095) move to the header.</constraint>
+    <constraint source="owner item 6 + decision A">Post-save view: the saved confirmation (View Document + Copy Link, unchanged) and the Profile with a Refresh button (accessible name "Refresh"). Refresh re-reads the saved document and shows its name, the filed-to record and the profile (or "still generating" with Refresh). No Cancel, no Open Document, and no Save until a document edit is detected; then Save (= new version) appears.</constraint>
+    <constraint source="NFR-10">Same behaviour in both hosts; no `hostType` branches (Outlook's Save tab gets the same flow where the item applies).</constraint>
+    <constraint source="ADR-021">Fluent v9, semantic tokens, dark mode; visible focus; after a section disappears, move focus to a sensible control (no focus lost to body).</constraint>
+    <constraint source="ADR-038">Update the tests that pin the old layout (`RelatedToPicker.*`, `SaveFlow.*`, `SaveModeSection`, `DocumentProfileSection`, `SaveView.*`); list new suites in `ci-gated-suites.txt`.</constraint>
+    <constraint source="scope">No BFF change. Item 3 (create fields) is task 100 — do not add create fields here.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Item 1: the lookup input has no placeholder icon; the Search icon button still runs the search; Enter still searches.</criterion>
+    <criterion testable="true">Item 2: after "+ New", only the create form (and the pills) is shown; name editing, Profile and Cancel/Save are absent; after a successful create they appear with the new record selected; cancelling "+ New" restores the previous view.</criterion>
+    <criterion testable="true">Item 4: selecting a result leaves only the selected record pill; its x restores the search box, query and results.</criterion>
+    <criterion testable="true">Item 5: the name is editable in the Document header; no "Document Details" header or pencil card exists; after a save the header name is locked with "Save as new document".</criterion>
+    <criterion testable="true">Item 6: after a save, the view shows the confirmation (View Document, Copy Link) and Profile with Refresh; no Cancel, Open Document or Save; Refresh shows name + filed-to record + profile; a detected document edit makes Save (new version) appear.</criterion>
+    <criterion testable="true">`cleanGuid` comes from the shared library by exact-path alias; the local copy is deleted; its test passes against the shared one.</criterion>
+    <criterion testable="true">Gates: gated jest green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy): items 1, 2, 4, 5, 6 as above. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-5 note, the 094/095 notes, `RelatedToPicker.tsx`, `SaveFlow.tsx`, the header, profile and save-mode sections; check the shared library for reusable pieces.</step>
+    <step>Items 1, 4 (Related-to); tests.</step>
+    <step>Items 2, 5 (create focus; name in the header); tests.</step>
+    <step>Item 6 + decision A (post-save view, Refresh); tests.</step>
+    <step>Shared `cleanGuid`; gates; `notes/099-save-tab-round5.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The Save tab's sections, 094's name lock and change detection, 095's layout, and the profile section exist.</existing>
+    <extension>Yes — re-arranges and hides existing sections; no new route, service or capability.</extension>
+    <cost-of-doing-nothing>The owner found the Save tab cluttered and the post-save buttons confusing (round 5 items 1-2, 4-6).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Round 5 Save tab">
+      <steps>
+        <step>New document: lookup text has no icon; select a matter → search collapses to the pill; x → results return.</step>
+        <step>"+ New" → only the create form; create → details and Save appear with the new record selected.</step>
+        <step>Name edited in the header; Save → confirmation + Profile + Refresh, no other buttons; edit the document → Save appears.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveModeSection.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/099-save-tab-round5.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round5-2026-10-05.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/094-saved-state-follow-up.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/095-related-to-and-save-as.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/099-save-tab-round5.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

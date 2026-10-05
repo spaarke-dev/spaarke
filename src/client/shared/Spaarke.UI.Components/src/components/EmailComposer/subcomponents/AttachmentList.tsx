@@ -209,10 +209,10 @@ export const AttachmentList: React.FC<IAttachmentListProps> = ({
                   />
                   {item.linkUrl && (
                     <Checkbox
-                      label="Link"
+                      label="Link to Spaarke record"
                       checked={item.linkSelected === true}
                       onChange={() => onToggleLink?.(item.id)}
-                      aria-label={`Insert a link to ${item.fileName} in the message body`}
+                      aria-label={`Insert a link to the Spaarke record for ${item.fileName} in the message body`}
                     />
                   )}
                 </div>
