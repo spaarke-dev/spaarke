@@ -265,7 +265,7 @@ round 33 item 2's copy.
 | G-8 | a user in each populated BU (root `Spaarke`, `Spaarke Business Unit 1`) reads the true value | escalation trigger 1's live check |
 | G-9 | Unsecure F3 live: a Collaborate-level colleague → 403 `not_permitted`; the creator and a Full Access holder → 200 | through the API until the ribbon ships |
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
-| G-11 | Access ribbon (§21, §22): after G-1 (BFF with 148 + 150 and, for Make Secure, round 26 item 3's relocation wired at integration — §22.4) and the web resources (`sprk_/scripts/access_ribbon.js` 1.2.0, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the four amendment ui-tests pass. Omit `-SecureTransitionDeployed` where the BFF lacks task 148's transition or the wired relocation |
+| G-11 | Access ribbon (§21, §22, §23): after G-1 (BFF with 148 + 150 and, for Make Secure, round 26 item 3's relocation wired at integration with its scheduled backstop — §22.4, §23.3) and the web resources (`sprk_/scripts/access_ribbon.js` **1.3.0**, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the amendment ui-tests pass, plus round 40's "Make Secure finishes an unfinished transition" ui-test (§23.1). Omit `-SecureTransitionDeployed` where the BFF lacks task 148's transition or the wired relocation |
 
 **Merge gates (all hold before task 150 reaches master):**
 1. **F6: MET.** Rows 1-6 closed by owner round 10 item 9 (c1, §15); rows 7-11 closed by owner round 13 item 10
@@ -929,7 +929,8 @@ WIP's "without the transition" twin repeated `Provision_AnUnflaggedRecord_ByAWri
   recorded person shared, the application user never; disabled creator → secured, not shared, nothing skipped; walled
   creator → secured, not shared, named `principal_no_access`; the creator's share fails → secured, named
   `principal_share_failed`; Make Secure resuming an unflagged team-owned row by a non-creator ×3 → resumes, the share goes
-  to the creator and never the caller (F8). The wizard half: the existing non-creator refusals (forward ×3, resume ×3).
+  to the creator and never the caller (F8) — **superseded by round 40 item 2 (§23.4): the caller is shared on the resume
+  too**. The wizard half: the existing non-creator refusals (forward ×3, resume ×3).
   `SecureProjectShareTests.Provisioning_WhenAColleaguesShareFails_StillSucceeds` now also asserts the failed colleague is
   named.
 - **Seeds** (each restored with `git checkout` and touched; each seeded build "Build succeeded"; run over
@@ -975,7 +976,9 @@ this caller. Task 150 builds no second relocator. **Integration step for the mai
 re-entry branch: list the record's `sprk_document` rows (the record and its secured children, as the child pass names
 them), call `RelocateDocumentsAsync` with the record's own container, and answer 500 `sdap.provision.files_incomplete`
 with the counts when the batch is incomplete (the record stays flagged and provisioned; a repeat call completes it);
-add the code to `provisioningService.ts`'s `EMITTED` and the ribbon's refusal path, with tests and a seed.
+add the code to `provisioningService.ts`'s `EMITTED` and the ribbon's refusal path, with tests and a seed. (Round 40,
+§23: the ribbon already offers `files_incomplete` in place — `MAKE_SECURE_RETRY_IN_PLACE` in access_ribbon.js 1.3.0 — and
+the step also needs a SCHEDULED backstop for the files, which 166's job is not: §23.3.)
 **Release rule tightened to match** (README, `Set-AccessRibbon.ps1`, `Merge-AccessRibbon.ps1`, guide §7d.1, §9 G-11):
 the Make Secure confirmation the user accepts says the files move, so `-SecureTransitionDeployed` is passed only for a
 BFF that carries task 148's transition AND that wiring.
@@ -1038,6 +1041,11 @@ needed. Hot-path: BFF = Y (already declared).
 
 ### 22.8 New finding — R-150-6 (a STOP: it changes a closed acceptance criterion; complete fix proposed)
 
+> **Since decided (round 40 item 1) and closed in §23.1–§23.2.** One premise below did not hold: a failure before the
+> owner move on a record that records a container (its own — re-securing after Remove Secure keeps it — or a shared one
+> whose unlink failed) leaves the record flagged WITH a container and its pre-call owner, not "no container"; §23.1 covers
+> it from the same read.
+
 **What.** A Make Secure that fails AFTER its first write (the flag) leaves a record that reads `sprk_issecure = true`, so
 the ribbon hides Make Secure (acceptance (e): "on a secure record Make Secure is hidden") — but the server's answer for
 those states says "the same caller may retry" / "calling again completes it": `container_creation_failed`,
@@ -1070,3 +1078,302 @@ provisioning host, `accessRibbon.secureCommands` — **10 suites, 193/193** (`pr
 `tsc --noEmit` exit 0; `npm run build` exit 0; eslint on the changed files 0 errors (1 pre-existing warning: an unused
 `eslint-disable` in the ribbon test); `node --check sprk_access_ribbon.js` OK. Seeds: §22.1–§22.3 and §22.5.
 
+## 23. Integration round c-v1 (2026-10-05, `task/uac-r2-150-integ-c-v1` from `task/uac-r2-150-integ-c` @ `0f993b651`) — round 40, the verifier's 16 items
+
+**Binding input:** round 40 (main session under round 15, `work/unified-access-control-r2` @ `83460442d`): item 1 R-150-6
+(option 1, completed), item 2 (the non-creator keeps access on BOTH paths), item 3 (`principal_share_failed` copy and the
+"Someone" fallback). No `NOTE-FROM-MAIN.md` existed. No live call of any kind was made.
+
+### 23.1 Round 40 item 1 (R-150-6) — a Make Secure that fails after the flag write can always be finished
+
+- **The enable rule** (`sprk_access_ribbon.js` **1.3.0**, `canMakeSecure`). Make Secure is offered to a caller with Write
+  on a record that is NOT secure, **or** that is flagged secure but whose transition did not finish. "Finished" is what
+  provisioning leaves: owned by the Secure Record owner TEAM, with the record's own container recorded. So a flagged record
+  with **no container recorded**, or one a **user** owns, is unfinished. The ONE `retrieveRecord` the rules already made
+  now selects `sprk_issecure,sprk_containerid,_owninguser_value` (no second read). A flag read that fails, or comes back
+  empty, still hides both commands (acceptance (f)). **Acceptance (e) as amended:** Make Secure is hidden on a
+  PROVISIONED secure record. Remove Secure is unchanged (flag true + Write).
+- **A premise of §22.8 that did not hold, and why `_owninguser_value` is in the read.** §22.8 said every failure between
+  the flag write and Step 7 leaves "flagged, no container". That is false for a record that ALREADY records a container:
+  - its own container. That is the common re-secure case: the unsecure endpoint moves the owner to a USER and keeps
+    `sprk_containerid` (`UnsecureProjectEndpoint.cs`, Step 3; it never writes the column);
+  - a shared container whose Step 4.2 unlink failed.
+
+  A failure at Steps 4.1–5.5 with the owner unchanged or restored leaves such a record flagged, WITH a container, and
+  owned by its pre-call owner. "Flagged + no container" alone would hide Make Secure there.
+  A provisioned record is never user-owned. So "user-owned" catches every such shape a Spaarke writer produces: the
+  wizards create user-owned roots, and unsecure assigns to a user. Office/BFF creates are owned by the business unit's
+  default team (task 080), and they never carry a container before provisioning: `RecordCreationService` refuses
+  `sprk_containerid` in mappings, and provisioning is the only writer of the column on a root (task 076). The one shape the
+  client cannot classify is a root reassigned OUTSIDE Spaarke to a non-default team while it records a container. Telling
+  that team from the named owner team needs the server's configuration (`SecureRecord:OwnerTeamName`). The only GET the
+  ribbon calls, `can-manage-access`, is by design a pure delegation answer (task 139). That shape is closed by the
+  in-place retry below and, after it, by an F3 holder's Remove Secure → Make Secure or an administrator's call (§23.2).
+- **The in-place retry.** Round 40 named the after-Step-7 codes (`files_incomplete`, `children_incomplete`).
+  `MAKE_SECURE_RETRY_IN_PLACE` (ONE frozen constant) holds every Make Secure failure after the flag write that the server
+  answers as "the same caller may call again": `secure_flag_not_set`, `shared_container_not_cleared`,
+  `creator_share_failed`, `owner_assignment_unverified`, `container_creation_failed`, `container_not_recorded`,
+  `children_incomplete`, `files_incomplete`. For each, the alert becomes `openConfirmDialog` with the server's `detail`,
+  confirm "Make Secure", cancel "Cancel". Make Secure repeats the same call (transition included, no second owner-copy
+  dialog); Cancel ends it. The six before Step 7 are added because they are the same server answer, and the in-place
+  offer is what closes the custom-team shape above.
+  Refusals that need an administrator first (`creator_share_failed_resumable`, `cascade_children_not_restored`,
+  `owner_assignment_failed`, `owner_assignment_not_applied`) stay an alert naming that step, because repeating them
+  repeats the refusal. Remove Secure never offers it. `files_incomplete` is in the list now because round 40 names it,
+  and the ribbon then needs no second release when §22.4 wires the relocation.
+- **Server:** nothing new was needed for the retry itself. The endpoint already resumes a flagged team-owned record with
+  no container and re-runs a flagged record not owned by the team; §23.4 makes the Make Secure resume finishable for
+  every caller and creator shape.
+- **Tests** (`accessRibbon.secureCommands.test.ts`, 37 → 67): unfinished, no container ×3 tables (Make Secure AND Remove
+  Secure, one read); empty / whitespace / absent container ×3; user-owned with its own container; provisioned hidden
+  (×3 tables + 1); masked flag on that shape; Read-only on an unfinished record; the frozen list; each of the 8 codes
+  (dialog strings, second POST body, refresh ×2, notification); Cancel; 5 non-retry codes (alert only); Remove Secure
+  never retries. **Seeds** (each restored from a backup and touched; hashes re-checked):
+  - CR1, Make Secure only when not secure: 7 fail.
+  - CR2, user-owned ignored: 1 fail.
+  - CR3, no retry offered: 9 fail.
+  - CR4, a retry for every failure: 6 fail.
+  - CR7, the container ignored (every flagged record unfinished): 4 fail.
+  - CR8, `files_incomplete` dropped: 2 fail.
+
+  (CR4's first run looped to a jest out-of-memory, because three non-retry tests confirmed every dialog. Those now
+  confirm once, so the seed fails cleanly.)
+- **ui-test** (POML): "Make Secure finishes an unfinished transition (round 40)" — part of G-11.
+
+### 23.2 Every post-flag failure code, and what closes it (round 40 item 1's table)
+
+R-150-6 named five codes (`container_creation_failed`, `container_not_recorded`, `owner_assignment_unverified`,
+`creator_share_failed_resumable`, `files_incomplete`). The table covers EVERY code a Make Secure call can answer at or
+after its first write (Step 4.1), read from `ProvisionProjectEndpoint.cs`.
+
+Key:
+- **"Re-offer"** — the enable rule offers Make Secure again on the state the code leaves: a flagged record with no
+  container, or owned by a user.
+- **"In place"** — `MAKE_SECURE_RETRY_IN_PLACE`.
+- **"Sweep"** — 148's `SecureChildReconciliationJob`. Round 28 E2: every 2 minutes, enabled, recent-changes pass writes
+  on wherever 148 is deployed. That is `task/uac-r2-147-r1c` (`DefaultCronSchedule = "*/2 * * * *"`, registered
+  enabled). On this branch and on `integ/uac-r2-batch4` the job is still registered disabled at `*/15`, and task 147
+  changes it.
+
+| Code (step) | State it leaves | Closed by |
+|---|---|---|
+| `secure_flag_not_set` (4.1) | flag maybe set; owner and container unchanged | **Ribbon**: in place; then re-offer (flag false → Make Secure; flag set → unfinished shape). A refused write or an unreadable read-back is an FLS fault: the administrator runs `Set-SecureFlagFieldSecurity.ps1 -Verify` (the detail says so), then the ribbon |
+| `shared_container_not_cleared` (4.2) | flagged; pre-call owner; shared container maybe still recorded | **Ribbon**: in place; re-offer (user-owned, or the unlink landed) |
+| `creator_share_failed` (4.5, ownership restored) | flagged; pre-call owner; container none or kept | **Ribbon**: in place; re-offer |
+| `owner_assignment_failed` / `owner_assignment_not_applied` (5) | flagged; pre-call owner | **Administrator first**: the owner team's role (guide §5, named in the detail). Then the **ribbon** re-offers |
+| `owner_assignment_unverified` (5) | owner unknown; caller's share issued | **Ribbon**: in place; re-offer when the move did not land or no container is recorded. If the move landed on a kept-container record, the record reads provisioned (owner round 10 item 5): its children are closed by the **sweep**, its files by §23.3 |
+| `creator_share_failed` (5.5, compensated) | flagged; pre-call owner restored | **Ribbon**: in place; re-offer |
+| `cascade_children_not_restored` (5.5) | flagged; pre-call owner; named children on the wrong owner | **Administrator first**: the named calls, by design (task 133 c1, "not a self-service retry"). Then the **ribbon** re-offers |
+| `creator_share_failed_resumable` (5 / 5.5 double failure) | may be team-owned with nobody shared — the caller may not even open it | **Administrator** (holds Write by role). No container: the administrator's Make Secure on the ribbon (re-offered) or the API call (§7). Kept container: a Manage Access share (owner round 10 item 5), after which the **sweep** closes the children |
+| `container_creation_failed` (6) | team-owned, flagged, no container | **Ribbon**: in place; re-offer |
+| `container_not_recorded` (7) | team-owned, flagged, no container (an empty container named) | **Ribbon**: in place; re-offer |
+| `children_incomplete` (8) | provisioned | **Both**: in place; **sweep** |
+| `files_incomplete` (relocation, once §22.4 is wired) | provisioned | **Ribbon** in place; the scheduled backstop is §23.3, part of §22.4 |
+| `creator_share_failed` (resume, `resumed: true`) | team-owned, flagged, no container | **Ribbon**: in place; re-offer |
+| `creator_unresolved` / `creator_no_access(_unverifiable)` / `record_creator_unverifiable` (Make Secure resume, §23.4, before any write) | unchanged | **Ribbon**: re-offer (the shape is unfinished); transient ones are retried there |
+
+Every code is closed by the ribbon's retry, by a scheduled job, or by both. The administrator-first rows are task 133's
+owner-decided designs, and after the administrator's step the ribbon closes them. One gap remains, and it is not on this
+branch: `files_incomplete` has no SCHEDULED backstop (§23.3).
+
+### 23.3 STOP for the §22.4 integration step — `files_incomplete`'s job backstop is not scheduled (round 40's premise); complete fix
+
+- **What.** Round 40 names "for files, 166's relocator re-entry" as the scheduled job. On `task/uac-r2-166-f1-v1`
+  (`ca8291442`), `DocumentContainerMigrationJob` is registered DISABLED: "Never fires on its own", and it runs only when
+  `scripts/Invoke-DocumentContainerMigration.ps1` triggers it, with writes switched on for that run. So after a
+  `files_incomplete` whose in-place retry is cancelled, nothing scheduled finishes the files. The record reads
+  PROVISIONED, so the ribbon does not re-offer Make Secure. Nothing is exposed: un-moved files are refused under the
+  strict rule. But the transition stays unfinished until an operator acts. That is "neither" under round 40, so it is a
+  defect to fix.
+- **Why it is not fixed here.** `DocumentContainerRelocator` is not on this branch or on `integ/uac-r2-batch4`:
+  `git merge-base --is-ancestor task/uac-r2-166-f1-v1 integ/uac-r2-batch4` is false. Round 26 item 3 forbids a second
+  relocator, and `files_incomplete` is not emitted until §22.4 wires the relocation.
+- **Complete fix (add to the §22.4 integration step).** The secure-child reconciliation sweep is already scheduled every
+  2 minutes (round 28 E2, task 147), already enumerates every secure root, and already reports `incompleteRoots`. For
+  each ISOLATED root it also settles the root's Make Secure relocation through the ONE `DocumentContainerRelocator`: its
+  re-entry over the root's documents, purpose `MakeSecure`. Each root still owing a step is reported among
+  `incompleteRoots`, as children are. That gives one relocator with a third caller and no new job (CLAUDE.md §11). Tests:
+  a root left `files_incomplete` is finished by the next run, plus a seed that disables the call. The release rule
+  becomes: Make Secure is imported (`-SecureTransitionDeployed`) only for a BFF carrying 148, the wired relocation AND
+  this backstop. The AccessRibbons README, `Set-AccessRibbon.ps1` and guide §7d.1 already gate on the wired relocation;
+  "and its sweep backstop" is added with the wiring.
+
+### 23.4 Round 40 item 2 — whoever runs Make Secure keeps access, on BOTH paths
+
+- **`ResumeMakeSecureAsync`.** A resume through Make Secure (`transition: "make-secure"`, flagged or not) follows the
+  forward Make Secure rules, minus the move. Every refusal comes before any write:
+  1. the caller by WhoAmI (403 `creator_unresolved`);
+  2. the caller against the No Access list (403 `creator_no_access` / 500 `creator_no_access_unverifiable`);
+  3. the record's creator (`ResolveMakeSecureCreatorAsync`: 500 `record_creator_unverifiable`, or 403 with
+     `creatorState: column-missing`);
+  4. the flag (skipped when set);
+  5. the caller's share, read back (500 `creator_share_failed`, `resumed: true`).
+
+  The creator joins the colleague step: shared, named in `skippedPrincipals`, or not shared when unusable. The response's
+  `sharedToCreatorSystemUserId` is the caller, as on the forward path.
+- **Interpretation recorded.** "Does the same" means the forward Make Secure rules in full, not only the caller's share.
+  The resume's own rules (F8) would answer a retry with 409 for exactly the records the forward path secured anyway:
+  - a creator on the No Access list (`resume_creator_no_access`);
+  - a disabled or absent creator (`resume_creator_unavailable`).
+
+  Those records would again be unfinishable from the command that started them, which is R-150-6. The caller's proven
+  share keeps S5: the record always has a reader.
+- **F8 holds without the transition.** A wizard or API resume shares to the creator only (now pinned on the flagged
+  no-transition resume: the caller holds no grant). An administrator who uses the ribbon's Make Secure is shared like any
+  caller. Guide §7a and §7 say so.
+- **Never narrowed (a defect in round 33's forward path, fixed with item 2).** `EnsureCreatorShareAsync` set the proven
+  share to EXACTLY the creator's level. That is correct for the wizards' new record, but it would MODIFY a Make Secure
+  caller's existing Full Access share down to Collaborate. That drops Delete, and with it the caller's F3 right to remove
+  the designation. "Keeps access" (round 40 item 2) and A4's "never lower existing access" both forbid that.
+  `MakeSecureCallerMask(held) = (held & FullAccess) | Collaborate`, with `held` = the pre-call share ∪ the current one:
+  - never lower than a level held;
+  - never beyond Full Access, so no Assign (a secure record leaves the business unit only through unsecure);
+  - applied at share-first, the Unverified ensure, Step 5.5 and the resume;
+  - the wizards' path is unchanged (exact).
+- **Shared helpers.** `CallerUnresolved` and `CallerWallRefusal` were extracted from the forward path, text unchanged,
+  and both paths now use them.
+- **Tests** (`SecureFlagEndpointWriteTests` 82 → 96):
+  - the renamed unflagged Make Secure resume ×3 (caller AND creator at the creator's level, 1 additional);
+  - flagged finish ×3 (`resumed`, `sharedToCreatorSystemUserId` = caller, no flag write);
+  - walled creator finishes and is named;
+  - disabled creator finishes for the caller;
+  - caller walled → 403, nothing written;
+  - caller unidentified → 403, nothing written;
+  - creator unreadable → 500, nothing written;
+  - caller share fails → 500, no container;
+  - Full Access kept, forward and resume;
+  - the level floor ×3 (View → Collaborate; Collaborate+Assign → Collaborate; Full+Assign → Full);
+  - the F8 pin on `Provision_ResumingAFlaggedRecord_ByAWriteHolderWhoDidNotCreateIt_StaysOnTheWriteGate`.
+
+  **Seeds** (each build "Build succeeded"; restored from a backup and touched; file hash `5c3ee0ce…` re-checked), over
+  the 768-test filter:
+  - SR1, the Make Secure resume back on F8 rules: 10 fail.
+  - SR2, the caller's No Access check skipped: 1 fail.
+  - SR3, narrowed to exact: 3 fail.
+  - SR4, the creator not shared on the resume: 8 fail.
+  - SR5, the caller's share not ensured: 8 fail.
+  - SR6, F8 broken (no-transition resumes routed through Make Secure): 46 fail.
+  - SR7, the creator read skipped: 1 fail.
+  - SR8, WhoAmI's refusal skipped: 1 fail.
+
+### 23.5 Round 40 item 3 — `principal_share_failed` copy, `{record}`, and "Someone"
+
+- The copy was already as accepted, and each string is pinned verbatim.
+  - Wizard: "{name} was not given access to this project. You can share it with them later from Manage Access."
+  - Ribbon: the same sentence with `{record}`, and round 29's two sentences generalized to `{record}`
+    (`SKIPPED_PRINCIPAL_COPY`, pinned in the frozen-constant test and per table).
+  - The wizard keeps "project": it secures projects only.
+- **"Someone"** (`UNNAMED_PERSON`, ONE constant on each side).
+  - Ribbon: `personName("")` makes no read and answers "Someone". A name that cannot be read, or reads back empty or
+    blank, is "Someone" (it used to show the id). `describeSkippedPrincipal` never fills a blank name.
+  - Wizard: an id the host gave no name or a blank name for, and an empty id, are "Someone" (they used to show the raw
+    id). `describeSkippedPrincipal` and the generic warning guard a blank too.
+  - Item 4 of the brief, the empty-name warning, is this case.
+- **Tests:** ribbon +5 (empty id / blank / null name; the constant; blank in describe); wizard +4. **Seeds:**
+  - CR5, unreadable shows the id: 1 fail.
+  - CR6, an empty id is read: 1 fail.
+  - CW1, the wizard shows the id: 2 fail.
+  - CW2, a blank name passes through: 1 fail.
+
+### 23.6 The brief's 16 items
+
+| # | Disposition |
+|---|---|
+| 1 | **Closed** — round 40 item 1, §23.1/§23.2 (one integration-step stop for files: §23.3) |
+| 2 | **Closed** — round 40 item 2, §23.4 (and the narrowing defect it exposed) |
+| 3 | **Closed** — `ShareToColleaguesAsync`'s summary and the call-site comment now name the share each path proves: the caller's on the forward path and on a Make Secure resume, the record creator's on a resume without the transition |
+| 4 | **Closed** — round 40 item 3, §23.5 |
+| 5–9 | Verified by the verifier; re-held here. The Make Secure resume no longer uses the creator rule, so the verifier's S8 is superseded by SR1/SR4/SR5. The wizards' half is still pinned by the existing non-creator refusals. SA1 / RO1 untouched, and the classes pass (768/768) |
+| 10 | Re-checked on this branch: POML parses (`xml.dom.minidom`); no `NOTE-FROM-MAIN.md`; no live write. `git merge-tree --write-tree` against `integ/uac-r2-batch4` @ `a9c703276` and `work/unified-access-control-r2` @ `83460442d`: both clean |
+| 11 | Superseded by this round's runs (§23.8) |
+| 12 | **Code closed** (§23.1); the live run is G-11 (manual gate, with the new ui-test) |
+| 13 | **Integration step, made complete:** the relocation wiring (§22.4) plus its scheduled backstop (§23.3, a STOP for the main session: round 40's premise did not hold). It cannot be built here: the relocator is not on this branch or on `integ` (166 not merged), and a second relocator is forbidden (round 26 item 3). The release gate (`-SecureTransitionDeployed`) holds until both land |
+| 14 | §23.8: the full BFF unit suite, once, with the result as run |
+| 15 | Live gates G-0…G-11 — manual, main session (§9; G-11 now names `access_ribbon.js` 1.3.0 and round 40's ui-test). G-0 is required in every environment other than dev |
+| 16 | **Pre-verified, and a merge conflict found and resolved:** §23.7 |
+
+### 23.7 Item 16 — external-spa lint and vitest against task 140 (pre-verified; a conflict, resolved)
+
+- Task 140 is not merged into the integration branch: `git merge-base --is-ancestor task/uac-r2-140-x1-v1c
+  integ/uac-r2-batch4` is false. Its newest branch is `task/uac-r2-140-x1-v1c` @ `2c2bcb232`.
+- In a throwaway detached worktree (`C:\wv150e` at `0f993b651`), `git merge --no-commit --no-ff
+  task/uac-r2-140-x1-v1c` raised **two conflicts with task 150's external-spa work**:
+  - `src/pages/OutsideCounselDashboard.tsx`: both tasks fixed the same "Unknown Project" defect, 150 by keeping events
+    tagged and deriving the items with names, 140 by a render-time `projectNameById`.
+  - `src/types/sdap-client.d.ts`: a modify/delete. 150 deleted the `any`-typed shim and mapped `tsconfig` paths to the
+    real package; 140 added `export type DriveItem = any` to the shim for the same `tsc` error.
+- **Resolution** (an integration step for whichever of 140 / 150-integ-c merges second):
+  - take 150's `OutsideCounselDashboard.tsx` whole. Every 140 edit to that file is the same fix: `projectNameById` /
+    `withProjectName`, `projectId` on `UpcomingItem`, the `$select`.
+  - keep the shim deleted. 150's path mapping supplies the real `DriveItem`.
+- **On the resolved tree** (`npm install --legacy-peer-deps --no-audit --no-fund` in `src/client/external-spa`):
+  - `tsc --noEmit -p tsconfig.json` exit 0;
+  - `npm run lint` (140's `eslint.config.js`) exit 0, no problems;
+  - `npx vitest run` 2 files, **13/13**, including 140's `OutsideCounselDashboard.projectName.test.tsx` against 150's
+    implementation;
+  - **seed**: 150's name lookup replaced by `'Unknown Project'` makes 140's test fail 1/1 (restored).
+- The merge was abandoned with nothing committed, and the worktree was removed and pruned.
+- So round 33 item 4's re-run is done against the merged tree. The definitive run is the same three commands on the
+  integration merge, with this resolution.
+
+### 23.8 Tests, publish size, CVE (this round)
+
+**Affected classes first.** The filter is `SecureFlag*`, `SecureProjectShareTests`, `ProvisionNoAccessTests`,
+`ProvisionProject*`, `ProvisionResume*`, `ProvisionRecordedContainer*`, `UnsecureProject*`, `RecordContainerResolver*`,
+`OrganizationMembershipReadTests`, `RecordOwnershipResolverTests`, `EmptySecureFlag*`, `SecureNamedOwnerTeam*` and
+`SecureChild*`.
+- It passed **768/768** before and after every seed, and again after the pre-commit hook's `dotnet format` / prettier pass.
+- `SecureFlagEndpointWriteTests`: **96** (82 + 14).
+
+**Once at the end** (code-final commit `c0acfd7b2`; this box, other agents active):
+- **Full BFF unit suite: 15638 passed, 0 failed, 54 skipped (15692 = the previous round's 15678 + 14)** — ONE clean full
+  run, which closes the brief's item 14;
+- **Spaarke.ArchTests 600/600**;
+- **Sprk.Bff.Api.IntegrationTests 104/104**;
+- **Spe.Integration.Tests 403 passed, 25 skipped, 0 failed (428)**.
+
+**Client** (`@spaarke/ui-components`, after `npm install --legacy-peer-deps --no-audit --no-fund` and building the two
+`file:` dependencies):
+- jest **10 suites 227/227**: CreateProjectWizard (8 suites), `SummarizeFilesDialog.provisioningHost`,
+  `accessRibbon.secureCommands`. That includes `provisioningService.test.ts` **94** (90 + 4) and the ribbon suite **67**
+  (37 + 30), and both `provisioningHost` suites;
+- `tsc --noEmit` 0; `npm run build` 0;
+- eslint on the changed files: 0 errors (the pre-existing unused-`eslint-disable` warning in the ribbon test; the ribbon
+  script itself sits outside the package's lint base path);
+- `node --check sprk_access_ribbon.js` OK.
+
+**external-spa** (§23.7, the merged tree): tsc 0, lint 0, vitest 13/13.
+
+**Publish size** (CLAUDE.md §10, NFR-01). Each tree was extracted fresh with `git archive` into a SHORT path (`C:\w150vm`,
+`C:\w150va`, `C:\w150vb`; removed afterwards) and built with `dotnet publish -c Release -o <root>\deploy\api-publish`
+(framework-dependent linux-x64, from the csproj). Each was zipped with `Compress-Archive -CompressionLevel Optimal` over
+`api-publish\*`, **PDBs included** (4). No MSB3030 on any side; 212 files each.
+
+| Tree | Commit | Files | Zip |
+|---|---|---|---|
+| `origin/master` | `293fcd4c8` | 212 | **45.65 MB** (47,864,294 B) |
+| this round's base | `0f993b651` | 212 | 46.05 MB (48,285,725 B) |
+| this round (code-final) | `c0acfd7b2` | 212 | **46.05 MB** (48,288,275 B) |
+
+This round adds **+0.002 MB** (+2,550 B). The integration tree is +0.40 MB over master (batch 4's tasks together). That is
+far under the 60 MB ceiling and the +5 MB escalation.
+
+**CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api` reports "no vulnerable packages".
+This round adds no package.
+
+### 23.9 Placement and justification (CLAUDE.md §10 / §11)
+
+No new endpoint, service, DI registration, option, job, column, package or PCF. No `.claude/**` edit needed. Hot path:
+BFF = Y (already declared). Each new member below answers the three questions.
+
+| New member | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ResumeMakeSecureAsync` (private) | The resume's F8 rules (`ResolveResumeCreatorAsync` …) and the forward Make Secure path | Reuses `ResolveMakeSecureCreatorAsync`, `EnsureSecureFlagAsync`, `EnsureCreatorShareAsync` and the colleague step. It is separate only because the resume has no move to make or undo | A Make Secure retry by a non-creator leaves them without access (round 40 item 2), and one on a record with a walled or disabled creator is refused 409 forever (R-150-6) |
+| `MakeSecureCallerMask` (internal static) + `EnsureCreatorShareAsync`'s optional target | `CreatorAccessMask`, `RecordShareLevels` | A pure function over the existing masks; one optional parameter on the existing ensure | A Full Access holder who runs Make Secure is narrowed to Collaborate and loses F3 |
+| `CallerUnresolved` / `CallerWallRefusal` (private) | Inline in the forward path | Extracted, text unchanged | Two copies of the refusal text would drift |
+| Ribbon `MAKE_SECURE_RETRY_IN_PLACE`, `UNNAMED_PERSON`, the `unfinished` state | The ribbon's `readSecureState` / `runDesignation` / `personName` | One read widened, the existing dialog helper reused | R-150-6 stays open; an empty name is shown |
+| Wizard `UNNAMED_PERSON` | `describeSkippedPrincipal` | One constant and a guard | The raw id, or an empty name, is shown |
+
+ADR-002: no plugin. ADR-003: every new refusal comes before any write, and an unknown flag still hides both commands.
+ADR-006: the ribbon stays a thin command script. ADR-028: the token is `BffAuth.authenticatedFetch`'s. ADR-038: no
+`Mock<HttpMessageHandler>`, no DI or constructor tests; every new guard was seeded.
