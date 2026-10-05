@@ -19,7 +19,8 @@
       2. Database `default`: accessKeysAuthentication Disabled, clientProtocol Encrypted, OSSCluster, port 10000
          (ADR-009 / owner D12-D13).
       3. At least one `default` access-policy assignment; with -ExpectedPrincipalIds the set must match exactly.
-      4. With -BffAppName: the app's `Redis__Endpoint` setting equals `{hostName}:10000`.
+      4. With -BffAppName: the app's `Redis__Endpoint` setting equals `{hostName}:10000`; with
+         -RequireNoBffConnectionString it also has no `ConnectionStrings__Redis` / `Redis__ConnectionString`.
 
 .PARAMETER RedisName
     Cache name, e.g. spaarke-bff-redis-dev.
@@ -36,6 +37,12 @@
 .PARAMETER BffResourceGroup
     Resource group of -BffAppName.
 
+.PARAMETER RequireNoBffConnectionString
+    Fail if -BffAppName still has a Redis connection-string setting (after the task 242b removal).
+
+.PARAMETER SubscriptionId
+    Subscription of the cache and the app. Default: the az CLI's current subscription.
+
 .EXAMPLE
     pwsh tests/manual/RedisValidationTests.ps1 -RedisName spaarke-bff-redis-dev -ResourceGroup spe-infrastructure-westus2 `
         -BffAppName spaarke-bff-dev -BffResourceGroup rg-spaarke-dev
@@ -45,7 +52,9 @@ param(
     [Parameter(Mandatory)][string]$ResourceGroup,
     [string[]]$ExpectedPrincipalIds = @(),
     [string]$BffAppName,
-    [string]$BffResourceGroup
+    [string]$BffResourceGroup,
+    [switch]$RequireNoBffConnectionString,
+    [string]$SubscriptionId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -65,7 +74,7 @@ function Get-ArmJson([string]$Path) {
 
 Write-Host "Azure Managed Redis validation - $RedisName ($ResourceGroup)" -ForegroundColor Cyan
 
-$subscriptionId = az account show --query id -o tsv
+$subscriptionId = if ($SubscriptionId) { $SubscriptionId } else { az account show --query id -o tsv }
 $clusterPath = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Cache/redisEnterprise/$RedisName"
 
 # 1. Cluster
@@ -110,8 +119,13 @@ if ($objectIds.Count -eq 0) {
 if ($BffAppName) {
     Write-Host "[4] $BffAppName Redis__Endpoint" -ForegroundColor Yellow
     $expected = "$($cluster.properties.hostName):10000"
-    $actual = az webapp config appsettings list --resource-group $BffResourceGroup --name $BffAppName --query "[?name=='Redis__Endpoint'].value | [0]" -o tsv 2>$null
+    $settings = az webapp config appsettings list --subscription $subscriptionId --resource-group $BffResourceGroup --name $BffAppName -o json 2>$null | ConvertFrom-Json
+    $actual = ($settings | Where-Object { $_.name -eq 'Redis__Endpoint' }).value
     if ($actual -eq $expected) { Pass "Redis__Endpoint = $expected" } else { Fail "Redis__Endpoint = '$actual' (expected '$expected')" }
+    if ($RequireNoBffConnectionString) {
+        $left = @($settings | Where-Object { $_.name -in @('ConnectionStrings__Redis', 'Redis__ConnectionString') } | ForEach-Object { $_.name })
+        if ($left.Count -eq 0) { Pass 'no Redis connection-string setting' } else { Fail "still set: $($left -join ', ')" }
+    }
 }
 
 Write-Host ""

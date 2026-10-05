@@ -51,6 +51,18 @@
     Redis__Endpoint is set, while older builds still deployed to a shared environment read it. Task 242b
     removes it after master carries T242 (no-outage cut-over).
 
+.PARAMETER RemoveBffConnectionString
+    Remove `ConnectionStrings__Redis` and `Redis__ConnectionString` from `spaarke-bff-{env}` (task 242b).
+    Refuses unless the app already carries `Redis__Endpoint`. Run it only once every build deployed to
+    that environment is T242+ (in a shared environment: after master carries T242 and other worktrees
+    were told to merge it) — an older build reads only the connection string. The Key Vault secret the
+    setting referenced is left alone (secrets are never deleted).
+
+.PARAMETER SubscriptionId
+    Subscription of the cache and the BFF. Default: the az CLI's current subscription. Pass it rather than
+    running `az account set` — the CLI context is shared by every session on the machine. (Demo lives in
+    its own subscription.)
+
 .PARAMETER Force
     Required to target `prod` or `demo` environments per NFR-05. Without `-Force`,
     the script exits with code 2 and a NFR-05 message.
@@ -123,6 +135,10 @@ param(
 
     [switch]$CutoverBffSettings,
 
+    [switch]$RemoveBffConnectionString,
+
+    [string]$SubscriptionId,
+
     [switch]$Force,
 
     [switch]$DeployAlerts,
@@ -133,6 +149,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# Every az call names the subscription when one was given (never `az account set`).
+$subArgs = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
 $repoRoot = Split-Path -Parent $PSScriptRoot
 
 # ---------------------------------------------------------------------------
@@ -210,7 +228,9 @@ if ($VerifyOnly) {
         Write-Error "Validation harness not found: $validationScript"
         exit 4
     }
-    & pwsh $validationScript -RedisName $redisName -ResourceGroup $ResourceGroup
+    $verifyArgs = @{ RedisName = $redisName; ResourceGroup = $ResourceGroup }
+    if ($SubscriptionId) { $verifyArgs.SubscriptionId = $SubscriptionId }
+    & $validationScript @verifyArgs
     exit $LASTEXITCODE
 }
 
@@ -219,7 +239,7 @@ if ($VerifyOnly) {
 # ---------------------------------------------------------------------------
 $existing = $null
 try {
-    $existing = az resource show --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.provisioningState" -o tsv 2>$null
+    $existing = az resource show @subArgs --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.provisioningState" -o tsv 2>$null
 } catch {
     $existing = $null
 }
@@ -229,7 +249,7 @@ if ($existing -eq 'Succeeded') {
 } else {
     if ($PSCmdlet.ShouldProcess("$redisName in $ResourceGroup", "Deploy Bicep (redis.bicep with redis-$Environment.bicepparam)")) {
         Write-Host "Deploying Bicep template..."
-        az deployment group create `
+        az deployment group create @subArgs `
             --resource-group $ResourceGroup `
             --template-file $bicepModule `
             --parameters $bicepParam `
@@ -251,14 +271,14 @@ if ($existing -eq 'Succeeded') {
 # ---------------------------------------------------------------------------
 if ($CutoverBffSettings) {
     if ($PSCmdlet.ShouldProcess("$bffAppName App Settings", "Set Redis__Endpoint (managed identity)")) {
-        $hostName = az resource show --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.hostName" -o tsv
+        $hostName = az resource show @subArgs --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.hostName" -o tsv
         if ($LASTEXITCODE -ne 0 -or -not $hostName) {
             Write-Error "Could not read the host name of '$redisName' (Microsoft.Cache/redisEnterprise) in '$ResourceGroup'."
             exit 5
         }
         # BFF App Service typically lives in rg-spaarke-{env}, not the Redis RG.
         $bffRg = "rg-spaarke-$Environment"
-        az webapp config appsettings set `
+        az webapp config appsettings set @subArgs `
             --resource-group $bffRg `
             --name $bffAppName `
             --settings `
@@ -271,7 +291,31 @@ if ($CutoverBffSettings) {
             Write-Error "BFF App Settings cutover failed (exit $LASTEXITCODE)"
             exit $LASTEXITCODE
         }
-        Write-Host "  Set Redis__Endpoint=${hostName}:10000 on '$bffAppName' (ConnectionStrings__Redis, if any, left for task 242b)."
+        Write-Host "  Set Redis__Endpoint=${hostName}:10000 on '$bffAppName' (ConnectionStrings__Redis, if any, left in place — see -RemoveBffConnectionString)."
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Remove the BFF's Redis connection-string settings (task 242b) — only once it has Redis__Endpoint
+# ---------------------------------------------------------------------------
+if ($RemoveBffConnectionString) {
+    $bffRg = "rg-spaarke-$Environment"
+    $endpointSetting = az webapp config appsettings list @subArgs --resource-group $bffRg --name $bffAppName --query "[?name=='Redis__Endpoint'].value | [0]" -o tsv
+    if ($LASTEXITCODE -ne 0 -or -not $endpointSetting) {
+        Write-Error "'$bffAppName' has no Redis__Endpoint: removing the connection string would leave it without Redis. Run -CutoverBffSettings first."
+        exit 8
+    }
+    if ($PSCmdlet.ShouldProcess("$bffAppName App Settings", "Remove ConnectionStrings__Redis and Redis__ConnectionString")) {
+        az webapp config appsettings delete @subArgs `
+            --resource-group $bffRg `
+            --name $bffAppName `
+            --setting-names ConnectionStrings__Redis Redis__ConnectionString `
+            --output none
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Removing the Redis connection-string settings failed (exit $LASTEXITCODE)"
+            exit $LASTEXITCODE
+        }
+        Write-Host "  Removed ConnectionStrings__Redis / Redis__ConnectionString from '$bffAppName' (it keeps Redis__Endpoint=$endpointSetting; the Key Vault secret is untouched)."
     }
 }
 
@@ -303,7 +347,7 @@ if ($DeployAlerts) {
 
     if ($WhatIfPreference) {
         Write-Host "  Mode           : what-if (no resources will be created)"
-        az deployment group what-if `
+        az deployment group what-if @subArgs `
             --resource-group $ResourceGroup `
             --template-file $alertsBicep `
             --parameters $alertParams `
@@ -313,7 +357,7 @@ if ($DeployAlerts) {
             exit $LASTEXITCODE
         }
     } elseif ($PSCmdlet.ShouldProcess("alerts in $ResourceGroup targeting $redisName + $AppInsightsName", "Deploy 3 Redis cache alerts via alerts.bicep")) {
-        az deployment group create `
+        az deployment group create @subArgs `
             --resource-group $ResourceGroup `
             --template-file $alertsBicep `
             --parameters $alertParams `
@@ -332,10 +376,13 @@ if ($DeployAlerts) {
 if (-not $WhatIfPreference -and (Test-Path $validationScript)) {
     Write-Host "Post-deploy verification..."
     $validationArgs = @{ RedisName = $redisName; ResourceGroup = $ResourceGroup }
-    if ($CutoverBffSettings) {
-        # The cut-over just set Redis__Endpoint: confirm it names this cache.
+    if ($SubscriptionId) { $validationArgs.SubscriptionId = $SubscriptionId }
+    if ($CutoverBffSettings -or $RemoveBffConnectionString) {
+        # The BFF settings were just changed: confirm Redis__Endpoint names this cache and no connection string remains
+        # after a removal.
         $validationArgs.BffAppName = $bffAppName
         $validationArgs.BffResourceGroup = "rg-spaarke-$Environment"
+        if ($RemoveBffConnectionString) { $validationArgs.RequireNoBffConnectionString = $true }
     }
     & $validationScript @validationArgs
     if ($LASTEXITCODE -ne 0) {
