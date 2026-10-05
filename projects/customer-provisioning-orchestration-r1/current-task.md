@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-04 SESSION 35 — **T242 IN PROGRESS** (task-execute started; master merged `7e9fd4dda`, 0 behind; /conflict-check soft-warn only).
+> **Last Updated**: 2026-10-04 SESSION 35 — **T242 ✅ COMPLETE** (code; commits `bc73844f9` + gate fixes, pushed). **Next: T242b** (live dev + demo Managed Redis cut-over — every step needs owner approval). T242b is extended per owner ("do not defer"): demo cache, no-outage dev cut-over, ordering gates.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,21 +36,15 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 34 END, 2026-10-04)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 35, 2026-10-04)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **242 — Per-customer Redis → Azure Managed Redis B0 HA, Entra-only (owner D12) — CODE** · `tasks/242-stamp-redis-managed-entra-only.poml` · status **pending** (TASK-INDEX `🔲 [open]`) · FULL · **opus @ high** · steps directional |
-| **Step** | Steps 0–6 code + docs DONE (uncommitted). Running: full BFF unit suite (log in scratchpad `bff-unit.log`) + master publish in `C:/wt242m`. NEXT: compare BFF failures vs master; commit WIP; branch publish in `C:/wt242b` (fresh worktree from the WIP commit) + Compress-Archive both; `dotnet list package --vulnerable` (BFF + ControlPlane.Core); ArchTests; Step 9.5 gates; close. |
-| **Status** | in-progress (started 2026-10-04 SESSION 35) |
-| **Next Action** | Check `bff-unit.log` failures (2 `RedisScheduledJobLeaseTests` fixed by `keepTtl: false`; `ContactAadObjectIdColumnGuardTests` probably pre-existing — verify on master). |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → **T242** (next, code) → **T242b** (live dev cache)  → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T241 (decommission) on owner go-ahead. |
-
-### T242 progress (SESSION 35, 2026-10-04) — uncommitted on the branch
-- Master merged (`7e9fd4dda`). Owner (2026-10-04): implement the designed strict rule; extra migration work goes into this project, not deferred → **T242b extended** (demo cache `spaarke-bff-redis-demo` + no-outage dev cut-over: add `Redis__Endpoint` first, keep the old connection string until T242 is on master + INDEX.md note; ordering gates). Live read-only facts: every deployed BFF/Worker runs `Production`; demo BFF stopped, Redis disabled, no cache; `sprksharedprod-redis` is T241's.
-- DONE: `modules/redis.bicep` → Managed Redis (redisEnterprise 2025-07-01, access keys Disabled, OSSCluster, AllKeysLRU, access-policy loop @batchSize(1), output `redisEndpoint`); `redis-{dev,staging,prod}.bicepparam` new shape (dev principals: mi-bff-api-dev 9fd47efb-…, sprk-controlplane-dev-uami 38f7693f-…); `customer.bicep` (+json recompiled) params `redisSkuName`/`redisHighAvailability`, UAMI access policy, `Redis__Endpoint`, no KV secret, output `redisEndpoint`; manifest (stamp `Redis-ConnectionString` removed, `Redis__Endpoint` per_env from `from-h2a-output:redis_endpoint`) + generator allow-list + regenerated; control plane `BicepDeployOutputs.RedisEndpoint`, ArmDeploymentRunner, H2a check + write, `InterStepState.RedisEndpoint`, HandlerRunInputs H4b, PerEnvSourceCatalog; packages `Microsoft.Azure.StackExchangeRedis` 3.3.1 + `StackExchange.Redis` 2.13.17 (BFF + ControlPlane.Core + Directory.Packages.props).
-- ALSO DONE (SESSION 35 cont.): BFF `CacheModule` (endpoint → MI via internal overload with configure/connect delegates; client id = `ManagedIdentityCredentialFactory.ResolveUamiClientId`; conn string only Dev/Testing; log mode), `RedisOptions.Endpoint`, `StartupValidationService` log, `appsettings.template.json`; `NullConnectionMultiplexer.NullDatabase` → DispatchProxy (SE.Redis 2.13 added ~160 IDatabase members) + `GetServer(RedisKey…)`; `RedisScheduledJobLease` `keepTtl: false` (2.13 overload binding); Worker `DispatchModule` (endpoint → MI lazy factory, `BuildManagedIdentityOptionsAsync` internal, conn string only Dev/Testing); H1 + `Microsoft.Cache`; PRQ-S-03 text; `Rotate-Secrets.ps1` Redis removed; `Decommission-Customer.ps1` name; prod scripts (`-RedisEndpoint`); stale comments; tests (H2a, ArmDeploymentRunner, H4b AC1b, FileKvSecretManifest floor 20→15, DispatchModule ×5, H1 default, CacheModule ×4); docs (deployment guide, inventory, packaging, config matrix, caching-architecture, full ADR-009) + .claude (ADR-009 concise, provisioning.md section, azure-deployment row, caching patterns, secret-catalog pattern, CHANGELOG). ControlPlane.Tests: only the 6 T221 baseline failures.
-- Inventory extras: `Configure-ProductionAppSettings.ps1` + `Seed-ProductionKeyVault.ps1` (nonexistent spaarke-bff-prod) fixed in T242; `config/spaarke-resources.yaml` dev entry → T242b step 8; remaining customer.json `listKeys` = Storage/ServiceBus/OpenAI (T244).
+| **Task** | **242b — Dev + demo Redis → Azure Managed Redis B0 non-HA, Entra-only — LIVE** · `tasks/242b-dev-redis-managed-recreate.poml` · status **pending** · FULL · opus @ high · steps **prescriptive** |
+| **Step** | Not started. |
+| **Status** | pending — every live step needs the owner's OK (ask each time) |
+| **Next Action** | `task-execute` on `tasks/242b-dev-redis-managed-recreate.poml`. Step 1 = owner OK → throwaway B0 non-HA preflight create in westus2 (also confirms whether the name `spaarke-bff-redis-dev` can be reused while the old Azure Cache for Redis exists). **Ordering gates (binding):** dev BFF gets `Redis__Endpoint` BEFORE this branch merges to master; `ConnectionStrings__Redis` + old cache removed only after master carries T242 + INDEX.md coordination note; Worker switches with its T242 build. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → **T242b** (next, live dev + demo caches)  → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T241 (decommission) on owner go-ahead. |
 
 ### Completed (SESSIONS 30–32)
 | Item | Commit | Outcome |
@@ -66,6 +60,7 @@
 | D23 / T250 / PRQ-E-14 (S31) | `13cf0f2e8` | **D23** `rg-spaarke-shared-prod` = single home for shared PROD resources (Model 1 SPE billing now; prod L2 control plane from its first deploy — change `platform-controlplane.bicep`'s RG name then; group is westus2); subscription renamed "Spaarke Shared Production"; T241 also deletes the partial `rg-spaarke-trial01-prod-model1` stamp. **T250** (plan row): `SpeAdminGraphService` still signs in as each owning app with a KV client SECRET (ADR-028 E-1) → add a MI-FIC credential mode; until then NO secret-based `sprk_specontainertypeconfig` for Model 1. `sprk_credentialmode` created on spaarkedev1 (owner-approved); schema script's case-sensitive existence check fixed. |
 | **T248** (S32) | `b730d9310` (+ master merge `cc7f76aa3`) | L2 signs in as the SPE owning app with MI-FIC — no certificate (D16, G28 closed). Live probe from a throwaway ACI with the Worker UAMI: FIC token `appidacr` 2; registration (already present) + containers GET 200. H0 `SpeOwnerCredential` (3 codes, no 24 h gate); T6 lists the run's container; Worker config `{ContainerTypeId, OwnerAppId}`; dev control plane + Worker deployed (Api part blocked by a pending swap; Worker 503 because of the sidecar → T251). Master merged (`cc7f76aa3`). Gates: 0 Critical / 0 violations; tests 2121 / 6 baseline; ArchTests 346. |
 | **T251** (S33–34) | `0b67f716f` `63fddc269` `633eb5ff3` `e1b874f55` `97ba6a24c` | Exchange sidecar works on the L2 Worker (G30 ✅). Sidecar holds no credential: the Worker mints an Exchange token as `Spaarke Exchange Admin` via MI-FIC (D24); narrowed Exchange role + delegating ×4 (D25); H14a on RBAC for Applications, stamp UAMI only, group-scoped (D26); H10 no longer grants the 4 mailbox roles in Entra. Root cause of the write failures: `-Organization <tenant GUID>` → Worker now resolves the initial domain from Graph `/organization`; sidecar requires it. Scope matched on `RecipientWriteScope=Group` + `CustomResourceScope=<group Name>`. Deployed to dev (image `provisioning-sidecar:633eb5ff3`); `Verify-Sidecar-Live.ps1 -InTenant` 5 PASS / 1 WARN. Fixed at discovery: the verify script (Kudu cannot reach the sidecar on Linux) and Deploy-ControlPlane's stale Worker key check. Open for T186: W1 (group Name vs DisplayName). |
+| **T242** (S35) | `bc73844f9` + gate-fix commit | Customer-stamp Redis = Azure Managed Redis Balanced_B0 HA, access keys disabled, stamp UAMI access policy; `Redis__Endpoint` (customer.bicep + H2a→InterStepState→H4b); no Redis key/secret anywhere. BFF `CacheModule` + Worker `DispatchModule`: endpoint → managed identity (BFF via shared `ManagedIdentityCredentialFactory`, RESP3), connection string only in Development/Testing. StackExchange.Redis 2.13.17 + Microsoft.Azure.StackExchangeRedis 3.3.1 (+0.22 MB, no CVE); NullDatabase → DispatchProxy. ADR-009 amended (Path B). Deploy-RedisCache keyless. Tests: BFF 14246/14300 (0 fail), ControlPlane 2107/2114 (6 = T221 baseline), ArchTests 349. |
 
 ### Live changes made 2026-10-04, SESSION 34 (T251 close — owner-approved: deploy to dev; cleanup of spike throwaways)
 - ACR `sprkcontrolplanedevacr`: `provisioning-sidecar:latest` + `:633eb5ff3` built (run `cc2`).
@@ -97,15 +92,15 @@
 - Read-only checks: no vault holds a Bing / LlamaParse / SPE-owner-cert secret; dev/demo BFFs use `BingGrounding__*` (Foundry connection), no LlamaParse settings.
 
 ### Critical Context
-**T242 (next)**: owner D12 — per-customer Redis = Azure Managed Redis `Balanced_B0`, HA on, Entra only, stamp UAMI via
-`databases/accessPolicyAssignments` (API 2025-07-01, OSSCluster, AllKeysLRU, port 10000). The split decided at filing:
-**T242 = code only** (module, customer.bicep, catalog without `Redis-ConnectionString`, `Redis__Endpoint` H2a→H4b,
-BFF `CacheModule` + Worker `DispatchModule` connect with their UAMI over RESP3 when an endpoint is set, connection string
-only in Development/Testing, H1 registers `Microsoft.Cache`, BFF §10 checks); **T242b = live dev**: recreate
-`spaarke-bff-redis-dev` (serves BOTH the dev BFF and the L2 Worker) as B0 non-HA Entra-only, rewire both, retire dev key
-rotation — owner confirms each live step. Known code risks (in the POML): StackExchange.Redis 2.7.27 → ≥2.10.1 for
-`Microsoft.Azure.StackExchangeRedis` 3.3.x; pub/sub needs RESP3 for token re-auth; SCAN-over-endpoints loops must stay
-cluster-safe; `RunContextContractTests` rule (g) couples `kvSecretValues` and the manifest.
+**T242b (next, live)**: the T242 code is on the branch — any BFF/Worker built from it REFUSES TO START in a deployed
+(Production-named) environment without `Redis__Endpoint`. Live facts (read-only, 2026-10-04): dev BFF `spaarke-bff-dev`
+(UAMI `mi-bff-api-dev`, principal 9fd47efb-…) and the L2 Worker (`sprk-controlplane-dev-uami`, 38f7693f-…) use
+`ConnectionStrings__Redis` → `spaarke-bff-redis-dev` (Basic C0, spe-infrastructure-westus2); demo BFF `spaarke-bff-demo`
+(sub 2ff9ee48-…, rg-spaarke-demo, UAMI `mi-bff-api-demo`) is STOPPED, Redis disabled, no cache. Cut-over: preflight →
+create dev Managed Redis (redis-dev.bicepparam) → Worker (add `redisEndpoint` to the worker module) → dev BFF
+(`Deploy-RedisCache.ps1 -Environment dev -CutoverBffSettings` adds `Redis__Endpoint`, keeps the old connection string)
+→ demo cache → merge to master + INDEX.md note → remove dev connection string → retire dev rotation/alert/seed → delete
+old cache. Live checks in step 4: RESP3 pub/sub round-trip, membership invalidation SCAN under OSS clustering.
 **Exchange (T251, done)**: never add a secret, certificate or Entra directory role to `Spaarke Exchange Admin`; the
 sidecar must connect with the tenant's initial domain, never the GUID. `Enable-OrganizationCustomization` was run
 (irreversible). Open owner items: **G31** (H10 grants Model 1 stamps tenant-wide Directory/User write roles in Spaarke's
@@ -113,6 +108,15 @@ tenant); the **Api site's pending slot swap** (every platform-controlplane deplo
 "Active" vs Status Reason "On hold" on Issue #438. Never delete Key Vault secrets (`Exchange-Connect-Cert` sentinel stays).
 
 ## 📁 Files Modified This Session
+
+### SESSION 35 (2026-10-04) — T242 ✅ — commits `7e9fd4dda` (master merge) `bc73844f9` + gate-fix commit (pushed)
+- Bicep: `modules/redis.bicep` (Managed Redis), `customer.bicep` (+json), `parameters/redis-{dev,staging,prod}.bicepparam`.
+- Catalog: `manifest.yaml`, `Invoke-CatalogGenerator.ps1`, `generated/*`.
+- Control plane: BicepDeployOutputs, ArmDeploymentRunner, H2a, InterStepState, HandlerRunInputs, PerEnvSourceCatalog, SubscriptionReadinessOptions, DispatchModule, csproj, stale comments, IDataverseAppUserCreator + T2 probe (guard fallout); tests (H2a, ArmDeploymentRunner, H4b, FileKvSecretManifest, DispatchModule, H1, T2 probe).
+- BFF: CacheModule, RedisOptions, NullConnectionMultiplexer, RedisScheduledJobLease, StartupValidationService, csproj, appsettings.template.json; CacheModuleTests; Directory.Packages.props.
+- Scripts: Rotate-Secrets, Decommission-Customer, Deploy-RedisCache, Configure-ProductionAppSettings, Seed-ProductionKeyVault, prereqs.yaml, tests/manual/RedisValidationTests.ps1.
+- Docs/.claude: ADR-009 (both), caching-architecture, deployment guide, resource inventory, packaging strategy, configuration matrix, provisioning.md, azure-deployment.md, caching patterns, secret-catalog pattern, CHANGELOG; project design.md §17, plan T242 ✅, T242/T242b POMLs, TASK-INDEX.
+- Memory: `feedback_implement_design_absorb_followon_work.md` (owner: implement the designed solution; absorb follow-on migrations into this project).
 
 ### SESSION 34 (2026-10-04) — T251 closed + T242/T242b filed — commits `1ec4b5b68` `633eb5ff3` `e1b874f55` `97ba6a24c` (pushed) + `1b0317cc2` (local, pushed at handoff)
 - T251 fix: `ExchangeAdminTokenSource.cs` (initial-domain lookup via Graph `/organization`), `ExchangePolicySidecarClient.cs` (`organization` on the wire), `SidecarCore.psm1` + `Listener.ps1` (organization required; scope on RecipientWriteScope/CustomResourceScope), `Sidecar.Tests.ps1` (16), contract + live-verification tests.

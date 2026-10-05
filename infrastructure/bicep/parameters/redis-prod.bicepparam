@@ -15,7 +15,11 @@ param highAvailability = 'Enabled'
 param minimumTlsVersion = '1.2'
 param publicNetworkAccess = 'Enabled'
 
-param accessPolicyPrincipalIds = []
+// PLACEHOLDER — replace with the prod BFF user-assigned identity's OBJECT id before deploying. Not a GUID on purpose:
+// Azure rejects it, so this template cannot deploy a cache that no identity can reach (the module requires >= 1).
+param accessPolicyPrincipalIds = [
+  'REPLACE-WITH-prod-BFF-UAMI-object-id'
+]
 
 param tags = {
   environment: 'prod'

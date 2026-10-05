@@ -44,7 +44,7 @@ Custom HybridCacheService wrapping L1+L2. **Rejected** as premature complexity.
 | Never cache | Authorization decisions |
 | Instrumentation | `cache.hits`, `cache.misses`, `cache.redis_call_duration_ms` (custom metrics emitted from `TenantCache` wrapper); App Insights Redis dependency telemetry |
 | Authentication | Microsoft Entra with the app's user-assigned managed identity (`Redis__Endpoint` host:10000 + `ManagedIdentity__ClientId`, RESP3) — access keys disabled on the cache; no connection string or Key Vault secret (amended 2026-10-04, task 242) |
-| Failure mode | Fail-fast at BFF startup when Redis configured-but-unreachable; in-memory fallback gated to Development + explicit opt-in |
+| Failure mode | Fail-fast at BFF startup when Redis configured-but-unreachable; in-memory fallback gated to Development/Testing + explicit opt-in |
 
 ## Operational MUSTs (added 2026-06-26 by `spaarke-redis-cache-remediation-r1`)
 
@@ -67,6 +67,7 @@ one database `default`, port 10000, `OSSCluster`, `AllKeysLRU`. Azure Cache for 
 |---|---|---|---|
 | dev / demo | Balanced_B0 | Disabled | Cost; dev fidelity (task 242b) |
 | staging | Balanced_B0 | Enabled | Fidelity to customer stamps |
+| platform prod (`spaarke-bff-redis-prod`, not deployed) | Balanced_B0 | Enabled | Template only (`redis-prod.bicepparam`); its access-policy principal is a placeholder that blocks deploy until filled |
 | customer stamp (prod, both models) | Balanced_B0 | Enabled | Owner D12; size up only on a measured memory metric — Managed Redis has no scale-down, and HA is fixed at create |
 
 *(Was: Basic C0 dev / Standard C0+ staging / Standard C2+ or Premium prod; and, from 2026-09-28, Standard per customer.)*
@@ -90,8 +91,8 @@ one database `default`, port 10000, `OSSCluster`, `AllKeysLRU`. Azure Cache for 
 
 - `CacheModule` implements 4-branch logic:
   - Redis-on (`Enabled=true`): `ConfigurationOptions.AbortOnConnectFail = true`; connection failure throws `InvalidOperationException` at startup naming the configuration source.
-  - Redis-off + `AllowInMemoryFallback=true` + `IHostEnvironment.IsDevelopment()`: in-memory `IDistributedCache` + `NullConnectionMultiplexer` registered (Pub/Sub no-op).
-  - Redis-off + `AllowInMemoryFallback=true` + NOT Development: throws.
+  - Redis-off + `AllowInMemoryFallback=true` + Development or Testing (CI fixtures): in-memory `IDistributedCache` + `NullConnectionMultiplexer` registered (Pub/Sub no-op).
+  - Redis-off + `AllowInMemoryFallback=true` + any other environment: throws.
   - Redis-off + no fallback opt-in: throws.
 - Rationale: silent degradation is the failure mode that caused this project. Throwing surfaces the problem at startup, not on the first cache call hours later.
 
@@ -274,12 +275,12 @@ Markdown-only alert documentation (`docs/guides/redis-cache-azure-setup.md` §8)
 
 **Operational references**:
 - `docs/architecture/caching-architecture.md` — design (tenant isolation, multi-instance behavior, instance registry, failure mode catalog)
-- `docs/guides/redis-cache-azure-setup.md` — operational runbook (provision, cutover, rollback, secret rotation, troubleshooting, lessons learned)
-- `scripts/Deploy-RedisCache.ps1` — provisioning automation
+- `docs/guides/redis-cache-azure-setup.md` — operational runbook (provision, cutover, rollback, troubleshooting, lessons learned; key-rotation sections retired by task 242b)
+- `scripts/Deploy-RedisCache.ps1` — per-environment provisioning (Azure Managed Redis; sets `Redis__Endpoint`, no Key Vault step since task 242)
 
 **Related ADRs**:
 - [ADR-010 DI Minimalism](../../.claude/adr/ADR-010-di-minimalism.md) — `ITenantCache` interface justification (≥2 future implementations: default today + named instances per NFR-12)
-- [ADR-028 Spaarke Auth Architecture](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Key Vault reference syntax
+- [ADR-028 Spaarke Auth Architecture](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — A4 secret-free identity: Redis is reached with the app's user-assigned managed identity (task 242)
 - [ADR-029 BFF Publish Hygiene](../../.claude/adr/ADR-029-bff-publish-hygiene.md) — publish-size delta rule
 - [ADR-032 BFF Null-Object Kill-Switch](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — symmetric `IConnectionMultiplexer` registration
 

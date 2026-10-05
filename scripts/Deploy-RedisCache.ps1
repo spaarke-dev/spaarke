@@ -4,12 +4,14 @@
     Deploy Spaarke BFF Redis cache instance per environment.
 
 .DESCRIPTION
-    Idempotent provisioning of `spaarke-bff-redis-{env}` Azure Cache for Redis instance.
-    Uses `redis.bicep` module + per-environment `.bicepparam` files at
-    `infrastructure/bicep/parameters/redis-{env}.bicepparam`.
+    Idempotent provisioning of the per-environment Azure Managed Redis (`spaarke-bff-redis-{env}`,
+    Microsoft.Cache/redisEnterprise, Microsoft Entra only). Uses `redis.bicep` module + per-environment
+    `.bicepparam` files at `infrastructure/bicep/parameters/redis-{env}.bicepparam` (which list the
+    identities granted the cache's access policy).
 
-    Optionally upserts the Redis connection string to Key Vault (`Redis-ConnectionString`)
-    and cuts over `spaarke-bff-{env}` App Service settings to use Key Vault references.
+    Task 242 (owner D12/D13): the cache has access keys DISABLED. This script no longer lists keys or
+    writes a `Redis-ConnectionString` Key Vault secret — there is none. `-CutoverBffSettings` sets the
+    plain `Redis__Endpoint` app setting (host:10000); the BFF authenticates with its managed identity.
 
     Extracted from `Provision-Customer.ps1` lines 422-492 per project
     `spaarke-redis-cache-remediation-r1` FR-11 / FR-12 (per-customer Redis is
@@ -31,10 +33,9 @@
       prod    -> rg-spaarke-prod
       demo    -> rg-spaarke-demo
 
-.PARAMETER KeyVaultName
-    Key Vault to upsert the `Redis-ConnectionString` secret into. Required if
-    `-CutoverBffSettings` is specified. See `notes/dev-cutover-baseline.md`
-    (project Phase 3) for the canonical dev Key Vault name.
+.PARAMETER RedisName
+    Override the cache name. Default: `spaarke-bff-redis-{env}` (must match `redisName` in the
+    environment's .bicepparam).
 
 .PARAMETER VerifyOnly
     Skip deploy; run `tests/manual/RedisValidationTests.ps1` against the existing
@@ -44,9 +45,11 @@
     After successful deploy, update `spaarke-bff-{env}` App Service settings:
       Redis__Enabled                = true
       Redis__InstanceName           = spaarke:
-      ConnectionStrings__Redis      = @Microsoft.KeyVault(VaultName=...;SecretName=Redis-ConnectionString)
+      Redis__Endpoint               = {cache host}:10000
       Redis__AllowInMemoryFallback  = false
-    Requires `-KeyVaultName`.
+    An existing `ConnectionStrings__Redis` is left in place on purpose: a T242+ build ignores it once
+    Redis__Endpoint is set, while older builds still deployed to a shared environment read it. Task 242b
+    removes it after master carries T242 (no-outage cut-over).
 
 .PARAMETER Force
     Required to target `prod` or `demo` environments per NFR-05. Without `-Force`,
@@ -86,9 +89,9 @@
     Plan-only run against dev — prints what would be deployed.
 
 .EXAMPLE
-    pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -KeyVaultName spaarke-spekvcert -CutoverBffSettings
+    pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -CutoverBffSettings
 
-    Deploy dev Redis, upsert connection string to Key Vault, cut over BFF App Settings,
+    Deploy dev Redis, set the BFF's Redis__Endpoint (managed identity),
     then run post-deploy validation.
 
 .EXAMPLE
@@ -114,7 +117,7 @@ param(
 
     [string]$ResourceGroup,
 
-    [string]$KeyVaultName,
+    [string]$RedisName,
 
     [switch]$VerifyOnly,
 
@@ -160,8 +163,7 @@ $bicepParam       = Join-Path $repoRoot "infrastructure/bicep/parameters/redis-$
 $alertsBicep      = Join-Path $repoRoot "infrastructure/bicep/alerts.bicep"
 $validationScript = Join-Path $repoRoot "tests/manual/RedisValidationTests.ps1"
 $bffAppName       = "spaarke-bff-$Environment"
-$kvSecretName     = 'Redis-ConnectionString'
-$redisName        = "spaarke-bff-redis-$Environment"
+$redisName        = if ($RedisName) { $RedisName } else { "spaarke-bff-redis-$Environment" }
 
 # DeployAlerts: resolve App Insights default by env (FR-04 of R2)
 if ($DeployAlerts -and -not $AppInsightsName) {
@@ -195,7 +197,7 @@ Write-Host "  ResourceGroup  : $ResourceGroup"
 Write-Host "  Redis name     : $redisName"
 Write-Host "  Bicep module   : $bicepModule"
 Write-Host "  Bicep param    : $bicepParam"
-Write-Host "  KeyVault       : $(if ($KeyVaultName) { $KeyVaultName } else { '(not specified)' })"
+Write-Host "  Redis          : $redisName (Azure Managed Redis, Entra only)"
 Write-Host "  Mode           : $modeLabel"
 Write-Host ""
 
@@ -217,7 +219,7 @@ if ($VerifyOnly) {
 # ---------------------------------------------------------------------------
 $existing = $null
 try {
-    $existing = az redis show --resource-group $ResourceGroup --name $redisName --query "provisioningState" -o tsv 2>$null
+    $existing = az resource show --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.provisioningState" -o tsv 2>$null
 } catch {
     $existing = $null
 }
@@ -240,37 +242,20 @@ if ($existing -eq 'Succeeded') {
 }
 
 # ---------------------------------------------------------------------------
-# Key Vault secret upsert
+# No Key Vault step (task 242): access keys are disabled on the cache, so there is no key or
+# connection string to store. The identities in the .bicepparam hold its access policy.
 # ---------------------------------------------------------------------------
-if ($KeyVaultName) {
-    if ($PSCmdlet.ShouldProcess("$kvSecretName in $KeyVaultName", "Upsert KV secret with Redis connection string")) {
-        $primaryKey = az redis list-keys --resource-group $ResourceGroup --name $redisName --query primaryKey -o tsv
-        $hostName   = az redis show --resource-group $ResourceGroup --name $redisName --query hostName -o tsv
-        $sslPort    = az redis show --resource-group $ResourceGroup --name $redisName --query sslPort -o tsv
-        $connString = "${hostName}:${sslPort},password=${primaryKey},ssl=True,abortConnect=False"
-        az keyvault secret set `
-            --vault-name $KeyVaultName `
-            --name $kvSecretName `
-            --value $connString `
-            --output none
-        if ($LASTEXITCODE -ne 0) {
-            Write-Error "Key Vault secret upsert failed (exit $LASTEXITCODE)"
-            exit $LASTEXITCODE
-        }
-        Write-Host "  Upserted KV secret '$kvSecretName' in '$KeyVaultName'."
-    }
-}
 
 # ---------------------------------------------------------------------------
-# Cut over BFF App Settings
+# Cut over BFF App Settings to the managed-identity endpoint
 # ---------------------------------------------------------------------------
 if ($CutoverBffSettings) {
-    if (-not $KeyVaultName) {
-        Write-Error "-CutoverBffSettings requires -KeyVaultName."
-        exit 5
-    }
-    if ($PSCmdlet.ShouldProcess("$bffAppName App Settings", "Cutover Redis settings to Key Vault reference")) {
-        $kvRef = "@Microsoft.KeyVault(VaultName=$KeyVaultName;SecretName=$kvSecretName)"
+    if ($PSCmdlet.ShouldProcess("$bffAppName App Settings", "Set Redis__Endpoint (managed identity)")) {
+        $hostName = az resource show --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.hostName" -o tsv
+        if ($LASTEXITCODE -ne 0 -or -not $hostName) {
+            Write-Error "Could not read the host name of '$redisName' (Microsoft.Cache/redisEnterprise) in '$ResourceGroup'."
+            exit 5
+        }
         # BFF App Service typically lives in rg-spaarke-{env}, not the Redis RG.
         $bffRg = "rg-spaarke-$Environment"
         az webapp config appsettings set `
@@ -279,14 +264,14 @@ if ($CutoverBffSettings) {
             --settings `
                 "Redis__Enabled=true" `
                 "Redis__InstanceName=spaarke:" `
-                "ConnectionStrings__Redis=$kvRef" `
+                "Redis__Endpoint=${hostName}:10000" `
                 "Redis__AllowInMemoryFallback=false" `
             --output none
         if ($LASTEXITCODE -ne 0) {
             Write-Error "BFF App Settings cutover failed (exit $LASTEXITCODE)"
             exit $LASTEXITCODE
         }
-        Write-Host "  Cut over '$bffAppName' App Settings to KV reference."
+        Write-Host "  Set Redis__Endpoint=${hostName}:10000 on '$bffAppName' (ConnectionStrings__Redis, if any, left for task 242b)."
     }
 }
 

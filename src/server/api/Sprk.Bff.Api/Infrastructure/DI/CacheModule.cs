@@ -1,3 +1,4 @@
+using Azure.Core;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
@@ -28,8 +29,11 @@ public static class CacheModule
     /// <summary>The setting deployed environments must carry when Redis is enabled (named in startup errors).</summary>
     internal const string EndpointSettingName = "Redis__Endpoint";
 
-    /// <summary>The setting that names the user-assigned managed identity (named in startup errors).</summary>
-    internal const string ClientIdSettingName = "ManagedIdentity__ClientId";
+    /// <summary>
+    /// The settings that name the user-assigned managed identity (named in startup errors) — the two keys
+    /// <see cref="ManagedIdentityCredentialFactory.ResolveUamiClientId"/> reads, in its order.
+    /// </summary>
+    internal const string ClientIdSettingName = "Graph__ManagedIdentity__ClientId or ManagedIdentity__ClientId";
 
     /// <summary>
     /// Adds distributed cache (Redis or in-memory) and memory cache services.
@@ -46,19 +50,20 @@ public static class CacheModule
             configuration,
             logging,
             environment,
-            (options, clientId) => StackExchange.Redis.AzureCacheForRedis.ConfigureForAzureWithUserAssignedManagedIdentityAsync(options, clientId),
+            (options, credential) => StackExchange.Redis.AzureCacheForRedis.ConfigureForAzureWithTokenCredentialAsync(options, credential),
             options => StackExchange.Redis.ConnectionMultiplexer.Connect(options));
 
     /// <summary>
-    /// Test seam: the two network steps of the Redis-on branch — acquiring the Entra token for the managed identity
-    /// and connecting — are passed in, so mode selection is verifiable without Azure or a live Redis.
+    /// Test seam: the two network steps of the Redis-on branch — authenticating with the managed-identity credential
+    /// (the first Entra token is fetched here) and connecting — are passed in, so mode selection is verifiable
+    /// without Azure or a live Redis.
     /// </summary>
     internal static IServiceCollection AddCacheModule(
         this IServiceCollection services,
         IConfiguration configuration,
         ILoggingBuilder logging,
         IHostEnvironment environment,
-        Func<StackExchange.Redis.ConfigurationOptions, string, Task> configureForManagedIdentity,
+        Func<StackExchange.Redis.ConfigurationOptions, TokenCredential, Task> configureForManagedIdentity,
         Func<StackExchange.Redis.ConfigurationOptions, StackExchange.Redis.IConnectionMultiplexer> connect)
     {
         // Bind RedisOptions (Enabled, Endpoint, ConnectionString, InstanceName, AllowInMemoryFallback)
@@ -220,9 +225,12 @@ public static class CacheModule
     private static (StackExchange.Redis.ConfigurationOptions Options, string AuthMode) BuildManagedIdentityOptions(
         string endpoint,
         IConfiguration configuration,
-        Func<StackExchange.Redis.ConfigurationOptions, string, Task> configureForManagedIdentity)
+        Func<StackExchange.Redis.ConfigurationOptions, TokenCredential, Task> configureForManagedIdentity)
     {
-        // The same lookup every app-only consumer uses (ADR-028 A4 — one shared credential path).
+        // ADR-028 A4 — one shared credential path: the identity is resolved by the same lookup every app-only consumer
+        // uses, and the credential is the shared tenant-pinned one (ManagedIdentityCredentialFactory.Create), not one
+        // the Redis library builds for itself. A client id is REQUIRED here: without it the credential could fall back
+        // to another identity on the host, and only the configured UAMI holds the cache's access policy.
         var clientId = ManagedIdentityCredentialFactory.ResolveUamiClientId(configuration);
         if (clientId is null)
         {
@@ -259,7 +267,8 @@ public static class CacheModule
 
         try
         {
-            configureForManagedIdentity(options, clientId).GetAwaiter().GetResult();
+            // Startup-time, like the synchronous Connect below: there is no SynchronizationContext at DI registration.
+            configureForManagedIdentity(options, ManagedIdentityCredentialFactory.Create(configuration)).GetAwaiter().GetResult();
         }
         catch (Exception ex)
         {

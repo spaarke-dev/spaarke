@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "1660596358289079279"
+      "templateHash": "17705922489390793174"
     }
   },
   "parameters": {
@@ -2244,7 +2244,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15594343827829009946"
+              "templateHash": "105629902906573440"
             }
           },
           "parameters": {
@@ -2306,8 +2306,9 @@
             },
             "accessPolicyPrincipalIds": {
               "type": "array",
+              "minLength": 1,
               "metadata": {
-                "description": "Object (principal) IDs of the managed identities granted the built-in \"default\" data access policy. The only way in: access keys are disabled."
+                "description": "Object (principal) IDs of the managed identities granted the built-in \"default\" data access policy. The only way in: access keys are disabled, so an empty list would deploy a cache nobody can use."
               }
             },
             "tags": {

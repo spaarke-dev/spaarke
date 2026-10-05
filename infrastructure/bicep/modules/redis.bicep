@@ -49,7 +49,8 @@ param minimumTlsVersion string = '1.2'
 ])
 param publicNetworkAccess string = 'Enabled'
 
-@description('Object (principal) IDs of the managed identities granted the built-in "default" data access policy. The only way in: access keys are disabled.')
+@description('Object (principal) IDs of the managed identities granted the built-in "default" data access policy. The only way in: access keys are disabled, so an empty list would deploy a cache nobody can use.')
+@minLength(1)
 param accessPolicyPrincipalIds array
 
 @description('Tags for the resource.')

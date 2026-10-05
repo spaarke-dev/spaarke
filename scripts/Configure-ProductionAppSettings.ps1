@@ -41,12 +41,11 @@ param(
     [string]$AppServiceName = "spaarke-bff-prod",
     [string]$VaultName = "sprk-platform-prod-kv",
     [bool]$IncludeSlots = $true,
-    [string]$RedisEndpoint = ""
+    # host:port only — never a connection string (the BFF refuses one in Production).
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[A-Za-z0-9.-]+:\d+$')]
+    [string]$RedisEndpoint
 )
-
-if ([string]::IsNullOrWhiteSpace($RedisEndpoint)) {
-    throw "-RedisEndpoint is required (host:10000 of the prod Azure Managed Redis — infrastructure/bicep/parameters/redis-prod.bicepparam). The BFF refuses to start in Production without Redis__Endpoint."
-}
 
 $ErrorActionPreference = "Stop"
 

@@ -250,7 +250,7 @@ if (-not $LocalOnly -and $RedisConnectionString) {
 # expose a `keys` verb against Azure Cache for Redis; full enumeration requires
 # `redis-cli` (not bundled with the validation harness). The function therefore
 # performs:
-#   1. `az redis show` — verifies the instance exists and is in `Succeeded`
+#   1. `az resource show` (Microsoft.Cache/redisEnterprise) — verifies the instance exists and is in `Succeeded`
 #      provisioningState (best-effort live signal).
 #   2. Documents the residual manual KEYS check the operator runs via redis-cli.
 #   3. Pass-by-default on an empty dev Redis (no keys yet → invariant trivially
@@ -270,7 +270,8 @@ function Test-TenantPrefixInvariant {
     # Step 1: verify the instance exists in Azure.
     $provisioningState = $null
     try {
-        $provisioningState = az redis show --resource-group $ResourceGroup --name $RedisName --query "provisioningState" -o tsv 2>$null
+        # Azure Managed Redis since task 242 (Microsoft.Cache/redisEnterprise).
+        $provisioningState = az resource show --resource-group $ResourceGroup --name $RedisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.provisioningState" -o tsv 2>$null
     } catch {
         $provisioningState = $null
     }

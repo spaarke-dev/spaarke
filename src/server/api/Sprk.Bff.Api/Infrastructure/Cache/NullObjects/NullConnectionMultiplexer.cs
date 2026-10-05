@@ -13,8 +13,9 @@
 //                             Subscribe* accepts callbacks but never delivers.
 //                             Log-once warning on first GetSubscriber() call.
 //   - GetDatabase():          returns NullDatabase — P3 Fail-fast for direct
-//                             database ops. Every method throws NotSupportedException
-//                             with guidance to use IDistributedCache instead.
+//                             database ops. Every Redis command throws NotSupportedException
+//                             with guidance to use IDistributedCache instead (the
+//                             identity properties and inert wait helpers answer).
 //   - Connection state:       safe inert defaults (IsConnected=false,
 //                             ClientName="null-object", Configuration="").
 //   - Events:                 unused (never raised) — backing fields accept
@@ -68,7 +69,7 @@ internal sealed class NullConnectionMultiplexer : IConnectionMultiplexer
             "NullConnectionMultiplexer active — Redis is disabled (in-memory cache mode). " +
             "Pub/Sub invalidations are no-ops (multi-instance unsupported in this mode). " +
             "Direct IDatabase operations will throw NotSupportedException — use IDistributedCache instead. " +
-            "Set Redis:Enabled=true with a valid connection string to activate the real connection.");
+            "Set Redis:Enabled=true with Redis:Endpoint (managed identity) to activate the real connection.");
     }
 
     // ---------------------------------------------------------------------
@@ -234,16 +235,18 @@ internal sealed class NullConnectionMultiplexer : IConnectionMultiplexer
     // ---------------------------------------------------------------------
 
     /// <summary>
-    /// Null-Object <see cref="IDatabase"/>. Every operation throws
+    /// Null-Object <see cref="IDatabase"/>. Every Redis command throws
     /// <see cref="NotSupportedException"/> per ADR-032 P3 Fail-fast tier:
     /// in-memory cache mode does not back arbitrary Redis database commands;
     /// callers must use <c>IDistributedCache</c> for cache reads/writes.
     /// <para>
     /// Built as a <see cref="DispatchProxy"/> rather than ~460 hand-written stubs (task 242): the
     /// <see cref="IDatabase"/> surface grows with every StackExchange.Redis release (2.7 → 2.13 added
-    /// ~160 members), and a hand-written stub stops compiling on each bump. The proxy answers the two
-    /// identity properties and throws for everything else, so the contract is unchanged and new
-    /// members are covered automatically.
+    /// ~160 members), and a hand-written stub stops compiling on each bump. The proxy keeps the previous
+    /// stub's contract exactly: the identity properties (<c>Database</c> = -1, <c>Multiplexer</c>) and the
+    /// inert connection/wait helpers (<c>IsConnected</c> = false, <c>TryWait</c>/<c>WaitAsync</c> = true,
+    /// <c>Wait</c>/<c>WaitAll</c> wait on the given task) answer; every Redis command throws. New members
+    /// are covered automatically.
     /// </para>
     /// </summary>
     internal class NullDatabase : DispatchProxy
@@ -262,8 +265,26 @@ internal sealed class NullConnectionMultiplexer : IConnectionMultiplexer
             {
                 "get_Database" => -1,
                 "get_Multiplexer" => _parent,
+                "IsConnected" => false,
+                "TryWait" => true,
+                "WaitAsync" => Task.FromResult(true),
+                "Wait" => WaitOn((Task)args![0]!, targetMethod),
+                "WaitAll" => WaitAll((Task[])args![0]!),
                 _ => throw new NotSupportedException(DatabaseNotSupportedMessage),
             };
+
+        private static object? WaitOn(Task task, MethodInfo method)
+        {
+            task.Wait();
+            // Wait<T>(Task<T>) returns the task's result; Wait(Task) returns nothing.
+            return method.ReturnType == typeof(void) ? null : task.GetType().GetProperty("Result")!.GetValue(task);
+        }
+
+        private static object? WaitAll(Task[] tasks)
+        {
+            Task.WaitAll(tasks);
+            return null;
+        }
     }
 
     // ---------------------------------------------------------------------

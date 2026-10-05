@@ -13,6 +13,8 @@
 //            src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs
 //            src/server/api/Sprk.Bff.Api/Infrastructure/Cache/NullObjects/NullConnectionMultiplexer.cs
 
+using Azure.Core;
+using Azure.Identity;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Caching.Memory;
@@ -90,14 +92,14 @@ public class CacheModuleTests
 
     private sealed class NetworkFakes
     {
-        public string? ClientIdUsed { get; private set; }
+        public TokenCredential? CredentialUsed { get; private set; }
         public ConfigurationOptions? ConnectedWith { get; private set; }
         public IConnectionMultiplexer Multiplexer { get; } =
             new NullConnectionMultiplexer(NullLogger<NullConnectionMultiplexer>.Instance);
 
-        public Task Configure(ConfigurationOptions options, string clientId)
+        public Task Configure(ConfigurationOptions options, TokenCredential credential)
         {
-            ClientIdUsed = clientId;
+            CredentialUsed = credential;
             return Task.CompletedTask;
         }
 
@@ -130,7 +132,9 @@ public class CacheModuleTests
             ["ManagedIdentity:ClientId"] = ClientId,
         }, Environments.Production, fakes);
 
-        fakes.ClientIdUsed.Should().Be(ClientId, "the token is requested for the configured user-assigned identity");
+        // ADR-028 A4: the shared, UAMI-pinned credential from ManagedIdentityCredentialFactory — not one the Redis
+        // library builds for itself.
+        fakes.CredentialUsed.Should().BeOfType<DefaultAzureCredential>();
         fakes.ConnectedWith!.Protocol.Should().Be(RedisProtocol.Resp3,
             "RESP3 lets the token refresh re-authenticate the pub/sub connection");
         fakes.ConnectedWith.Ssl.Should().BeTrue();
@@ -170,8 +174,10 @@ public class CacheModuleTests
         fakes.ConnectedWith.Should().BeNull("nothing connects with a connection string outside Development/Testing");
     }
 
-    [Fact]
-    public void Redis_On_ConnectionString_Development_ConnectsWithIt_WithoutManagedIdentity()
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Testing")]
+    public void Redis_On_ConnectionString_LocalLikeEnvironment_ConnectsWithIt_WithoutManagedIdentity(string environmentName)
     {
         var services = new ServiceCollection();
         var fakes = new NetworkFakes();
@@ -180,10 +186,62 @@ public class CacheModuleTests
         {
             ["Redis:Enabled"] = "true",
             ["ConnectionStrings:Redis"] = "localhost:6379",
-        }, Environments.Development, fakes);
+        }, environmentName, fakes);
 
-        fakes.ClientIdUsed.Should().BeNull();
+        fakes.CredentialUsed.Should().BeNull();
         fakes.ConnectedWith!.EndPoints.Should().ContainSingle().Which.ToString().Should().Contain("6379");
+    }
+
+    [Fact]
+    public void Redis_On_EndpointAndConnectionString_Production_UsesTheEndpointOnly()
+    {
+        // The T242b cut-over relies on this: the dev BFF carries both settings while older builds still read the
+        // connection string; a T242 build must ignore it and use the managed identity.
+        var services = new ServiceCollection();
+        var fakes = new NetworkFakes();
+
+        AddWithFakes(services, new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "true",
+            ["Redis:Endpoint"] = Endpoint,
+            ["ManagedIdentity:ClientId"] = ClientId,
+            ["ConnectionStrings:Redis"] = "old-cache.redis.cache.windows.net:6380,password=oldkey,ssl=True",
+        }, Environments.Production, fakes);
+
+        fakes.CredentialUsed.Should().NotBeNull();
+        fakes.ConnectedWith!.Password.Should().BeNullOrEmpty();
+        fakes.ConnectedWith.EndPoints.Should().ContainSingle().Which.ToString().Should().Contain("10000");
+    }
+
+    [Fact]
+    public void Redis_On_EndpointCarryingACredential_IsRefused_WithoutEchoingIt()
+    {
+        // Security guard (justification for coverage beyond the task's list): a connection string pasted into
+        // Redis__Endpoint must not be used, and its secret must not reach the startup log.
+        var services = new ServiceCollection();
+
+        Action act = () => AddWithFakes(services, new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "true",
+            ["Redis:Endpoint"] = "cache.example:10000,password=s3cret-value",
+            ["ManagedIdentity:ClientId"] = ClientId,
+        }, Environments.Production, new NetworkFakes());
+
+        act.Should().Throw<InvalidOperationException>()
+            .Where(e => e.Message.Contains("Redis__Endpoint") && !e.Message.Contains("s3cret-value"));
+    }
+
+    [Fact]
+    public void NullConnectionMultiplexer_Database_KeepsTheInertMembers()
+    {
+        // The DispatchProxy rewrite (task 242) keeps the previous stub's non-command members.
+        var sut = new NullConnectionMultiplexer(NullLogger<NullConnectionMultiplexer>.Instance);
+        var database = sut.GetDatabase();
+
+        database.Database.Should().Be(-1);
+        database.Multiplexer.Should().BeSameAs(sut);
+        database.IsConnected("any-key").Should().BeFalse();
+        database.Wait(Task.FromResult(7)).Should().Be(7);
     }
 
     [Fact]
