@@ -161,7 +161,7 @@
          via a probe-local ArmClient — no second credential chain, parity
          with the other Wave-G-2 ARM collaborators). -->
     <PackageReference Include="Azure.ResourceManager.Authorization" Version="1.1.4" />
-    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.2" />
 
     <!-- Azure.ResourceManager.ServiceBus / .Storage — originally added by task 200
          for H4-shared's source-key extractor (retired T226, 2026-09-30, together with
