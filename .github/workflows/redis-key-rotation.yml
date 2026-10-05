@@ -1,5 +1,5 @@
 # ============================================================================
-# redis-key-rotation.yml — Quarterly automated Redis access-key rotation
+# redis-key-rotation.yml — Redis access-key rotation for legacy key-based caches (manual dispatch)
 # ============================================================================
 #
 # FR-08 of spaarke-redis-cache-remediation-r2.

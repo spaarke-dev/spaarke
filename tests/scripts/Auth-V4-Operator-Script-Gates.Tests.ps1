@@ -215,7 +215,6 @@ Describe "Source-level regression guards (A38c no-regress obligations)" {
     }
 
     It "Rotate-Secrets.ps1: no Redis key rotation (task 242: every Spaarke Redis is Entra-only, no key to rotate)" {
-        $rotateSecretsSource | Should Match 'Redis is not rotated here'
         # NEGATIVE: the removed Redis branch must not come back
         $rotateSecretsSource | Should Not Match 'function Rotate-RedisKey'
         $rotateSecretsSource | Should Not Match 'az redis regenerate-keys'

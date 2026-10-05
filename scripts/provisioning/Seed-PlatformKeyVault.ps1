@@ -12,7 +12,7 @@
       infrastructure/bicep/platform-controlplane.bicep + its two App Service
       modules (modules/controlplane-app-service.bicep,
       modules/controlplane-worker-app-service.bicep) wire @Microsoft.KeyVault
-      references into L2 app-settings for FIVE platform-KV secrets -- but
+      references into L2 app-settings for platform-KV secrets -- but
       NOTHING seeded those secrets. Handler H4 seeds CUSTOMER vaults
       (sprk-{env}-kv via the canonical-secret-catalog generated seeder), never
       the platform-controlplane vault. On a fresh stamp every KV ref therefore
@@ -21,7 +21,7 @@
       Validate() sees a non-empty string and SUCCEEDS, and the failure
       surfaces much later as garbage-credential errors downstream.
 
-    THE 5 SECRETS (names MUST match the Bicep modules' KV-reference
+    THE SECRETS (names MUST match the Bicep modules' KV-reference
     SecretName= values exactly). Task 225b (D-12) retired the former third
     entry, AzureOpenAI-Endpoint: it fed only H12c's Model 1 shared-platform
     branch, which is gone (every customer stamp has its own OpenAI account).

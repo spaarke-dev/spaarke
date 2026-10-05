@@ -482,7 +482,7 @@ customEvents
 | project environment = tostring(customDimensions.environment), timestamp
 ```
 
-Manual rotations (§6.3) do NOT produce this event. The missed-rotation alert (§8, Alert 4) watches the same event and is deployed for staging and prod only (dev and demo have no keys).
+Manual rotations (§6.3) do NOT produce this event. The missed-rotation alert (§8, Alert 4) watches the same event; it is opt-in (`deployLegacyRotationAlert=true`), because no Azure Managed Redis cache has keys.
 
 ---
 
@@ -530,9 +530,9 @@ After the verification window has passed without regressions (dev used the same 
 
 The L2 Worker uses the same pattern: `Redis__Endpoint` plus its user-assigned identity (`src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchModule.cs`); outside Development/Testing it refuses a connection string the same way.
 
-### Latency spikes (P95 > 100 ms sustained)
+### Latency spikes (average call latency > 100 ms sustained)
 
-**Symptoms**: App Insights `cache.redis_p95_ms` custom metric exceeds 100 ms for sustained windows; user-visible BFF latency increases.
+**Symptoms**: the average of the `cache.redis_call_duration_ms` histogram exceeds 100 ms for sustained windows (§8 Alert 2); user-visible BFF latency increases.
 
 **Common causes**:
 
@@ -561,7 +561,7 @@ pwsh ./scripts/Deploy-RedisCache.ps1 -Environment {env} -SubscriptionId <sub> -D
   -ActionGroupResourceId /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/actionGroups/{name}
 ```
 
-`-AppInsightsName` defaults per environment (dev: `spe-insights-dev-67e2xz`). `alerts.bicep` accepts `environment` `dev`, `staging` or `prod`. They were drafted in [`projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md); the definitions below are the operational source of truth.
+`-AppInsightsName` defaults per environment (dev: `spe-insights-dev-67e2xz`). `alerts.bicep` accepts `environment` `dev`, `demo`, `staging` or `prod`. They were drafted in [`projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md); the definitions below are the operational source of truth.
 
 All alerts are **Sev 2 (Warning)** by convention. Sustained or co-occurring firings escalate via the runbook below.
 
@@ -595,26 +595,26 @@ hits
 | where avg_hit_rate < 0.80
 ```
 
-#### Alert 2 — Redis P95 Latency Above 100 ms
+#### Alert 2 — Redis call latency above 100 ms
 
-- **Name**: `redis-cache-p95-latency-high-{env}`
-- **Resource scope**: App Insights — wrapper-emitted P95 reflects BFF-observed latency, not cache-side only.
+- **Name**: `redis-cache-p95-latency-high-{env}` (name kept so the deployed rule updates in place)
+- **Resource scope**: App Insights — BFF-observed latency of each `IDistributedCache` call, not cache-side only.
 - **Severity**: Warning (Sev 2)
 - **Evaluation frequency**: 1 minute
 - **Window**: 5 minutes
-- **Threshold**: `avg(cache.redis_p95_ms) > 100` for the window
-- **Metric source**: App Insights custom metric `cache.redis_p95_ms` (FR-16, emitted from cache wrapper)
-- **Suggested action**: "Network issue or SKU undersize."
+- **Threshold**: the **average** call duration per operation (`get`, `set`, `refresh`, `remove`) over 5 minutes `> 100` ms
+- **Metric source**: the histogram `cache.redis_call_duration_ms`, recorded by `Infrastructure/Cache/MetricsDistributedCache.cs` (tags `op`, `tier`). App Insights stores it pre-aggregated (sum, count, min, max), so a true P95 is not available from `customMetrics`; the average is what can be alerted on.
+- **History**: until 2026-10-05 the rule queried `cache.redis_p95_ms`, which nothing emits, so it could never fire.
+- **Suggested action**: "Network issue, SKU undersize, or client-side delay." Compare with the `redis` dependency durations — if those are low while this is high, the time is spent in the BFF's cache client, not in Redis.
 
 KQL expression (scheduledQueryRules):
 
 ```kusto
 customMetrics
-| where name == "cache.redis_p95_ms"
-| extend resource = tostring(customDimensions.resource)
-| summarize avg_p95_ms = avg(valueSum / valueCount) by bin(timestamp, 1m), resource
-| summarize windowed_p95 = avg(avg_p95_ms) by bin(timestamp, 5m), resource
-| where windowed_p95 > 100
+| where name == "cache.redis_call_duration_ms"
+| extend op = tostring(customDimensions.op)
+| summarize avg_ms = sum(valueSum) / sum(valueCount) by bin(timestamp, 5m), op
+| where avg_ms > 100
 ```
 
 #### Alert 3 — Redis Memory Usage Above 80% of SKU Limit
@@ -642,7 +642,7 @@ Azure Monitor metric alert (no KQL required):
 
 - **Name**: `redis-cache-rotation-missed-{env}`
 - **Fires**: no `RedisKeyRotation` success event for more than 100 days (FR-11). Evaluated daily, not auto-mitigated.
-- **Deployed for staging and prod only** (`alerts.bicep`: dev and demo caches have no key). Even there it is only meaningful while a key-based cache exists (§6).
+- **Opt-in** (`alerts.bicep` parameter `deployLegacyRotationAlert`, default `false`): Azure Managed Redis caches — every Spaarke cache since T242 — have no keys, so the event never arrives and the alert would fire for ever. Turn it on only for a legacy key-based cache that `Rotate-RedisKey.ps1` rotates (§6).
 
 #### Threshold Tuning — Dev vs. Prod
 
@@ -651,7 +651,7 @@ Defaults above are dev/staging-appropriate. Prod tuning is tighter (finalize dur
 | Alert | Dev/Staging | Prod (proposed) |
 |---|---|---|
 | Hit rate | < 80% | < 90% |
-| P95 latency | > 100 ms | > 50 ms |
+| Average call latency | > 100 ms | > 50 ms |
 | Memory | > 80% | > 70% |
 
 #### Cross-alert correlation runbook

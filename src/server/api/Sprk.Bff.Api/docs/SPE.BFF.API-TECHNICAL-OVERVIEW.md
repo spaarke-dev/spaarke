@@ -255,7 +255,7 @@ Document GUID → Query Dataverse → Extract (DriveId, ItemId) → Return Point
 - **App Service:** `app-sdap-bff-{environment}` (.NET 8, Linux)
 - **Service Bus Namespace:** `sb-sdap-{environment}` (Standard SKU)
 - **Service Bus Queue:** `document-events`
-- **Azure Cache for Redis:** `redis-sdap-{environment}` (Standard tier for staging/prod)
+- **Azure Managed Redis:** `spaarke-bff-redis-{environment}` (`Microsoft.Cache/redisEnterprise` Balanced_B0, Microsoft Entra only — ADR-009 as amended by task 242)
 - **User-Assigned Managed Identity (UAMI):** `mi-sdap-{environment}`
 - **Key Vault:** `kv-sdap-{environment}`
 - **Application Insights:** `ai-sdap-{environment}`
@@ -303,13 +303,9 @@ az servicebus queue create \
   --namespace-name "sb-sdap-$ENVIRONMENT" \
   --resource-group $RG_NAME
 
-# Create Redis (Optional - staging/production only)
-az redis create \
-  --name "redis-sdap-$ENVIRONMENT" \
-  --resource-group $RG_NAME \
-  --location $LOCATION \
-  --sku Standard \
-  --vm-size C1
+# Redis: Azure Managed Redis, Microsoft Entra only (task 242). Do not create it with `az redis create` (that
+# makes a classic, key-based cache). Use scripts/Deploy-RedisCache.ps1 with
+# infrastructure/bicep/parameters/redis-$ENVIRONMENT.bicepparam — see docs/guides/redis-cache-azure-setup.md.
 
 # Create User-Assigned Managed Identity
 az identity create \
@@ -390,8 +386,8 @@ az keyvault secret set \
   --value "$SB_CONN_STRING"
 
 # Redis: NO secret (task 242, ADR-009 as amended). The cache is Azure Managed Redis with access keys
-# disabled; the BFF signs in with its managed identity. Provision it with scripts/Deploy-RedisCache.ps1
-# (adds the BFF identity to the cache's access policy) -- see docs/guides/redis-cache-azure-setup.md.
+# disabled; the BFF signs in with its managed identity, which must be listed in the .bicepparam's
+# accessPolicyPrincipalIds when the cache is created -- see docs/guides/redis-cache-azure-setup.md.
 ```
 
 #### Step 3: Configure App Service Settings
@@ -586,7 +582,7 @@ Expected: 200 OK with `previewUrl` in response
 
 | Setting | Development | Staging | Production |
 |---------|-------------|---------|------------|
-| **Redis** | Disabled (in-memory) | Enabled (Standard) | Enabled (Standard+) |
+| **Redis** | Disabled (in-memory) | Enabled (Azure Managed Redis Balanced_B0, Entra only) | Enabled (Azure Managed Redis Balanced_B0 HA, Entra only) |
 | **Service Bus Concurrency** | 2 | 5 | 10+ |
 | **Authorization** | Optional | Enabled | Required |
 | **Logging Level** | Debug | Information | Warning |
@@ -750,9 +746,9 @@ ServiceBus__ConnectionString=@Microsoft.KeyVault(SecretUri=...)
 ServiceBus__QueueName=document-events
 ServiceBus__MaxConcurrentCalls=5
 
-# Redis (Optional)
+# Redis (Azure Managed Redis, Microsoft Entra only -- task 242; no connection string outside Development/Testing)
 Redis__Enabled=true
-Redis__ConnectionString=@Microsoft.KeyVault(SecretUri=...)
+Redis__Endpoint=<cache-name>.<region>.redis.azure.net:10000
 Redis__InstanceName=sdap:
 
 # Authorization

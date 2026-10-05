@@ -9,10 +9,15 @@
 //
 // Four alerts (mirroring docs §8 Alert Definitions FR-17 source of truth + FR-11 rotation):
 //   1. Hit-rate < 80% over 15 min     (scheduledQueryRule, App Insights)
-//   2. P95 latency > 100 ms over 5 min (scheduledQueryRule, App Insights)
+//   2. Redis call latency > 100 ms over 5 min (scheduledQueryRule, App Insights) — the AVERAGE of the
+//      cache.redis_call_duration_ms histogram: App Insights stores it pre-aggregated (sum/count/min/max),
+//      so a true P95 is not available there. (It queried cache.redis_p95_ms, which nothing emits, until
+//      2026-10-05 — the alert could never fire.)
 //   3. Memory > 80% of SKU over 15 min (metricAlert, Azure Managed Redis platform metric)
 //   4. RedisKeyRotation success absent >100 days (scheduledQueryRule, App Insights) — FR-11.
-//      Deployed for staging/prod only (T242b, 2026-10-05): dev and demo are Entra-only, there is no key to rotate.
+//      OPT-IN (deployLegacyRotationAlert, default false; T242b review 2026-10-05): every Spaarke cache is
+//      Azure Managed Redis with access keys disabled, so no rotation event ever arrives and the alert would
+//      fire for ever. Turn it on only for a legacy key-based cache that Rotate-RedisKey.ps1 rotates.
 //
 // Alert 3 targets `Microsoft.Cache/redisEnterprise` (Azure Managed Redis — ADR-009 as amended by T242:
 // every Spaarke Redis is Managed Redis). It targeted the retired `Microsoft.Cache/Redis` type until T242b.
@@ -58,6 +63,9 @@ param p95LatencyMsThreshold int = 100
 @maxValue(100)
 param memoryPercentThreshold int = 80
 
+@description('Deploy alert 4 (missed key rotation). Only for a LEGACY key-based Azure Cache for Redis rotated by scripts/Rotate-RedisKey.ps1; Azure Managed Redis caches (every Spaarke cache since T242) have no keys.')
+param deployLegacyRotationAlert bool = false
+
 @description('Missed-rotation alert threshold in days. Fires if no RedisKeyRotation success custom event for any env in this window. Default 100 per FR-11 (90-day rotation cadence + 10-day grace).')
 @minValue(1)
 param missedRotationDays int = 100
@@ -79,9 +87,8 @@ var alertNamePrefix = 'redis-cache'
 // module callable from any RG context (mirrors the redis.bicep output pattern).
 var redisCacheResourceId = resourceId('Microsoft.Cache/redisEnterprise', redisCacheName)
 
-// Dev and demo have no Redis key (T242b — Azure Managed Redis, access keys disabled): the
-// missed-rotation alert applies only where Rotate-RedisKey.ps1 still rotates (staging, prod).
-var deployMissedRotationAlert = contains(['staging', 'prod'], environment)
+// Alert 4 is opt-in: Azure Managed Redis has no keys, so it applies only to a legacy key-based cache.
+var deployMissedRotationAlert = deployLegacyRotationAlert
 var appInsightsResourceId = resourceId('Microsoft.Insights/components', appInsightsName)
 
 // KQL — hit rate below threshold (mirrors docs §8 Alert 1 KQL, threshold parameterized).
@@ -102,14 +109,14 @@ hits
 | where avg_hit_rate < ${HIT_RATE_THRESHOLD}
 '''
 
-// KQL — P95 latency above threshold (mirrors docs §8 Alert 2 KQL).
+// KQL — average Redis call latency above threshold, per operation (docs §8 Alert 2). The BFF records the
+// histogram cache.redis_call_duration_ms (Infrastructure/Cache/MetricsDistributedCache.cs, tags op + tier).
 var p95LatencyKql = '''
 customMetrics
-| where name == "cache.redis_p95_ms"
-| extend resource = tostring(customDimensions.resource)
-| summarize avg_p95_ms = avg(valueSum / valueCount) by bin(timestamp, 1m), resource
-| summarize windowed_p95 = avg(avg_p95_ms) by bin(timestamp, 5m), resource
-| where windowed_p95 > ${P95_THRESHOLD_MS}
+| where name == "cache.redis_call_duration_ms"
+| extend op = tostring(customDimensions.op)
+| summarize avg_ms = sum(valueSum) / sum(valueCount) by bin(timestamp, 5m), op
+| where avg_ms > ${P95_THRESHOLD_MS}
 '''
 
 // KQL — RedisKeyRotation success absent >N days per env (FR-11).
@@ -173,7 +180,7 @@ resource p95LatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-prev
   location: location
   tags: tags
   properties: {
-    description: 'Cache P95 latency above ${p95LatencyMsThreshold}ms over 5 min — likely network issue or SKU undersize. Source: cache.redis_p95_ms custom metric (FR-16 of R1).'
+    description: 'Average Redis call latency above ${p95LatencyMsThreshold}ms over 5 min for an operation — likely network issue or SKU undersize. Source: cache.redis_call_duration_ms histogram (average; a true P95 is not available from customMetrics).'
     severity: alertSeverity
     enabled: true
     evaluationFrequency: 'PT1M'

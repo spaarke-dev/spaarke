@@ -110,6 +110,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │                          SCHEDULED                                    │
 │  nightly-health.yml (daily, 06:00 UTC)                                │
 │  client-tests.yml (nightly, 07:00 UTC)                                │
+│  pcf-build-prod-nightly.yml (daily, 08:00 UTC)                        │
 │  adr-audit.yml / report-workflow-health.yml (weekly, Mon 09:00 UTC)   │
 └────────────────────────────────────────────────────────────────────┘
 ```
@@ -192,7 +193,7 @@ Hooks complete in under 10 seconds. If a hook fails, the commit is blocked until
 git commit --no-verify -m "fix(api): emergency hotfix — skipping hooks, will fix lint in follow-up"
 ```
 
-See [Testing and Code Quality Procedures](testing-and-code-quality.md#husky--lint-staged-pre-commit-hooks) for detailed Husky documentation.
+See [Testing and Code Quality Procedures](testing-and-code-quality.md#pre-commit-hooks-husky--lint-staged) for detailed Husky documentation.
 
 ### Before Committing
 
@@ -675,7 +676,9 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
-| `redis-key-rotation.yml` | None — the quarterly crons were removed 2026-10-05 (owner decision): every scheduled run had failed, because no staging/prod cache, service principal or secrets exist | Redis access-key rotation for legacy key-based caches (staging/prod, manual dispatch). Dev was removed 2026-10-05: its cache is Azure Managed Redis, Entra only, no key | N/A — operational; has automatic rollback on health-check failure |
+| `pcf-build-prod-nightly.yml` | Daily, 08:00 UTC | `npm run build:prod` for every PCF control, judged by the build output (pcf-scripts exits 0 on a failed build) | No — advisory; job summary + artifact |
+
+`redis-key-rotation.yml` has no schedule since 2026-10-05 (owner decision): every scheduled run had failed, because no staging/prod key-based cache, service principal or secrets exist. It runs by manual dispatch only.
 
 ### `nightly-health.yml`
 
@@ -705,7 +708,7 @@ Iterates every file in `.github/workflows/*.yml`, queries `gh run list --workflo
 
 ### `redis-key-rotation.yml`
 
-Two jobs (`rotate-staging`/`rotate-prod`), each gated by `if:` matching its own cron expression or a dispatch `environment` input, authenticate via a per-environment OIDC-bound GitHub Environment and run `scripts/Rotate-RedisKey.ps1 -Environment {env} -Force` (Secondary regen → Key Vault upsert → BFF restart → `/healthz` poll → Primary regen, with automatic rollback on a failed health check). Each job posts an Application Insights KQL verification query to the run summary.
+Two jobs (`rotate-staging`/`rotate-prod`), each gated by `if:` on the dispatch `environment` input (the conditions also match the removed cron expressions, so restoring the schedule needs no job change), authenticate via a per-environment OIDC-bound GitHub Environment and run `scripts/Rotate-RedisKey.ps1 -Environment {env} -Force` (Secondary regen → Key Vault upsert → BFF restart → `/healthz` poll → Primary regen, with automatic rollback on a failed health check). Each job posts an Application Insights KQL verification query to the run summary.
 
 **Manual dispatch**: `gh workflow run redis-key-rotation.yml -f environment=staging`
 

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "8504687912189591197"
+      "templateHash": "7859057405814127405"
     }
   },
   "parameters": {
@@ -121,7 +121,7 @@
       "type": "bool",
       "defaultValue": false,
       "metadata": {
-        "description": "Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled. Default false per ADR-032 null-object kill-switch -- flip true once customerRunGuardTenantId is supplied; the guard authenticates as the bound L2 UAMI (no client secret) since 2026-08-27, and CustomerRunGuardOptions.Validate() then fails fast at Worker boot on any missing field. spec.md §4D I5 / FR-32 requires this true in production."
+        "description": "Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production."
       }
     },
     "requireSecretFreeIdentity": {
@@ -1552,7 +1552,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "8209116503299698818"
+              "templateHash": "13662544885713775605"
             }
           },
           "parameters": {
@@ -1695,7 +1695,7 @@
               "type": "bool",
               "defaultValue": false,
               "metadata": {
-                "description": "Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once customerRunGuardTenantId is supplied and the bound UAMI is a Dataverse Application User on the admin env (it authenticates as the UAMI since 2026-08-27; no client secret is involved). MUST equal the Api module's value (the Api acquires, the Worker releases). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27)."
+                "description": "Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the bound UAMI is a Dataverse Application User on the admin env (customerRunGuardTenantId is diagnostics-only) (it authenticates as the UAMI since 2026-08-27; no client secret is involved). MUST equal the Api module's value (the Api acquires, the Worker releases). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27)."
               }
             },
             "requireSecretFreeIdentity": {
