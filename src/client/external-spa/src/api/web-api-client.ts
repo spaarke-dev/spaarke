@@ -93,11 +93,14 @@ export interface ODataDocument {
 export interface ODataEvent {
   /** Primary key — Dataverse GUID */
   sprk_eventid: string;
-  /** Event display name */
+  /** Event display name — the BFF reads it from Dataverse `sprk_eventname` (sprk_event has no `sprk_name`; task 097). */
   sprk_name: string;
   /** ISO date string — due date */
   sprk_duedate?: string | null;
-  /** Event status option set value */
+  /**
+   * Event status — the BFF reads it from the Dataverse choice `sprk_eventstatus` (sprk_event has no
+   * `sprk_status`; task 097): Draft 0, Open 1, Completed 2, Closed 3, On Hold 4, Cancelled 5, Reassigned 6, Archived 7.
+   */
   sprk_status?: number | null;
   /** ISO date string — record created */
   createdon?: string | null;
@@ -553,11 +556,11 @@ export async function getOrganizations(
  * Omits system-generated fields (primary key, createdon, etc.).
  */
 export interface CreateEventPayload {
-  /** Event display name */
+  /** Event display name — the BFF writes it to `sprk_eventname` (task 097). */
   sprk_name: string;
   /** ISO date string for the due date */
   sprk_duedate?: string;
-  /** Event status option set value */
+  /** Event status — the BFF writes it to the `sprk_eventstatus` choice (1 = Open; task 097). */
   sprk_status?: number;
   /**
    * OData binding to associate the event with a project. The navigation property is the

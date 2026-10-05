@@ -307,13 +307,17 @@ public sealed class ExternalEventDto
     [JsonPropertyName("sprk_eventid")]
     public string SprkEventid { get; init; } = "";
 
+    /// <summary>The event name — read from Dataverse <c>sprk_eventname</c> (sprk_event has no <c>sprk_name</c>; the wire
+    /// name is kept for the external SPA, task 097).</summary>
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
-    /// <summary>sprk_eventstatus choice value.</summary>
+    /// <summary>Dataverse <c>sprk_eventstatus</c> choice value (Draft 0, Open 1, Completed 2, Closed 3, On Hold 4, Cancelled 5,
+    /// Reassigned 6, Archived 7 — verified live 2026-10-05). Wire name kept for the external SPA; sprk_event has no
+    /// <c>sprk_status</c> column (task 097).</summary>
     [JsonPropertyName("sprk_status")]
     public int? SprkStatus { get; init; }
 
@@ -331,12 +335,14 @@ public sealed class ExternalEventDto
 
 public sealed class CreateExternalEventRequest
 {
+    /// <summary>Written to Dataverse <c>sprk_eventname</c> (task 097).</summary>
     [JsonPropertyName("sprk_name")]
     public string SprkName { get; init; } = "";
 
     [JsonPropertyName("sprk_duedate")]
     public string? SprkDuedate { get; init; }
 
+    /// <summary>Written to Dataverse <c>sprk_eventstatus</c> (task 097).</summary>
     [JsonPropertyName("sprk_status")]
     public int? SprkStatus { get; init; }
 }

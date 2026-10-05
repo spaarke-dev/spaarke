@@ -170,10 +170,24 @@ public sealed class TodoGenerationService : IScheduledJob
     /// <summary>Owner attribute (User/Team) on sprk_todo.</summary>
     private const string FieldOwnerId = "ownerid";
 
-    /// <summary>Status reason values for sprk_todo (see entity-schema.md).</summary>
-    private const int StatusCodeOpen = 1;        // Active
-    private const int StatusCodeCompleted = 2;   // Inactive
-    private const int StatusCodeDismissed = 3;   // Inactive
+    /// <summary>
+    /// Status reason values for sprk_todo — verified against the LIVE option set (spaarkedev1, 2026-10-05, task 097)
+    /// and src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md: Open 1 / In Progress 659490001 (Active),
+    /// Completed 2 / Dismissed 659490002 (Inactive). Dismissed was 3, a value that does not exist.
+    /// </summary>
+    internal const int StatusCodeOpen = 1;                 // Active
+    internal const int StatusCodeInProgress = 659490001;   // Active
+    internal const int StatusCodeCompleted = 2;            // Inactive
+    internal const int StatusCodeDismissed = 659490002;    // Inactive
+
+    /// <summary>
+    /// The sprk_todo statuses that make a same-titled To Do count as EXISTING, so it is not generated again: EVERY
+    /// status, Dismissed included. Coordinator decision (task 097): a dismissed To Do must NOT be regenerated — the user
+    /// already said no. Before task 097 this held only by accident: the query excluded statuscode 3 (a value that
+    /// does not exist), which excluded nothing. It is now stated, not accidental.
+    /// </summary>
+    internal static readonly int[] StatusesThatBlockRegeneration =
+        { StatusCodeOpen, StatusCodeInProgress, StatusCodeCompleted, StatusCodeDismissed };
 
     /// <summary>statecode values for sprk_todo.</summary>
     private const int StateCodeActive = 0;
@@ -785,17 +799,15 @@ public sealed class TodoGenerationService : IScheduledJob
     // ──────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Returns <c>true</c> if a <c>sprk_todo</c> with <paramref name="title"/>
-    /// already exists and has not been dismissed.
+    /// Returns <c>true</c> if a <c>sprk_todo</c> with <paramref name="title"/> already exists in ANY status —
+    /// Open, In Progress, Completed or Dismissed.
     /// </summary>
     /// <remarks>
-    /// A to-do is considered a duplicate when ALL of the following match:
-    /// <list type="bullet">
-    ///   <item><c>sprk_name</c> = <paramref name="title"/> (exact match)</item>
-    ///   <item><c>statuscode</c> != Dismissed (3)</item>
-    /// </list>
-    /// Dismissed to-dos are intentionally excluded — users who dismissed them
-    /// must not see them re-appear on the next run.
+    /// A to-do is considered a duplicate when <c>sprk_name</c> = <paramref name="title"/> (exact match) and its
+    /// <c>statuscode</c> is one of <see cref="StatusesThatBlockRegeneration"/> (all four live values). A DISMISSED
+    /// To Do therefore counts as existing and is never re-created: the user who dismissed it must not see it re-appear
+    /// on the next run (task 097 coordinator decision — the former "!= Dismissed (3)" filter was a no-op, which is
+    /// what actually produced this behaviour; it is now explicit).
     /// </remarks>
     internal async Task<bool> TodoExistsAsync(string title, CancellationToken ct)
     {
@@ -807,7 +819,7 @@ public sealed class TodoGenerationService : IScheduledJob
         };
 
         query.Criteria.AddCondition("sprk_name", ConditionOperator.Equal, title);
-        query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, StatusCodeDismissed);
+        query.Criteria.AddCondition("statuscode", ConditionOperator.In, StatusesThatBlockRegeneration.Cast<object>().ToArray());
 
         var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
         return results.Entities.Count > 0;

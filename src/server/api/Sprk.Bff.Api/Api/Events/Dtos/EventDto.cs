@@ -88,7 +88,8 @@ public record EventDto
     public string Status { get; init; } = string.Empty;
 
     /// <summary>
-    /// Event priority: Low (0), Normal (1), High (2), Urgent (3).
+    /// Event priority (sprk_priority) — live <see cref="Spaarke.Dataverse.EventPriority"/> value: Low (100000000),
+    /// Normal (100000001), High (100000002), Urgent (100000003).
     /// </summary>
     public int? Priority { get; init; }
 
@@ -116,31 +117,12 @@ public record EventDto
 // Status reason values: Spaarke.Dataverse.EventStatusCode (task 097 — the former fictional 1..7 set that lived here
 // was rejected by Dataverse; the live set has one home, next to the payload builders that write it).
 
-/// <summary>
-/// Priority values for Event records.
-/// </summary>
-public static class EventPriority
-{
-    public const int Low = 0;
-    public const int Normal = 1;
-    public const int High = 2;
-    public const int Urgent = 3;
-
-    /// <summary>
-    /// Converts priority value to display name.
-    /// </summary>
-    public static string GetDisplayName(int priority) => priority switch
-    {
-        Low => "Low",
-        Normal => "Normal",
-        High => "High",
-        Urgent => "Urgent",
-        _ => "Normal"
-    };
-}
+// Priority values: Spaarke.Dataverse.EventPriority (task 097 — the former 0..3 set that lived here was rejected by
+// Dataverse; live sprk_priority is Low 100000000 … Urgent 100000003).
 
 /// <summary>
-/// Regarding record type values (matches sprk_regardingrecordtype option set).
+/// The API's regarding record type values (0..7). NOT an option set: <c>sprk_regardingrecordtype</c> is a lookup to
+/// <c>sprk_recordtype_ref</c>; Spaarke.Dataverse.RegardingRecordType maps each value to its lookup and catalog row.
 /// </summary>
 public static class RegardingRecordType
 {

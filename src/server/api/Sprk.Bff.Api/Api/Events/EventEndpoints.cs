@@ -27,6 +27,12 @@ public static class EventEndpoints
     /// <summary>
     /// Registers event endpoints with the application.
     /// </summary>
+    /// <summary>Task 097: priority is validated against the live sprk_priority option set (the former 0..3 range was
+    /// rejected by Dataverse with "outside the valid range").</summary>
+    private static readonly string PriorityValidationMessage =
+        "Priority must be a sprk_event priority: " +
+        string.Join(", ", EventPriority.All.Select(p => $"{p.Label} ({p.Value})")) + ".";
+
     public static void MapEventEndpoints(this WebApplication app)
     {
         var group = app.MapGroup("/api/v1/events")
@@ -135,7 +141,7 @@ public static class EventEndpoints
     /// <param name="statusCode">Filter by a live status reason (<see cref="EventStatusCode"/>), e.g. 659490001=Open,
     /// 659490002=Completed, 659490004=Cancelled.</param>
     /// <param name="status">String alias for statusCode: "open", "completed", "cancelled". Takes precedence over statusCode.</param>
-    /// <param name="priority">Filter by priority (0-3).</param>
+    /// <param name="priority">Filter by a live sprk_priority value (<see cref="EventPriority"/>): 100000000 Low … 100000003 Urgent.</param>
     /// <param name="dueDateFrom">Filter events with due date on or after this date.</param>
     /// <param name="dueDateTo">Filter events with due date on or before this date.</param>
     /// <param name="pageNumber">Page number (1-based). Defaults to 1.</param>
@@ -199,11 +205,11 @@ public static class EventEndpoints
         }
 
         // Validate priority if provided
-        if (priority.HasValue && (priority < 0 || priority > 3))
+        if (priority.HasValue && !EventPriority.IsDefined(priority.Value))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["priority"] = ["Priority must be between 0 (Low) and 3 (Urgent)."]
+                ["priority"] = [PriorityValidationMessage]
             });
         }
 
@@ -354,11 +360,11 @@ public static class EventEndpoints
         }
 
         // Validate priority if provided
-        if (request.Priority.HasValue && (request.Priority < 0 || request.Priority > 3))
+        if (request.Priority.HasValue && !EventPriority.IsDefined(request.Priority.Value))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["Priority"] = ["Priority must be between 0 (Low) and 3 (Urgent)."]
+                ["Priority"] = [PriorityValidationMessage]
             });
         }
 
@@ -461,11 +467,11 @@ public static class EventEndpoints
         }
 
         // Validate priority if provided
-        if (request.Priority.HasValue && (request.Priority < 0 || request.Priority > 3))
+        if (request.Priority.HasValue && !EventPriority.IsDefined(request.Priority.Value))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["Priority"] = ["Priority must be between 0 (Low) and 3 (Urgent)."]
+                ["Priority"] = [PriorityValidationMessage]
             });
         }
 

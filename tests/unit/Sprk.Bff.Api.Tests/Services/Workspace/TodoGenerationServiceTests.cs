@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 /// Key acceptance criteria verified:
 /// <list type="bullet">
 ///   <item>Re-running the job with identical data produces ZERO duplicate to-do items</item>
-///   <item>Dismissed to-dos (statuscode=Dismissed) are never re-created (server-side filter at query)</item>
+///   <item>Dismissed to-dos (statuscode=Dismissed, live 659490002) count as existing and are never re-created (task 097)</item>
 ///   <item>A single item failure does not block processing of remaining items</item>
 ///   <item>Created to-dos are <c>sprk_todo</c> records with the expected name/status/owner shape</item>
 ///   <item>When a regarding parent exists, all four resolver fields are populated atomically (ADR-024)</item>
@@ -209,10 +209,11 @@ public class TodoGenerationServiceTests
     }
 
     [Fact]
-    public async Task TodoExistsAsync_QueriesSprkTodoAndExcludesDismissedRecords()
+    public async Task TodoExistsAsync_QueriesSprkTodo_CountingEveryLiveStatusIncludingDismissed()
     {
-        // Arrange — capture the QueryExpression so we can verify both the entity name
-        // AND the statuscode != Dismissed condition.
+        // Task 097 coordinator decision: a DISMISSED To Do counts as existing and is never regenerated. The query must
+        // therefore NOT exclude Dismissed (live 659490002). Before task 097 it said `statuscode != 3` — a value that
+        // does not exist — so this held only by accident.
         var service = CreateService();
         QueryExpression? capturedQuery = null;
 
@@ -223,21 +224,83 @@ public class TodoGenerationServiceTests
             .Callback<QueryExpression, CancellationToken>((q, _) => capturedQuery = q)
             .ReturnsAsync(new EntityCollection());
 
-        // Act
         await service.TodoExistsAsync("Anything", CancellationToken.None);
 
-        // Assert — entity is sprk_todo (NOT sprk_event)
         capturedQuery.Should().NotBeNull();
         capturedQuery!.EntityName.Should().Be("sprk_todo");
 
-        // Assert — query filters out Dismissed (statuscode=3 per entity-schema.md)
-        var hasDismissedFilter = capturedQuery.Criteria.Conditions
-            .Any(c => c.AttributeName == "statuscode"
-                  && c.Operator == ConditionOperator.NotEqual
-                  && c.Values.Count == 1
-                  && Convert.ToInt32(c.Values[0]) == 3);
-        hasDismissedFilter.Should().BeTrue(
-            "Dismissed to-dos must be excluded server-side so they never re-appear after a user dismisses them");
+        var status = capturedQuery.Criteria.Conditions.Where(c => c.AttributeName == "statuscode").ToList();
+        status.Should().ContainSingle();
+        status[0].Operator.Should().Be(ConditionOperator.In);
+        status[0].Values.Select(Convert.ToInt32).Should().BeEquivalentTo(
+            new[] { 1, 659490001, 2, 659490002 },
+            "every live sprk_todo status — Open, In Progress, Completed AND Dismissed — blocks regeneration");
+    }
+
+    [Theory]
+    [InlineData(1)]          // Open
+    [InlineData(659490001)]  // In Progress
+    [InlineData(2)]          // Completed
+    [InlineData(659490002)]  // Dismissed — the case the coordinator decision is about
+    public async Task TodoExistsAsync_ASameTitledToDoInAnyStatus_CountsAsExisting(int existingStatus)
+    {
+        var service = CreateService();
+        SetupIdempotencyQueryEvaluating(new Entity("sprk_todo")
+        {
+            Id = Guid.NewGuid(),
+            ["sprk_name"] = "Overdue: Missed Deadline",
+            ["statuscode"] = new OptionSetValue(existingStatus),
+        });
+
+        var exists = await service.TodoExistsAsync("Overdue: Missed Deadline", CancellationToken.None);
+
+        exists.Should().BeTrue("the query is evaluated against the row: a filter that excluded this status would miss it");
+    }
+
+    [Fact]
+    public async Task RunGenerationPass_ADismissedToDoWithTheSameTitle_IsNotRecreated()
+    {
+        var service = CreateService(_eventSourcedEnabledOptions);
+        var overdueEvent = BuildEvent(name: "Contract Review", dueDate: DateTime.UtcNow.Date.AddDays(-3));
+
+        _eventsMock
+            .Setup(d => d.QueryEventsAsync(
+                null, null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((new[] { overdueEvent }, 1));
+        _eventsMock
+            .Setup(d => d.QueryEventsAsync(
+                null, null, null, null, null, It.Is<DateTime?>(dt => dt != null), It.Is<DateTime?>(dt => dt != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Array.Empty<EventEntity>(), 0));
+
+        SetupIdempotencyQueryEvaluating(new Entity("sprk_todo")
+        {
+            Id = Guid.NewGuid(),
+            ["sprk_name"] = $"Overdue: {overdueEvent.Name}",
+            ["statuscode"] = new OptionSetValue(659490002), // Dismissed (live)
+        });
+
+        await service.RunGenerationPassAsync(CancellationToken.None);
+
+        _dataverseMock.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the user dismissed this To Do; regenerating it would undo their decision");
+    }
+
+    [Fact]
+    public void ToDoStatusConstants_MatchTheLiveVerifiedEntitySchema()
+    {
+        // ADR-038 rule 1: the constants are pinned to src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md,
+        // whose statuscode table was re-verified against the live StatusAttributeMetadata on 2026-10-05.
+        var schema = File.ReadAllText(Path.Combine(RepoRoot(), "src", "solutions", "SpaarkeCore", "entities", "sprk_todo", "entity-schema.md"));
+        var documented = System.Text.RegularExpressions.Regex
+            .Matches(schema, @"(?m)^\|\s*(\d+)\s*\|\s*([A-Za-z ]+?)\s*\|\s*(\d) \((?:Active|Inactive)\)")
+            .ToDictionary(m => m.Groups[2].Value, m => int.Parse(m.Groups[1].Value));
+
+        documented.Should().Contain("Open", TodoGenerationService.StatusCodeOpen);
+        documented.Should().Contain("In Progress", TodoGenerationService.StatusCodeInProgress);
+        documented.Should().Contain("Completed", TodoGenerationService.StatusCodeCompleted);
+        documented.Should().Contain("Dismissed", TodoGenerationService.StatusCodeDismissed);
+        TodoGenerationService.StatusesThatBlockRegeneration.Should().BeEquivalentTo(documented.Values,
+            "every live status blocks regeneration — Dismissed included");
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -807,25 +870,51 @@ public class TodoGenerationServiceTests
     }
 
     // ──────────────────────────────────────────────────────────────────────────
-    // Idempotency: dismissed to-dos are never re-created (server-side filter at query)
+    // Idempotency helpers: a fake that EVALUATES the query's statuscode/name conditions against a stored row, so a
+    // filter that excluded a status (e.g. "!= Dismissed") would visibly miss it (task 097).
     // ──────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public async Task TodoExistsAsync_WhenDismissedFilteredOut_ReturnsFalseSoDuplicateCreationPossible()
+    private void SetupIdempotencyQueryEvaluating(Entity storedTodo)
     {
-        // The Dataverse query filters statuscode != Dismissed (3) — so dismissed items
-        // are NOT returned, and the idempotency guard reports "no duplicate". This is
-        // the intended behavior: dismissed-and-re-emerged matches still get a fresh
-        // sprk_todo. The PROTECTION against re-creating identical dismissed items
-        // lives in the source-condition logic (e.g., once a matter falls below the
-        // budget threshold, no new "Budget Alert" todo is generated).
-        var service = CreateService();
-        SetupIdempotencyQueryEmpty(); // server-side filter excluded the dismissed row
+        _dataverseMock
+            .Setup(d => d.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_todo"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression q, CancellationToken _) =>
+                Matches(q, storedTodo) ? new EntityCollection(new List<Entity> { storedTodo }) : new EntityCollection());
+    }
 
-        var exists = await service.TodoExistsAsync("Overdue: Missed Deadline", CancellationToken.None);
+    private static bool Matches(QueryExpression q, Entity row)
+    {
+        foreach (var c in q.Criteria.Conditions)
+        {
+            var actual = row.Contains(c.AttributeName) ? row[c.AttributeName] : null;
+            var value = actual is OptionSetValue osv ? (object)osv.Value : actual;
+            var ok = c.Operator switch
+            {
+                ConditionOperator.Equal => Equals(value?.ToString(), c.Values[0]?.ToString()),
+                ConditionOperator.NotEqual => !Equals(value?.ToString(), c.Values[0]?.ToString()),
+                ConditionOperator.In => c.Values.Any(v => Equals(value?.ToString(), v?.ToString())),
+                _ => throw new NotSupportedException($"Fake does not evaluate {c.Operator}"),
+            };
+            if (!ok) return false;
+        }
 
-        exists.Should().BeFalse(
-            "the server-side statuscode != Dismissed filter is applied in the query");
+        return true;
+    }
+
+    private static string RepoRoot()
+    {
+        var dir = AppContext.BaseDirectory;
+        while (dir is not null)
+        {
+            var git = Path.Combine(dir, ".git");
+            if (Directory.Exists(git) || File.Exists(git))
+                return dir;
+            dir = Directory.GetParent(dir)?.FullName;
+        }
+
+        throw new InvalidOperationException("Repository root (.git) not found above " + AppContext.BaseDirectory);
     }
 
     // ──────────────────────────────────────────────────────────────────────────

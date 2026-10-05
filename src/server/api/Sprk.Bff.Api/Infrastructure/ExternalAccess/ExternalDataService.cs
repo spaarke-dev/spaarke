@@ -101,12 +101,19 @@ public class ExternalDataService
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
     }
 
+    // Task 097: sprk_event has NO sprk_name / sprk_status columns (live: HTTP 400 "Could not find a property named
+    // 'sprk_name'" — so the external events list and create always failed). The live columns are sprk_eventname (the
+    // primary name) and sprk_eventstatus (the choice ExternalEventDto.SprkStatus documents). The SPA wire names
+    // (sprk_name / sprk_status on ExternalEventDto) are unchanged; only the Dataverse side is mapped here.
+    internal const string EventNameColumn = "sprk_eventname";
+    internal const string EventStatusColumn = "sprk_eventstatus";
+
     private sealed class EventRow
     {
         [JsonPropertyName("sprk_eventid")] public string? SprkEventid { get; set; }
-        [JsonPropertyName("sprk_name")] public string? SprkName { get; set; }
+        [JsonPropertyName(EventNameColumn)] public string? SprkName { get; set; }
         [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
-        [JsonPropertyName("sprk_status")] public int? SprkStatus { get; set; }
+        [JsonPropertyName(EventStatusColumn)] public int? SprkStatus { get; set; }
         [JsonPropertyName("createdon")] public string? Createdon { get; set; }
         [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
     }
@@ -559,9 +566,7 @@ public class ExternalDataService
     /// </remarks>
     public virtual async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
     {
-        var select = "sprk_eventid,sprk_name,sprk_duedate,sprk_status,createdon,_sprk_regardingproject_value";
-        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
-        var url = $"{GetApiUrl()}/sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+        var url = $"{GetApiUrl()}/{BuildEventsQuery(projectId)}";
 
         var rows = await GetCollectionAsync<EventRow>(url, ct);
         return rows.Select(MapEvent).ToList();
@@ -584,16 +589,7 @@ public class ExternalDataService
 
         var token = await GetAppOnlyTokenAsync(ct);
 
-        var body = new Dictionary<string, object?>();
-        if (!string.IsNullOrWhiteSpace(request.SprkName))
-            body["sprk_name"] = request.SprkName;
-        if (request.SprkDuedate is not null)
-            body["sprk_duedate"] = request.SprkDuedate;
-        if (request.SprkStatus.HasValue)
-            body["sprk_status"] = request.SprkStatus.Value;
-
-        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
-        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+        var body = BuildCreateEventBody(projectId, request);
 
         var url = $"{GetApiUrl()}/sprk_events";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
@@ -621,6 +617,36 @@ public class ExternalDataService
             throw new InvalidOperationException("Dataverse returned no event data after create");
 
         return MapEvent(row);
+    }
+
+    /// <summary>
+    /// The relative <c>sprk_events</c> query <see cref="GetEventsAsync"/> sends (task 097: live column names).
+    /// Internal for tests.
+    /// </summary>
+    internal static string BuildEventsQuery(Guid projectId)
+    {
+        var select = $"sprk_eventid,{EventNameColumn},sprk_duedate,{EventStatusColumn},createdon,_sprk_regardingproject_value";
+        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
+        return $"sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+    }
+
+    /// <summary>
+    /// The Web API body <see cref="CreateEventAsync"/> POSTs (task 097: the DTO's sprk_name / sprk_status are written
+    /// to the live sprk_eventname / sprk_eventstatus). Internal for tests.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildCreateEventBody(Guid projectId, CreateExternalEventRequest request)
+    {
+        var body = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(request.SprkName))
+            body[EventNameColumn] = request.SprkName;
+        if (request.SprkDuedate is not null)
+            body["sprk_duedate"] = request.SprkDuedate;
+        if (request.SprkStatus.HasValue)
+            body[EventStatusColumn] = request.SprkStatus.Value;
+
+        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
+        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+        return body;
     }
 
     /// <summary>

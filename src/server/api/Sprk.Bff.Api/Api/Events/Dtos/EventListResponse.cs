@@ -72,7 +72,7 @@ public record EventQueryParams
     public int? StatusCode { get; init; }
 
     /// <summary>
-    /// Filter by priority (0=Low, 1=Normal, 2=High, 3=Urgent).
+    /// Filter by a live sprk_priority value (Spaarke.Dataverse.EventPriority): 100000000 Low … 100000003 Urgent.
     /// </summary>
     public int? Priority { get; init; }
 

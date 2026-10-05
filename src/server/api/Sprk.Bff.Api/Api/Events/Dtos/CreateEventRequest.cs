@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Api.Events.Dtos;
 /// <param name="ScheduledStart">Scheduled start date/time.</param>
 /// <param name="ScheduledEnd">Scheduled end date/time.</param>
 /// <param name="DueDate">Due date for the event.</param>
-/// <param name="Priority">Event priority: Low (0), Normal (1), High (2), Urgent (3).</param>
+/// <param name="Priority">Event priority — a live sprk_priority value (Spaarke.Dataverse.EventPriority): Low (100000000), Normal (100000001), High (100000002), Urgent (100000003).</param>
 public record CreateEventRequest(
     string Subject,
     string? Description = null,

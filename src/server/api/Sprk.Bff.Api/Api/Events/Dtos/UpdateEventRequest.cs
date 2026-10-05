@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Api.Events.Dtos;
 /// <param name="ScheduledStart">Updated scheduled start date/time.</param>
 /// <param name="ScheduledEnd">Updated scheduled end date/time.</param>
 /// <param name="DueDate">Updated due date for the event.</param>
-/// <param name="Priority">Updated event priority: Low (0), Normal (1), High (2), Urgent (3).</param>
+/// <param name="Priority">Updated event priority — a live sprk_priority value (Spaarke.Dataverse.EventPriority): Low (100000000), Normal (100000001), High (100000002), Urgent (100000003).</param>
 /// <param name="StatusCode">Updated status reason — a live <c>sprk_event.statuscode</c> value
 /// (<see cref="Spaarke.Dataverse.EventStatusCode"/>): Draft (1), Open (659490001), Completed (659490002),
 /// Closed (659490003), Cancelled (659490004), Transferred (659490005), On Hold (659490006),

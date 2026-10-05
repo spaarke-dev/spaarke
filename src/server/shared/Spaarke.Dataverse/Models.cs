@@ -869,7 +869,7 @@ public class EventEntity
     /// <summary>Completed date (sprk_completeddate)</summary>
     public DateTime? CompletedDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
     /// <summary>Source: User (0), System (1), Workflow (2), External (3)</summary>
@@ -878,7 +878,7 @@ public class EventEntity
     /// <summary>Remind at (sprk_remindat)</summary>
     public DateTime? RemindAt { get; set; }
 
-    /// <summary>Related Event lookup ID (_sprk_relatedevent_value)</summary>
+    /// <summary>Not populated: sprk_event has no sprk_relatedevent column (verified live 2026-10-05, task 097).</summary>
     public Guid? RelatedEventId { get; set; }
 
     /// <summary>Related Event Type: Reminder (0), Notification (1), Extension (2)</summary>
@@ -910,7 +910,7 @@ public class EventEntity
     public string? RegardingRecordId { get; set; }
     /// <summary>Regarding record display name (sprk_regardingrecordname)</summary>
     public string? RegardingRecordName { get; set; }
-    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7)</summary>
+    /// <summary>Regarding record type: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), WorkAssignment (6), Budget (7) — derived from which entity-specific regarding lookup is populated (sprk_regardingrecordtype itself is a lookup to sprk_recordtype_ref).</summary>
     public int? RegardingRecordType { get; set; }
 
     /// <summary>Created date/time</summary>
@@ -940,7 +940,7 @@ public class CreateEventRequest
     /// <summary>Due date</summary>
     public DateTime? DueDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
     /// <summary>Regarding record type</summary>
@@ -980,7 +980,7 @@ public class UpdateEventRequest
     /// <summary>Due date</summary>
     public DateTime? DueDate { get; set; }
 
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
+    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
     /// <summary>Status reason (statuscode) — must be a live <see cref="EventStatusCode"/> value; the matching
@@ -1177,6 +1177,48 @@ public static class EventStatusCode
     }
 }
 
+/// <summary>
+/// <c>sprk_event.sprk_priority</c> values — the single source of truth for every BFF read and write of an event's
+/// priority. Verified against the LIVE option set (spaarkedev1, 2026-10-05) and pinned by
+/// <c>EventStatusWritePathTests</c> against <c>docs/data-model/sprk_event-related-tables.md</c>.
+/// </summary>
+/// <remarks>
+/// Task 097: the BFF used to accept and write 0..3, which Dataverse rejects ("The value 2 of 'sprk_priority' ... is
+/// outside the valid range"). NOTE: <c>sprk_todo.sprk_priority</c> is a DIFFERENT option set (Urgent = 100000000 …
+/// Low = 100000003) — never reuse these constants for a To Do.
+/// </remarks>
+public static class EventPriority
+{
+    public const int Low = 100000000;
+    public const int Normal = 100000001;
+    public const int High = 100000002;
+    public const int Urgent = 100000003;
+
+    /// <summary>Every live value with its label, in option-set order.</summary>
+    public static IReadOnlyList<(int Value, string Label)> All { get; } = new[]
+    {
+        (Low, "Low"),
+        (Normal, "Normal"),
+        (High, "High"),
+        (Urgent, "Urgent"),
+    };
+
+    /// <summary>True when <paramref name="priority"/> exists in the live option set.</summary>
+    public static bool IsDefined(int priority) => All.Any(p => p.Value == priority);
+
+    /// <summary>The live label for <paramref name="priority"/>, or "Unknown".</summary>
+    public static string GetDisplayName(int priority)
+    {
+        foreach (var p in All)
+        {
+            if (p.Value == priority)
+                return p.Label;
+        }
+
+        return "Unknown";
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════════════
 // Field Mapping Framework Entities (Events and Workflow Automation R1)
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -1342,6 +1384,53 @@ public static class RegardingRecordType
         WorkAssignment => "sprk_regardingworkassignment",
         Budget => "sprk_regardingbudget",
         _ => null
+    };
+
+    // ── sprk_event Web API binding (task 097) ─────────────────────────────────────────────────────────────
+    // Verified live (spaarkedev1, 2026-10-05, ManyToOneRelationships + EntitySetName). An @odata.bind key MUST be
+    // the case-sensitive navigation property and the value MUST use the entity SET name — the former code bound
+    // `sprk_regardingmatter@odata.bind` to `/{logicalName}s(...)` (which also gave `sprk_analysiss`, the set is
+    // `sprk_analysises`), and wrote `sprk_regardingrecordtype` as an int although it is a LOOKUP to
+    // sprk_recordtype_ref — Dataverse rejected both.
+
+    /// <summary>The <c>sprk_event</c> navigation property of the record-type lookup (→ <c>sprk_recordtype_ref</c>).</summary>
+    public const string RecordTypeNavigationProperty = "sprk_RegardingRecordType";
+
+    /// <summary>Entity set of <c>sprk_recordtype_ref</c>.</summary>
+    public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
+
+    /// <summary>The <c>sprk_event</c> navigation property of the entity-specific regarding lookup.</summary>
+    public static string? GetNavigationPropertyName(int recordType) => recordType switch
+    {
+        Project => "sprk_RegardingProject",
+        Matter => "sprk_RegardingMatter",
+        Invoice => "sprk_RegardingInvoice",
+        Analysis => "sprk_RegardingAnalysis",
+        Account => "sprk_RegardingAccount",
+        Contact => "sprk_RegardingContact",
+        WorkAssignment => "sprk_RegardingWorkAssignment",
+        Budget => "sprk_RegardingBudget",
+        _ => null
+    };
+
+    /// <summary>The Web API entity set of the regarding entity.</summary>
+    public static string? GetEntitySetName(int recordType) => recordType switch
+    {
+        Project => "sprk_projects",
+        Matter => "sprk_matters",
+        Invoice => "sprk_invoices",
+        Analysis => "sprk_analysises",
+        Account => "accounts",
+        Contact => "contacts",
+        WorkAssignment => "sprk_workassignments",
+        Budget => "sprk_budgets",
+        _ => null
+    };
+
+    /// <summary>Every record type this API maps (0..7).</summary>
+    public static IReadOnlyList<int> AllTypes { get; } = new[]
+    {
+        Project, Matter, Invoice, Analysis, Account, Contact, WorkAssignment, Budget
     };
 
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──

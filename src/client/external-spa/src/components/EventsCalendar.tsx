@@ -175,22 +175,26 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Map Dataverse sprk_status option set value to a human-readable label.
- * Status values are from the internal EventsPage pattern.
+ * Map the event's `sprk_status` wire value to a label. The BFF reads it from the
+ * live Dataverse choice `sprk_event.sprk_eventstatus` (there is no `sprk_status`
+ * column on sprk_event — task 097). Live options, verified 2026-10-05:
+ * Draft 0, Open 1, Completed 2, Closed 3, On Hold 4, Cancelled 5, Reassigned 6,
+ * Archived 7. The former map (2 = In Progress, 3 = Completed, 4 = Cancelled)
+ * mislabelled Completed as "In Progress".
  */
+const EVENT_STATUS_LABELS: Record<number, string> = {
+  0: 'Draft',
+  1: 'Open',
+  2: 'Completed',
+  3: 'Closed',
+  4: 'On Hold',
+  5: 'Cancelled',
+  6: 'Reassigned',
+  7: 'Archived',
+};
+
 function getEventStatusLabel(status: number | null | undefined): string {
-  switch (status) {
-    case 1:
-      return 'Open';
-    case 2:
-      return 'In Progress';
-    case 3:
-      return 'Completed';
-    case 4:
-      return 'Cancelled';
-    default:
-      return 'Open';
-  }
+  return (status !== null && status !== undefined && EVENT_STATUS_LABELS[status]) || 'Open';
 }
 
 /**
@@ -201,14 +205,19 @@ function getEventStatusColor(
   status: number | null | undefined
 ): 'brand' | 'success' | 'warning' | 'danger' | 'informative' | undefined {
   switch (status) {
-    case 1:
+    case 1: // Open
       return 'brand';
-    case 2:
+    case 4: // On Hold
+    case 6: // Reassigned
       return 'warning';
-    case 3:
+    case 2: // Completed
+    case 3: // Closed
       return 'success';
-    case 4:
+    case 5: // Cancelled
       return 'danger';
+    case 0: // Draft
+    case 7: // Archived
+      return 'informative';
     default:
       return 'brand';
   }
