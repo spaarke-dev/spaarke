@@ -82,9 +82,9 @@ public sealed class WorkerL2OwnedOptionsBootTests
     }
 
     /// <summary>The secret-free Worker fixture (WorkerSecretFreeBootTests) plus one per-test adjustment.</summary>
-    private sealed class L2OptionsWorkerTestFactory(Action<IWebHostBuilder> adjust) : WebApplicationFactory<WorkerProgram>
+    private sealed class L2OptionsWorkerTestFactory(Action<IWebHostBuilder> adjust) : StartGatedWorkerTestFactory
     {
-        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        protected override void ConfigureWorker(IWebHostBuilder builder)
         {
             SecretFreeWorkerTestFactory.ApplyCommonWorkerFixtureSettings(builder);
             builder.UseSetting("EnvVarValues:Credentials:Order:0", "ManagedIdentityFederated");

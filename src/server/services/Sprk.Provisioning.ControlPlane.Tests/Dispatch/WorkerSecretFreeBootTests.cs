@@ -11,8 +11,9 @@
 // available form, not the degraded one): the production DI container is
 // composed and the AddOptions<T>().Validate(...) chains are executed by
 // resolving IOptions<T>.Value (the exact validators ValidateOnStart forces at
-// real boot — ValidationHostedService is stripped with the other hosted
-// services, so the validators are triggered explicitly instead). What this
+// real boot; on .NET 8+ ValidateOnStart runs inside Host.StartAsync, so a
+// failing validator also fails factory start — see StartGatedWorkerTestFactory
+// for why that failure is reported deterministically). What this
 // deliberately does NOT prove: a live MI-FIC token exchange — L2 cannot
 // exchange-verify from a test host (remediation plan §5 item 2 / SF-4:
 // "L2 cannot exchange-verify — real proof lands post-App-Service" in the
@@ -133,9 +134,9 @@ public sealed class WorkerSecretFreeBootTests
 /// KV-refs; FR-39 chain settings present instead. Everything else mirrors
 /// <see cref="WorkerTestFactory"/> (HandlerRegistrationCompletenessTests).
 /// </summary>
-public sealed class SecretFreeWorkerTestFactory : WebApplicationFactory<WorkerProgram>
+public sealed class SecretFreeWorkerTestFactory : StartGatedWorkerTestFactory
 {
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    protected override void ConfigureWorker(IWebHostBuilder builder)
     {
         ApplyCommonWorkerFixtureSettings(builder);
 
@@ -183,8 +184,61 @@ public sealed class SecretFreeWorkerTestFactory : WebApplicationFactory<WorkerPr
 /// misconfiguration task 142's boot guard exists to catch. Deliberately does
 /// NOT set <c>EnvVarValues:ClientSecret</c>.
 /// </summary>
-public sealed class LegacyMissingSecretWorkerTestFactory : WebApplicationFactory<WorkerProgram>
+public sealed class LegacyMissingSecretWorkerTestFactory : StartGatedWorkerTestFactory
 {
-    protected override void ConfigureWebHost(IWebHostBuilder builder)
+    protected override void ConfigureWorker(IWebHostBuilder builder)
         => SecretFreeWorkerTestFactory.ApplyCommonWorkerFixtureSettings(builder);
+}
+
+/// <summary>
+/// A Worker <see cref="WebApplicationFactory{TEntryPoint}"/> whose host start
+/// failure is reported deterministically.
+/// <para>
+/// Without the gate the tests race: <c>Program.Main</c> runs <c>app.Run()</c>
+/// on its own thread, and when <c>ValidateOnStart</c> fails, <c>Run</c>
+/// disposes the host's service provider in its <c>finally</c>. The factory's
+/// thread meanwhile resolves <see cref="IHostApplicationLifetime"/> from that
+/// same provider (<c>DeferredHost.StartAsync</c>). When Main wins, the test sees
+/// "Cannot access a disposed object. Object name: 'IServiceProvider'" instead of
+/// the validation error (seen in CI on PR #1298).
+/// </para>
+/// <para>
+/// The gate is the host lifetime: <c>Host.StartAsync</c> awaits
+/// <see cref="IHostLifetime.WaitForStartAsync"/> before it runs startup
+/// validation, and the factory's <c>StartAsync</c> subscribes before its first
+/// await. So the gate opens only once the factory is subscribed, and the
+/// validation error then reaches the test through the entry point's completion.
+/// </para>
+/// </summary>
+public abstract class StartGatedWorkerTestFactory : WebApplicationFactory<WorkerProgram>
+{
+    private readonly StartGateLifetime _gate = new();
+
+    protected sealed override void ConfigureWebHost(IWebHostBuilder builder)
+    {
+        ConfigureWorker(builder);
+        builder.ConfigureServices(services => services.AddSingleton<IHostLifetime>(_gate));
+    }
+
+    protected abstract void ConfigureWorker(IWebHostBuilder builder);
+
+    protected override IHost CreateHost(IHostBuilder builder)
+    {
+        var host = builder.Build();
+        var start = host.StartAsync();   // subscribed to ApplicationStarted by the time this returns
+        _gate.Open();
+        start.GetAwaiter().GetResult();
+        return host;
+    }
+
+    private sealed class StartGateLifetime : IHostLifetime
+    {
+        private readonly TaskCompletionSource _open = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public void Open() => _open.TrySetResult();
+
+        public Task WaitForStartAsync(CancellationToken cancellationToken) => _open.Task.WaitAsync(cancellationToken);
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 }
