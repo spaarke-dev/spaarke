@@ -101,9 +101,16 @@ $SharedLibs = @(
     @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # type-only, no @spaarke/* deps (auth dep dropped 2026-10-03, reuse audit C-14)
     @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
     @{ Name = "Spaarke.DocumentOperations";   Path = "$RepoRoot\src\client\shared\Spaarke.DocumentOperations" }   # depends on Auth (added 2026-06-29 by spaarkeai-compose-r1 task 030)
-    @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
-    @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
     @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
+    # Events.Components and SmartTodo.Components MUST come AFTER UI.Components (moved 2026-10-04,
+    # spaarke-ontology-platform-r1 task 094). Events.Components imports UI.Components SOURCE by relative
+    # path (CalendarWorkspaceWidget -> ../Spaarke.UI.Components/src/...), so tsc needs UI.Components'
+    # node_modules; SmartTodo.Components path-maps @spaarke/ui-components to ../Spaarke.UI.Components/dist.
+    # Listed before it, both failed on every clean checkout (TS2307 'react' / '@spaarke/ui-components'),
+    # and Step 1's fail-fast stopped the whole build. A developer machine with UI.Components already
+    # installed and built hides this.
+    @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }    # depends on UI.Components (source + node_modules)
+    @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" } # depends on UI.Components (dist)
     @{ Name = "Spaarke.Communication.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.Communication.Components" } # depends on Auth + UI.Components; consumed by AI.Widgets (file: dep + dist paths-map) → MUST build BEFORE AI.Widgets. Added 2026-08-11 by email-communication-intelligence-r2 task 063 (stale-dist fix; same class as Spaarke.Notifications line above — its own `prebuild` also rebuilds Auth+UI.Components for standalone safety).
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
     @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth + UI.Components; standalone build restored 2026-07-08 (supersedes PR #506)
