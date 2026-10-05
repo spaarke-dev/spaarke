@@ -12,10 +12,12 @@
  *   - no legacy two-entity props/state remain (compile-time enforced by TS)
  */
 
+import * as fs from 'fs';
+import * as path from 'path';
 import * as React from 'react';
 import { screen, fireEvent, waitFor, act } from '@testing-library/react';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
-import { TodoDetail } from '../TodoDetail';
+import { TodoDetail, TODO_ASSIGNED_TO_ENTITY_SET } from '../TodoDetail';
 import type { ITodoRecord, ITodoFieldUpdates } from '../types';
 
 // ─────────────────────────────────────────────────────────────────────
@@ -160,6 +162,68 @@ describe('TodoDetail — single-entity save', () => {
     await waitFor(() => {
       expect(screen.getByText('Network down')).toBeInTheDocument();
     });
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// Reassign — sprk_AssignedTo binds to CONTACT (task 097)
+//
+// Live metadata (spaarkedev1, 2026-10-05): sprk_todo.sprk_assignedto → contact,
+// nav prop sprk_AssignedTo. The component used to emit `/systemusers(id)`; with a
+// systemuser id Dataverse answered 404 "Entity 'Contact' With Id = … Does Not
+// Exist". ADR-038 rule 1: the asserted target is pinned to the live-verified
+// entity-schema.md row, not just to a literal in this file.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('TodoDetail — reassign (sprk_AssignedTo → contact)', () => {
+  it('saves the picked person as /contacts(id) on the sprk_AssignedTo nav prop', async () => {
+    const onSaveTodo = jest.fn().mockResolvedValue({ success: true });
+    const onSearchContacts = jest.fn().mockResolvedValue([{ id: 'contact-9', name: 'Bob Contact' }]);
+    const unassigned: ITodoRecord = {
+      ...baseRecord,
+      _sprk_assignedto_value: undefined,
+      '_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue': undefined,
+    };
+    renderWithProviders(
+      <TodoDetail
+        record={unassigned}
+        isLoading={false}
+        error={null}
+        onSaveTodo={onSaveTodo}
+        onSearchContacts={onSearchContacts}
+      />
+    );
+
+    const picker = screen.getByRole('combobox');
+    fireEvent.click(picker);
+    fireEvent.input(picker, { target: { value: 'Bo' } });
+    await waitFor(() => expect(onSearchContacts).toHaveBeenCalledWith('Bo'), { timeout: 2000 });
+
+    fireEvent.click(await screen.findByRole('option', { name: 'Bob Contact' }));
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /Save/i }));
+    });
+
+    await waitFor(() => expect(onSaveTodo).toHaveBeenCalledTimes(1));
+    const payload = onSaveTodo.mock.calls[0][1] as ITodoFieldUpdates;
+    expect(payload['sprk_AssignedTo@odata.bind']).toBe(`/${TODO_ASSIGNED_TO_ENTITY_SET}(contact-9)`);
+    expect(payload['sprk_AssignedTo@odata.bind']).toBe('/contacts(contact-9)');
+  });
+
+  it('pins the bind target to the live-verified sprk_todo entity schema', () => {
+    const schemaPath = path.resolve(
+      __dirname,
+      '../../../../../../../../src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md'
+    );
+    const row = fs
+      .readFileSync(schemaPath, 'utf8')
+      .split(/\r?\n/)
+      .find(l => /^\|\s*sprk_assignedto\s*\|/.test(l));
+    expect(row).toBeDefined();
+    const target = /Lookup\s*→\s*\*\*(\w+)\*\*/.exec(row as string)?.[1];
+    expect(target).toBe('contact');
+    expect(TODO_ASSIGNED_TO_ENTITY_SET).toBe(`${target}s`);
   });
 });
 

@@ -142,7 +142,7 @@ public class TodoGenerationAssignedToTests
     public async Task Rule1_OverdueEvent_AssignsTheEventsResponsibleContact()
     {
         _events.Setup(e => e.QueryEventsAsync(null, null, null, null, null, null, It.Is<DateTime?>(d => d != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new[] { new EventEntity { Id = EventId, Name = "Filing", StatusCode = 3, DueDate = DateTime.UtcNow.Date.AddDays(-3) } }, 1));
+            .ReturnsAsync((new[] { new EventEntity { Id = EventId, Name = "Filing", StatusCode = EventStatusCode.Open, DueDate = DateTime.UtcNow.Date.AddDays(-3) } }, 1));
         ParentHas("sprk_event", EventId, InternalContact, AttorneyContact);
 
         await CreateService(eventSourced: true).RunGenerationPassAsync(CancellationToken.None);
@@ -166,7 +166,7 @@ public class TodoGenerationAssignedToTests
     public async Task Rule3_Deadline_AssignsTheEventsResponsibleContact()
     {
         _events.Setup(e => e.QueryEventsAsync(null, null, null, null, null, It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), 0, 100, (Guid?)null, It.IsAny<CancellationToken>()))
-            .ReturnsAsync((new[] { new EventEntity { Id = EventId, Name = "Hearing", StatusCode = 3, DueDate = DateTime.UtcNow.Date.AddDays(4) } }, 1));
+            .ReturnsAsync((new[] { new EventEntity { Id = EventId, Name = "Hearing", StatusCode = EventStatusCode.Open, DueDate = DateTime.UtcNow.Date.AddDays(4) } }, 1));
         ParentHas("sprk_event", EventId, null, AttorneyContact);
 
         await CreateService(eventSourced: true).RunGenerationPassAsync(CancellationToken.None);

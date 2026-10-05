@@ -3,7 +3,8 @@
  * Follow-on step: "Create Event" -- linked to the work assignment.
  *
  * Fields: Name (required, default "Assign Work"), Description, Priority,
- *         Due Date, Final Due Date, Assigned To (systemuser).
+ *         Due Date, Final Due Date, Assigned To (contact -- `sprk_event.sprk_assignedto`
+ *         targets contact in the live schema; task 097).
  *
  * Dependencies are injected via props -- no solution-specific imports.
  */
@@ -11,7 +12,7 @@ import * as React from 'react';
 import { Text, Input, Textarea, Dropdown, Option, Field, makeStyles, tokens } from '@fluentui/react-components';
 import { LookupField } from '../LookupField/LookupField';
 import type { ILookupItem } from '../../types/LookupTypes';
-import { searchUsersAsLookup } from './workAssignmentService';
+import { searchContactsAsLookup } from './workAssignmentService';
 import type { ICreateFollowOnEventState } from './formTypes';
 import { EMPTY_FOLLOW_ON_EVENT_STATE } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -125,8 +126,10 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
   // See `formTypes.ts` for the rationale — `sprk_event.sprk_todoflag` is
   // being dropped from the schema in favor of first-class `sprk_todo`.
 
-  const handleSearchUsers = React.useCallback(
-    (query: string) => searchUsersAsLookup(dataService, query),
+  // Task 097: sprk_event.sprk_assignedto is a CONTACT lookup -- search contacts, the same
+  // source the CreateEventWizard uses (a systemuser id cannot be bound to it).
+  const handleSearchAssignees = React.useCallback(
+    (query: string) => searchContactsAsLookup(dataService, query),
     [dataService]
   );
 
@@ -183,8 +186,8 @@ export const CreateFollowOnEventStep: React.FC<ICreateFollowOnEventStepProps> = 
           label="Assigned To"
           value={assignedToValue}
           onChange={handleAssignedToChange}
-          onSearch={handleSearchUsers}
-          placeholder="Search users..."
+          onSearch={handleSearchAssignees}
+          placeholder="Search contacts..."
         />
       </div>
 

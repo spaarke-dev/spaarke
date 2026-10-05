@@ -406,7 +406,7 @@ public sealed class TodoGenerationService : IScheduledJob
                 ct: ct);
 
             // Exclude completed/cancelled events.
-            overdueEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            overdueEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled); // task 097: live values (was the fictional 5/6, which excluded nothing)
         }
         catch (Exception ex)
         {
@@ -574,7 +574,7 @@ public sealed class TodoGenerationService : IScheduledJob
                 ct: ct);
 
             // Exclude completed/cancelled events.
-            upcomingEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            upcomingEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled); // task 097: live values
         }
         catch (Exception ex)
         {
@@ -1010,7 +1010,7 @@ public sealed class TodoGenerationService : IScheduledJob
         };
 
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
-        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, 3); // Open
+        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, EventStatusCode.Open); // task 097: live Open (was 3, which matched no row)
 
         var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
 

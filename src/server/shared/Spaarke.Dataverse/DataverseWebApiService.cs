@@ -440,8 +440,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             ["sprk_eventname"] = request.Name,
             ["sprk_description"] = request.Description,
-            ["statuscode"] = 3, // Open
-            ["statecode"] = 0,  // Active
+            // Task 097: live Open is 659490001 (Active). The former literal 3 does not exist in the option set and
+            // Dataverse rejected every BFF event create with 0x80048408.
+            ["statuscode"] = EventStatusCode.Open,
+            ["statecode"] = EventStatusCode.GetStateCode(EventStatusCode.Open),
             ["sprk_source"] = 0 // User
         };
 
@@ -482,7 +484,28 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
     {
+        var payload = BuildUpdateEventPayload(request);
 
+        if (payload.Count == 0)
+        {
+            _logger.LogDebug("No fields to update for event {Id}", id);
+            return;
+        }
+
+        _logger.LogInformation("Updating event: {Id}", id);
+
+        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
+        response.EnsureSuccessStatusCode();
+
+        _logger.LogDebug("Event updated: {Id}", id);
+    }
+
+    /// <summary>
+    /// The Web API body <see cref="UpdateEventAsync"/> PATCHes to <c>sprk_events({id})</c>. Internal (InternalsVisibleTo
+    /// the BFF unit tests) so the status pairing is asserted without intercepting the HTTP transport.
+    /// </summary>
+    internal static Dictionary<string, object?> BuildUpdateEventPayload(UpdateEventRequest request)
+    {
         var payload = new Dictionary<string, object?>();
 
         if (request.Name != null)
@@ -504,7 +527,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_priority"] = request.Priority.Value;
 
         if (request.StatusCode.HasValue)
+        {
+            // Task 097: Dataverse requires the statecode the status reason belongs to; a statuscode of the other
+            // state sent alone is rejected. Throws for a value outside the live option set.
             payload["statuscode"] = request.StatusCode.Value;
+            payload["statecode"] = EventStatusCode.GetStateCode(request.StatusCode.Value);
+        }
 
         if (request.RegardingRecordType.HasValue)
         {
@@ -513,35 +541,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["sprk_regardingrecordname"] = request.RegardingRecordName;
         }
 
-        if (payload.Count == 0)
-        {
-            _logger.LogDebug("No fields to update for event {Id}", id);
-            return;
-        }
-
-        _logger.LogInformation("Updating event: {Id}", id);
-
-        var response = await SendPatchAsJsonAsync($"sprk_events({id})", payload, ct);
-        response.EnsureSuccessStatusCode();
-
-        _logger.LogDebug("Event updated: {Id}", id);
+        return payload;
     }
 
     public async Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
-
-        var payload = new Dictionary<string, object?>
-        {
-            ["statuscode"] = statusCode
-        };
-
-        // Set statecode based on statuscode
-        // Draft(1), Planned(2), Open(3), OnHold(4) = Active(0)
-        // Completed(5), Cancelled(6), Deleted(7) = Inactive(1)
-        payload["statecode"] = statusCode >= 5 ? 1 : 0;
-
-        if (completedDate.HasValue)
-            payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
+        var payload = BuildUpdateEventStatusPayload(statusCode, completedDate);
 
         _logger.LogInformation("Updating event status: {Id} -> {StatusCode}", id, statusCode);
 
@@ -549,6 +554,26 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         response.EnsureSuccessStatusCode();
 
         _logger.LogDebug("Event status updated: {Id}", id);
+    }
+
+    /// <summary>
+    /// The Web API body <see cref="UpdateEventStatusAsync"/> PATCHes. The statecode comes from
+    /// <see cref="EventStatusCode.GetStateCode"/> — never from a numeric threshold (task 097: the former
+    /// <c>statusCode &gt;= 5 ? 1 : 0</c> paired live Completed/Closed, which are ACTIVE, with Inactive).
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not in the live option set.</exception>
+    internal static Dictionary<string, object?> BuildUpdateEventStatusPayload(int statusCode, DateTime? completedDate)
+    {
+        var payload = new Dictionary<string, object?>
+        {
+            ["statuscode"] = statusCode,
+            ["statecode"] = EventStatusCode.GetStateCode(statusCode)
+        };
+
+        if (completedDate.HasValue)
+            payload["sprk_completeddate"] = completedDate.Value.ToString("yyyy-MM-dd");
+
+        return payload;
     }
 
     public async Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)

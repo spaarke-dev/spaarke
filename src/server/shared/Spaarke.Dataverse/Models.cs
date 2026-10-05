@@ -857,7 +857,7 @@ public class EventEntity
     /// <summary>State code: Active (0), Inactive (1)</summary>
     public int StateCode { get; set; }
 
-    /// <summary>Status code: Draft (1), Planned (2), Open (3), OnHold (4), Completed (5), Cancelled (6), Deleted (7)</summary>
+    /// <summary>Status reason (statuscode) — live values in <see cref="EventStatusCode"/>.</summary>
     public int StatusCode { get; set; }
 
     /// <summary>Base date (sprk_basedate)</summary>
@@ -983,7 +983,8 @@ public class UpdateEventRequest
     /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Status code</summary>
+    /// <summary>Status reason (statuscode) — must be a live <see cref="EventStatusCode"/> value; the matching
+    /// statecode is written with it.</summary>
     public int? StatusCode { get; set; }
 
     /// <summary>Regarding record type</summary>
@@ -1073,6 +1074,107 @@ public static class EventLogAction
         Deleted => "Deleted",
         _ => "Unknown"
     };
+}
+
+/// <summary>
+/// <c>sprk_event.statuscode</c> (Status Reason) values and the <c>statecode</c> each one belongs to — the single
+/// source of truth for every BFF read and write of an event's status.
+/// </summary>
+/// <remarks>
+/// <para>Verified against the LIVE option set (spaarkedev1, 2026-10-05, <c>StatusAttributeMetadata</c> with
+/// <c>State</c> per option) and pinned by <c>EventStatusCodeSchemaParityTests</c> against
+/// <c>docs/data-model/sprk_event-related-tables.md</c>.</para>
+/// <para>Two traps this class exists to close (task 097): (1) the BFF used to carry a fictional 1..7 set
+/// (Open = 3, Completed = 5, Cancelled = 6, Deleted = 7) that Dataverse rejects with <c>0x80048408</c>, so complete,
+/// cancel, soft-delete and create could never succeed; (2) <b>Completed and Closed are ACTIVE (statecode 0)</b> —
+/// pairing them with statecode 1 is rejected too ("not a valid status code for state code Inactive").</para>
+/// </remarks>
+public static class EventStatusCode
+{
+    /// <summary>Draft — statecode 0 (Active). The platform default for a new row.</summary>
+    public const int Draft = 1;
+
+    /// <summary>No Further Action — statecode 1 (Inactive). Used by the archive commands.</summary>
+    public const int NoFurtherAction = 2;
+
+    /// <summary>Open — statecode 0 (Active). What the Daily Briefing reads as open work.</summary>
+    public const int Open = 659490001;
+
+    /// <summary>Completed — statecode 0 (<b>Active</b>, not Inactive).</summary>
+    public const int Completed = 659490002;
+
+    /// <summary>Closed — statecode 0 (<b>Active</b>, not Inactive).</summary>
+    public const int Closed = 659490003;
+
+    /// <summary>Cancelled — statecode 1 (Inactive).</summary>
+    public const int Cancelled = 659490004;
+
+    /// <summary>Transferred — statecode 1 (Inactive).</summary>
+    public const int Transferred = 659490005;
+
+    /// <summary>On Hold — statecode 0 (Active).</summary>
+    public const int OnHold = 659490006;
+
+    /// <summary>Reassigned — statecode 0 (Active).</summary>
+    public const int Reassigned = 659490007;
+
+    /// <summary>statecode Active.</summary>
+    public const int StateActive = 0;
+
+    /// <summary>statecode Inactive.</summary>
+    public const int StateInactive = 1;
+
+    /// <summary>Every live value with its label and statecode, in option-set order.</summary>
+    public static IReadOnlyList<(int Value, string Label, int State)> All { get; } = new[]
+    {
+        (Draft, "Draft", StateActive),
+        (Open, "Open", StateActive),
+        (Completed, "Completed", StateActive),
+        (Closed, "Closed", StateActive),
+        (OnHold, "On Hold", StateActive),
+        (Reassigned, "Reassigned", StateActive),
+        (NoFurtherAction, "No Further Action", StateInactive),
+        (Cancelled, "Cancelled", StateInactive),
+        (Transferred, "Transferred", StateInactive),
+    };
+
+    /// <summary>True when <paramref name="statusCode"/> exists in the live option set.</summary>
+    public static bool IsDefined(int statusCode) => All.Any(s => s.Value == statusCode);
+
+    /// <summary>
+    /// The statecode Dataverse requires alongside <paramref name="statusCode"/>.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The value is not in the live option set.</exception>
+    public static int GetStateCode(int statusCode)
+    {
+        foreach (var s in All)
+        {
+            if (s.Value == statusCode)
+                return s.State;
+        }
+
+        throw new ArgumentOutOfRangeException(nameof(statusCode), statusCode,
+            "Not a sprk_event statuscode in the live option set.");
+    }
+
+    /// <summary>
+    /// Statuses that still represent open work — the ones an event may be completed or cancelled from:
+    /// Draft, Open, On Hold, Reassigned.
+    /// </summary>
+    public static bool IsOpenWork(int statusCode) =>
+        statusCode is Draft or Open or OnHold or Reassigned;
+
+    /// <summary>The live label for <paramref name="statusCode"/>, or "Unknown".</summary>
+    public static string GetDisplayName(int statusCode)
+    {
+        foreach (var s in All)
+        {
+            if (s.Value == statusCode)
+                return s.Label;
+        }
+
+        return "Unknown";
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════

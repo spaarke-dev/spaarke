@@ -17,7 +17,10 @@ namespace Sprk.Bff.Api.Api.Events.Dtos;
 /// <param name="ScheduledEnd">Updated scheduled end date/time.</param>
 /// <param name="DueDate">Updated due date for the event.</param>
 /// <param name="Priority">Updated event priority: Low (0), Normal (1), High (2), Urgent (3).</param>
-/// <param name="StatusCode">Updated status code: Draft (1), Planned (2), Open (3), On Hold (4), Completed (5), Cancelled (6), Deleted (7).</param>
+/// <param name="StatusCode">Updated status reason — a live <c>sprk_event.statuscode</c> value
+/// (<see cref="Spaarke.Dataverse.EventStatusCode"/>): Draft (1), Open (659490001), Completed (659490002),
+/// Closed (659490003), Cancelled (659490004), Transferred (659490005), On Hold (659490006),
+/// Reassigned (659490007), No Further Action (2). The matching statecode is written with it.</param>
 public record UpdateEventRequest(
     string? Subject = null,
     string? Description = null,

@@ -161,7 +161,7 @@ export interface ITodoFieldUpdates {
   sprk_todopinned?: boolean;
   statecode?: number;
   statuscode?: number;
-  /** OData bind for the Assigned To lookup (systemuser table). */
+  /** OData bind for the Assigned To lookup — targets `contact`: `/contacts(id)` (task 097). */
   'sprk_AssignedTo@odata.bind'?: string | null;
 
   // ---- Resolver fields (FR-13) ---------------------------------------------

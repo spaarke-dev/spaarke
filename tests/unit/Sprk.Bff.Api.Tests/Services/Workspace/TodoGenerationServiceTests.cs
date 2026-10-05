@@ -127,7 +127,7 @@ public class TodoGenerationServiceTests
     private static EventEntity BuildEvent(
         Guid? id = null,
         string name = "Test Event",
-        int statusCode = 3,
+        int statusCode = EventStatusCode.Open,
         DateTime? dueDate = null) =>
         new()
         {
@@ -651,11 +651,13 @@ public class TodoGenerationServiceTests
     [Fact]
     public async Task RunGenerationPass_CompletedOverdueEvent_NotIncluded()
     {
-        // Arrange: overdue event with statuscode=5 (Completed) should be skipped
+        // Arrange: overdue event with the LIVE Completed status reason (659490002) should be skipped.
+        // Task 097: this used the fictional 5, which the service also used — both wrong, so the test passed
+        // while a real Completed event still generated an overdue to-do.
         var service = CreateService(_eventSourcedEnabledOptions);
         var completedEvent = BuildEvent(
             name: "Completed Filing",
-            statusCode: 5,
+            statusCode: EventStatusCode.Completed,
             dueDate: DateTime.UtcNow.Date.AddDays(-3));
 
         _eventsMock

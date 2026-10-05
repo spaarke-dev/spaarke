@@ -4,15 +4,16 @@
  * Displays a compact dropdown for quick status changes.
  * Uses Fluent UI v9 Dropdown component.
  *
- * Status Reason Values (from Dataverse sprk_event.statuscode):
+ * Status Reason Values (LIVE sprk_event.statuscode, verified 2026-10-05 — task 097):
  * Active (statecode 0):
  *   1           = Draft
  *   659,490,001 = Open
+ *   659,490,002 = Completed   (ACTIVE, not Inactive)
+ *   659,490,003 = Closed      (ACTIVE, not Inactive)
  *   659,490,006 = On Hold
  * Inactive (statecode 1):
- *   659,490,002 = Completed
- *   659,490,003 = Closed
  *   659,490,004 = Cancelled
+ * The statecode written with each value comes from App.tsx STATUSCODE_STATECODE_MAP.
  *
  * @see projects/events-workspace-apps-UX-r1/tasks/033-create-status-section.poml
  */

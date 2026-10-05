@@ -92,8 +92,8 @@ public static class EventEndpoints
         group.MapPost("/{id:guid}/complete", CompleteEventAsync)
             .WithName("CompleteEvent")
             .WithSummary("Mark an event as completed")
-            .WithDescription("Changes the event status to Completed. " +
-                "Can only complete events with status Draft (1), Planned (2), Open (3), or On Hold (4). " +
+            .WithDescription("Changes the event status to Completed (659490002, which stays Active). " +
+                "Can only complete events with status Draft (1), Open (659490001), On Hold (659490006) or Reassigned (659490007). " +
                 "Returns 200 OK with action details on success, 400 if status transition is invalid, 404 if not found.")
             .Produces<EventActionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -105,8 +105,8 @@ public static class EventEndpoints
         group.MapPost("/{id:guid}/cancel", CancelEventAsync)
             .WithName("CancelEvent")
             .WithSummary("Mark an event as canceled")
-            .WithDescription("Changes the event status to Cancelled. " +
-                "Can only cancel events with status Draft (1), Planned (2), Open (3), or On Hold (4). " +
+            .WithDescription("Changes the event status to Cancelled (659490004, Inactive). " +
+                "Can only cancel events with status Draft (1), Open (659490001), On Hold (659490006) or Reassigned (659490007). " +
                 "Returns 200 OK with action details on success, 400 if status transition is invalid, 404 if not found.")
             .Produces<EventActionResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -132,8 +132,9 @@ public static class EventEndpoints
     /// <param name="regardingRecordType">Filter by regarding record type (0-7).</param>
     /// <param name="regardingRecordId">Filter by specific regarding record ID.</param>
     /// <param name="eventTypeId">Filter by event type ID.</param>
-    /// <param name="statusCode">Filter by status code (3=Open, 5=Completed, 6=Cancelled).</param>
-    /// <param name="status">String alias for statusCode: "open" (3), "completed" (5), "cancelled" (6). Takes precedence over statusCode.</param>
+    /// <param name="statusCode">Filter by a live status reason (<see cref="EventStatusCode"/>), e.g. 659490001=Open,
+    /// 659490002=Completed, 659490004=Cancelled.</param>
+    /// <param name="status">String alias for statusCode: "open", "completed", "cancelled". Takes precedence over statusCode.</param>
     /// <param name="priority">Filter by priority (0-3).</param>
     /// <param name="dueDateFrom">Filter events with due date on or after this date.</param>
     /// <param name="dueDateTo">Filter events with due date on or before this date.</param>
@@ -175,15 +176,15 @@ public static class EventEndpoints
             pageSize = 100;
         }
 
-        // Map string status alias (used by Copilot) to Dataverse integer statusCode.
-        // "open"→3, "completed"→5, "cancelled"→6. String wins over integer if both provided.
+        // Map string status alias (used by Copilot) to the live Dataverse statusCode. String wins over integer if both
+        // provided. Task 097: the former 3/5/6 do not exist in the option set, so these filters never matched a row.
         if (!string.IsNullOrEmpty(status))
         {
             statusCode = status.ToLowerInvariant() switch
             {
-                "open" => 3,
-                "completed" => 5,
-                "cancelled" or "canceled" => 6,
+                "open" => EventStatusCode.Open,
+                "completed" => EventStatusCode.Completed,
+                "cancelled" or "canceled" => EventStatusCode.Cancelled,
                 _ => statusCode // unknown string → fall through to integer param
             };
         }
@@ -477,12 +478,14 @@ public static class EventEndpoints
             });
         }
 
-        // Validate statusCode if provided
-        if (request.StatusCode.HasValue && (request.StatusCode < 1 || request.StatusCode > 7))
+        // Validate statusCode if provided — against the live option set (task 097), not a 1..7 range.
+        if (request.StatusCode.HasValue && !EventStatusCode.IsDefined(request.StatusCode.Value))
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
-                ["StatusCode"] = ["Status code must be between 1 (Draft) and 7 (Deleted)."]
+                ["StatusCode"] = [
+                    "Status code must be a sprk_event status reason: " +
+                    string.Join(", ", EventStatusCode.All.Select(s => $"{s.Label} ({s.Value})")) + "."]
             });
         }
 
@@ -552,7 +555,7 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>204 No Content on success, or 404 ProblemDetails if not found.</returns>
-    private static async Task<IResult> DeleteEventAsync(
+    internal static async Task<IResult> DeleteEventAsync(
         Guid id,
         IEventDataverseService dataverseService,
         ILogger<Program> logger,
@@ -693,19 +696,20 @@ public static class EventEndpoints
     }
 
     /// <summary>
-    /// Soft deletes an event by setting statuscode to Deleted (7).
+    /// Soft deletes an event by setting its status to Cancelled — what the DELETE route's own description promises.
     /// </summary>
     /// <remarks>
     /// Soft delete preserves the record in the database for audit trail.
-    /// An Event Log entry is created to track the state transition.
+    /// An Event Log entry (action Deleted) is created to track the state transition.
+    /// Task 097: the live option set has no "Deleted" status reason; the former value 7 was rejected by Dataverse,
+    /// so this route could never succeed.
     /// </remarks>
     private static async Task SoftDeleteEventAsync(
         IEventDataverseService dataverseService,
         Guid id,
         CancellationToken ct)
     {
-        // Set statuscode to Deleted (7)
-        await dataverseService.UpdateEventStatusAsync(id, EventStatusCode.Deleted, null, ct);
+        await dataverseService.UpdateEventStatusAsync(id, EventStatusCode.Cancelled, null, ct);
 
         // Create Event Log entry for "deleted" transition
         await dataverseService.CreateEventLogAsync(
@@ -880,7 +884,7 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>200 OK with action response on success, 400 if invalid transition, or 404 if not found.</returns>
-    private static async Task<IResult> CompleteEventAsync(
+    internal static async Task<IResult> CompleteEventAsync(
         Guid id,
         IEventDataverseService dataverseService,
         ILogger<Program> logger,
@@ -965,7 +969,7 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>200 OK with action response on success, 400 if invalid transition, or 404 if not found.</returns>
-    private static async Task<IResult> CancelEventAsync(
+    internal static async Task<IResult> CancelEventAsync(
         Guid id,
         IEventDataverseService dataverseService,
         ILogger<Program> logger,
@@ -1046,61 +1050,30 @@ public static class EventEndpoints
     /// Checks if an event can be completed based on its current status.
     /// </summary>
     /// <remarks>
-    /// Valid transitions to Completed:
-    /// - Draft (1) -> Completed
-    /// - Planned (2) -> Completed
-    /// - Open (3) -> Completed
-    /// - OnHold (4) -> Completed
-    ///
-    /// Invalid transitions:
-    /// - Completed (5) -> Completed (already completed)
-    /// - Cancelled (6) -> Completed (cannot complete cancelled event)
-    /// - Deleted (7) -> Completed (cannot complete deleted event)
+    /// Valid from the open-work statuses (<see cref="EventStatusCode.IsOpenWork"/>): Draft, Open, On Hold,
+    /// Reassigned. Every other status (Completed, Closed, Cancelled, Transferred, No Further Action) is refused.
+    /// Task 097: the former gate allowed the fictional {1,2,3,4}, so a live Open (659490001) event was refused here.
     /// </remarks>
-    private static bool CanCompleteEvent(int statusCode) =>
-        statusCode is EventStatusCode.Draft
-            or EventStatusCode.Planned
-            or EventStatusCode.Open
-            or EventStatusCode.OnHold;
+    private static bool CanCompleteEvent(int statusCode) => EventStatusCode.IsOpenWork(statusCode);
 
     /// <summary>
     /// Checks if an event can be canceled based on its current status.
     /// </summary>
     /// <remarks>
-    /// Valid transitions to Cancelled:
-    /// - Draft (1) -> Cancelled
-    /// - Planned (2) -> Cancelled
-    /// - Open (3) -> Cancelled
-    /// - OnHold (4) -> Cancelled
-    ///
-    /// Invalid transitions:
-    /// - Completed (5) -> Cancelled (cannot cancel completed event)
-    /// - Cancelled (6) -> Cancelled (already cancelled)
-    /// - Deleted (7) -> Cancelled (cannot cancel deleted event)
+    /// Same open-work set as <see cref="CanCompleteEvent"/>: Draft, Open, On Hold, Reassigned.
     /// </remarks>
-    private static bool CanCancelEvent(int statusCode) =>
-        statusCode is EventStatusCode.Draft
-            or EventStatusCode.Planned
-            or EventStatusCode.Open
-            or EventStatusCode.OnHold;
+    private static bool CanCancelEvent(int statusCode) => EventStatusCode.IsOpenWork(statusCode);
 
     /// <summary>
-    /// Gets the list of valid statuses for completion as a display string.
+    /// The open-work statuses an event may be completed or cancelled from, as a display string.
     /// </summary>
     private static string GetValidStatusesForCompletion() =>
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Draft)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Planned)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Open)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.OnHold)}";
+        string.Join(", ", EventStatusCode.All.Where(s => EventStatusCode.IsOpenWork(s.Value)).Select(s => s.Label));
 
     /// <summary>
     /// Gets the list of valid statuses for cancellation as a display string.
     /// </summary>
-    private static string GetValidStatusesForCancellation() =>
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Draft)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Planned)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.Open)}, " +
-        $"{EventStatusCode.GetDisplayName(EventStatusCode.OnHold)}";
+    private static string GetValidStatusesForCancellation() => GetValidStatusesForCompletion();
 
     /// <summary>
     /// Updates an event's status in Dataverse.

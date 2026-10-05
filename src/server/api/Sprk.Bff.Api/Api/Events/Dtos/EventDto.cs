@@ -76,7 +76,9 @@ public record EventDto
     public int StateCode { get; init; }
 
     /// <summary>
-    /// Status reason: Draft (1), Planned, Open, On Hold, Completed (2), Cancelled, Deleted.
+    /// Status reason (statuscode) — live values in <see cref="Spaarke.Dataverse.EventStatusCode"/>:
+    /// Draft (1), Open (659490001), Completed (659490002), Closed (659490003), Cancelled (659490004),
+    /// Transferred (659490005), On Hold (659490006), Reassigned (659490007), No Further Action (2).
     /// </summary>
     public int StatusCode { get; init; }
 
@@ -111,34 +113,8 @@ public record EventDto
     public DateTime ModifiedOn { get; init; }
 }
 
-/// <summary>
-/// Status code values for Event records.
-/// </summary>
-public static class EventStatusCode
-{
-    public const int Draft = 1;
-    public const int Planned = 2;
-    public const int Open = 3;
-    public const int OnHold = 4;
-    public const int Completed = 5;
-    public const int Cancelled = 6;
-    public const int Deleted = 7;
-
-    /// <summary>
-    /// Converts status code to display name.
-    /// </summary>
-    public static string GetDisplayName(int statusCode) => statusCode switch
-    {
-        Draft => "Draft",
-        Planned => "Planned",
-        Open => "Open",
-        OnHold => "On Hold",
-        Completed => "Completed",
-        Cancelled => "Cancelled",
-        Deleted => "Deleted",
-        _ => "Unknown"
-    };
-}
+// Status reason values: Spaarke.Dataverse.EventStatusCode (task 097 — the former fictional 1..7 set that lived here
+// was rejected by Dataverse; the live set has one home, next to the payload builders that write it).
 
 /// <summary>
 /// Priority values for Event records.
