@@ -42,13 +42,6 @@ public class ClientChildFixUpTests
         Enumerable.Range(0, count).Select(_ => Guid.NewGuid()).OrderBy(g => g).ToArray();
 
     /// <summary>
-    /// AC (job watermark pass): a to-do created outside the product (user-owned, in the creator's business unit) under a
-    /// secure record is re-owned to the Secure team in the NEXT run, with the record's sharee mirrored onto it. This holds
-    /// even though the capped sweep window (one record) covers a different record in that run. The run's report names the
-    /// record under <c>recentChanges</c> and lists the change with the row's previous owner. An ordinary record's
-    /// user-owned to-do and an unfiled user-owned document, both changed in the same window, are never written.
-    /// </summary>
-    /// <summary>
     /// The SHIPPING STATE (owner round 28 item 2: "the L4 recent-changes pass runs with writes ON every 2 minutes") - not an
     /// ADR-038 B3 wiring test: perturb the cron or the enabled flag and it reddens (the NoAccessShareReconciliation
     /// precedent).
@@ -69,6 +62,13 @@ public class ClientChildFixUpTests
         registration.Enabled.Should().BeTrue();
     }
 
+    /// <summary>
+    /// AC (job watermark pass): a to-do created outside the product (user-owned, in the creator's business unit) under a
+    /// secure record is re-owned to the Secure team in the NEXT run, with the record's sharee mirrored onto it. This holds
+    /// even though the capped sweep window (one record) covers a different record in that run. The run's report names the
+    /// record under <c>recentChanges</c> and lists the change with the row's previous owner. An ordinary record's
+    /// user-owned to-do and an unfiled user-owned document, both changed in the same window, are never written.
+    /// </summary>
     [Fact]
     public async Task ANonProductChildOfASecureRecord_IsReownedAndMirrored_InTheNextRun_EvenOutsideTheSweepWindow()
     {
@@ -385,6 +385,113 @@ public class ClientChildFixUpTests
         job.LastResult!.Success.Should().BeTrue();
     }
 
+    // ── Task 147 r1c: the CATCH-UP — what an instance carried is lost on a restart, so a new instance walks every secure
+    //    record once before it trusts its watermark alone ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A refused re-own is carried in the job's memory (r1). A restart (deploy, scale-out) starts an instance that does not
+    /// have it, and the child has not changed again — it is behind any lookback. The new instance's catch-up walks every
+    /// secure record once, so the child is still corrected; the catch-up's corrections are reported with pass "catch-up".
+    /// </summary>
+    [Fact]
+    public async Task ARefusedReownCarriedBeforeARestart_IsCorrectedByTheNewInstancesCatchUp()
+    {
+        var before = new JobHarness();
+        var roots = OrderedRoots(3);
+        var (target, todo, ordinaryProject, ordinaryTodo) = (roots[2], Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        foreach (var root in roots)
+            before.World.SecureRoot("sprk_workassignment", root);
+        before.World.UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", target))
+            .Modified("sprk_todo", todo, MinutesAgo(2))
+            .RefusingOwnerWritesOf(todo)
+            .OrdinaryRoot("sprk_project", ordinaryProject)
+            .UserOwnedChild("sprk_todo", ordinaryTodo, ("sprk_regardingproject", "sprk_project", ordinaryProject))
+            .Modified("sprk_todo", ordinaryTodo, MinutesAgo(600));
+
+        var refused = await before.RunAsync(writesEnabled: null);
+        refused.GetProperty("recentChanges").GetProperty("carriedRoots").GetInt32().Should().Be(1);
+
+        // Time passes, the fault clears, the instance restarts: the child is now far behind the initial lookback.
+        before.World.ClearOwnerWriteFaults().Modified("sprk_todo", todo, MinutesAgo(600));
+        var after = new JobHarness(before.World, before.Shares);
+
+        var first = await after.RunAsync(writesEnabled: null, maxRootsPerRun: "2", trigger: JobRunTrigger.Scheduled);
+        first.GetProperty("recentChanges").GetProperty("rowsChanged").GetInt32().Should().Be(0,
+            "nothing changed since the new instance's lookback: only the catch-up can reach the child");
+        first.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeTrue();
+        first.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeFalse();
+        after.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "two records a run, from the first: the third is the next run's");
+
+        var second = await after.RunAsync(writesEnabled: null, maxRootsPerRun: "2", trigger: JobRunTrigger.Scheduled);
+
+        after.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+        var catchUp = second.GetProperty("recentChanges").GetProperty("catchUp");
+        catchUp.GetProperty("complete").GetBoolean().Should().BeTrue();
+        second.GetProperty("recentChanges").GetProperty("corrected").GetInt32().Should().Be(1);
+        second.GetProperty("changes").EnumerateArray().Single(c => c.GetProperty("id").GetGuid() == todo)
+            .GetProperty("pass").GetString().Should().Be("catch-up");
+        second.GetProperty("sweepRan").GetBoolean().Should().BeFalse("the sweep stays report-only and off the schedule");
+        after.World.OwnerWrites.Should().NotContain(w => w.Id == ordinaryTodo, "an ordinary record's child is never written");
+        after.LastResult!.Success.Should().BeTrue();
+
+        var third = await after.RunAsync(writesEnabled: null, maxRootsPerRun: "2", trigger: JobRunTrigger.Scheduled);
+        third.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeFalse(
+            "an instance walks every record ONCE; then its watermark alone decides");
+    }
+
+    /// <summary>
+    /// The catch-up is part of the SCHEDULED net. A manual run is the backfill script's review run, whose report-only plan
+    /// must not be applied under the operator's eyes; and while the sweep itself writes, its window covers every record in
+    /// order, so the catch-up stands aside.
+    /// </summary>
+    [Fact]
+    public async Task TheCatchUp_DoesNotRunOnAManualTrigger_NorWhileTheSweepWrites()
+    {
+        var job = new JobHarness();
+        var root = Guid.NewGuid();
+        var todo = Guid.NewGuid();
+        job.World.SecureRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root))
+            .Modified("sprk_todo", todo, MinutesAgo(600));
+
+        var manual = await job.RunAsync(writesEnabled: null);
+        manual.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeFalse();
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser),
+            "the review run plans; it never writes");
+
+        var sweeping = await job.RunAsync(writesEnabled: "true", trigger: JobRunTrigger.Scheduled);
+        sweeping.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeFalse();
+        sweeping.GetProperty("sweepRan").GetBoolean().Should().BeTrue();
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam), "the writing sweep did it");
+    }
+
+    /// <summary>
+    /// Under the emergency stop (RecentChangesWritesEnabled=false) the catch-up plans and writes nothing, and does NOT
+    /// advance: a report-only walk corrected nothing, so the first run with writes on starts the walk from the first record.
+    /// </summary>
+    [Fact]
+    public async Task TheCatchUp_UnderTheEmergencyStop_WritesNothing_AndDoesNotAdvance()
+    {
+        var job = new JobHarness();
+        var root = Guid.NewGuid();
+        var todo = Guid.NewGuid();
+        job.World.SecureRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root))
+            .Modified("sprk_todo", todo, MinutesAgo(600));
+
+        var stopped = await job.RunAsync(writesEnabled: null, recentWritesEnabled: "false", trigger: JobRunTrigger.Scheduled);
+
+        stopped.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("ran").GetBoolean().Should().BeTrue();
+        stopped.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeFalse();
+        stopped.GetProperty("wouldChange").GetInt32().Should().Be(1);
+        job.World.OwnerWrites.Should().BeEmpty();
+
+        var resumed = await job.RunAsync(writesEnabled: null, trigger: JobRunTrigger.Scheduled);
+        resumed.GetProperty("recentChanges").GetProperty("catchUp").GetProperty("complete").GetBoolean().Should().BeTrue();
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.Team(SecureTeam));
+    }
+
     /// <summary>
     /// Task 147 r1 (verifier item 4): a changed row the walk cannot place (its record is flagged secure but not isolated)
     /// is carried and looked at again in EVERY run, reported each time, not only in the run that listed it. Once the record
@@ -503,8 +610,16 @@ public class ClientChildFixUpTests
     /// </summary>
     private sealed class JobHarness
     {
-        public SecureChildShareWorld World { get; } = SecureChildShareWorld.Standard();
-        public FakeRecordShareTable Shares { get; } = new();
+        public JobHarness()
+            : this(SecureChildShareWorld.Standard(), new FakeRecordShareTable())
+        {
+        }
+
+        /// <summary>Task 147 r1c: a NEW job instance (a restart, a deploy, a scale-out) over the SAME Dataverse.</summary>
+        public JobHarness(SecureChildShareWorld world, FakeRecordShareTable shares) => (World, Shares) = (world, shares);
+
+        public SecureChildShareWorld World { get; }
+        public FakeRecordShareTable Shares { get; }
         public JobRunResult? LastResult { get; private set; }
         private readonly IConfigurationRoot _configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
         private SecureChildReconciliationJob? _job;

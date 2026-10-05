@@ -46,6 +46,35 @@ const REFILE_ROUTES: Readonly<Record<string, (id: string) => string>> = {
   sprk_communication: id => `/api/communications/${id}/filing`,
 };
 
+/**
+ * Every CHILD table whose owner follows what it is filed under — the server's ownership parents
+ * (`RecordOwnershipResolver.OwnershipParentEntities`) minus the four roots (project, matter, work assignment, service
+ * request). Task 147 r1c: a host control that re-files a row of one of these tables must go through the BFF; one with no
+ * BFF re-file route is REFUSED rather than written through `Xrm.WebApi` (its owner would not follow the move). Pinned to
+ * the C# list by `Spaarke.ArchTests.SecureChildNewCommandAgreementTests`.
+ */
+export const OWNERSHIP_CHILD_TABLES: ReadonlySet<string> = new Set([
+  'sprk_agreement',
+  'sprk_analysis',
+  'sprk_billingevent',
+  'sprk_budget',
+  'sprk_communication',
+  'sprk_document',
+  'sprk_event',
+  'sprk_invoice',
+  'sprk_kpiassessment',
+  'sprk_memo',
+  'sprk_reportcard',
+  'sprk_spendsignal',
+  'sprk_spendsnapshot',
+  'sprk_todo',
+]);
+
+/** True when `table` is a child whose owner follows what it is filed under (see {@link OWNERSHIP_CHILD_TABLES}). */
+export function isOwnershipChildTable(table: string): boolean {
+  return OWNERSHIP_CHILD_TABLES.has((table ?? '').toLowerCase());
+}
+
 /** True when `table` is created through the BFF. */
 export function isBffChildCreateTable(table: string): boolean {
   return BFF_CHILD_CREATE_TABLES.has((table ?? '').toLowerCase());

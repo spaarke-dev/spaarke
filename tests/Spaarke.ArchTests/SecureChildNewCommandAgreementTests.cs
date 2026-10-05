@@ -18,9 +18,10 @@ namespace Spaarke.ArchTests;
 /// template, its merge script and the deploy script — four files, two languages, no compiler between them. A table added to
 /// one and not the others would ship a hidden platform "+ New" with no replacement, or a replacement that names a create
 /// route the BFF refuses. Per ADR-038 Amendment A1, <c>tests/Spaarke.ArchTests/**</c> is a KEEP path.</para>
-/// <para><b>The inventory.</b> <see cref="RootFormSecureChildSubgrids"/> is the read-only live inventory of spaarkedev1's
-/// project, matter and work-assignment main forms (2026-10-04), filtered to the secure-child tables. A new subgrid of a
-/// secure-child table on a root form is added here, and then served (or its native "+ New" hidden some other way).</para>
+/// <para><b>The inventory.</b> <see cref="ChildSubgridsOnMainForms"/> is the read-only live inventory of every active main
+/// form of spaarkedev1 (2026-10-04; task 147 r1c widened it from the three root forms), filtered to subgrids of ownership
+/// child tables. A new such subgrid is added here, and then served (or its native "+ New" hidden some other way, or its
+/// host is a party).</para>
 /// </remarks>
 public class SecureChildNewCommandAgreementTests
 {
@@ -33,12 +34,36 @@ public class SecureChildNewCommandAgreementTests
     private static string ChildRecordEndpointsFile => Path.Combine(Root, "src", "server", "api", "Sprk.Bff.Api", "Api", "ChildRecordEndpoints.cs");
     private static string AnalysisRibbonFile => Path.Combine(Root, "infrastructure", "dataverse", "ribbon", "AnalysisRibbons", "Entities", "sprk_analysis", "RibbonDiff.xml");
 
-    /// <summary>Secure-child tables with a subgrid on a root main form (live inventory, spaarkedev1, 2026-10-04).</summary>
-    private static readonly string[] RootFormSecureChildSubgrids =
+    /// <summary>
+    /// EVERY subgrid of an ownership-child table on an active main form (live inventory, spaarkedev1, read-only, 2026-10-04;
+    /// task 147 r1c widened it from the three root forms to all forms): (host form table, subgrid table). A child created
+    /// by the platform "+ New" on any of these is filed under the host — under a secure record directly (root hosts) or
+    /// through it (an event, a document, an invoice, an analysis, a budget of a secure record).
+    /// </summary>
+    private static readonly (string Host, string Child)[] ChildSubgridsOnMainForms =
     {
-        "sprk_todo", "sprk_event", "sprk_document", "sprk_invoice", "sprk_analysis", "sprk_budget", "sprk_communication",
-        "sprk_reportcard",
+        ("sprk_project", "sprk_todo"), ("sprk_project", "sprk_event"), ("sprk_project", "sprk_document"),
+        ("sprk_project", "sprk_invoice"), ("sprk_project", "sprk_analysis"), ("sprk_project", "sprk_budget"),
+        ("sprk_matter", "sprk_analysis"), ("sprk_matter", "sprk_budget"), ("sprk_matter", "sprk_communication"),
+        ("sprk_matter", "sprk_invoice"), ("sprk_matter", "sprk_reportcard"),
+        ("sprk_workassignment", "sprk_document"), ("sprk_workassignment", "sprk_event"),
+        ("sprk_analysis", "sprk_todo"), ("sprk_budget", "sprk_todo"), ("sprk_document", "sprk_analysis"),
+        ("sprk_document", "sprk_todo"), ("sprk_event", "sprk_todo"),
+        ("sprk_invoice", "sprk_communication"), ("sprk_invoice", "sprk_document"), ("sprk_invoice", "sprk_event"),
+        ("sprk_invoice", "sprk_todo"),
+        ("sprk_matter", "sprk_kpiassessment"), ("sprk_project", "sprk_kpiassessment"),
+        ("sprk_reportcard", "sprk_kpiassessment"), ("sprk_invoice", "sprk_billingevent"),
+        ("contact", "sprk_todo"), ("sprk_organization", "sprk_todo"),
     };
+
+    /// <summary>The party hosts the script lets keep the platform "+ New" (never an ownership parent).</summary>
+    private static readonly string[] PartyHosts = { "contact", "sprk_organization", "account" };
+
+    private static string[] ScriptMapKeys(string mapName) =>
+        Regex.Matches(
+                Regex.Match(File.ReadAllText(ScriptFile), $@"ns\.{mapName}\s*=\s*\{{(?<map>[^;]*)\}};").Groups["map"].Value,
+                @"(\w+)\s*:\s*true")
+            .Select(m => m.Groups[1].Value).OrderBy(t => t, StringComparer.Ordinal).ToArray();
 
     private static string[] Quoted(string text) =>
         Regex.Matches(text, "'(sprk_[a-z]+)'|\"(sprk_[a-z]+)\"").Select(m => m.Groups[1].Success ? m.Groups[1].Value : m.Groups[2].Value)
@@ -60,19 +85,72 @@ public class SecureChildNewCommandAgreementTests
     }
 
     [Fact]
-    public void EverySecureChildSubgridOnARootForm_IsServed_OrItsPlatformNewIsHiddenOutright()
+    public void EveryChildSubgridOnAMainForm_IsServed_OrItsPlatformNewIsHiddenOutright_OrItsHostIsAParty()
     {
         var served = ScriptTables();
         var analysisHidesNative = File.ReadAllText(AnalysisRibbonFile)
             .Contains("Location=\"Mscrm.SubGrid.sprk_analysis.AddNewStandard\"", StringComparison.Ordinal);
 
-        var uncovered = RootFormSecureChildSubgrids
-            .Where(t => !served.Contains(t) && !(t == "sprk_analysis" && analysisHidesNative))
+        var uncovered = ChildSubgridsOnMainForms
+            .Where(s => !PartyHosts.Contains(s.Host))
+            .Where(s => !served.Contains(s.Child) && !(s.Child == "sprk_analysis" && analysisHidesNative))
+            .Select(s => $"{s.Host} -> {s.Child}")
             .ToList();
 
         Assert.True(uncovered.Count == 0,
-            "A secure-child subgrid on a root form keeps the platform '+ New' (a user-owned create under a secure record): "
+            "A child subgrid keeps the platform '+ New' (a user-owned create under, or through, a secure record): "
             + string.Join(", ", uncovered));
+    }
+
+    [Fact]
+    public void SpaarkesOwnAddKpiQuickCreate_CarriesTheSecureRule_InTheAuthoredRibbon_AndTheMergeScript()
+    {
+        // "+ Add KPI" opens the KPI assessment QUICK CREATE with the matter prefilled — the "quick create with the parent
+        // prefilled" round 28 item 2 names. Under a secure host only the BFF command may show.
+        var kpi = XDocument.Load(Path.Combine(Root, "src", "solutions", "SpaarkeCore", "entities", "sprk_matter", "RibbonDiff",
+            "add-kpi-ribbon.xml"));
+        const string rule = "sprk.SecureChild.sprk_kpiassessment.NativeNewAllowed.EnableRule";
+        var command = kpi.Descendants("CommandDefinition").Single(c => (string?)c.Attribute("Id") == "sprk.matter.subgrid.kpi.AddKpiButton.Command");
+        Assert.Contains(command.Descendants("EnableRule"), r => (string?)r.Attribute("Id") == rule);
+        var definition = kpi.Descendants("EnableRule").Single(r => (string?)r.Attribute("Id") == rule && r.Elements("CustomRule").Any());
+        Assert.Equal("Spaarke.SecureChild.Ribbon.nativeNewAllowed", definition.Element("CustomRule")!.Attribute("FunctionName")!.Value);
+
+        var merge = File.ReadAllText(MergeFile);
+        Assert.Contains("'sprk.matter.subgrid.kpi.AddKpiButton.Command'", merge, StringComparison.Ordinal);
+
+        // The script's own check: the Quick Create opens only for a record read as NOT secure.
+        var actions = File.ReadAllText(Path.Combine(Root, "src", "solutions", "webresources", "sprk_kpi_ribbon_actions.js"));
+        Assert.Contains("row.sprk_issecure === false", actions, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ThePartyHosts_AreExactlyTheIdentityTables_TheOwnershipRuleNeverFollows()
+    {
+        // A party host keeps the platform "+ New" (nativeNewAllowed answers true without a flag read). That is safe only
+        // while the table is NOT an ownership parent — otherwise a child created under it could sit under a secure record.
+        Assert.Equal(PartyHosts.OrderBy(t => t, StringComparer.Ordinal), ScriptMapKeys("PARTIES"));
+        Assert.All(PartyHosts, party =>
+            Assert.DoesNotContain(party, Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.OwnershipParentEntities));
+        Assert.Equal(new[] { "sprk_matter", "sprk_project", "sprk_workassignment" }, ScriptMapKeys("ROOTS"));
+    }
+
+    [Fact]
+    public void TheClientOwnershipChildList_IsTheServersOwnershipParentsWithoutTheRoots()
+    {
+        // Task 147 r1c: a host control (RegardingResolver) refuses to re-file an ownership child it has no BFF route for,
+        // instead of writing it through Xrm.WebApi. Its list must be the server's — a table missing on the client side would
+        // be re-filed as the user with no owner change.
+        var adapter = File.ReadAllText(Path.Combine(Root, "src", "client", "shared", "Spaarke.UI.Components", "src", "utils",
+            "adapters", "bffChildWriteAdapter.ts"));
+        var client = Quoted(Regex.Match(adapter, @"OWNERSHIP_CHILD_TABLES[^=]*=\s*new Set\(\[(?<list>[^\]]*)\]\)").Groups["list"].Value);
+
+        var roots = new[] { "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest" };
+        var server = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.OwnershipParentEntities
+            .Where(t => !roots.Contains(t, StringComparer.OrdinalIgnoreCase))
+            .OrderBy(t => t, StringComparer.Ordinal).ToArray();
+
+        Assert.NotEmpty(client);
+        Assert.Equal(server, client);
     }
 
     [Fact]
@@ -131,5 +209,10 @@ public class SecureChildNewCommandAgreementTests
         // An unreadable flag resolves null (never rejects into the rule's Default) and is not cached.
         Assert.Contains("return null;", Body("hostSecureFlag"), StringComparison.Ordinal);
         Assert.DoesNotContain("sessionStorage", script, StringComparison.Ordinal);
+        // Owner round 28 item 2: the rules read sprk_issecure THROUGH Xrm.WebApi (the stored value) — never the form's
+        // in-memory attribute, which Make Secure / Remove Secure may not have refreshed yet.
+        Assert.Contains("Xrm.WebApi.retrieveRecord(host.entity, host.id, \"?$select=sprk_issecure\")", Body("hostSecureFlag"),
+            StringComparison.Ordinal);
+        Assert.DoesNotContain("getAttribute", script, StringComparison.Ordinal);
     }
 }

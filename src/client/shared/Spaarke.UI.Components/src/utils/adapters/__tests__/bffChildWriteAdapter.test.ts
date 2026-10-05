@@ -174,6 +174,29 @@ describe('BFF child-record writes (task 147 r1)', () => {
       await expect(rewrapped.createRecord('sprk_todo', { sprk_name: 'x' })).resolves.toBe(ID);
     });
 
+    it('keeps a host decorator that inherits from a routed service in the call path (a create listener still fires)', async () => {
+      // Task 147 r1c: the CreateTodoWizard code page decorates its BFF-routed service with a create broadcast
+      // (Object.create(routed)). The service the wizard wraps again must call THAT decorator, not go straight to the BFF
+      // past it — otherwise the listener (the cross-iframe refetch) silently never fires.
+      const fetchFn = jest.fn().mockResolvedValue(json(201, { id: ID }));
+      const routed = withBffChildWrites(innerService(), fetchFn, BFF);
+      const heard: string[] = [];
+      const decorated: IDataService = Object.assign(Object.create(routed) as IDataService, {
+        createRecord: async (entity: string, data: Record<string, unknown>) => {
+          const id = await routed.createRecord(entity, data);
+          heard.push(`${entity}:${id}`);
+          return id;
+        },
+      });
+
+      const wrapped = withBffChildWrites(decorated, undefined, undefined);
+      await wrapped.createRecord('sprk_todo', { sprk_name: 'x' });
+
+      expect(wrapped).toBe(decorated);
+      expect(heard).toEqual([`sprk_todo:${ID}`]);
+      expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
     it('does NOT fall back to the inner service when the BFF refuses — nothing is left user-owned', async () => {
       const inner = innerService();
       const fetchFn = jest

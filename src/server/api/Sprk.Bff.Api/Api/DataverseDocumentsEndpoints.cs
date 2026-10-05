@@ -100,6 +100,7 @@ public static class DataverseDocumentsEndpoints
             Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
             Spaarke.Core.Auth.AuthorizationService authorization,
             [FromServices] Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe callerAccessProbe,
+            [FromServices] Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer shares,
             ILogger<Program> logger,
             HttpContext context) =>
         {
@@ -149,6 +150,21 @@ public static class DataverseDocumentsEndpoints
                         return denial;
                     }
 
+                    // Task 147 r1c (owner round 28 item 1 — the Compose document association re-files through this
+                    // route): whether the document is isolated BEFORE it moves, so a move OUT of every secure record
+                    // also takes the secure record's mirrored shares off it (owner round 22), exactly as the other
+                    // browser re-file routes do. A read fault is carried as "unknown" (nothing is removed; logged).
+                    Exception? isolationReadFault = null;
+                    var isolatedBefore = false;
+                    try
+                    {
+                        isolatedBefore = await shares.IsSecureTeamOwnedAsync("sprk_document", Guid.Parse(id), context.RequestAborted);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        isolationReadFault = ex;
+                    }
+
                     var reparent = await ownershipResolver.ReparentAsync(
                         new Sprk.Bff.Api.Services.Dataverse.RecordReparent
                         {
@@ -170,6 +186,13 @@ public static class DataverseDocumentsEndpoints
                     {
                         return ProblemDetailsHelper.RecordOwnerRefused(reparent, "document", traceId);
                     }
+
+                    // Task 149's mirror, inline (task 147 r1c): moved under a secure record → shared with its sharees now
+                    // (not at the next two-minute reconcile); moved out of every secure record → the mirror goes.
+                    await shares.AfterRefileAsync(
+                        "sprk_document", Guid.Parse(id),
+                        () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
+                        CancellationToken.None);
                 }
 
                 // Task 156 (owner round 4 item 5, option b): a document re-filed to another matter / project / work

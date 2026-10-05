@@ -764,6 +764,9 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
         } catch (err) {
           // eslint-disable-next-line no-console
           console.warn('[SmartToDo] three-field quickAdd create failed:', err);
+          // UAC-r2 task 147 r1c (owner round 28 item 1: "refusals show the ProblemDetails message"): the server's own
+          // words reach the user — the to-do was NOT created (nothing is left owned by the user).
+          setAddError(err instanceof Error && err.message ? err.message : 'Failed to create to-do item. Please try again.');
         }
       })();
     };

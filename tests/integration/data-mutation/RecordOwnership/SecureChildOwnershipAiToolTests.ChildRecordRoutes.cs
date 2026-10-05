@@ -291,6 +291,124 @@ public sealed partial class SecureChildOwnershipAiToolTests
         _appCreates.Should().BeEmpty();
     }
 
+    // ── Per census table (task 147 r1c, AC13): secure / ordinary / refusal for EVERY table the route creates ────
+
+    /// <summary>Every create table, with the lookup a writer names a matter through (live navigation properties).</summary>
+    public static TheoryData<string, string> CensusCreateTablesUnderAMatter => new()
+    {
+        { "sprk_todo", "sprk_RegardingMatter" },
+        { "sprk_event", "sprk_RegardingMatter" },
+        { "sprk_memo", "sprk_RegardingMatter" },
+        { "sprk_invoice", "sprk_Matter" },
+        { "sprk_reportcard", "sprk_RegardingMatter" },
+        { "sprk_analysis", "sprk_RegardingMatter" },
+        { "sprk_document", "sprk_Matter" },
+        { "sprk_budget", "sprk_Matter" },
+        { "sprk_kpiassessment", "sprk_Matter" },
+        { "sprk_billingevent", "sprk_matter" },
+    };
+
+    [Fact]
+    public void TheCensusTheory_CoversEveryCreateTable()
+    {
+        CensusCreateTablesUnderAMatter.Select(row => (string)row[0]).Should()
+            .BeEquivalentTo(ChildRecordEndpoints.CreateTables, "a table added to the route gets its secure/ordinary/refusal cases");
+    }
+
+    [Theory]
+    [MemberData(nameof(CensusCreateTablesUnderAMatter))]
+    public async Task ChildCreate_EveryCensusTable_UnderASecureMatter_IsCreatedByTheApp_OwnedByTheNamedTeam_AndMirrored(
+        string table, string navigation)
+    {
+        var result = await CreateChild(table, new()
+        {
+            ["sprk_name"] = "x",
+            [$"{navigation}@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        _user.Posts.Should().BeEmpty("a browser child is never created as, or owned by, the user");
+        var (created, id, fields) = _appCreates.Should().ContainSingle().Subject;
+        created.Should().Be(table);
+        Owner(fields).Should().Be(Directory.SecureNamedTeam);
+        _shareTable.MaskOf(table, id, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask,
+            "the secure matter's sharee sees the new row at once");
+        fields.Should().ContainKey("sprk_CreatedByPerson@odata.bind",
+            "createdby is the application; the person who asked is recorded (RecordCreatorPerson)");
+    }
+
+    [Theory]
+    [MemberData(nameof(CensusCreateTablesUnderAMatter))]
+    public async Task ChildCreate_EveryCensusTable_UnderAnOrdinaryMatter_IsOwnedByThatMattersBusinessUnitTeam_AndNotShared(
+        string table, string navigation)
+    {
+        var result = await CreateChild(table, new()
+        {
+            ["sprk_name"] = "x",
+            [$"{navigation}@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        Owner(_appCreates.Should().ContainSingle().Subject.Fields).Should().Be(Directory.ChildTeam,
+            "round 35 item 6 / I-6: a child of a non-secure parent is owned by that parent's business-unit team");
+        _shareTable.WriteLog.Should().BeEmpty("an ordinary record's child is never mirrored or shared");
+    }
+
+    [Theory]
+    [MemberData(nameof(CensusCreateTablesUnderAMatter))]
+    public async Task ChildCreate_EveryCensusTable_UnderAMatterTheCallerCannotAppendTo_IsTheUniformNotFound_AndCreatesNothing(
+        string table, string navigation)
+    {
+        _user.NoAppendTo.Add(SecureMatter);
+
+        var result = await CreateChild(table, new()
+        {
+            ["sprk_name"] = "x",
+            [$"{navigation}@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        _appCreates.Should().BeEmpty();
+        _user.Posts.Should().BeEmpty();
+    }
+
+    // ── Round 34 item 6: CreateEventWizard's documents bind the event through sprk_relatedevent ────────────
+
+    [Fact]
+    public async Task ChildCreate_ADocumentFiledUnderAnEvent_BindsSprkRelatedEvent()
+    {
+        _world.WithRecord("sprk_event", Event, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+
+        var result = await CreateChild("sprk_document", new()
+        {
+            ["sprk_documentname"] = "brief.pdf",
+            ["sprk_RelatedEvent@odata.bind"] = $"/sprk_events({Event:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        Bind(fields, "sprk_RelatedEvent@odata.bind").Should().Be($"/sprk_events({Event:D})",
+            "sprk_document's event lookup is sprk_relatedevent (navigation property sprk_RelatedEvent)");
+        fields.Keys.Should().NotContain(k => k.Equals("sprk_Event@odata.bind", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task ChildCreate_ADocumentBindingTheNonexistentSprkEventColumn_IsRefused400_AndCreatesNothing()
+    {
+        // The defect round 34 item 6 names: `sprk_Event@odata.bind` on sprk_document — no such column. The mapper resolves
+        // every bind from the table's own metadata, so the wrong key is refused rather than written.
+        var result = await CreateChild("sprk_document", new()
+        {
+            ["sprk_documentname"] = "brief.pdf",
+            ["sprk_Event@odata.bind"] = $"/sprk_events({Event:D})",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        _appCreates.Should().BeEmpty();
+    }
+
     // ── Re-file (the ONE core) ────────────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -431,6 +549,200 @@ public sealed partial class SecureChildOwnershipAiToolTests
         Status(result).Should().Be(StatusCodes.Status204NoContent);
         _world.Assignments.Should().Equal(("sprk_event", Event, Directory.SecureNamedTeam));
         _shareTable.MaskOf("sprk_event", Event, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_ACommunicationMovedUnderASecureMatter_IsPatchedAsTheCaller_ThenOwnedByTheNamedTeam_AndMirrored()
+    {
+        // PATCH /api/communications/{id}/filing (the communications family, round 28) — the Connections writers' route.
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.UserOwnedChild("sprk_communication", communication, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        var result = await ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", communication,
+            Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }),
+            _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle().Which.Path.Should().Be($"sprk_communications({communication:D})");
+        _world.Assignments.Should().Equal(("sprk_communication", communication, Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_communication", communication, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_UnderARecordTheCallerCannotAppendTo_IsTheUniformNotFound_AndNothingIsWritten()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000005");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.NoAppendTo.Add(SecureMatter);
+
+        var result = await ChildRecordEndpoints.UpdateAsync(
+            "sprk_communication", communication,
+            Payload(new() { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" }),
+            _user, _world.Resolver(), Restamper(), Shares(), HttpContextOfCaller(), NullLogger<Program>.Instance,
+            CancellationToken.None);
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    /// <summary>Every table re-filed through <c>PATCH /api/v1/child-records/{table}/{id}</c>, with its matter lookup.</summary>
+    public static TheoryData<string, string, string> CensusRefileTablesUnderAMatter => new()
+    {
+        { "sprk_todo", "sprk_RegardingMatter", "sprk_regardingmatter" },
+        { "sprk_memo", "sprk_RegardingMatter", "sprk_regardingmatter" },
+        { "sprk_invoice", "sprk_Matter", "sprk_matter" },
+        { "sprk_reportcard", "sprk_RegardingMatter", "sprk_regardingmatter" },
+        { "sprk_analysis", "sprk_RegardingMatter", "sprk_regardingmatter" },
+    };
+
+    [Fact]
+    public void TheRefileTheory_CoversEveryRefileTable()
+    {
+        CensusRefileTablesUnderAMatter.Select(row => (string)row[0]).Should()
+            .BeEquivalentTo(ChildRecordEndpoints.RefileTables, "a table added to the re-file route gets its cases");
+    }
+
+    [Theory]
+    [MemberData(nameof(CensusRefileTablesUnderAMatter))]
+    public async Task ChildRefile_EveryCensusTable_MovedUnderASecureMatter_IsOwnedByTheNamedTeam_AndMirrored(
+        string table, string navigation, string column)
+    {
+        var row = Guid.Parse("a2470000-0000-4000-8000-000000000007");
+        _world.WithRecord(table, row, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild(table, row, (column, "sprk_matter", SecureMatter));
+
+        var result = await RefileChild(table, row, new() { [$"{navigation}@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.Patches.Should().ContainSingle();
+        _world.Assignments.Should().Equal((table, row, Directory.SecureNamedTeam));
+        _shareTable.MaskOf(table, row, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    [Theory]
+    [MemberData(nameof(CensusRefileTablesUnderAMatter))]
+    public async Task ChildRefile_EveryCensusTable_MovedOutOfASecureMatter_ByAFullAccessHolder_ReturnsToTheBusinessUnitTeam_AndLosesTheMirror(
+        string table, string navigation, string column)
+    {
+        var row = Guid.Parse("a2470000-0000-4000-8000-000000000008");
+        _world.WithRecord(table, row, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            [column] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild(table, row, (column, "sprk_matter", SecureMatter));
+        _shareTable.Seed(table, row, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        _user.OwningTeamOf[row] = Directory.SecureNamedTeam;
+        ShareWorld.Set(table, row, column, new EntityReference("sprk_matter", OrdinaryMatter));
+
+        var result = await RefileChild(table, row, new() { [$"{navigation}@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _world.Assignments.Should().Equal((table, row, Directory.ChildTeam));
+        _shareTable.MaskOf(table, row, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+    }
+
+    [Theory]
+    [MemberData(nameof(CensusRefileTablesUnderAMatter))]
+    public async Task ChildRefile_EveryCensusTable_UnderAMatterTheCallerCannotAppendTo_IsTheUniformNotFound_AndNothingIsWritten(
+        string table, string navigation, string column)
+    {
+        _ = column;
+        var row = Guid.Parse("a2470000-0000-4000-8000-000000000009");
+        _world.WithRecord(table, row, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        _user.NoAppendTo.Add(SecureMatter);
+
+        var result = await RefileChild(table, row, new() { [$"{navigation}@odata.bind"] = $"/sprk_matters({SecureMatter:D})" });
+
+        Status(result).Should().Be(StatusCodes.Status404NotFound);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.NotFoundCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    // ── Task 147 r1c: the chat update tool runs the SAME after-re-file mirror (one implementation) ──────────────
+
+    [Fact]
+    public async Task UpdateTool_MovingAToDoUnderASecureMatter_SharesItWithTheMattersSharees_Inline()
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        var result = await UpdateRecordWithShares(
+            "sprk_todo", Todo, Lookup("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.SecureNamedTeam));
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(CollaborateMask);
+    }
+
+    [Fact]
+    public async Task UpdateTool_MovingAToDoOutOfASecureMatter_ByAFullAccessHolder_TakesTheMirroredSharesOff()
+    {
+        // Before r1c the chat tool's move out left the secure record's sharees on the row for good: the two-minute share
+        // job looks only at Secure-team-owned rows, so nothing ever took them off.
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", new EntityReference("sprk_matter", OrdinaryMatter));
+
+        var result = await UpdateRecordWithShares(
+            "sprk_todo", Todo, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task UpdateTool_ReFilingANeverIsolatedToDo_KeepsItsOwnShares()
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), 1);
+
+        var result = await UpdateRecordWithShares(
+            "sprk_todo", Todo, Lookup("sprk_regardingmatter", "sprk_matter", OrdinaryMatter));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().Be(1,
+            "owner round 22: a share on a never-isolated row is its user's own intent");
+    }
+
+    /// <summary>The chat update tool with a scope that resolves the REAL synchronizer over this test's share world.</summary>
+    private Task<Sprk.Bff.Api.Services.Ai.ToolResult> UpdateRecordWithShares(
+        string table, Guid id, params (string Column, JsonElement Value)[] item)
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddScoped(services, _ => Shares());
+        var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+        var scopes = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<Microsoft.Extensions.DependencyInjection.IServiceScopeFactory>(provider);
+
+        return new Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler(
+                _user,
+                new Sprk.Bff.Api.Tests.Integration.DataMutation.CoreAncestorStamping.StampWorld().AfterWriteRestamp,
+                NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler>.Instance,
+                _world.Resolver(),
+                scopes)
+            .ExecuteChatAsync(
+                BuildChatInvocationContext(
+                    toolArgumentsJson: JsonSerializer.Serialize(new
+                    {
+                        tablename = table,
+                        recordId = id,
+                        item = item.ToDictionary(i => i.Column, i => i.Value),
+                    })) with { UserId = Guid.NewGuid().ToString() },
+                BuildAnalysisTool(nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler)), CancellationToken.None);
     }
 
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────

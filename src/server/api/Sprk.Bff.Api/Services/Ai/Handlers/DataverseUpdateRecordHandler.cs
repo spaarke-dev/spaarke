@@ -212,6 +212,25 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId, MapClientError(tool, mapped.ClientFailure, startedAt), stopwatch);
             }
 
+            // Task 147 r1c: a write that may move a CHILD row into or out of a secure record reads, BEFORE it, whether the
+            // row is isolated — so a move OUT also takes the secure record's mirrored shares off (owner round 22), exactly
+            // as the browser re-file routes do. One implementation: SecureChildShareSynchronizer.AfterRefileAsync.
+            using var shareScope = MayRefile(tablename, mapped.Item!) ? _scopes?.CreateScope() : null;
+            var shares = shareScope?.ServiceProvider.GetService<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+            Exception? isolationReadFault = null;
+            var isolatedBefore = false;
+            if (shares is not null)
+            {
+                try
+                {
+                    isolatedBefore = await shares.IsSecureTeamOwnedAsync(tablename, recordId, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    isolationReadFault = ex;
+                }
+            }
+
             // Task 146 r2 (verifier item 2): a change to the records the row is FILED under is a re-file.
             var refile = await RefileIfFiledAsync(
                 tool, tablename, recordId, entitySetName, primaryIdAttribute, mapped.Item!, context, startedAt, cancellationToken)
@@ -219,6 +238,14 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             if (refile.Result is { } refileResult)
             {
                 return LogOutcome(context, tablename, recordId, refileResult, stopwatch);
+            }
+
+            if (refile.Written && shares is not null)
+            {
+                await shares.AfterRefileAsync(
+                    tablename, recordId,
+                    () => isolationReadFault is null ? Task.FromResult(isolatedBefore) : Task.FromException<bool>(isolationReadFault),
+                    CancellationToken.None).ConfigureAwait(false);
             }
 
             if (!refile.Written)
@@ -341,6 +368,15 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Task 147 r1c: whether the update could be a RE-FILE of a child row (a set or cleared lookup on a reparentable child
+    /// table) — the case <see cref="OwnedChildWrite.RefileAsync"/> decides, and the only one worth the pre-write isolation read.
+    /// </summary>
+    private static bool MayRefile(string tablename, DataverseWriteItemMapper.MappedItem item) =>
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsReparentableChild(tablename)
+        && (item.Lookups.Any(l => Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(l.RelatedTable))
+            || item.ClearedColumns.Count > 0);
 
     private ToolResult LogOutcome(ChatInvocationContext context, string tablename, Guid recordId, ToolResult result, Stopwatch stopwatch)
     {

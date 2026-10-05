@@ -12,15 +12,23 @@
     replaced by BFF-backed commands in the existing ribbon command-script pattern; enable rules read sprk_issecure via
     Xrm.WebApi; a read failure hides the native command and shows the BFF one". The Create privilege is NOT removed.
 
-    SURFACES (task 147 census + read-only live inventory of spaarkedev1, 2026-10-04):
+    SURFACES (task 147 census + read-only live inventory of EVERY active main form of spaarkedev1, 2026-10-04):
       - Subgrids on the three root main forms - project: sprk_todo, sprk_event, sprk_document, sprk_invoice,
         sprk_analysis, sprk_budget; matter: sprk_analysis, sprk_budget, sprk_communication, sprk_invoice, sprk_reportcard;
-        work assignment: sprk_document, sprk_event. Every one of those subgrids' "+ New" is the platform command
-        Mscrm.AddNewRecordFromSubGridStandard (the parent-prefilled create).
+        work assignment: sprk_document, sprk_event.
+      - Subgrids on CHILD main forms (r1c) - a child created there is filed THROUGH the host under its secure record:
+        analysis, budget, document, event: sprk_todo; document: sprk_analysis; invoice: sprk_communication, sprk_document,
+        sprk_event, sprk_todo. The script hides the platform "+ New" on every non-root host (its secure ancestor is not
+        known client-side) and shows the BFF command, which files the new row under the host and lets the BFF decide.
+      - Party hosts (contact, organization: sprk_todo) keep the platform "+ New": a party is never an ownership parent.
+      Every one of those subgrids' "+ New" is the platform command Mscrm.AddNewRecordFromSubGridStandard (the
+      parent-prefilled create).
         * sprk_analysis is ALREADY covered: AnalysisRibbons hides its native "+ New" outright and shows "New Analysis"
           (the analysis wizard, BFF-backed since task 147 r1). Not touched here.
         * contact / email / sprk_kpiassessment / sprk_organization / sprk_project / sprk_matter /
           sprk_externalrecordaccess subgrids are not secure-child tables (no ownership rule files them under the root).
+      The dry run and -Verify re-read that inventory live and FAIL on a subgrid of an ownership-child table this change
+      does not serve (a new form or subgrid since 2026-10-04).
       - Quick create: IsQuickCreateEnabled = false on every child table (live), so no subgrid opens a quick-create form;
         nothing to replace. The script reports it, and FAILS -Verify if any child table turns it on.
       - Form "New" / "Save & New" on a child's own form: creates an UNFILED record (no parent prefilled), owned per the
@@ -31,7 +39,7 @@
          (created or updated) and published. Its two helper libraries (sprk_/scripts/bff_auth.js,
          sprk_/scripts/assignedaccess_postsave.js) must already exist (task 142) - checked, never written here.
       2. For each served child table, merges the ONE template into the table's RibbonDiff.xml inside -ExportDir (an
-         UNPACKED fresh export of the dedicated ribbon solution -SolutionUniqueName, holding the seven tables ribbon-only,
+         UNPACKED fresh export of the dedicated ribbon solution -SolutionUniqueName, holding the nine served tables ribbon-only,
          exported per .claude/skills/ribbon-edit/SKILL.md - never SpaarkeCore) with
          infrastructure/dataverse/ribbon/SecureChildRibbons/Merge-SecureChildRibbon.ps1.
       3. Packs (pac solution pack) and imports the solution, then publishes all customizations.
@@ -63,7 +71,7 @@
     & ./scripts/Deploy-SecureChildNewCommands.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify
 .NOTES
     Order: the BFF carrying task 147 r1 (POST /api/v1/child-records/sprk_budget) and
-    scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Apply (gate G147-5: sprk_budget gains sprk_createdbyperson) BEFORE this
+    scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Apply (gate G147-5: sprk_budget, sprk_kpiassessment and sprk_billingevent gain sprk_createdbyperson) BEFORE this
     script's -Apply. Auth: the operator's own az CLI identity (System Administrator). pac CLI authenticated to the same
     environment for -Apply. No secrets.
 #>
@@ -91,7 +99,8 @@ $HelperNames = @('sprk_/scripts/bff_auth.js', 'sprk_/scripts/assignedaccess_post
 $NativeCommandId = 'Mscrm.AddNewRecordFromSubGridStandard'
 
 # The child tables this change serves (Spaarke.SecureChild.Ribbon.TABLES; Merge-SecureChildRibbon.ps1 -Entity).
-$Tables = @('sprk_todo', 'sprk_event', 'sprk_invoice', 'sprk_reportcard', 'sprk_document', 'sprk_communication', 'sprk_budget')
+$Tables = @('sprk_todo', 'sprk_event', 'sprk_invoice', 'sprk_reportcard', 'sprk_document', 'sprk_communication', 'sprk_budget',
+    'sprk_kpiassessment', 'sprk_billingevent')
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv
 if (-not $token) { throw 'No az CLI token for the environment - run az login as an administrator of it.' }
@@ -142,6 +151,35 @@ if (-not $live) {
 } elseif ($live.content -ne $repoContent) {
     if ($Verify) { Fail "$ScriptName differs from $ScriptFile" } else { Info "$ScriptName differs from the repository file (-Apply updates it)" }
 } else { Ok "$ScriptName matches the repository file" }
+
+# ── Live subgrid inventory (r1c): every ownership-child subgrid on an active main form is served ──────────────────
+# The ownership-child tables (RecordOwnershipResolver.OwnershipParentEntities without the four roots); sprk_analysis is
+# served by AnalysisRibbons; party hosts keep the platform "+ New".
+$OwnershipChildren = @('sprk_agreement', 'sprk_analysis', 'sprk_billingevent', 'sprk_budget', 'sprk_communication',
+    'sprk_document', 'sprk_event', 'sprk_invoice', 'sprk_kpiassessment', 'sprk_memo', 'sprk_reportcard', 'sprk_spendsignal',
+    'sprk_spendsnapshot', 'sprk_todo')
+$PartyHosts = @('contact', 'sprk_organization', 'account')
+Write-Host 'Subgrids of ownership-child tables on active main forms'
+$formUri = "$Api/systemforms?`$select=name,objecttypecode,formxml&`$filter=type eq 2 and formactivationstate eq 1 and contains(formxml,'TargetEntityType')"
+$forms = @()
+while ($formUri) {
+    $page = Invoke-RestMethod -Headers ($Headers + @{ Prefer = 'odata.maxpagesize=100' }) -Uri $formUri
+    $forms += $page.value
+    $formUri = $page.'@odata.nextLink'
+}
+foreach ($form in $forms) {
+    if (-not $form.formxml) { continue }
+    [xml] $x = $form.formxml
+    foreach ($control in $x.SelectNodes('//control')) {
+        $child = $control.parameters.TargetEntityType
+        if (-not $child -or $OwnershipChildren -notcontains $child) { continue }
+        $where = "$($form.objecttypecode) '$($form.name)' -> $child"
+        if ($PartyHosts -contains $form.objecttypecode) { Ok "$where (party host: platform + New kept)" }
+        elseif ($child -eq 'sprk_analysis') { Ok "$where (AnalysisRibbons hides the platform + New)" }
+        elseif ($Tables -contains $child) { Ok "$where (served)" }
+        else { Fail "$where is NOT served: its platform + New would create a user-owned child under or through a secure record" }
+    }
+}
 
 # ── Per table: platform drift, live state, quick create ────────────────────────────────────────────────────────
 [xml] $templateXml = (Get-Content -Raw -LiteralPath $Template)
@@ -204,9 +242,9 @@ if ($Apply) {
     pac solution import --path $zip --publish-changes
     if ($LASTEXITCODE -ne 0) { throw 'pac solution import failed.' }
     Invoke-RestMethod -Method Post -Headers $writeHeaders -Uri "$Api/PublishAllXml" -Body '{}' | Out-Null
-    Ok 'imported and published - now run -Verify, then check each root form by hand (below)'
+    Ok 'imported and published - now run -Verify, then check the forms by hand (below)'
     Write-Host @'
-  Manual check on each root main form (a secure and an ordinary record of each):
+  Manual check on each root main form, and on one child form (an event of a secure record: its To Do subgrid):
     secure record   - the subgrid shows "New <thing>", NOT the platform "+ New"; the command opens the wizard / compose
                       page / creates the budget, and the new row is owned by the Secure Record Owners team;
     ordinary record - the platform "+ New" shows, "New <thing>" does not;

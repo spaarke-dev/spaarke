@@ -90,18 +90,18 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
       'https://bff.example'
     );
 
-    await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
+    await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_RelatedEvent', [file1], {
       containerId: 'container-1',
       additionalBinds: [{ entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Matter' }],
     });
 
     expect(webApi.createRecord).toHaveBeenCalledTimes(1);
     const payload = lastCreatePayload(webApi);
-    expect(payload['sprk_Event@odata.bind']).toBe('/sprk_events(event-guid-1)');
+    expect(payload['sprk_RelatedEvent@odata.bind']).toBe('/sprk_events(event-guid-1)');
     expect(payload['sprk_Matter@odata.bind']).toBe('/sprk_matters(matter-guid-1)');
 
     const bindKeys = Object.keys(payload).filter(k => k.endsWith('@odata.bind'));
-    expect(bindKeys.sort()).toEqual(['sprk_Event@odata.bind', 'sprk_Matter@odata.bind']);
+    expect(bindKeys.sort()).toEqual(['sprk_Matter@odata.bind', 'sprk_RelatedEvent@odata.bind']);
   });
 
   it('supports more than one additional bind on the same document', async () => {
@@ -112,7 +112,7 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
       'https://bff.example'
     );
 
-    await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
+    await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_RelatedEvent', [file1], {
       additionalBinds: [
         { entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Matter' },
         { entitySet: 'sprk_projects', id: 'project-guid-1', navProp: 'sprk_Project' },
@@ -120,7 +120,7 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
     });
 
     const payload = lastCreatePayload(webApi);
-    expect(payload['sprk_Event@odata.bind']).toBe('/sprk_events(event-guid-1)');
+    expect(payload['sprk_RelatedEvent@odata.bind']).toBe('/sprk_events(event-guid-1)');
     expect(payload['sprk_Matter@odata.bind']).toBe('/sprk_matters(matter-guid-1)');
     expect(payload['sprk_Project@odata.bind']).toBe('/sprk_projects(project-guid-1)');
   });
@@ -133,12 +133,12 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
       'https://bff.example'
     );
 
-    await service.createDocumentRecords('sprk_events', '{EVENT-GUID-1}', 'sprk_Event', [file1], {
+    await service.createDocumentRecords('sprk_events', '{EVENT-GUID-1}', 'sprk_RelatedEvent', [file1], {
       additionalBinds: [{ entitySet: 'sprk_matters', id: '{Matter-Guid-1}', navProp: 'sprk_Matter' }],
     });
 
     const payload = lastCreatePayload(webApi);
-    expect(payload['sprk_Event@odata.bind']).toBe('/sprk_events(event-guid-1)');
+    expect(payload['sprk_RelatedEvent@odata.bind']).toBe('/sprk_events(event-guid-1)');
     expect(payload['sprk_Matter@odata.bind']).toBe('/sprk_matters(matter-guid-1)');
   });
 
@@ -150,16 +150,16 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
       'https://bff.example'
     );
 
-    const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
+    const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_RelatedEvent', [file1], {
       // Deliberately collides with the primary bind's nav-prop.
-      additionalBinds: [{ entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Event' }],
+      additionalBinds: [{ entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_RelatedEvent' }],
     });
 
     const payload = lastCreatePayload(webApi);
     // Primary bind wins — not overwritten by the colliding additional bind.
-    expect(payload['sprk_Event@odata.bind']).toBe('/sprk_events(event-guid-1)');
+    expect(payload['sprk_RelatedEvent@odata.bind']).toBe('/sprk_events(event-guid-1)');
     const bindKeys = Object.keys(payload).filter(k => k.endsWith('@odata.bind'));
-    expect(bindKeys).toEqual(['sprk_Event@odata.bind']);
+    expect(bindKeys).toEqual(['sprk_RelatedEvent@odata.bind']);
 
     expect(result.warnings.some(w => w.includes('duplicate additionalBinds nav-prop'))).toBe(true);
     // Duplicate-bind warning is non-fatal — the document record still gets created and linked.
@@ -174,7 +174,7 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
       'https://bff.example'
     );
 
-    const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1], {
+    const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_RelatedEvent', [file1], {
       additionalBinds: [
         { entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Matter' },
         { entitySet: 'sprk_matters', id: 'matter-guid-2', navProp: 'sprk_Matter' }, // duplicate nav-prop
@@ -195,14 +195,20 @@ describe('EntityCreationService.createDocumentRecords — additionalBinds', () =
       'https://bff.example'
     );
 
-    const result = await service.createDocumentRecords('sprk_events', 'event-guid-1', 'sprk_Event', [file1, file2], {
-      additionalBinds: [{ entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Matter' }],
-    });
+    const result = await service.createDocumentRecords(
+      'sprk_events',
+      'event-guid-1',
+      'sprk_RelatedEvent',
+      [file1, file2],
+      {
+        additionalBinds: [{ entitySet: 'sprk_matters', id: 'matter-guid-1', navProp: 'sprk_Matter' }],
+      }
+    );
 
     expect(webApi.createRecord).toHaveBeenCalledTimes(2);
     for (let i = 0; i < 2; i++) {
       const payload = lastCreatePayload(webApi, i);
-      expect(payload['sprk_Event@odata.bind']).toBe('/sprk_events(event-guid-1)');
+      expect(payload['sprk_RelatedEvent@odata.bind']).toBe('/sprk_events(event-guid-1)');
       expect(payload['sprk_Matter@odata.bind']).toBe('/sprk_matters(matter-guid-1)');
     }
     expect(result.linkedCount).toBe(2);

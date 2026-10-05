@@ -865,14 +865,14 @@ describe('v1.6.0 BFF re-file (task 147 r1)', () => {
     expect(webApi.updateRecord).not.toHaveBeenCalled();
   });
 
-  test('a host the BFF does not re-file (not a child table) keeps webApi.updateRecord', async () => {
+  test('a host that is not an ownership child (a contact) keeps webApi.updateRecord', async () => {
     const webApi = makeWebApi();
     const refile = jest.fn();
     await applyRegardingSelection(
-      { webApi, refileThroughBff: refile, hostEntity: 'sprk_kpiassessment', hostRecordId: HOST_TODO },
+      { webApi, refileThroughBff: refile, hostEntity: 'contact', hostRecordId: HOST_TODO },
       { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
       undefined,
-      makeFetch({ sprk_kpiassessment: FULL_NAV_PROPS }) as unknown as typeof fetch
+      makeFetch({ contact: FULL_NAV_PROPS }) as unknown as typeof fetch
     );
 
     expect(refile).not.toHaveBeenCalled();
@@ -910,6 +910,98 @@ describe('v1.6.0 BFF re-file (task 147 r1)', () => {
     expect(result.success).toBe(true);
     expect(result.payload).toBeDefined();
     expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  // r1c: a SAVED ownership-child host with no BFF re-file route (a document) is refused — its owner would not follow.
+  test('a SAVED ownership-child host with no BFF re-file route (sprk_document) is REFUSED — nothing is written', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_document', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_document: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('changes who owns it');
+    expect(refile).not.toHaveBeenCalled();
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  // r1c: on a NEW host the form's own save creates the record OWNED BY THE USER, so the selection may ride it only when
+  // the target is decided NOT to be under a secure record.
+  test('a NEW host filed under a PARTY (contact) is staged — a party is never an ownership parent; no flag is read', async () => {
+    const webApi = makeWebApi();
+    const isSecureRoot = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'contact', recordId: MATTER_2, recordName: 'A person' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.payload).toBeDefined();
+    expect(isSecureRoot).not.toHaveBeenCalled();
+  });
+
+  test.each([
+    ['a child with no core-ancestor stamp (no-ancestor)', 'sprk_communication', COMM_ORPHAN],
+    ['a record outside the core taxonomy (unclassified: budget)', 'sprk_budget', MATTER_2],
+  ])(
+    'a NEW host filed under %s is REFUSED — its secure ancestry cannot be seen here',
+    async (_label, entityType, id) => {
+      const webApi = makeWebApi();
+      const isSecureRoot = jest.fn().mockResolvedValue(false);
+      const result = await applyRegardingSelection(
+        { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+        { entityType, recordId: id, recordName: 'X' },
+        undefined,
+        makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('cannot be checked before it is saved');
+      expect(result.payload).toBeUndefined();
+      expect(webApi.updateRecord).not.toHaveBeenCalled();
+    }
+  );
+
+  test('a NEW host under a child whose ONLY ancestor is a service request (never secure) is staged', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingservicerequest_value: MATTER_2 } },
+    });
+    const isSecureRoot = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(isSecureRoot).not.toHaveBeenCalled();
+  });
+
+  test('a NEW host under a child whose derived ancestor is SECURE is refused, even when the host cannot stamp it', async () => {
+    // The host has no project column (NARROW-like): the ancestor is "unstampable" on the host, yet the record would still
+    // sit under the secure project through the target — so it is checked.
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingproject_value: MATTER_2 } },
+    });
+    const isSecureRoot = jest.fn().mockResolvedValue(true);
+    const hostWithoutProject = FULL_NAV_PROPS.filter(r => r.ReferencingAttribute !== 'sprk_regardingproject');
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C' },
+      undefined,
+      makeFetch({ sprk_todo: hostWithoutProject, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(isSecureRoot).toHaveBeenCalledWith('sprk_project', MATTER_2);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('filed under a secure record');
   });
 
   test('a NEW host with a root parent and no way to check it is refused (fail closed)', async () => {

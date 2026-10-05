@@ -62,6 +62,8 @@ export {
   isBffChildRefileTable,
   ChildRecordWriteError,
   BFF_CHILD_CREATE_TABLES,
+  OWNERSHIP_CHILD_TABLES,
+  isOwnershipChildTable,
 } from './bffChildWriteAdapter';
 export type { NavigateFunction, DialogRenderer, DialogCloser } from './bffNavigationServiceAdapter';
 

@@ -15,12 +15,14 @@
  *       sprk_todo -> To Do wizard, sprk_event -> Event wizard, sprk_invoice -> Invoice wizard,
  *       sprk_reportcard -> Report Card wizard, sprk_document -> Document Upload wizard,
  *       sprk_communication -> the Communication page in compose mode (sent through the BFF),
- *       sprk_budget -> POST /api/v1/child-records/sprk_budget (budgets have no wizard), then the new budget opens.
+ *       sprk_budget, sprk_kpiassessment, sprk_billingevent -> POST /api/v1/child-records/{table} (no wizard of their own),
+ *       then the new row opens.
  *
  * FAIL CLOSED (ADR-003): the native "+ New" is allowed ONLY when the host is a project / matter / work assignment whose
- * sprk_issecure was read and is false. A flag that cannot be read, an empty flag, or a host that is not one of the three
- * roots (a child of a child - its secure ancestor is not known here) hides the native command and shows the BFF one, which
- * is right for any host: the BFF files the new record under whatever it names.
+ * sprk_issecure was read (through Xrm.WebApi) and is false, or a party (contact, organization, account - never an
+ * ownership parent). A flag that cannot be read, an empty flag, or any other host (a child of a child - an event, a
+ * document, an invoice, an analysis, a budget: its secure ancestor is not known here) hides the native command and shows
+ * the BFF one, which is right for any host: the BFF files the new record under whatever it names and decides its owner.
  *
  * Not a security boundary on its own: the Create privilege is NOT removed (owner round 28); a native create that slips
  * past (an API client, an import) is re-owned by the reconcile job's recent-changes pass every 2 minutes.
@@ -49,6 +51,14 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
     /** The secure-capable roots: the only hosts whose flag this script reads. */
     ns.ROOTS = { sprk_project: true, sprk_matter: true, sprk_workassignment: true };
 
+    /**
+     * r1c: party hosts. A contact, an organization or an account is never an ownership parent (identity tables with no
+     * owning business unit - RecordOwnershipResolver.OwnershipParentEntities excludes them), so a child created under
+     * one is never under a secure record: the platform "+ New" stays (live inventory: the contact and organization main
+     * forms carry a to-do subgrid).
+     */
+    ns.PARTIES = { contact: true, sprk_organization: true, account: true };
+
     /** Wizard code pages (envelope: entityType / entityId / bffBaseUrl - sprk_wizard_commands.js). */
     ns.WIZARDS = {
         sprk_todo: { page: "sprk_createtodowizard", title: "Create New To Do" },
@@ -57,11 +67,20 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         sprk_reportcard: { page: "sprk_createreportcardwizard", title: "Create New Report Card" }
     };
 
-    /** Tables created through POST /api/v1/child-records/{table}, then opened (no wizard of their own). */
-    ns.CREATE_THEN_OPEN = { sprk_budget: { label: "budget" } };
+    /**
+     * Tables created through POST /api/v1/child-records/{table}, then opened (no wizard of their own). r1c: the live
+     * inventory of every main form adds the KPI assessment (matter, project and report card forms) and the billing event
+     * (invoice form) - the new row is a named draft filed under the host; its form asks for the rest.
+     */
+    ns.CREATE_THEN_OPEN = {
+        sprk_budget: { label: "budget" },
+        sprk_kpiassessment: { label: "KPI assessment" },
+        sprk_billingevent: { label: "billing event" }
+    };
 
     /** Every child table this script serves (the template's per-entity instances must stay within it). */
-    ns.TABLES = ["sprk_todo", "sprk_event", "sprk_invoice", "sprk_reportcard", "sprk_document", "sprk_communication", "sprk_budget"];
+    ns.TABLES = ["sprk_todo", "sprk_event", "sprk_invoice", "sprk_reportcard", "sprk_document", "sprk_communication", "sprk_budget",
+        "sprk_kpiassessment", "sprk_billingevent"];
 
     var DIALOG_OPTIONS = { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" } };
     var COMPOSE_OPTIONS = { target: 2, width: { value: 85, unit: "%" }, height: { value: 85, unit: "%" } };
@@ -83,31 +102,16 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
         }
     };
 
-    function flagFromForm(primaryControl) {
-        try {
-            var attribute = primaryControl.getAttribute && primaryControl.getAttribute("sprk_issecure");
-            if (!attribute) return undefined;
-            var value = attribute.getValue();
-            // The form's own value is current (Make Secure refreshes the form) - but only an explicit true/false counts.
-            return typeof value === "boolean" ? value : null;
-        } catch (error) {
-            return undefined;
-        }
-    }
-
     /**
      * Whether the host is secure: true / false, or null when it cannot be told (unreadable, empty, or not a root).
-     * Resolves; never rejects.
+     * Resolves; never rejects. Read through Xrm.WebApi every time (owner round 28 item 2: "enable rules read sprk_issecure
+     * through Xrm.WebApi") - the stored value, never the form's in-memory copy, which Make Secure / Remove Secure may not
+     * have refreshed yet.
      */
     ns.hostSecureFlag = function (primaryControl) {
         var host = ns.hostOf(primaryControl);
         if (!host || !ns.ROOTS[host.entity]) {
             return Promise.resolve(null);
-        }
-
-        var fromForm = flagFromForm(primaryControl);
-        if (fromForm === true || fromForm === false) {
-            return Promise.resolve(fromForm);
         }
 
         try {
@@ -129,7 +133,8 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
      * nothing. Returns a promise (UCI waits for it).
      */
     ns.nativeNewAllowed = function (primaryControl) {
-        if (!ns.hostOf(primaryControl)) {
+        var host = ns.hostOf(primaryControl);
+        if (!host || ns.PARTIES[host.entity]) {
             return true;
         }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag === false; });
@@ -137,7 +142,8 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
 
     /** EnableRule for the "New <thing>" command: the exact complement of nativeNewAllowed (one of the two is shown). */
     ns.newChildAvailable = function (primaryControl) {
-        if (!ns.hostOf(primaryControl)) {
+        var host = ns.hostOf(primaryControl);
+        if (!host || ns.PARTIES[host.entity]) {
             return false;
         }
         return ns.hostSecureFlag(primaryControl).then(function (flag) { return flag !== false; });
@@ -289,8 +295,12 @@ Spaarke.SecureChild.Ribbon = Spaarke.SecureChild.Ribbon || {};
                 var bff = "&bffBaseUrl=" + encodeURIComponent(baseUrl);
                 var wizard = ns.WIZARDS[childTable];
                 if (wizard) {
-                    return openPage(wizard.page, "entityType=" + host.entity + "&entityId=" + host.id + bff, wizard.title,
-                        DIALOG_OPTIONS, selectedControl, primaryControl);
+                    // The wizard opens filed under the host (useWizardPageBootstrap / the To Do page read entityType,
+                    // entityId and recordName); its create goes through the BFF.
+                    return openPage(wizard.page,
+                        "entityType=" + host.entity + "&entityId=" + host.id +
+                        "&recordName=" + encodeURIComponent(hostName(primaryControl)) + bff,
+                        wizard.title, DIALOG_OPTIONS, selectedControl, primaryControl);
                 }
                 if (childTable === "sprk_document") {
                     return openPage("sprk_documentuploadwizard",

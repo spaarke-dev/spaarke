@@ -660,6 +660,8 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             ["sprk_mattertype_ref"] = "sprk_mattertype_refs",
             // Task 147 r1: the browser child-record routes' tables.
             ["sprk_memo"] = "sprk_memos", ["sprk_event"] = "sprk_events", ["sprk_budget"] = "sprk_budgets",
+            ["sprk_invoice"] = "sprk_invoices", ["sprk_reportcard"] = "sprk_reportcards", ["sprk_analysis"] = "sprk_analysises",
+            ["sprk_kpiassessment"] = "sprk_kpiassessments", ["sprk_billingevent"] = "sprk_billingevents",
         };
 
         /// <summary>Tables whose metadata declares organization ownership (everything else is UserOwned).</summary>
@@ -702,6 +704,38 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             {
                 ("sprk_matter", "sprk_matter", "sprk_Matter"),
                 ("sprk_project", "sprk_project", "sprk_Project"),
+                // Task 147 r1c (round 34 item 6): the document's event lookup is sprk_relatedevent / sprk_RelatedEvent
+                // (Spaarke.Dataverse.DocumentLinkFields, live metadata). There is NO sprk_event column on sprk_document.
+                ("sprk_relatedevent", "sprk_event", "sprk_RelatedEvent"),
+            },
+            // Task 147 r1c: the remaining census create/re-file tables (live navigation-property casing).
+            ["sprk_invoice"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_project", "sprk_project", "sprk_Project"),
+            },
+            ["sprk_reportcard"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+            },
+            ["sprk_analysis"] = new[]
+            {
+                ("sprk_regardingmatter", "sprk_matter", "sprk_RegardingMatter"),
+                ("sprk_regardingproject", "sprk_project", "sprk_RegardingProject"),
+            },
+            // Task 147 r1c (E2, the live inventory of every main form; read-only metadata, spaarkedev1, 2026-10-04): the
+            // KPI assessment's and the billing event's lookups. The billing event's matter navigation property is
+            // lower-case (sprk_matter) live.
+            ["sprk_kpiassessment"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_Matter"),
+                ("sprk_project", "sprk_project", "sprk_Project"),
+            },
+            ["sprk_billingevent"] = new[]
+            {
+                ("sprk_matter", "sprk_matter", "sprk_matter"),
+                ("sprk_project", "sprk_project", "sprk_project"),
             },
             ["task"] = new[] { ("regardingobjectid", "sprk_matter", "regardingobjectid_sprk_matter") },
             // Task 147 r1 (live navigation-property casing: the schema name).
@@ -731,6 +765,9 @@ public sealed partial class SecureChildOwnershipAiToolTests : TypedToolHandlerTe
             "prvCreatesprk_project", "prvAppendsprk_project",
             "prvCreatesprk_memo", "prvAppendsprk_memo", "prvCreatesprk_event", "prvAppendsprk_event",
             "prvCreatesprk_budget", "prvAppendsprk_budget",
+            "prvCreatesprk_document", "prvAppendsprk_document", "prvCreatesprk_invoice", "prvAppendsprk_invoice",
+            "prvCreatesprk_reportcard", "prvAppendsprk_reportcard", "prvCreatesprk_analysis", "prvAppendsprk_analysis",
+            "prvCreatesprk_kpiassessment", "prvAppendsprk_kpiassessment", "prvCreatesprk_billingevent", "prvAppendsprk_billingevent",
         };
 
         public HashSet<Guid> NoAppendTo { get; } = new();

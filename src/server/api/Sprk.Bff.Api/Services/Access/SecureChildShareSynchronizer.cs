@@ -243,6 +243,107 @@ public sealed class SecureChildShareSynchronizer
         teamId != Guid.Empty
         && (await ResolveSecureOwnerTeamAsync(_dataverse, _configuration, ct).ConfigureAwait(false)).TeamId == teamId;
 
+    /// <summary>
+    /// Task 147 r1c: whether ONE child row is owned by this environment's Secure Record owner team right now — asked by a
+    /// re-file route BEFORE it moves the row, so that afterwards it can tell a row that LEFT isolation (its mirrored shares
+    /// go, owner round 22) from a row that was never isolated (a share on it is its user's own intent and is kept). A row
+    /// that does not exist, an absent Secure team and an ambiguous one answer no; a Dataverse fault propagates.
+    /// </summary>
+    public async Task<bool> IsSecureTeamOwnedAsync(string childLogicalName, Guid childId, CancellationToken ct)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(childLogicalName);
+        if (!SecureChildLineage.Children.TryGetValue(childLogicalName.Trim(), out var table))
+            return false;
+
+        var query = new QueryExpression(table.LogicalName)
+        {
+            ColumnSet = new ColumnSet(OwningTeamColumn),
+            TopCount = 1,
+            NoLock = true,
+        };
+        query.Criteria.AddCondition(table.IdColumn, ConditionOperator.Equal, childId);
+        var row = (await _dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
+        var owningTeam = row?.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id;
+        return owningTeam is { } teamId && await IsSecureOwnerTeamAsync(teamId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>How many times a re-file out of a secure record tries to take the mirrored shares off before it reports.</summary>
+    internal const int MirrorRemovalAttempts = 3;
+
+    /// <summary>
+    /// Task 149's mirror after ONE RE-FILE, inline (task 147 r1; one implementation for every re-file writer since r1c — the
+    /// browser routes, <c>PUT /api/v1/documents/{id}</c> and the chat update tool): moved under a secure record → shared
+    /// with its sharees now (<see cref="SyncChildAsync"/>), not at the next two-minute reconcile; moved OUT of every secure
+    /// record (it was isolated before the re-file and is not now) → its mirrored shares go now (<see cref="RemoveMirrorAsync"/>,
+    /// owner round 22: only a row that WAS isolated carries the mirror; a share on a never-isolated row is its user's own
+    /// intent and is kept). The two-minute share job is no backstop for the move out — it looks only at Secure-team-owned
+    /// rows — so a removal that faults is retried (<see cref="MirrorRemovalAttempts"/>) and then logged as an ERROR naming
+    /// the row. Never throws.
+    /// </summary>
+    /// <param name="wasIsolated">Whether the row was owned by the Secure team BEFORE the re-file (asked only when needed;
+    /// a fault means "unknown": nothing is removed, and it is logged).</param>
+    public async Task AfterRefileAsync(string childLogicalName, Guid childId, Func<Task<bool>> wasIsolated, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(wasIsolated);
+        SecureChildShareSyncStatus mirrored;
+        try
+        {
+            var result = await SyncChildAsync(childLogicalName, childId, ct).ConfigureAwait(false);
+            mirrored = result.Status;
+            if (result.Status is SecureChildShareSyncStatus.Failed or SecureChildShareSyncStatus.Incomplete)
+            {
+                _logger.LogWarning(
+                    "[SECURE-CHILD-SHARES] {Table} {Id} was re-filed under a secure record, but its sharees were not mirrored " +
+                    "({Status}: {Detail}); the two-minute reconcile completes it", childLogicalName, childId, result.Status, result.Detail);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: the share mirror after a re-file faulted; the two-minute " +
+                "reconcile completes it", childLogicalName, childId);
+            return;
+        }
+
+        if (mirrored != SecureChildShareSyncStatus.NotApplicable)
+            return;
+
+        bool isolatedBefore;
+        try
+        {
+            isolatedBefore = await wasIsolated().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: whether it was isolated before the re-file could not be " +
+                "read, so its mirrored shares (if any) were NOT removed", childLogicalName, childId);
+            return;
+        }
+
+        if (!isolatedBefore)
+            return;
+
+        SecureChildMirrorRemoval? removal = null;
+        for (var attempt = 1; attempt <= MirrorRemovalAttempts; attempt++)
+        {
+            try
+            {
+                removal = await RemoveMirrorAsync(childLogicalName, childId, ct).ConfigureAwait(false);
+                if (removal.IsComplete)
+                    return;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[SECURE-CHILD-SHARES] {Table} {Id}: removing its mirrored shares faulted (attempt {Attempt})",
+                    childLogicalName, childId, attempt);
+            }
+        }
+
+        _logger.LogError(
+            "[SECURE-CHILD-SHARES] {Table} {Id} left its secure record, but its mirrored shares were not all removed after " +
+            "{Attempts} attempts ({Status}: {Detail}) — the secure record's sharees may still open it", childLogicalName, childId,
+            MirrorRemovalAttempts, removal?.Status, removal?.Detail);
+    }
+
     /// <summary>Brings EVERY secure child in the environment into line — the scheduled reconcile.</summary>
     public Task<SecureChildShareSyncResult> ReconcileAllAsync(CancellationToken ct) => RunAsync(scope: null, ct);
 

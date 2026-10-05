@@ -98,8 +98,8 @@ public static class EventEndpoints
         group.MapPatch("/{id:guid}/filing", (
                 Guid id,
                 [FromBody] System.Text.Json.JsonElement body,
-                Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
-                Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+                [FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+                [FromServices] Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
                 [FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
                 [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer shares,
                 HttpContext httpContext,

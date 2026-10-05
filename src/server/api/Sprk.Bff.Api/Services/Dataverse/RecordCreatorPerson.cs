@@ -88,6 +88,10 @@ public static class RecordCreatorPerson
         // Task 147 r1 (owner round 28 item 2, E2): the secure-record ribbon's "New Budget" creates a budget app-only
         // through POST /api/v1/child-records/sprk_budget, so it records the person who asked too (same script, gate G147-5).
         "sprk_budget",
+        // Task 147 r1c (E2, the live inventory of every main form): "New KPI Assessment" (matter, project and report card
+        // forms) and "New Billing Event" (invoice form) create through the same route, so they record the person too
+        // (same script, gate G147-5).
+        "sprk_kpiassessment", "sprk_billingevent",
     };
 
     /// <summary>Whether <paramref name="entityLogicalName"/> carries the column: a secure root or a stamped child table.</summary>

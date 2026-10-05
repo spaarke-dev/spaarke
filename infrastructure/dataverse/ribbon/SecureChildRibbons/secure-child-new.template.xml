@@ -9,7 +9,9 @@
 
   1. The platform's own subgrid "+ New" (Mscrm.AddNewRecordFromSubGridStandard - the parent-prefilled create) gets ONE
      extra enable rule, sprk.SecureChild.{{entity}}.NativeNewAllowed.EnableRule: allowed only when the host record is a
-     project / matter / work assignment read as NOT secure. Everything else in the definition below is the platform's,
+     project / matter / work assignment read (through Xrm.WebApi) as NOT secure, or a party (contact, organization,
+     account - never an ownership parent; task 147 r1c). Any other host - a child of a secure record's child - hides it
+     and shows the BFF command. Everything else in the definition below is the platform's,
      copied from RetrieveEntityRibbon on spaarkedev1 (2026-10-04) - the merge script re-checks it against the live
      definition before an import (Deploy-SecureChildNewCommands.ps1 dry run) and refuses on drift.
 

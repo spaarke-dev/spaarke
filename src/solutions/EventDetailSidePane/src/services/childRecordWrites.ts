@@ -45,6 +45,14 @@ export async function createChildThroughBff(table: string, payload: Record<strin
   return createChildRecordViaBff(authenticatedFetch, bffBaseUrl, table, payload);
 }
 
+/**
+ * The message a failed child create shows (task 147 r1c, owner round 28 item 1: "refusals show the ProblemDetails
+ * message"): the BFF's own words when it answered, else a plain fallback. Nothing was created either way.
+ */
+export function childCreateFailure(err: unknown, noun: string): string {
+  return err instanceof Error && err.message ? err.message : `The ${noun} could not be created. Nothing was saved.`;
+}
+
 /** Re-files the event (its `@odata.bind` lookups) through the BFF. Rejects with the server's message. */
 export async function refileEventThroughBff(eventId: string, payload: Record<string, unknown>): Promise<void> {
   const bffBaseUrl = await ensureBffBaseUrl();

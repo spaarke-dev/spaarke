@@ -72,7 +72,10 @@ import {
   TODO_REGARDING_CATALOG,
   type ITodoRegardingTargetCatalogEntry,
 } from '@spaarke/ui-components/dist/services/TodoRegardingUpdateBuilder';
-import { isBffChildRefileTable } from '@spaarke/ui-components/dist/utils/adapters/bffChildWriteAdapter';
+import {
+  isBffChildRefileTable,
+  isOwnershipChildTable,
+} from '@spaarke/ui-components/dist/utils/adapters/bffChildWriteAdapter';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -116,8 +119,23 @@ export interface IResolverWriteContext {
 const SECURE_ROOT_TABLES = new Set(['sprk_project', 'sprk_matter', 'sprk_workassignment']);
 
 /**
- * v1.6.0 (task 147 r1): the write of a SAVED host — through the BFF for every child table it re-files, else
- * `webApi.updateRecord`. A BFF re-file table with no `refileThroughBff` is refused (fail closed).
+ * The core-ancestor stamps that are a root but can never be secure (the service request carries no `sprk_issecure`;
+ * owner S6 — its ownership is its own), so a target under one of them is decided without a flag read.
+ */
+const NEVER_SECURE_ROOTS = new Set(['sprk_servicerequest']);
+
+/**
+ * Party tables: a contact, an organization or an account is never an ownership parent (identity tables with no owning
+ * business unit — `RecordOwnershipResolver.OwnershipParentEntities` excludes them), so a record filed only under one is
+ * never under a secure record.
+ */
+const PARTY_TABLES = new Set(['contact', 'sprk_organization', 'account']);
+
+/**
+ * v1.6.0 (task 147 r1; r1c): the write of a SAVED host — through the BFF for every child table it re-files, else
+ * `webApi.updateRecord`. Fail closed: a BFF re-file table with no `refileThroughBff`, and an ownership CHILD table with no
+ * BFF re-file route at all (its owner would not follow the move), are REFUSED — never sent through `webApi.updateRecord`.
+ * Live hosts (spaarkedev1, 2026-10-04, read-only): the to-do, event and report card main forms — all three routed.
  */
 async function writeSavedHost(ctx: IResolverWriteContext, payload: Record<string, unknown>): Promise<void> {
   const hostId = (ctx.hostRecordId as string).replace(/[{}]/g, '');
@@ -130,18 +148,38 @@ async function writeSavedHost(ctx: IResolverWriteContext, payload: Record<string
     await ctx.refileThroughBff(ctx.hostEntity, hostId, payload);
     return;
   }
+  if (isOwnershipChildTable(ctx.hostEntity)) {
+    throw new Error(
+      `The ${ctx.hostEntity} was not re-filed: filing it under another record changes who owns it, and this form has no ` +
+        'Spaarke service route for that. Nothing was saved.'
+    );
+  }
   await ctx.webApi.updateRecord(ctx.hostEntity, hostId, payload);
 }
 
 /**
- * v1.6.0 (task 147 r1): on a NEW host, the reason the selection must not ride the form's own (as-the-user) save — a root
- * among the derived stamps that is secure, or whose flag cannot be read — or `null` when it may.
+ * v1.6.0 (task 147 r1; tightened in r1c): on a NEW host, the reason the selection must not ride the form's own
+ * (as-the-user) save, or `null` when it may. The form's save creates the record OWNED BY THE USER, so it is allowed only
+ * when the selection is decided NOT to be under any secure record:
+ * - a party target (contact, organization, account) — never an ownership parent;
+ * - a target whose derived core ancestors are all read as not secure (or are a service request).
+ * Everything else is refused (fail closed, ADR-003): a secure root, a flag that cannot be read, and a target whose secure
+ * ancestry this control cannot see — no core-ancestor stamp to read (a document, an invoice, a budget, a report card, an
+ * event filed only under a document, …). The way on is to save first and then file: a SAVED host's re-file goes through
+ * the BFF, which decides the owner server-side.
  */
 async function refusalForNewHost(
   ctx: IResolverWriteContext,
+  targetEntityType: string,
   stamps: ReadonlyArray<{ entityType: string; recordId: string }>
 ): Promise<string | null> {
+  if (PARTY_TABLES.has((targetEntityType ?? '').toLowerCase())) return null;
+
   const roots = stamps.filter(s => SECURE_ROOT_TABLES.has(s.entityType));
+  const neverSecure = stamps.filter(s => NEVER_SECURE_ROOTS.has(s.entityType));
+  if (roots.length === 0 && neverSecure.length === 0) {
+    return 'Whether this record would be filed under a secure record cannot be checked before it is saved. Save it first, then file it here.';
+  }
   if (roots.length === 0) return null;
   if (!ctx.isSecureRoot) {
     return 'This record cannot be filed here before it is saved: whether its parent is secure cannot be checked. Save it first, then file it.';
@@ -469,7 +507,9 @@ export async function applyRegardingSelection(
   const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
   if (!hasHostGuid) {
     // v1.6.0 (task 147 r1): a NEW host's selection rides the form's own save, as the user. Never under a secure record.
-    const refusal = await refusalForNewHost(ctx, ancestorStamps);
+    // Every DERIVED ancestor counts here, including one the host has no stamp column for (`unstampable`): the record
+    // would still sit under it through the target.
+    const refusal = await refusalForNewHost(ctx, selection.entityType, built.ancestor.stamps);
     if (refusal) {
       return { success: false, catalogEntry, ancestorStatus: built.ancestor.status, error: refusal };
     }

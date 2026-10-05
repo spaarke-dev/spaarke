@@ -46,15 +46,17 @@ namespace Sprk.Bff.Api.Api;
 public static class ChildRecordEndpoints
 {
     /// <summary>
-    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c> is the
-    /// secure-record ribbon's "New Budget" (owner round 28 item 2, E2): the native subgrid "+ New" under a secure matter or
-    /// project is replaced by a command that creates the budget here and then opens it — budgets have no product create
-    /// surface of their own.
+    /// The tables a browser writer creates through this route (task 147's census, note §2a). <c>sprk_budget</c>,
+    /// <c>sprk_kpiassessment</c> and <c>sprk_billingevent</c> are the secure-record ribbon's "New Budget" / "New KPI
+    /// Assessment" / "New Billing Event" (owner round 28 item 2, E2; the r1c live inventory of every main form found the
+    /// last two on the matter, project, report card and invoice forms): the native subgrid "+ New" under a secure record is
+    /// replaced by a command that creates the row here and then opens it — these tables have no product create surface of
+    /// their own.
     /// </summary>
     internal static readonly IReadOnlySet<string> CreateTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_todo", "sprk_event", "sprk_memo", "sprk_invoice", "sprk_reportcard", "sprk_analysis", "sprk_document",
-        "sprk_budget",
+        "sprk_budget", "sprk_kpiassessment", "sprk_billingevent",
     };
 
     /// <summary>
@@ -91,7 +93,7 @@ public static class ChildRecordEndpoints
         // the resolver's team. Authorization is decided in the handler, as the caller, on every record the body binds.
         group.MapPost("/{table}", CreateAsync)
             .WithName("CreateChildRecord")
-            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document)")
+            .WithSummary("Create a child record (to-do, event, memo, invoice, report card, analysis, document, budget, KPI assessment, billing event)")
             .WithDescription("Takes the Dataverse Web API payload a browser writer would have sent. Checks AS THE CALLER " +
                 "that they could create it (table privilege, AppendTo on every record it binds, no owner or field-secured " +
                 "column), then the application creates it owned by the team the ownership rule names (the Secure Record " +
@@ -122,9 +124,9 @@ public static class ChildRecordEndpoints
     internal static async Task<IResult> CreateAsync(
         string table,
         [FromBody] JsonElement body,
-        IDataverseUserClient user,
-        IRecordOwnershipResolver ownership,
-        IFieldMappingDataverseService appOnly,
+        [FromServices] IDataverseUserClient user,
+        [FromServices] IRecordOwnershipResolver ownership,
+        [FromServices] IFieldMappingDataverseService appOnly,
         [FromServices] CoreAncestorRestamper restamper,
         [FromServices] SecureChildShareSynchronizer shares,
         HttpContext httpContext,
@@ -188,8 +190,8 @@ public static class ChildRecordEndpoints
         string table,
         Guid id,
         [FromBody] JsonElement body,
-        IDataverseUserClient user,
-        IRecordOwnershipResolver ownership,
+        [FromServices] IDataverseUserClient user,
+        [FromServices] IRecordOwnershipResolver ownership,
         [FromServices] CoreAncestorRestamper restamper,
         [FromServices] SecureChildShareSynchronizer shares,
         HttpContext httpContext,
@@ -244,7 +246,8 @@ public static class ChildRecordEndpoints
         if (mapped.ClientFailure is { } mapFailure)
             return CallerFailure(mapFailure, entity);
 
-        var serverOwned = mapped.Item!.Columns.FirstOrDefault(c => false);
+        var serverOwned = mapped.Item!.Columns.FirstOrDefault(c =>
+            OwnedChildWrite.ServerOwnedColumns.Contains(c) || RecordCreatorPerson.NamesColumn(c));
         if (serverOwned is not null)
         {
             return Problem(StatusCodes.Status403Forbidden, DeniedCode,
@@ -290,22 +293,14 @@ public static class ChildRecordEndpoints
 
         if (outcome.Written)
         {
-            // Task 149's mirror, inline (task 147 r1): moved under a secure record → shared with its sharees now; moved OUT
-            // of every secure record (it was isolated and is not now) → its mirrored shares go now (owner round 22: only a
-            // row that WAS isolated carries the mirror). Never thrown; the two-minute job completes what does not finish.
-            var mirrored = await MirrorAsync(shares, entity, id, logger).ConfigureAwait(false);
-            if (mirrored == SecureChildShareSyncStatus.NotApplicable
-                && GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
-                && await IsSecureOwnerTeamAsync(shares, beforeTeam).ConfigureAwait(false))
-            {
-                var removal = await shares.RemoveMirrorAsync(entity, id, CancellationToken.None).ConfigureAwait(false);
-                if (!removal.IsComplete)
-                {
-                    logger.LogWarning(
-                        "[CHILD-RECORD] {Entity} {Id} left its secure record, but its mirrored shares were not all removed " +
-                        "({Status}: {Detail}); the reconcile job reports it", entity, id, removal.Status, removal.Detail);
-                }
-            }
+            // Task 149's mirror after the re-file, inline (task 147): moved under a secure record → shared with its sharees
+            // now; moved OUT of every secure record → the mirror goes now (only from a row that WAS isolated — its owning
+            // team, read as the caller before the write, rides along on `row`). One implementation for every re-file writer.
+            await shares.AfterRefileAsync(
+                entity, id,
+                async () => GetString(row.Body, "_owningteam_value") is { } before && Guid.TryParse(before, out var beforeTeam)
+                            && await shares.IsSecureOwnerTeamAsync(beforeTeam, CancellationToken.None).ConfigureAwait(false),
+                CancellationToken.None).ConfigureAwait(false);
         }
 
         return Results.NoContent();
@@ -332,19 +327,6 @@ public static class ChildRecordEndpoints
             logger.LogWarning(ex, "[CHILD-RECORD] {Entity} {Id}: the share mirror faulted; the two-minute reconcile completes it",
                 entity, id);
             return SecureChildShareSyncStatus.Failed;
-        }
-    }
-
-    /// <summary>Whether <paramref name="teamId"/> is the Secure Record owner team (unknown = no: nothing is removed).</summary>
-    private static async Task<bool> IsSecureOwnerTeamAsync(SecureChildShareSynchronizer shares, Guid teamId)
-    {
-        try
-        {
-            return await shares.IsSecureOwnerTeamAsync(teamId, CancellationToken.None).ConfigureAwait(false);
-        }
-        catch (Exception)
-        {
-            return false;
         }
     }
 
@@ -383,6 +365,9 @@ public static class ChildRecordEndpoints
         "sprk_analysis" => "analysis",
         "sprk_document" => "document",
         "sprk_communication" => "communication",
+        "sprk_budget" => "budget",
+        "sprk_kpiassessment" => "KPI assessment",
+        "sprk_billingevent" => "billing event",
         _ => "record",
     };
 

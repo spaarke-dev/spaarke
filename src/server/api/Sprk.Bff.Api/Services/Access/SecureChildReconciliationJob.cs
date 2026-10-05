@@ -50,7 +50,10 @@ namespace Sprk.Bff.Api.Services.Access;
 /// under a secure parent are replaced by BFF-backed commands. Each correction is listed in <c>ResultJson.changes</c> with
 /// <c>pass: "recent"</c> and its previous owner, and counted in <c>recentChanges.corrected</c> — the standing correction
 /// report. A record whose recent pass came back incomplete, and a changed row the walk could not place, are carried to the
-/// next run and looked at again in every run until finished (task 147 r1).</para>
+/// next run and looked at again in every run until finished (task 147 r1). That carried state, the watermark and the
+/// cursor live in this singleton, so a start (a restart, a deployment, a scale-out) loses them: a new instance therefore
+/// walks every secure record ONCE on its scheduled ticks — the CATCH-UP, the same reconcile, <c>MaxRootsPerRun</c> records
+/// a run — before its watermark alone decides (task 147 r1c). Nothing an earlier instance carried is lost with it.</para>
 /// <para><b>ADR-036 A1.</b> Rule 3: the unit of work is one root's pass, idempotent and read back, so no claim marker is
 /// needed. Rule 4: only a run that could not LIST the secure records throws (nothing was decided; a retry this tick can do
 /// the work); a run in which some roots are incomplete returns <c>Success = false</c> — the next run revisits them. Rule 5:
@@ -214,19 +217,46 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             start = 0;
         var batch = runSweep ? roots.Skip(start).Take(cap).ToList() : new List<(string Table, Guid Id, string Key)>();
 
-        // The recent-changes roots go first, with every record a previous run left incomplete (task 147 r1). A record in
-        // both lists is reconciled once, and it still counts toward the sweep window's position. A carried record that is
-        // no longer flagged secure is not carried on: the sweep list is the authority on which records are.
+        // Task 147 r1c — the CATCH-UP: what an instance carries (the watermark, the unfinished records, the unplaced rows)
+        // lives in this singleton, so a restart, a deployment or a scale-out starts an instance that knows none of it. For
+        // that instance "everything since the last run" is unknown, so instead of listing every changed row ever, it walks
+        // every secure record ONCE — the same recent-changes reconcile (its mode, the Sweep trigger that never releases),
+        // `cap` records a run, from the first — and only then trusts its watermark alone. A record whose reconcile an
+        // earlier instance left unfinished is therefore reconciled again within ceil(records / cap) runs of any restart,
+        // never lost with the memory that carried it. While the SWEEP itself writes, its window covers every record in
+        // order, so the catch-up stands aside. It advances only in a run whose recent-changes pass writes. It is part of
+        // the SCHEDULED net only: a manual trigger is the backfill script's review run (§7c.1), whose report-only plan must
+        // not be applied by the catch-up while an operator reads it. Deployment order (G147-2): the task 148 backfill is
+        // applied and verified in an environment BEFORE a task 147 BFF reaches it, so a catch-up only ever finds drift.
+        bool catchUpPending;
+        (string Table, Guid Id)? catchUpAfter;
+        lock (_cursorGate)
+            (catchUpPending, catchUpAfter) = (!_catchUpComplete, _catchUpCursor);
+        var catchUpRuns = catchUpPending && context.Trigger != JobRunTrigger.ManualAdmin && !(runSweep && writes);
+        var catchUpStart = catchUpAfter is { } cAfter ? roots.FindIndex(r => Compare((r.Table, r.Id), cAfter) > 0) : 0;
+        if (catchUpStart < 0)
+            catchUpStart = roots.Count;
+        var catchUpBatch = catchUpRuns
+            ? roots.Skip(catchUpStart).Take(cap).ToList()
+            : new List<(string Table, Guid Id, string Key)>();
+
+        // The recent-changes roots go first, with every record a previous run left incomplete (task 147 r1), then the
+        // catch-up window (r1c), then the sweep window. A record in more than one list is reconciled once, and it still
+        // counts toward the sweep window's position. A carried record that is no longer flagged secure is not carried on:
+        // the sweep list is the authority on which records are.
         var secureKeys = roots.Select(r => (r.Table, r.Id)).ToHashSet();
         var firstRoots = recent.Roots
             .Concat(retryRoots.Where(secureKeys.Contains))
             .Distinct()
             .ToList();
         var recentKeys = firstRoots.ToHashSet();
+        var catchUpKeys = catchUpBatch.Select(c => (c.Table, c.Id)).Where(k => !recentKeys.Contains(k)).ToHashSet();
         var work = firstRoots
-            .Select(r => (r.Table, r.Id, Key: $"{r.Table}:{r.Id:D}", Position: (int?)null))
-            .Concat(batch.Select((b, i) => (b.Table, b.Id, b.Key, Position: (int?)(start + i + 1)))
-                .Where(b => !recentKeys.Contains((b.Table, b.Id))))
+            .Select(r => (r.Table, r.Id, Key: $"{r.Table}:{r.Id:D}", Group: WorkGroup.Recent, Position: (int?)null))
+            .Concat(catchUpBatch.Where(c => catchUpKeys.Contains((c.Table, c.Id)))
+                .Select(c => (c.Table, c.Id, c.Key, Group: WorkGroup.CatchUp, Position: (int?)null)))
+            .Concat(batch.Select((b, i) => (b.Table, b.Id, b.Key, Group: WorkGroup.Sweep, Position: (int?)(start + i + 1)))
+                .Where(b => !recentKeys.Contains((b.Table, b.Id)) && !catchUpKeys.Contains((b.Table, b.Id))))
             .ToList();
 
         var totals = new int[8];
@@ -238,25 +268,32 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         var sharesWritten = 0;
         var mirrorsRevoked = 0;
 
-        foreach (var (table, id, key, position) in work)
+        foreach (var (table, id, key, group, position) in work)
         {
-            if (position is { } at)
+            if (group == WorkGroup.Sweep)
             {
                 _logger.LogInformation(
                     "[SECURE-CHILD-RECONCILE] progress run={RunId} mode={Mode} root={Root} position={Position}/{Total} " +
                     "(of {All} secure records).",
-                    context.RunId, mode, key, at, start + batch.Count, roots.Count);
+                    context.RunId, mode, key, position, start + batch.Count, roots.Count);
+            }
+            else if (group == WorkGroup.CatchUp)
+            {
+                _logger.LogInformation(
+                    "[SECURE-CHILD-RECONCILE] catch-up run={RunId} mode={Mode} root={Root}: this instance has not yet walked " +
+                    "every secure record since it started.",
+                    context.RunId, recentMode, key);
             }
             else
             {
                 _logger.LogInformation(
                     "[SECURE-CHILD-RECONCILE] recent-changes run={RunId} mode={Mode} root={Root}: a related record changed " +
                     "since {Since:o}.",
-                    context.RunId, mode, key, since);
+                    context.RunId, recentMode, key, since);
             }
 
             var report = await reconciler.ReconcileAsync(
-                    table, id, position is null ? recentMode : mode, SecureChildPassTrigger.Sweep, cancellationToken)
+                    table, id, group == WorkGroup.Sweep ? mode : recentMode, SecureChildPassTrigger.Sweep, cancellationToken)
                 .ConfigureAwait(false);
 
             foreach (var t in report.Tables)
@@ -273,9 +310,10 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             {
                 incompleteRoots.Add($"{key}: {report.Status}{(report.Detail is null ? "" : " — " + report.Detail)}");
 
-                // Carried only from the recent-changes group: a sweep-window record that is incomplete is the sweep's to
-                // revisit, in the sweep's own mode (a carried record is reconciled in the recent-changes mode).
-                if (position is null)
+                // Carried from the recent-changes and catch-up groups (the L4 net): a sweep-window record that is
+                // incomplete is the sweep's to revisit, in the sweep's own mode (a carried record is reconciled in the
+                // recent-changes mode).
+                if (group != WorkGroup.Sweep)
                     stillIncomplete.Add((table, id));
             }
 
@@ -284,15 +322,15 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 // Counted in full (task 148 r2): the listed sample is capped, the total is not — so a reader can tell
                 // when the list is incomplete (changesTotal > changesListed).
                 changesTotal++;
-                if (position is null && change.Outcome == SecureChildRowOutcome.Changed)
+                if (group != WorkGroup.Sweep && change.Outcome == SecureChildRowOutcome.Changed)
                     recentCorrections++;
                 if (sampled.Count >= MaxSampledChanges)
                     continue;
                 sampled.Add(new
                 {
-                    // Task 147: which part of the run made it — "recent" (the L4 net's standing correction report) or
-                    // "sweep" (the backfill window).
-                    pass = position is null ? "recent" : "sweep",
+                    // Task 147: which part of the run made it — "recent" or "catch-up" (the L4 net's standing correction
+                    // report) or "sweep" (the backfill window).
+                    pass = group switch { WorkGroup.Recent => "recent", WorkGroup.CatchUp => "catch-up", _ => "sweep" },
                     root = key,
                     table = change.Table,
                     id = change.Id,
@@ -314,10 +352,25 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
             // The watermark moves only past a listing that COMPLETED, in a run that WROTE. After a failed listing, the
             // next run looks at the same window again. A report-only run corrects nothing, so it must not move the
             // watermark either: the first run with writes on then still sees the changes the report-only runs listed
-            // (back to the initial lookback). A record whose pass was incomplete is revisited by the sweep, as every
-            // secure record is.
+            // (back to the initial lookback). A record whose pass was incomplete is carried (below).
             if (recent.Failure is null && recentWrites && !recent.PendingOverflow)
                 _recentChangesWatermark = startedAt - RecentChangesOverlap;
+
+            // Task 147 r1c: the catch-up advances only in a run that wrote (a report-only run corrected nothing). Past the
+            // last secure record this instance has walked them all once; from then on the watermark alone decides.
+            if (catchUpRuns && recentWrites)
+            {
+                var reached = catchUpStart + catchUpBatch.Count;
+                if (reached >= roots.Count)
+                {
+                    _catchUpComplete = true;
+                    _catchUpCursor = null;
+                }
+                else
+                {
+                    _catchUpCursor = (catchUpBatch[^1].Table, catchUpBatch[^1].Id);
+                }
+            }
 
             // Task 147 r1 (verifier item 4): carry forward, to be looked at first in the NEXT run, every record whose pass
             // came back incomplete in THIS run (a refused or failed re-own, a record that cannot be decided) and every
@@ -340,10 +393,14 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // skipped (task 147, ADR-003). Examples are a row under a record flagged secure but not isolated, or under a
         // missing ancestor.
         var success = incompleteRoots.Count == 0 && recent.Failure is null && recent.Undetermined.Count == 0;
-        var recentOnly = work.Count - batch.Count(b => !recentKeys.Contains((b.Table, b.Id)));
         int carriedRoots, carriedRows;
+        bool catchUpComplete;
+        (string Table, Guid Id)? catchUpResumeAfter;
         lock (_cursorGate)
+        {
             (carriedRoots, carriedRows) = (_pendingRoots.Count, _pendingRows.Count);
+            (catchUpComplete, catchUpResumeAfter) = (_catchUpComplete, _catchUpCursor);
+        }
 
         // THE HEARTBEAT (ADR-036 A1 rule 5) — every attempt, including one with nothing to do.
         _logger.Log(
@@ -371,7 +428,7 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                 ? null
                 : $"{incompleteRoots.Count} secure record(s) not fully reconciled and {recent.Undetermined.Count} recently " +
                   "changed related record(s) not placed; the next run revisits them: " + string.Join("; ", problems),
-            ProcessedItems: batch.Count + recentOnly,
+            ProcessedItems: work.Count,
             Duration: duration,
             ResultJson: JsonSerializer.Serialize(new
             {
@@ -427,6 +484,16 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     carriedRows,
                     // More unplaced rows than the job carries: the watermark stays, so the whole window is listed again.
                     pendingOverflow = recent.PendingOverflow,
+                    // Task 147 r1c: the once-per-instance walk of every secure record after a start (a restart, deploy or
+                    // scale-out loses what the previous instance carried). `complete` once this instance has walked them all.
+                    catchUp = new
+                    {
+                        ran = catchUpRuns,
+                        complete = catchUpComplete,
+                        rootsInRun = work.Count(w => w.Group == WorkGroup.CatchUp),
+                        startPosition = catchUpRuns ? catchUpStart + 1 : (int?)null,
+                        resumeAfter = catchUpResumeAfter is { } c ? $"{c.Table}:{c.Id:D}" : null,
+                    },
                 },
                 attempt = context.Attempt,
             }, ResultJsonOptions));
@@ -613,8 +680,11 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
 
     // Task 147 r1 (verifier item 4): what a run could not finish, looked at first by the next run on this instance — the
     // records whose pass was incomplete and the changed rows that could not be placed. Same per-instance, in-singleton
-    // reasoning as the cursor (ADR-052 §5). A restart drops them: every carried record is still a sweep record, and every
-    // carried row is named in the run history of each run that carried it.
+    // reasoning as the cursor (ADR-052 §5). A restart drops them; the new instance's catch-up (task 147 r1c) walks every
+    // secure record once, so a carried RECORD is reconciled again regardless. A carried ROW sits under no isolated record
+    // (flagged-not-isolated: its record's provisioning re-entry completes it, and the catch-up walks that record and
+    // reports it incomplete; a missing ancestor: no secure record above it at all) and is named in the run history of
+    // every run that carried it.
     private readonly HashSet<(string Table, Guid Id)> _pendingRoots = new();
     private readonly HashSet<(string Table, Guid Id)> _pendingRows = new();
 
@@ -623,4 +693,23 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
     /// window is listed again: nothing is dropped, it is only re-listed more broadly.
     /// </summary>
     internal const int MaxCarriedRows = 1000;
+
+    // Task 147 r1c: the catch-up (see ExecuteAsync) — whether this instance has walked every secure record once since it
+    // started, and where its walk resumes. Per instance and in this singleton, deliberately: what it repairs is exactly
+    // the loss of the other per-instance state on a start.
+    private bool _catchUpComplete;
+    private (string Table, Guid Id)? _catchUpCursor;
+
+    /// <summary>Which part of a run a record is reconciled in (task 147 r1c).</summary>
+    private enum WorkGroup
+    {
+        /// <summary>A record whose related records changed since the watermark, or one an earlier run left unfinished.</summary>
+        Recent,
+
+        /// <summary>The once-per-instance walk of every secure record after a start.</summary>
+        CatchUp,
+
+        /// <summary>The task 148 sweep window (the backfill), in the sweep's own mode.</summary>
+        Sweep,
+    }
 }
