@@ -994,6 +994,27 @@ The owner, verbatim: "it is important that we address issues that impact the qua
 3. **The backstop also settles isolated documents whose file is still in a shared business-unit container,** as well as those with an open ledger step. A failed copy is never written to the ledger, and this is the only way it gets finished (round 46 item 2's intent).
 4. **Known limit (class e):** a repeat call whose only work was an owed source delete answers 409 "already provisioned". The work is done; the message does not say so.
 
+## Round 65 (2026-10-05). BINDING. Main-session decisions under owner rounds 56/59. Integration of 165 and 167.
+
+1. **165's secret-name allow-list after master `bb8ba7251` (option A, carried to its conclusion).**
+   - Master moved SPE Admin onto the BFF's own managed identity. It deleted `SpeAdminTokenProvider` and every Key Vault secret read, and made `keyVaultSecretName` optional. What round 35 item 3 and round 41 item 4 guarded no longer exists.
+   - **The fix:**
+     - REMOVE the read guard and the filter's 409. Kept, they would block the Model 1 config that `bb8ba7251` made work.
+     - CHECK whether any code still READS `sprk_keyvaultsecretname`.
+   - **If NOTHING reads it** (class b, a dead mechanism), also remove:
+     - the 400 validation on config POST/PUT;
+     - `Test-SpeConfigSecretName.ps1` / `Repair-SpeConfigSecretName.ps1` and their gate;
+     - round 41 item 4's dev-config repair live step.
+
+     Record that SPE Admin authenticates as the BFF identity, and that the column is retained only as data, in the topology doc and 165's note.
+   - **If something still reads it:** keep ONLY the 400 validation of a supplied name.
+   - **Resolving the merge:** take master's managed-identity design in `SpeAdminGraphService` / `SpeAdminTokenProvider` (modify/delete → delete). Re-apply 165's other work (container binding, the operator marker, type routes) on top. Then do round 62 items 1–3.
+2. **The five sweep entries fixed in code but still Pending** (S-24, S-18, S-78, S-64, S-65): ONE generic ledger credit, not five new scanner vocabularies.
+   - **The credit (`ProvenByTest`):** a present route's entry is resolved when `ResolvedBy` is set AND `ProofTest` names a test that drives the REAL app (WebApplicationFactory / the booted BFF) and asserts the route's authorization outcome. That means a refusal for an unauthorized caller and success for an authorized one.
+   - **Enforcement:** the guard checks that the named test exists, runs (is not skipped) and references the route.
+   - **The cap:** this is the only new vocabulary. It does not loosen any existing rule.
+   - Use it for those five, and for any later fix shape the scanner cannot see.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
