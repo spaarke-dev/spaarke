@@ -24,6 +24,10 @@ This is the running list of obligations the main session takes on while integrat
 - [x] **162-f1** merged `8fd16bbea`. Fork handler/tests gone; promote = 162's session-document check, then 146's owner. **Owed at 167 integration:** 162 note §7/§8. **Owed at 164's merge:** 162 §14.3 one-line edit (done in the 164 merge, see below).
 - [x] **Round 34 item 1** (`scripts/Set-DocumentAnalysisCascadeSchema.ps1`, dry run + `-Verify` read-only on spaarkedev1: FAIL exit 1 as expected pre-apply) — commit below. **Manual gate:** `-Apply` → `-Verify` exit 0 → non-admin delete probe (162 note §14.14).
 - [x] **Round 34 item 2** confirmed + missing-row test added, seeded both ways (162 note §14.14).
+- [x] **Round 34 commit** `ebb3ba38f` (items 1 and 2 above).
+- [x] **164-r1** merged `672923b0b`. Associate/match-records routes retired: 146's seven associate tests + harness, 156's associate re-stamp test, the route guard's GovernedFiles entry + match-records Pending waiver, and the owner-census entry left with the file (dated notes). Read-rule conflict: took 162 f1's superset. **162 §14.3 edit done**: `AiAuthorizationFilter.IsAnalysisReadableAsync` delegates to the shared evaluator; new chat test for the personal-creator host, seeded. Also fixed 156's report-card test (161 live-verified its name column). **Owed at 167 integration:** 164 note §9 ledger rows. **Infra (optional, main session):** retire the Cosmos `prompts` container from bicep (164 note §5).
+- [x] **163-f1** merged `99fe4c3f6`. Census 118 → 117. **Owed at 167 integration:** 163 note §15.7 (delete the 17 Pending(163) waivers; the three CreditedForms; the TenantAuthorizationFilter evidence line; AdminOnlyRoutes += `POST /api/ai/rag/index`, `DELETE /api/ai/rag/{documentId}`; SweepFindings ResolvedBy/ProofTest) — round 34 items 4-5 decide 163's two 167 contract gaps.
+- [ ] **Pre-existing whitespace debt (advisory CI format job)** on the merged tree, none from the merge edits: `FinanceAuthorizationFilter.cs` 389-410 (`8f0f1b8fc`), `AnalysisEndpoints.cs`/`AnalysisResultPersistence.cs` (146 `738bed883`), and 162 test files (`eaf21d9b9`, `d1c5e6f34`, `f86c3902b`). `dotnet format whitespace` fixes them in one pass if wanted.
 
 ## `.claude/` edits (main session only; sub-agents cannot write there)
 
@@ -31,6 +35,10 @@ This is the running list of obligations the main session takes on while integrat
 - [ ] **166:** `.claude/skills/bff-deploy/SKILL.md` §9c. Move its smoke check off `GET /healthz/dataverse/doc/{id}`, which was an anonymous document read, onto `/healthz/dataverse`. The exact text is in 166's note. Also update the runbooks it lists (`projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md`, `051-operator-runbook.md`).
 - [ ] **160 (only if a production caller needs the SDK path):** a one-line ADR-028 A5 note that an SDK CallerId path satisfies A5's "equivalent refusal".
 - [ ] **161 (optional pointer):** `.claude/patterns/api/endpoint-filters.md`, add one line under the filter list: "`CommunicationRecordAuthorizationFilter` — per-record gate for `/api/communications` routes; one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny answer (task 161)."
+- [ ] **163:** `.claude/skills/add-reference-to-index/SKILL.md` line 176 — replace
+  `` - `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` — BFF API indexing service ``
+  with
+  `- (ReferenceIndexingService and /api/admin/knowledge/* were removed by unified-access-control-r2 task 163 — the scripts above are the only indexing path)`.
 - [ ] **`.claude/CHANGELOG.md`:** add an entry for each `.claude` edit above.
 
 ## Live steps on dev (owner round 11: approved; run each as dry run, then apply, then verify, and record it in the task's live-gate note)
