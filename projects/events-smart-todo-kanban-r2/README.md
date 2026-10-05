@@ -1,5 +1,7 @@
 # Smart To Do Kanban R2 — Unified Code Page with Inline Detail Panel
 
+> **Portfolio**: [Project #1162](https://github.com/spaarke-dev/spaarke/issues/1162) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Branch**: `work/events-smart-todo-kanban-r2`
 > **PR**: #270

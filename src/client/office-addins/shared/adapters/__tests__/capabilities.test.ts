@@ -17,6 +17,7 @@
 import { WordAdapter } from '../WordAdapter';
 import { OutlookAdapter } from '../OutlookAdapter';
 import type { HostCapabilities } from '../types';
+import { getAvailableTabs } from '../../taskpane/components/TaskPaneNavigation';
 
 describe('WordAdapter.getCapabilities()', () => {
   let adapter: WordAdapter;
@@ -42,9 +43,11 @@ describe('WordAdapter.getCapabilities()', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    delete process.env.ADDIN_EMAIL_TAB_ENABLED;
   });
 
   it('reports the full capability set honestly (Word-only true, Outlook-only false)', () => {
+    process.env.ADDIN_EMAIL_TAB_ENABLED = 'true';
     const capabilities: HostCapabilities = adapter.getCapabilities();
 
     // Outlook-only — Word has no mailbox/email concept for any of these.
@@ -54,6 +57,9 @@ describe('WordAdapter.getCapabilities()', () => {
     expect(capabilities.canSaveAsEml).toBe(false);
     expect(capabilities.canAttachFile).toBe(false);
     expect(capabilities.canComposeEmail).toBe(false);
+    // Task 096: Word emails a document from its own Email tab (in-pane form, shared compose engine) —
+    // when the build setting is on (this test sets it; the held-off default is pinned below).
+    expect(capabilities.canEmailFromPane).toBe(true);
 
     // Word-only.
     expect(capabilities.canGetDocumentContent).toBe(true);
@@ -74,6 +80,36 @@ describe('WordAdapter.getCapabilities()', () => {
 
     // task 094: GA (not preview) requirement set WordApi 1.6 — isSetSupported stubbed true by beforeEach.
     expect(capabilities.canDetectDocumentChanges).toBe(true);
+  });
+
+  // Owner decision 2026-10-04 (task 097 note §6): the Email tab is held OFF until the send route authorizes
+  // each attachment and association (unified-access-control-r2 task 161). Only the exact string "true" on.
+  it.each([
+    ['unset', undefined, false],
+    ['"false"', 'false', false],
+    ['"1"', '1', false],
+    ['"TRUE"', 'TRUE', false],
+    ['"true"', 'true', true],
+  ])('canEmailFromPane follows the ADDIN_EMAIL_TAB_ENABLED build setting (%s)', (_label, value, expected) => {
+    if (value === undefined) delete process.env.ADDIN_EMAIL_TAB_ENABLED;
+    else process.env.ADDIN_EMAIL_TAB_ENABLED = value;
+
+    const capabilities = adapter.getCapabilities();
+    expect(capabilities.canEmailFromPane).toBe(expected);
+    // The switch moves nothing else.
+    expect(capabilities.canComposeEmail).toBe(false);
+    expect(capabilities.canGetDocumentContent).toBe(true);
+  });
+
+  // The chain App.tsx uses (adapter capability → tab table), with the build setting as CI ships it: unset/off.
+  it('with the build setting off, the real Word adapter yields a tab list with no Email tab', () => {
+    delete process.env.ADDIN_EMAIL_TAB_ENABLED;
+    const tabs = getAvailableTabs('word', { canEmailFromPane: adapter.getCapabilities().canEmailFromPane });
+    expect(tabs.map(t => t.value)).not.toContain('email');
+
+    process.env.ADDIN_EMAIL_TAB_ENABLED = 'true';
+    const tabsOn = getAvailableTabs('word', { canEmailFromPane: adapter.getCapabilities().canEmailFromPane });
+    expect(tabsOn.map(t => t.value)).toContain('email');
   });
 
   it('canOpenBrowserWindow follows the runtime requirement-set check (task 027), not a hardcoded value', () => {
@@ -173,6 +209,17 @@ describe('OutlookAdapter.getCapabilities()', () => {
     expect(capabilities.canInsertLink).toBe(false);
   });
 
+  it('keeps canEmailFromPane false even with the Word Email-tab build setting on (the switch is Word-only)', async () => {
+    process.env.ADDIN_EMAIL_TAB_ENABLED = 'true';
+    try {
+      (global.Office.context.mailbox as unknown as { item: unknown }).item = mockReadItem;
+      await adapter.initialize();
+      expect(adapter.getCapabilities().canEmailFromPane).toBe(false);
+    } finally {
+      delete process.env.ADDIN_EMAIL_TAB_ENABLED;
+    }
+  });
+
   it('reports the full capability set honestly for read mode (Outlook-only true where applicable, Word-only false)', async () => {
     (global.Office.context.mailbox as unknown as { item: unknown }).item = mockReadItem;
     await adapter.initialize();
@@ -189,6 +236,8 @@ describe('OutlookAdapter.getCapabilities()', () => {
     expect(capabilities.canGetSender).toBe(true);
     expect(capabilities.canSaveAsEml).toBe(true);
     expect(capabilities.canComposeEmail).toBe(true);
+    // Task 096 (owner: "Outlook unchanged"): no in-pane Email tab — Send Email opens native compose.
+    expect(capabilities.canEmailFromPane).toBe(false);
 
     // Compose-only, so false in read mode.
     expect(capabilities.canInsertLink).toBe(false);

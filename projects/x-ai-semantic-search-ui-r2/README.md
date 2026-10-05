@@ -1,5 +1,7 @@
 # AI Semantic Search UI R2
 
+> **Portfolio**: [Project #1263](https://github.com/spaarke-dev/spaarke/issues/1263) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Ready for Implementation
 > **Start Date**: 2026-01-20
 > **Branch**: `work/ai-semantic-search-ui-r2`

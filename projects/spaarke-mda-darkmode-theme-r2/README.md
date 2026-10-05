@@ -1,5 +1,7 @@
 # MDA Dark Mode Theme R2 — Unified Theme Consistency
 
+> **Portfolio**: [Project #1224](https://github.com/spaarke-dev/spaarke/issues/1224) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Code Complete (pending deployment)
 > **Branch**: `work/spaarke-mda-darkmode-theme-r2`
 > **Created**: 2026-03-30

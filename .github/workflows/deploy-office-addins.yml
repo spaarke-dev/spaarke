@@ -73,6 +73,10 @@ jobs:
           # The Spaarke model-driven app (unique name) every record link opens in (task 088). Without it a
           # record opens in the user's default app. Same in every environment; empty → links name no app.
           SPAARKE_APP_NAME: sprk_MatterManagement
+          # Word's Email tab (task 096). HELD OFF by owner decision 2026-10-04 until the send route authorizes
+          # attachments and associations (unified-access-control-r2 task 161) on master and deployed. Set to
+          # "true" in the change that records 161's deploy (spaarkeai-word-add-in-r1 task 097); no code change.
+          ADDIN_EMAIL_TAB_ENABLED: "false"
 
       # Task 078 (FR-05): the combined Outlook + Word unified app package. The build above emits its parts into
       # dist/spaarke/; this zips them for the Microsoft 365 admin center (Integrated apps -> Upload custom apps ->

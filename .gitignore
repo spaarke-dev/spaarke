@@ -166,3 +166,4 @@ exports/
 # Jest JSON report written by Tier 1's datagrid-external-host-gate (ci-tier1-blocking.yml) and by running
 # that job's command locally. A run artifact; never commit (unified-access-control-r2 task 157).
 src/client/shared/Spaarke.UI.Components/datagrid-jest-results.json
+__pycache__/

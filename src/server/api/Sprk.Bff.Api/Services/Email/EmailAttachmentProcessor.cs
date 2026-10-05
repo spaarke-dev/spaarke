@@ -56,9 +56,11 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
-        // Pre-compile signature patterns for performance
+        // Pre-compile signature patterns for performance. Timeout is configurable
+        // (EmailProcessingOptions.SignatureImageRegexTimeout, default 1s unchanged) so tests can
+        // use a budget appropriate to their own execution environment — see task 095.
         _signaturePatterns = _options.SignatureImagePatterns
-            .Select(p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, TimeSpan.FromSeconds(1)))
+            .Select(p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled, _options.SignatureImageRegexTimeout))
             .ToArray();
     }
 

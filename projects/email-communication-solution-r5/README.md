@@ -1,5 +1,7 @@
 # Email Workspace (Outlook-style) — `email-communication-solution-r5`
 
+> **Portfolio**: [Project #1160](https://github.com/spaarke-dev/spaarke/issues/1160) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Initialized 2026-07-27 via `/project-pipeline` · **Round**: r5 (Communication surface line; successor to `email-communication-solution-r4`)
 > **Owner**: ralph.schroeder · **Branch**: `work/email-communication-solution-r5`
 > **Type**: UI/surface (dual-use Pattern D) + 1 new BFF endpoint + 1 config change · **Hot-path**: BFF=Y · SpaarkeAi=Y · CI=N · Skills=N

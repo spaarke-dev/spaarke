@@ -19,7 +19,7 @@ Spaarke's email backbone is 100% Microsoft Graph + `sprk_communication` (no Serv
 
 Communication (send and receive, email today, any channel later) is governed by four coupled rules:
 
-1. **Client canonical send.** All email-send UX flows through ONE `<EmailComposer />` engine in `@spaarke/ui-components` (modes `compose|view|reply|forward|draft`; mounts `inline|dialog|page`) exposed via three thin semantic wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`). All programmatic (no-UI) send flows through the `sendCommunication()` typed wrapper. No ad-hoc/inline `fetch` to the send endpoint; no per-caller composer forks.
+1. **Client canonical send.** All email-send UX flows through ONE `<EmailComposer />` engine in `@spaarke/ui-components` (modes `compose|view|reply|forward|draft`; mounts `inline|dialog|page`) exposed via four thin semantic wrappers (`SendEmailStep`/`SendEmailDialog`/`SendEmailPage`/`SendEmailPane` — the last added 2026-10-04 for the Word add-in task pane, under this ADR's "new mount → new thin wrapper" rule). All programmatic (no-UI) send flows through the `sendCommunication()` typed wrapper. No ad-hoc/inline `fetch` to the send endpoint; no per-caller composer forks.
 
 2. **Server Association Engine over a normalized envelope.** Matching each communication to related records is done by a single engine operating on a **normalized message envelope** — never `Microsoft.Graph.Message`. It resolves eight targets (matter, project, invoice, service request, work assignment, event, contact, organization) via a deterministic-first rung ladder (0 explicit-ref → 1 thread → 2 participant → 3 structural detectors), then semantic (4) and AI (5). Every match records per-attribute confidence + provenance.
 
@@ -33,7 +33,7 @@ Communication (send and receive, email today, any channel later) is governed by 
 
 ### ✅ MUST
 
-- **MUST** route all email-send UX through `<EmailComposer />` via the three wrappers, and all programmatic send through `sendCommunication()`. Shared-lib components inject `authenticatedFetch` — no direct `@spaarke/auth` import inside the engine.
+- **MUST** route all email-send UX through `<EmailComposer />` via the thin wrappers, and all programmatic send through `sendCommunication()`. Shared-lib components inject `authenticatedFetch` — no direct `@spaarke/auth` import inside the engine.
 - **MUST** operate the Association Engine over the **normalized envelope** only. No engine rung may take a `Microsoft.Graph.Message` (or any channel-specific type) as input.
 - **MUST** invoke `ICommunicationEnrichmentService` from **both** inbound and outbound paths (direction symmetry), including the outbound RAG-indexing leg that was previously missing.
 - **MUST** record confidence + provenance (JSON in `sprk_associationprovenance`) on every association decision, and map confidence to `sprk_associationstatus` per the ladder: ≥0.85 deterministic (rungs 0–3) → `Resolved`; 0.50–0.85 or ANY AI rung → `Suggested`; <0.50/none → `Pending Review`; conflicting high-confidence → `Ambiguous`.

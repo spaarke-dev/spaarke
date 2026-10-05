@@ -1,5 +1,7 @@
 # spaarke-ai-code-audit-r1 — AI Code Inventory + Migration Map
 
+> **Portfolio**: [Project #1198](https://github.com/spaarke-dev/spaarke/issues/1198) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Created**: 2026-07-05 (Fable 5 session, per operator direction 2026-07-05)
 > **Parent epic**: #421 SPAARKE AI
 > **Origin**: strategic pivot in `spaarke-ai-platform-unification-r7` — the canonical
