@@ -1,5 +1,61 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-05 (checkpoint #13, by context-handoff). Supersedes #12. Read the Quick Recovery table first.
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|---|---|
+| **Task** | Batch 4 + route-sweep INTEGRATION (`integ/uac-r2-batch4`, `C:\wt4i`), then PR, deploy and live gates; then batch 5 |
+| **Step** | Final merges in progress. The merge agent `sweepmerge` (Agent tool; resume with SendMessage) is merging 158, 165, 167 and 132, each with its integration item |
+| **Status** | in-progress. No workflows are running; all lanes are verified ready |
+| **Next Action** | When `sweepmerge` reports, push integ (`git -C C:/wt4i push origin integ/uac-r2-batch4`) and review its results. Then: merge origin/master again; full suites; publish size (fresh short-path worktrees, Compress-Archive) and CVE; open the PR (§6.5 blocks, known limits, deleted-route evidence); merge on Router green |
+
+### Integration state (integ tip `1e8041fbe`, pushed)
+- **Merged:** 132-r1, 133, 137, 140, 142, 143, 146–150, 156, 157, 159–164, 166, 168, 169, and master `b4b58a361`.
+- **Make Secure file relocation and its backstop:** wired (`9fec61fec`, round 64).
+- **Merging now:**
+  - 158 (`task/uac-r2-158-h`) + round 61 transitive walk + 158×140 If-Match.
+  - 165 (`task/uac-r2-165-h`) + round 62 marker bound to the App Service.
+  - 167 (`task/uac-r2-167-f2-v2`) + its route ledger and LOW items.
+  - 132 (`task/uac-r2-132-g`) + ONE IL reader + 148×132 owner-change evictions.
+
+### Live steps on dev
+- **Done 2026-10-05:**
+  - Child-record creator column on 22 tables (G147-5/146).
+  - Document→analysis cascade (round 34).
+  - 166 relocation columns `sprk_relocationpending` / `sprk_relocatedversions`. They are field-secured; profile grants come with gate 23.
+- **Remaining:**
+  - **With the deploy:** gate 23 (`Set-DocumentPointerFieldSecurity.ps1`). It locks pointer fields that the current client writes, so it ships with the deploy.
+  - 142 ledger (+ `sprk_subjectteam` from 158).
+  - 140 G-140-1 (+ `sprk_grantedbycontactid`).
+  - 150 FLS lock.
+  - 144 default-team migration, before the 150 ribbon (round 60).
+  - 165 container backfill + `-Bind` + secret-name repair.
+  - 168 forms and grids.
+  - 147 G147-2/3/4/6.
+  - G-11 ribbon.
+  - BFF deploy.
+  - Live gates.
+  - Notify word-add-in-r1 when 161 is deployed.
+
+### Decisions this session (all in `notes/session27-owner-decisions-and-research.md`)
+- Rounds 35–64.
+- **Owner round 56:** finding classification (a)–(f), no over-engineering, a round cap.
+- **Owner round 59:** batch-5 scope. Build required functionality fully; reuse over new; 036 built; promised features kept; 154 with the existing picker; 5 tasks deferred (#1303–#1306, #1072); cuts per `notes/batch5-scope-review-2026-10-05.md`.
+- Memory `fix-root-cause-not-options` carries rounds 56 and 59.
+
+### Elsewhere
+- **Master:** #1297 merged (DateOnly grant expiry).
+- **#1293** (#1290 jest fixes): a DRAFT. Rebase it onto master after #1123 merges, and keep only its unique parts (owner chose "grid fills the row").
+- **Issues filed:** #1290, #1307 (duplicate record filter), #1310 (L2 guard).
+
+### Batch 5 (after batch 4 ships)
+- **Order:** 154 first → 113, 114, 105, 101 → 064 → 153 and 067 → 099 → 036 (after the batch-4 deploy) → 090.
+- **Session A** (dev, no deploy needed): closes 003, 013, 037 and 039 together with 135/136.
+
+---
+
 > **Last Updated**: 2026-10-05 (checkpoint #12). Supersedes #11.
 >
 > ## ⚡ CHECKPOINT #12: every batch-4/sweep lane is verified; the integration merges are in progress
