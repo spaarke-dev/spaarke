@@ -2211,6 +2211,15 @@ Ceiling 60 MB. Equal file counts, no MSB3030 — all three publishes complete. T
 afterwards. `dotnet list … package --vulnerable --include-transitive`: **no vulnerable packages** (BFF and L2 Core); no
 `.csproj` / `.props` changed this round.
 
+**Conflict check:** `git merge-tree` of this branch into `work/unified-access-control-r2` @ `0caca7e3e` — clean. Open PRs
+(23) touching a path this round changed: **#1298** (`work/customer-provisioning-orchestration-r1` → master) also edits
+`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` and `SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`, and a trial merge with its head also
+conflicts in `infrastructure/bicep/stacks/model2-full.bicep` / `.json` / `dev.bicepparam` — besides files earlier 165 rounds
+changed (`ConfigEndpoints.cs`, `SpeAdminGraphService.cs`, …): the two work branches have diverged. Whichever integrates
+second resolves; for `model2-full.json`, resolve the `.bicep` and regenerate it (`az bicep build --file
+infrastructure/bicep/stacks/model2-full.bicep --outfile infrastructure/bicep/stacks/model2-full.json`); keep this round's
+`speAdminPlatformOperatorEnvironment` parameter and its `union(…)` on the BFF `appSettings`.
+
 ### 14.13 Decisions (this round)
 
 - **D33 — H8's resume record is TYPED** (`InterStepState.SpeContainerCreation`, a controlled schema extension) and H8 never
