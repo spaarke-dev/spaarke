@@ -7,6 +7,52 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-04 — PCF deploy procedures verify the REAL build result; `pcf-scripts` exits 0 on a failed build
+
+**What was wrong.** `pcf-scripts build` (and so `npm run build:prod` in every PCF) **exits 0 when the webpack
+build fails**: its `taskRunner.js` logs `[build] Failed:` and `[pcf-1033] [Error] An error occurred compiling or
+bundling the control.` and returns without rethrowing. Deploy procedures that ran the build and went on to "copy
+`bundle.js`, pack, import" could ship the PREVIOUS bundle still in `out/`. Found 2026-10-04 by
+`spaarke-ontology-platform-r1` (tasks 092 / 093b): the new nightly CI workflow reported 17 of 18 PCFs passing when
+9 had failed.
+
+**What changed** (one rule, judged from the OUTPUT: fail on a non-zero exit, `[build] Failed`, `compiled with N
+error(s)` or `[pcf-1033]`, after stripping ANSI colour; pass only on `[build] Succeeded`; anything else is a failure.
+Same rule as `.github/workflows/pcf-build-prod-nightly.yml`, PR #1285):
+- New `scripts/PcfBuildResult.psm1` (the rule) and `scripts/Invoke-PcfBuildProd.ps1` (build one PCF, exit 1 on a
+  failed build). Proven against a real failing build (VisualHost: npm exit 0, script exit 1) and a real passing one,
+  plus fake builds in Windows PowerShell 5.1 and pwsh 7.
+- `pcf-deploy` and `dataverse-deploy` SKILL.md: every build step runs the script **from the PCF folder**
+  (`pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .`) and stops on a non-zero exit; MUST rules
+  say why. `pcf-deploy` Step 3's copy paths now match its working folder (they were `../out/...`), and its
+  Manual Quick Deploy no longer uses dev-mode `npm run build`.
+- `.claude/commands/dataverse-deploy.md`: its "Quick Dev Deploy" was `npm run build:prod` + `pac pcf push`, which
+  contradicts `pcf-deploy`'s NEVER rule (push rebuilds in development mode). Now the verified build + pack + import.
+- `task-execute` and `project-pipeline` SKILL.md: wave build verification and the PCF checklist judge PCF builds
+  with the script; task-execute's checklist no longer suggests `pac pcf push`.
+- `script-aware`, `project-pipeline`, `task-execute`: the example PCF script was `Deploy-PCFWebResources.ps1`,
+  deleted below (`script-aware` had also documented a `-ControlName` parameter it never had).
+- `docs/guides/PCF-DEPLOYMENT-GUIDE.md` said **"NEVER use `npm run build:prod` — pcf-scripts only has `build`"**,
+  the AP-1 error `pcf-deploy` was corrected for in May. Corrected, plus a troubleshooting row for "build succeeded
+  but the deployed control is unchanged".
+- `src/client/pcf/{MatterHeader,RecordHeader}/Solution/pack.ps1` (which rebuild before packing) judge the build with
+  the module.
+- `scripts/Build-AllClientComponents.ps1` Step 4 (the release build's PCF step, run by `Deploy-Release.ps1` Phase 1)
+  now builds **each PCF on its own in production mode**, mirroring the nightly workflow: every git-tracked
+  `src/client/pcf/<name>/package.json` with a `build:prod` script gets `npm install` + `npm run build:prod`, is judged
+  by the module, and is its own summary row (`PCF/<name>`); zero PCFs discovered is a FAILED row. It used to run ONE
+  aggregate dev-mode `npm run build` at `src/client/pcf`, which never worked from a clean checkout (TS5083, then out of
+  memory) and whose `out/` nothing consumed. Step 1 now builds `Spaarke.Events.Components` and
+  `Spaarke.SmartTodo.Components` AFTER `Spaarke.UI.Components` (both depend on it; before, a clean checkout failed
+  Step 1 and never reached Step 4). `ThemeEnforcer` gained the `build:prod` script every other PCF has. The script is
+  now ASCII-only, so Windows PowerShell 5.1 parses it too (12 non-ASCII dashes/arrows in a BOM-less file gave 10 parse
+  errors). Verified with #1123 merged: 14/14 shared libs + 19/19 PCFs pass.
+- `master-deploy` SKILL.md: F-2's "until diagnosed" follow-up was stale (F-2 itself records the 2026-06-11 fix); now
+  points at this PR's clean-checkout fixes as well, and notes that a full run takes over an hour.
+- `scripts/Deploy-PCFWebResources.ps1` **deleted** and dropped from `Deploy-AllWebResources.ps1`: it only ever pushed
+  `UniversalQuickCreate`, deleted 2026-06-22 by `pcf-orphan-cleanup-r1`, from a hard-coded path that no longer exists.
+
+---
 ###### 2026-10-04 — portfolio board hygiene: Type backfill, 156 missing projects registered, new `/project-spend-update` skill
 
 Triggered by investigating why `unified-access-control-r2` spent ~$4,490 over 3 days via 27

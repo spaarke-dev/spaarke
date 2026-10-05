@@ -68,7 +68,8 @@ This name MUST appear identically in ALL of:
 ### MUST:
 - **MUST** use unmanaged solution unless explicitly told to use managed (ADR-022)
 - **MUST** use Dataverse publisher `Spaarke` with prefix `sprk_`
-- **MUST** rebuild fresh every deployment (`npm run build`)
+- **MUST** rebuild fresh every deployment with `npm run build:prod` (production mode: tree-shaking + minification), run through `scripts/Invoke-PcfBuildProd.ps1`
+- **MUST** stop when the build failed, judged from its **output**: `pcf-scripts build` **exits 0 when webpack fails** (it logs `[build] Failed:` / `[pcf-1033]` and returns), so trusting the exit code can pack the PREVIOUS bundle. `scripts/Invoke-PcfBuildProd.ps1` exits 1 on failure
 - **MUST** copy build output files to Solution folder (bundle.js, ControlManifest.xml, and styles.css if produced)
 - **MUST** update version in ALL version locations (see Version Locations below)
 - **MUST** include `.js` and `.css` entries in `[Content_Types].xml`
@@ -86,7 +87,7 @@ This name MUST appear identically in ALL of:
 - ❌ **NEVER** include web resources (JS/HTML) in a PCF-only solution — deploy web resources separately via Dataverse UI or their own solution
 - ❌ **NEVER** use placeholder GUIDs (e.g., `{00000000-...}`) for web resource IDs — Dataverse rejects GUIDs that don't match existing records
 - ❌ **NEVER** hand-edit `Solution/Controls/.../ControlManifest.xml` - always copy from build output
-- ❌ **NEVER** use `npm run build:prod` - pcf-scripts only has `build` (no separate prod script)
+- ❌ **NEVER** use plain `npm run build` for a deploy: it is **development mode** (no tree-shaking), and bundles come out 10–15× larger. Every deployable PCF has `"build:prod": "pcf-scripts build --buildMode production"` (root CLAUDE.md §12; FAILURE-MODES AP-1)
 - ❌ **NEVER** use special characters (em dashes, smart quotes) in pack.ps1 - breaks PowerShell parsing
 
 ---
@@ -209,34 +210,36 @@ npm run build
 
 > **Auth v2 contract (ADR-028)**: PCFs consuming `@spaarke/auth` MUST use `await initAuth({...})` once in the React `useEffect`, then consume tokens via `useAuth()` or `authenticatedFetch`. NEVER instantiate `PublicClientApplication` directly. NEVER pass `accessToken: string` as a typed prop. See [`spaarke-sso-binding.md`](../../.claude/patterns/auth/spaarke-sso-binding.md) for INV-1..INV-8 and [`auth-deployment-setup.md`](auth-deployment-setup.md) for env-var setup.
 >
-> **Pre-v2 holdout**: `UniversalQuickCreate` still uses its own local `MsalAuthProvider.ts` (V3 cleanup target). Do NOT copy this pattern for new PCFs.
+> **No pre-v2 holdouts remain**: `UniversalQuickCreate`, the last PCF with its own local `MsalAuthProvider.ts`, was deleted on 2026-06-22 (`pcf-orphan-cleanup-r1`). Do NOT recreate a local MSAL provider in a PCF.
 
-**Note**: When building individual controls (not using the root `npm run build`), you may also need to install dependencies in the control directory first:
+**Note**: build each control on its own, from its own folder. You may need to install its dependencies there first:
 ```bash
 cd src/client/pcf/{ControlName}
 npm install --legacy-peer-deps
-npm run build
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
 ```
 
 Some controls also require the `scheduler` package (React peer dependency) to be installed separately:
 ```bash
+cd src/client/pcf/{ControlName}
 npm install scheduler --legacy-peer-deps
 ```
 
 ### Step 2: Build Fresh
 
 ```bash
-cd src/client/pcf/{ControlName}
-rm -rf out/
+cd src/client/pcf/{ControlName}   # stay here for the following steps
+rm -rf out/                       # a failed build must leave NO bundle behind
 
-npm run build
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .
+# STOP on a non-zero exit. A bare `npm run build:prod` exits 0 even when webpack fails.
 
 # Verify build output exists at the CORRECT path for your control type:
 #   Field-based:  ls -la out/controls/control/bundle.js
 #   Custom Page:  ls -la out/controls/bundle.js
 ```
 
-**Important**: The build command is `npm run build` (not `build:prod`). pcf-scripts does not have a separate production build script.
+**Important**: the deploy build is `npm run build:prod` (`pcf-scripts build --buildMode production`), never plain `npm run build` (development mode). And `pcf-scripts` **exits 0 even when the build fails**, which is why the build goes through `scripts/Invoke-PcfBuildProd.ps1`: it runs `build:prod` and fails on `[build] Failed`, a `compiled with N error(s)` line or `[pcf-1033]`, passing only on `[build] Succeeded`. The nightly CI workflow `.github/workflows/pcf-build-prod-nightly.yml` uses the same rule.
 
 ### Step 3: Verify Build Output Files
 
@@ -692,7 +695,8 @@ And enable in featureconfig.json:
 | `Root component missing for custom control` | `solution.xml` has empty `<RootComponents />` | Add `<RootComponent type="66" schemaName="sprk_Spaarke.Controls.{ControlName}" behavior="0" />` |
 | `component sprk_xyz.js of type 61 is not declared as root component` | Web resource added to `customizations.xml` but not in `<RootComponents>`, or GUID doesn't match Dataverse | **Remove web resources from PCF solution entirely.** PCF solutions should contain ONLY the PCF control (type 66). Deploy web resources separately via Dataverse UI. |
 | `NU1008` CPM error | CPM not disabled | Disable `Directory.Packages.props` before PAC commands |
-| Bundle is 8MB (field-based) | Dev build or missing platform libraries | Ensure platform libraries declared, run `npm run build` |
+| Bundle is 8MB (field-based) | Dev build (`npm run build`) or missing platform libraries | Ensure platform libraries declared; build with `npm run build:prod` via `scripts/Invoke-PcfBuildProd.ps1` |
+| Build "succeeded" but the deployed control is unchanged or old | `pcf-scripts` exited 0 on a FAILED webpack build, and the stale `out/` bundle was packed | Build via `scripts/Invoke-PcfBuildProd.ps1`, which exits 1 on `[build] Failed` / `[pcf-1033]`; delete `out/` before building |
 | `Source File does not exist` | Missing file in Controls folder | Copy ALL files from build output |
 | Version didn't update | Stale bundle copied | Rebuild fresh, copy fresh files |
 | Old features still showing | Browser cache | Hard refresh `Ctrl+Shift+R` |
