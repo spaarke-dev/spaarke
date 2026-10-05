@@ -1,5 +1,61 @@
 # Current Task State — `unified-access-control-r2`
 
+> **Last Updated**: 2026-10-05 (checkpoint #12). Supersedes #11.
+>
+> ## ⚡ CHECKPOINT #12: every batch-4/sweep lane is verified; the integration merges are in progress
+>
+> **Owner rounds 56 and 59 (BINDING; memory `fix-root-cause-not-options`).**
+> - Fix runtime defects, maintainability defects that compound, and measurable performance problems.
+> - Record adversarial guard bypasses, rare edges that fail closed, and minor seeding as known limits.
+> - No over-engineering, but required and promised functionality is built fully. Prefer reuse.
+> - At most one more fix round per lane.
+> - Rounds 35–63 are recorded in `notes/session27-owner-decisions-and-research.md`.
+>
+> **All lanes are ready to merge:**
+>
+> | Task | Branch |
+> |---|---|
+> | 132 | `task/uac-r2-132-g` |
+> | 140 | merged |
+> | 147 | merged |
+> | 150 | `task/uac-r2-150-integ-d` |
+> | 158 | `task/uac-r2-158-h` |
+> | 165 | `task/uac-r2-165-h` |
+> | 166 | `task/uac-r2-166-g` |
+> | 167 | `task/uac-r2-167-f2-v2` |
+> | 168 | merged |
+> | 169 | merged |
+>
+> Workflows: none running.
+>
+> **Integration branch** `integ/uac-r2-batch4` (`C:\wt4i`, pushed at `c69779707`).
+> - Contains:
+>   - 132-r1, 133, 137, 140, 142, 143, 146–149, 156, 157, 159–164, 168, 169;
+>   - the 150 earlier version;
+>   - master `b4b58a361`.
+> - The merge agent `sweepmerge` (Agent tool, resumable with SendMessage) is NOW merging 150 and 166, and wiring Make Secure relocation and its job backstop (rounds 26, 45, 46). It also fixes the external-spa @types/react type gate.
+>
+> **Merges still to come, with their integration items:**
+> - **158:** round 61's transitive No Access walk, bounded and cycle-safe; the 158 × 140 If-Match item.
+> - **165:** round 62's marker bound to the App Service; recipe fix.
+> - **167:** the route ledger (ResolvedBy and ProofTest from each task); its LOW items (csproj comment, note §19.2).
+> - **132:** the ONE IL reader (167's CompiledIl vs 132's IlCallScan); 148 × 132 child OWNER-change evictions.
+>
+> **Then:**
+> - Merge origin/master into integ (picks up word-add-in round 4 if needed).
+> - Full suites, publish size, CVE check, the PR, merge.
+>
+> **Live steps on dev:**
+> - **Done 2026-10-05:** child-record creator column on 22 tables (G147-5 / 146); document→analysis cascade (round 34).
+> - **Remaining:** 142 ledger; 140 G-140-1; 150 FLS lock; 144 default-team migration before the 150 ribbon (round 60); 165 container backfill + `-Bind` + secret-name repair; 166 pointer FLS / migration; 168 forms and grids; 147 G147-2/3/4/6; G-11 ribbon; deploy; live gates; tell word-add-in-r1 when 161 is deployed.
+>
+> **Master:** #1297 merged (the grant expiry DateOnly fix). #1293 (the #1290 jest fixes) is a DRAFT; rebase it after #1123 merges.
+>
+> **Batch 5:** the scope was decided in owner round 59 (`notes/batch5-scope-review-2026-10-05.md`); the bookkeeping is applied (`2db93ce48`).
+> - Keep: 154 first, then 113, 114, 105, 101; then 064 → 153 / 067 → 099; 036; 090 last.
+> - 136 is a live session only.
+> - Session A (dev, no deploy) closes 003, 013, 037 and 039 together with 135/136.
+
 > **Last Updated**: 2026-10-04 (checkpoint #11, after the restart). Supersedes #10 for "what is running".
 >
 > ## ⚡ CHECKPOINT #11: relaunched after the restart
