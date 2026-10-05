@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-05 — ADR-009: the latency alert is the average BFF-observed call latency (T242b, owner §6.5 Path B)
+
+`customer-provisioning-orchestration-r1` T242b Step 9.5 review.
+
+- **`.claude/adr/ADR-009-redis-caching.md`** (+ full `docs/adr/ADR-009-caching-redis-first.md`): operational alert (b) was
+  "P95 >100ms / 5min". It is now "average BFF-observed cache call latency per operation
+  (`cache.redis_call_duration_ms`) >100ms / 5min". The histogram reaches App Insights pre-aggregated
+  (sum/count/min/max), so a true P95 cannot be computed there, and the old alert queried `cache.redis_p95_ms`, which
+  nothing emits, so it never fired. `infrastructure/bicep/alerts.bicep` implements the new rule.
+
+---
 ###### 2026-10-05 — Redis key rotation: dev retired, quarterly schedule removed (T242b)
 
 `customer-provisioning-orchestration-r1` T242b (owner decision 2026-10-05).
