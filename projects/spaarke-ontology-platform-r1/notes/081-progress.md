@@ -4,6 +4,24 @@
 > into `docs/ontology-platform-design`). Recorded by the main session from the agent's stop report, because the
 > agent was stopped before writing its own notes.
 
+## 2026-10-05: second independent review FAILED; round 3 moves 081 to its own PR to master
+
+Rework `51fb2287a` (≈60 more Xrm walks converged; F2–F5, F7–F13 verified true) failed review round 2 on:
+**H1** colours still differ per surface (only "overdue" matched); **H2** VisualHost parses DateOnly as UTC
+(today → overdue in US zones); **H3** the branch carries 31 ontology commits, so it cannot be a master PR as is;
+**H4** ~20 touched packages never built or tested (no `node_modules` in the worktree). Plus M1 inconsistent
+frame order, M2 capability checks lost, M3 command-bar walk shallower, L1–L6.
+
+**Owner decision 2026-10-05 — one due-urgency palette everywhere = SmartTodo's**: overdue red · 0–3 days dark
+orange · 4–7 yellow · 8–10 grey · beyond that no badge. The event due-date card loses green. One tier function
+(`dueUrgencyForDays`) in `Spaarke.UI.Components/src/utils/dateLocal.ts`; Visuals keeps no boundary copy.
+
+**Coordinator decisions**: window-first frame order, walking the full parent chain (bounded) with an optional
+capability requirement; compact relative-time style is deterministic English, not ICU-dependent.
+
+Round 3 cherry-picks the three task commits onto `fix/ui-duplication-cleanup-081` off `origin/master`
+(worktree `C:\wt081m`), fixes everything, builds and tests EVERY touched package, and opens the PR.
+
 ## 2026-10-05: independent review FAILED; rework dispatched
 
 The independent review (code-review + adr-check, opus) of `89b5230f9` returned **FAIL**. The rework agent's record
