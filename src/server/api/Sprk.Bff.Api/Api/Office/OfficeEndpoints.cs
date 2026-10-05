@@ -535,6 +535,8 @@ public static class OfficeEndpoints
     /// <summary>
     /// Task 055 (#1005 / ISS-006): strips a name-collision refusal's <c>ExistingDocumentName</c> and
     /// <c>ExistingDocumentId</c> unless the caller holds <see cref="AccessRights.Read"/> on that document.
+    /// Task 088 (UAT-5): <c>CanSaveAsVersion</c> is forced to <c>false</c> in the same breath, so a caller who
+    /// cannot read the other document receives exactly the payload it received before task 088.
     /// Every other error passes through untouched.
     /// </summary>
     /// <remarks>
@@ -593,7 +595,41 @@ public static class OfficeEndpoints
             + "and id are withheld. The pane offers \"Keep both\" only.",
             error.FileName);
 
-        return error with { ExistingDocumentId = null, ExistingDocumentName = null };
+        return error with { ExistingDocumentId = null, ExistingDocumentName = null, CanSaveAsVersion = false };
+    }
+
+    /// <summary>
+    /// The ProblemDetails extensions of an <c>OFFICE_020</c> name-collision refusal (task 025, extended by tasks
+    /// 055 and 088).
+    /// </summary>
+    /// <remarks>
+    /// <c>existingDocumentId</c> + <c>existingDocumentName</c> identify the document that already holds the
+    /// name — present only when the caller holds Read on it (stripped upstream by
+    /// <see cref="WithholdCollisionIdentityIfUnauthorizedAsync"/>); the pane offers "Open" from them.
+    /// <c>canSaveAsVersion</c> (task 088) is the ONLY signal for "Save as new version", and is written only
+    /// alongside an id: a refusal whose identity was withheld carries exactly the keys it carried before task
+    /// 088, so a caller who cannot read the other document cannot tell from the payload's shape anything it
+    /// could not tell before.
+    /// </remarks>
+    private static Dictionary<string, object?> NameCollisionExtensions(SaveError error, string correlationId)
+    {
+        var extensions = new Dictionary<string, object?>
+        {
+            ["errorCode"] = error.Code,
+            ["correlationId"] = correlationId,
+            ["retryable"] = error.Retryable,
+            ["fileName"] = error.FileName,
+            ["existingDocumentId"] = error.ExistingDocumentId,
+            // Task 055 (#1005): names the document. Null whenever the id is also null.
+            ["existingDocumentName"] = error.ExistingDocumentName
+        };
+
+        if (error.ExistingDocumentId is not null)
+        {
+            extensions["canSaveAsVersion"] = error.CanSaveAsVersion;
+        }
+
+        return extensions;
     }
 
     /// <summary>
@@ -652,25 +688,14 @@ public static class OfficeEndpoints
                     ["retryable"] = error.Retryable
                 }),
             // Task 025 (word-add-in-r1) — a same-name collision refused BEFORE any bytes moved. FileName +
-            // ExistingDocumentId (Document saves only, when resolvable) let the pane offer the two-option
-            // choice ("Keep both" / "Save as new version") without re-parsing the message text.
+            // ExistingDocumentId (when resolvable and readable) let the pane offer its choices without
+            // re-parsing the message text.
             OfficeErrorCodes.NameCollision => Results.Problem(
                 type: OfficeErrorCodes.GetTypeUri(error.Code),
                 title: OfficeErrorCodes.GetTitle(error.Code),
                 detail: error.Message,
                 statusCode: OfficeErrorCodes.GetStatusCode(error.Code),
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = error.Code,
-                    ["correlationId"] = correlationId,
-                    ["retryable"] = error.Retryable,
-                    ["fileName"] = error.FileName,
-                    ["existingDocumentId"] = error.ExistingDocumentId,
-                    // Task 055 (#1005): names the document the version retry would write into. Null — and so
-                    // omitted from the body — whenever the id is also null, which is how both the
-                    // filed-elsewhere case and the caller-cannot-read case reach the pane.
-                    ["existingDocumentName"] = error.ExistingDocumentName
-                }),
+                extensions: NameCollisionExtensions(error, correlationId)),
             _ => Results.Problem(
                 title: "Save Failed",
                 detail: error.Message,

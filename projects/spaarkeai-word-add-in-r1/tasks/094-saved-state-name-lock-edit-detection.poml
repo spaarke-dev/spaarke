@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="094" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Save tab follow-up (owner 2026-10-04): the name is locked once a document is in Spaarke ("Save as new document" to rename); "Save" re-enables when the document's content changes; the saved state survives a tab switch; Open on "Name Already Exists" offers desktop Word and the browser</title>
+    <phase>6 UAT round 3 (2026-10-03)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.ts`/`.tsx` (`SaveFlow.tsx`, `useSaveFlow.ts`, `App.tsx`, `WordAdapter.ts`/adapter types) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only; the design is decided by the owner and every piece extends code task 088/089 just wrote.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs alone; touches only `src/client/office-addins/**`.</parallel-reason>
+    <deps>088, 089</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner answers of 2026-10-04 to the three questions left open by task 088, and to two follow-ups the same day. Record: `notes/042-uat-round3-2026-10-03.md` §7.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9, Office.js Word API).</role>
+
+  <goal>Once a document is in Spaarke, its name cannot be changed by a save (only by "Save as new document"); the user can always save a new version after editing the document; the saved state is still there after switching tabs; and Open on "Name Already Exists" lets the user choose desktop Word or the browser.</goal>
+
+  <context>
+    <background>
+      - **Owner, verbatim (2026-10-04)**: *"if by 'version save' you mean a user is working on the same document/file,
+        then a save should not rename the record; a record/file name should only be set when it is a new document/file
+        OR when 'save as'"* · *"yes save should survive tab switch"* · on desktop-Word Open: *"if this is just something
+        to test, then fine"*.
+      - **Owner choices (2026-10-04)**: name box **"Locked, with Save as new"** — once the document is in Spaarke the
+        name box shows the Spaarke name read-only with a short hint; "Save as new document" unlocks it and creates a new
+        document/file under the new name; editing the name no longer re-activates the button. Save-again trigger
+        **"Re-enable on document edits"** — the pane listens for Word's content-changed events and turns "Saved" into
+        an enabled "Save" as soon as the text changes; where Word does not provide the events, the button stays "Save"
+        rather than gray, so a save is never blocked.
+      - **What 088 built** (`notes/088-save-tab-after-save.md`): after a save the form stays; footer
+        [Open Document][Saved]; "Saved" → "Save version" on a name edit or an accepted Generate Profile. The name-edit
+        trigger is now WRONG per the owner and must go; the profile trigger stays. 088 noted the saved state lives in
+        SaveFlow and is lost on a tab switch because keeping it needs `App.tsx`. The version path already keeps the
+        record's name (task 023 D-5) — that is now the intended behaviour, not a gap.
+      - **The same rule applies to a document the pane opens on that is already in Spaarke** (identity resolved,
+        version mode): name read-only, "Save as new document" to rename.
+      - **Content-change detection**: Word API document/paragraph change events (e.g. `Word.Document.onParagraphChanged`
+        / `onParagraphAdded` / `onParagraphDeleted`, requirement set WordApi 1.6 — VERIFY the exact names and set on
+        Microsoft Learn or via the researcher subagent before coding). Register only behind `isSetSupported`, expose
+        it as an adapter capability (NFR-10), and remove handlers on unmount. Writing the identity mark (task 089) adds
+        a custom XML part, not a paragraph — confirm it does not itself fire the event, or ignore events for the moment
+        of the pane's own write.
+      - **Desktop Word Open** (088 escalation 1; researcher note
+        `.claude/agent-memory/researcher/office-addin-launch-ms-word-uri-2026-10-03.md`): no SUPPORTED call launches
+        `ms-word:`; community evidence (office-js #6926, Windows Word) is that an anchor element's `click()` with the
+        `DesktopUrl` from `GET /api/documents/{id}/open-links` launches desktop Word. As a test the owner accepted:
+        show **two** buttons — "Open in Word" (desktop, anchor-click of `DesktopUrl`) and "Open in browser" (`WebUrl`,
+        today's behaviour) — with "Open in Word" only where `Office.context.platform` is PC or Mac. Nothing can detect a
+        failed launch; the browser button is the fallback. Record in the note that this is an unsupported mechanism
+        being trialled in UAT round 4.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-04">A save of a document that is already in Spaarke never changes its name; only a new document or "Save as new document" sets a name.</constraint>
+    <constraint source="owner 2026-10-04">The save button's label is **"Save"** whenever it is enabled — never "Save version" (owner: *"the button should just say 'Save' because if 'Save version' the user will probably think it is creating a new file like 'file name (1)'"*). This applies everywhere the pane says "Save version" today, including when the pane opens on a document already in Spaarke. "Saved" (gray, disabled) and "Save as new document" keep their wording. Update the tests that pin "Save version".</constraint>
+    <constraint source="owner 2026-10-04">Never block a save: where content-change events are unavailable, the button is an enabled "Save", not gray.</constraint>
+    <constraint source="NFR-10">Event support and desktop launch are capabilities (adapter / platform), never `hostType`. Outlook: no content events — the email save behaves as 088 left it unless a test shows otherwise; say what Outlook does in the note.</constraint>
+    <constraint source="this task">The saved state survives switching to To Do or Find and back; lift it to `App.tsx` (or a context it owns) — not `localStorage`. A new document opened in Word is a new session and starts fresh.</constraint>
+    <constraint source="this task">No BFF change. "Open in Word" uses the `DesktopUrl` the existing `open-links` route returns; no URL is built client-side.</constraint>
+    <constraint source="ADR-021">Fluent v9, semantic tokens, dark mode; the read-only name box and its hint are readable in both themes.</constraint>
+    <constraint source="ADR-038">Tests in `shared/**/__tests__/`, listed in `ci-gated-suites.txt`; update 088's `SaveFlow.savedState` tests that pinned the name-edit trigger (the owner changed the rule) — say so in the note.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">After a save, and when the pane opens on a document already in Spaarke, the name box is read-only and shows the Spaarke name with a hint; a version save sends no new name.</criterion>
+    <criterion testable="true">"Save as new document" unlocks the name box; saving creates a new document under the typed name (create path, no `existingDocumentId`).</criterion>
+    <criterion testable="true">With content-change events supported: "Saved" turns into an enabled "Save" on a content-change event; the pane's own identity-mark write does not trigger it; handlers are removed on unmount.</criterion>
+    <criterion testable="true">With content-change events unsupported: after a save the button reads "Save" (enabled), never gray.</criterion>
+    <criterion testable="true">An accepted Generate Profile still re-enables the button as "Save" (088 behaviour kept).</criterion>
+    <criterion testable="true">Switching to To Do or Find and back keeps the saved state (bar, Saved/Save, Open Document).</criterion>
+    <criterion testable="true">"Name Already Exists" with a readable other document: on PC/Mac it offers "Open in Word" (anchor-click of `DesktopUrl`) and "Open in browser" (`WebUrl`); on the web only "Open in browser".</criterion>
+    <criterion testable="true">Gates: gated jest green; lint 0; typecheck 0 production; `npm run build` with the CI settings succeeds.</criterion>
+    <criterion testable="true">Live (UAT round 4): edit text after a save → "Save"; switch tabs and back → state kept; "Open in Word" launches desktop Word on Windows (record the result either way). If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>No Word content-change event exists in a GA requirement set that Word desktop 2501+ and Word on the web support — STOP and report the options (polling, focus-based re-check, always-enabled) before choosing.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read `notes/088-save-tab-after-save.md`, `notes/089-…md`, the researcher note, and the current SaveFlow / useSaveFlow / App code.</step>
+    <step>Verify the Word content-change event API and requirement set.</step>
+    <step>Name lock + Save as new; remove the name-edit trigger; tests.</step>
+    <step>Content-change capability + re-enable; tests (supported / unsupported / own-write).</step>
+    <step>Lift the saved state to `App.tsx`; tab-switch test.</step>
+    <step>Collision Open: two buttons by platform; tests.</step>
+    <step>Gates; record in `notes/094-saved-state-follow-up.md`; set POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The saved-form state (088), the version path that keeps the name (023), the open-links route and the adapter capability pattern all exist.</existing>
+    <extension>Yes — adjusts 088's state machine, adds one adapter capability, lifts state one level; no new route or service.</extension>
+    <cost-of-doing-nothing>A save could rename a record the owner says must keep its name; a user who edits the document cannot save a version from the pane; the saved state vanishes on a tab switch; collisions cannot open desktop Word.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Saved state follow-up">
+      <steps>
+        <step>Save a new document: name locked; edit text in Word → "Save"; save → a version, same name.</step>
+        <step>"Save as new document": name unlocks; save → a new document under the new name.</step>
+        <step>Switch to Find and back: the saved state is still shown.</step>
+        <step>"Name Already Exists" on Windows desktop: "Open in Word" opens desktop Word (record result); "Open in browser" opens Word for the web.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useSaveFlow.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="edit">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+    <file role="edit">src/client/office-addins/shared/adapters/types.ts</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/094-saved-state-follow-up.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round3-2026-10-03.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/089-identity-mark-quick-save-open-spaarke.md</file>
+      <file>.claude/agent-memory/researcher/office-addin-launch-ms-word-uri-2026-10-03.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/094-saved-state-follow-up.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes>
+    Escalation trigger did NOT fire: verified on Microsoft Learn (2026-10-04) that `Word.Document.onParagraphAdded`
+    / `onParagraphChanged` / `onParagraphDeleted` are GA (not preview) under requirement set WordApi 1.6, supported
+    on Word on the web / Windows / Mac since build 2308 (Aug 2023) and iPad since 16.76 — well below the "desktop
+    2501+" floor, so a GA event exists on every platform this add-in targets. Implemented all 7 steps directionally;
+    the only POML-undirected decision was suppressing the locked name box's own "Save as new document" button
+    whenever the error banner is already offering the identical action (a refused version save), to avoid showing
+    the same button twice. Full writeup, verification sources, gate numbers and the Step 9.5 review table:
+    `projects/spaarkeai-word-add-in-r1/notes/094-saved-state-follow-up.md`. Live AC9 (UAT round 4) is OPEN — no
+    Office host available in this session, per the POML's own "if unavailable, leave open."
+  </notes>
+</task>

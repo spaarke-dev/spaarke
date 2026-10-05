@@ -85,6 +85,12 @@ public class OfficeService : IOfficeService
     // Task.Run behind the 202 lost the profile on a restart, and the three optional parameters that built it.
     private readonly OfficeProfileQueue _profileQueue;
 
+    // Task 083 (#1044 writer half): the caller's linked CONTACT (task 141's link,
+    // systemuser.sprk_primarycontact / contact.sprk_externalobjectid), used to default CreateTodoAsync's
+    // sprk_assignedto when the request names no assignee. Required, not optional (ADR-032): registered
+    // unconditionally as a singleton by MembershipModule, so an absent one is a startup fault.
+    private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
+
     public OfficeService(
         OfficeJobStatusService jobs,
         OfficeEmailEnricher emailEnricher,
@@ -102,6 +108,7 @@ public class OfficeService : IOfficeService
         IGenericEntityService genericEntityService,
         ICallerSystemUserResolver callerSystemUserResolver,
         OfficeProfileQueue profileQueue,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         ILogger<OfficeService> logger)
     {
         _containerResolver = containerResolver
@@ -114,6 +121,8 @@ public class OfficeService : IOfficeService
             ?? throw new ArgumentNullException(nameof(coreAncestors));
         _ownershipResolver = ownershipResolver
             ?? throw new ArgumentNullException(nameof(ownershipResolver));
+        _identity = identity
+            ?? throw new ArgumentNullException(nameof(identity));
         _jobs = jobs;
         _emailEnricher = emailEnricher;
         _documentPersistence = documentPersistence;
@@ -1355,12 +1364,16 @@ public class OfficeService : IOfficeService
     /// another document's file is not. Same direction as task 046's cleanup guard.</para>
     /// <para><b>Document saves are unchanged by task 054.</b> Two Word drafts that are byte-identical right
     /// now are still two distinct drafts (NFR-08), so an editable collision is refused on the NAME alone,
-    /// exactly as task 025 left it. Only an editable refusal carries <c>ExistingDocumentId</c>: FR-11's
+    /// exactly as task 025 left it. Only an editable refusal can carry <c>CanSaveAsVersion = true</c>: FR-11's
     /// version-save retry is Document-only — an Email/Attachment save carrying <c>ExistingDocumentId</c>
     /// ignores it and creates its own document (pinned by
     /// <c>OfficeVersionSaveContractTests.Post_OfficeSave_EmailOrAttachmentCarryingExistingDocumentId_IgnoresIt_AndBehavesAsBefore</c>),
     /// so advertising that retry for an immutable capture would offer the pane a choice the server does not
     /// honour.</para>
+    /// <para><b>Task 088 (UAT-5).</b> Every OWNED collision now carries the owning document's id and display
+    /// name, whatever its content type and wherever it is filed, so the pane can offer "Open". The version
+    /// retry is the separate <c>CanSaveAsVersion</c> flag (editable AND filed to the target record). The
+    /// endpoint strips id, name and flag when the caller cannot read that document.</para>
     /// </remarks>
     private async Task<(SaveError? Refusal, OfficeStorageUploader.UploadResult Upload)> ResolveNameCollisionAsync(
         OfficeStorageUploader.UploadResult collidedUpload,
@@ -1463,7 +1476,8 @@ public class OfficeService : IOfficeService
         }
 
         // ══ TASK 055 (#1005 / ISS-006) — the version retry is offered ONLY when the colliding document is
-        // ══ already filed where this save is filing.
+        // ══ already filed where this save is filing. (Task 088: that is now the CanSaveAsVersion flag; the
+        // ══ document's identity travels regardless, for the pane's "Open".)
         //
         // The defect this closes: Word's default upload name is "Untitled Document.docx" (getSubject() falls
         // back to it whenever the Title property is blank, which is the norm) and containers are
@@ -1483,27 +1497,35 @@ public class OfficeService : IOfficeService
             && collisionTarget.DirectAssociationIds.Contains(targetId);
 
         // Immutable captures get no version-save retry either — FR-11's version path is Document-only.
-        var offersVersionRetry = isEditable && associationMatches;
+        var canSaveAsVersion = isEditable && associationMatches;
 
         if (isEditable && !associationMatches)
         {
             _logger.LogInformation(
                 "Collision refusal for '{FileName}': the owning document {ExistingDocumentId} is not filed to "
-                + "the record this save targets, so no version retry is offered. The pane shows \"Keep both\" only.",
+                + "the record this save targets, so no version retry is offered.",
                 fileName, collidingDocumentId);
         }
 
+        // ══ TASK 088 (UAT-5) — the identity travels on EVERY owned collision; the version retry is a FLAG.
+        //
+        // Until task 088 the id's PRESENCE was the version-retry signal, so the #1005 rule above had to
+        // withhold the identity to withhold the offer — which also took away any way to reach the other file
+        // ("Name Already Exists" offered Keep both + Dismiss only, UAT-5). The two meanings are now separate:
+        // CanSaveAsVersion carries the #1005 rule, and the id + name let the pane offer "Open". Nothing here is
+        // an authorization decision: the endpoint (WithholdCollisionIdentityIfUnauthorizedAsync, ADR-008)
+        // strips the id, the name AND the flag unless the caller holds Read on that document, and Open itself
+        // goes through GET /api/documents/{id}/open-links, whose filter re-checks Read.
         return (new SaveError
         {
             Code = OfficeErrorCodes.NameCollision,
             Message = $"A file named \"{fileName}\" already exists here. Nothing was uploaded or changed.",
             Retryable = false,
             FileName = fileName,
-            ExistingDocumentId = offersVersionRetry ? collidingDocumentId : null,
-            // The name travels WITH the id, never without it: naming a document the pane cannot act on
-            // would disclose it for no user benefit. The endpoint strips both again if the caller holds no
-            // Read on that document (ADR-008 gate — this method makes no authorization decision).
-            ExistingDocumentName = offersVersionRetry ? collisionTarget?.DocumentName : null
+            ExistingDocumentId = collidingDocumentId,
+            // The name travels WITH the id, never without it.
+            ExistingDocumentName = collisionTarget?.DocumentName,
+            CanSaveAsVersion = canSaveAsVersion
         }, collidedUpload);
     }
 
@@ -2034,6 +2056,51 @@ public class OfficeService : IOfficeService
         if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
         {
             entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId);
+        }
+        else
+        {
+            // Task 083 (#1044 writer half): task 080 made the owner a BU default team (above), so nothing on
+            // the row names the person it is for, and the Daily Briefing (UAC-r2 task 152's people-targeting
+            // surface, which matches sprk_assignedto through the SAME link) could not find it. Default to the
+            // CALLER's linked contact — task 141's link, read through IIdentityNormalizationService exactly as
+            // 141's contract directs (141-link-contract.md §6): resolve the caller's systemuserid with the
+            // existing task-067 resolver (already done by the endpoint into ownerSystemUserId), then
+            // ResolveAsync(...).ContactId. Two contacts on one oid, or an inactive one, resolve to null (141's
+            // ambiguity rule) — never refused: a To Do that is hard to find beats a refused one. Do NOT call
+            // ContactIdentityBinder here; linking is the reconciliation job's and the sign-in resolver's job.
+            Guid? callerContactId = null;
+            if (Guid.TryParse(ownerSystemUserId, out var callerSystemUserId))
+            {
+                try
+                {
+                    callerContactId = (await _identity.ResolveAsync(callerSystemUserId, cancellationToken)
+                        .ConfigureAwait(false)).ContactId;
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex,
+                        "The caller's linked contact could not be resolved for {CallerId}", callerSystemUserId);
+                }
+            }
+
+            if (callerContactId is { } resolvedContactId && resolvedContactId != Guid.Empty)
+            {
+                entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", resolvedContactId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "todo_assignee_unset: caller={CallerId} reason={Reason} — no assignee was chosen and the "
+                    + "caller has no linked contact, so sprk_assignedto is left blank; the To Do is still "
+                    + "created (never refused) but will not surface in the caller's Daily Briefing until the "
+                    + "link exists",
+                    ownerSystemUserId ?? "(unresolved)",
+                    "caller_has_no_linked_contact");
+            }
         }
 
         // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.

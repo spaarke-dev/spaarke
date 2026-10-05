@@ -357,5 +357,28 @@ describe('DocumentProfileSection', () => {
       expect(generateProfileButton()).toBeEnabled();
       expect(mockGet).toHaveBeenCalledTimes(1);
     });
+
+    // Task 088 (UAT-6), wording fixed by task 094: SaveFlow's saved state turns "Saved" back into an
+    // enabled "Save" on this callback.
+    it('calls onProfileGenerated once when the server accepts the request — and not when it refuses it', async () => {
+      mockGet.mockResolvedValue(envelope({ summaryStatus: 100000000 }));
+      mockPost
+        .mockResolvedValueOnce({ documentId: DOCUMENT_ID, correlationId: 'corr-3' })
+        .mockRejectedValueOnce(
+          new ApiClientError({ type: 'about:blank', title: 'Forbidden', status: 403, detail: 'No write access.' })
+        );
+      const onProfileGenerated = jest.fn();
+
+      const user = userEvent.setup();
+      renderWithProvider(<DocumentProfileSection documentId={DOCUMENT_ID} onProfileGenerated={onProfileGenerated} />);
+      await waitFor(() => expect(screen.getByText(/has not been profiled yet/i)).toBeTruthy());
+
+      await user.click(generateProfileButton());
+      await waitFor(() => expect(onProfileGenerated).toHaveBeenCalledTimes(1));
+
+      await user.click(generateProfileButton());
+      await waitFor(() => expect(screen.getByText('No write access.')).toBeTruthy());
+      expect(onProfileGenerated).toHaveBeenCalledTimes(1);
+    });
   });
 });

@@ -9,6 +9,7 @@
  */
 
 import { getXrm } from "../services/xrmProvider";
+import { cleanGuid } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -70,7 +71,7 @@ export async function setRecordState(
   const clientUrl = getClientUrl();
   if (!clientUrl) throw new Error("Cannot resolve Dataverse client URL");
 
-  const cleanId = recordId.replace(/[{}]/g, "");
+  const cleanId = cleanGuid(recordId);
   const url = `${clientUrl}/api/data/v9.2/${entitySetName}(${cleanId})`;
   const response = await fetch(url, {
     method: "PATCH",

@@ -81,6 +81,27 @@ describe('prepareSendEmail', () => {
     expect(result.content.htmlBody).toContain('Smith v. Jones');
   });
 
+  it('the record link names the Spaarke app when SPAARKE_APP_NAME is set (task 088 — the same rule as every record link)', async () => {
+    const original = process.env.SPAARKE_APP_NAME;
+    process.env.SPAARKE_APP_NAME = 'sprk_MatterManagement';
+    try {
+      const result = await prepareSendEmail({
+        document: null,
+        relatedRecord: { entityType: 'sprk_matter', id: RECORD_ID, typeLabel: 'Matter', displayName: 'Smith v. Jones' },
+        subject: 'Contract Review',
+        orgUrl: ORG_URL,
+      });
+
+      if (result.kind !== 'ready') throw new Error('expected ready');
+      expect(result.content.htmlBody).toContain(
+        `${ORG_URL}/main.aspx?appname=sprk_MatterManagement&amp;etn=sprk_matter&amp;id=${RECORD_ID}&amp;pagetype=entityrecord&amp;navbar=off`
+      );
+    } finally {
+      if (original === undefined) delete process.env.SPAARKE_APP_NAME;
+      else process.env.SPAARKE_APP_NAME = original;
+    }
+  });
+
   it('mints the share link via POST /api/documents/{documentId}/share-link with no body (no expiry override)', async () => {
     mockPost.mockResolvedValue({
       url: 'https://contoso.sharepoint.com/share/abc',

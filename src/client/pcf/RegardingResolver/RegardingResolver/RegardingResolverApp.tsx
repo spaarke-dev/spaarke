@@ -665,7 +665,7 @@ async function resolveClickTarget(
 ): Promise<{ entityName: string; entityId: string } | null> {
   // Priority 1 — fresh picker selection wins. Synchronous, no WebAPI call.
   if (selectedTarget?.entityType && selectedTarget?.recordId) {
-    const cleanId = String(selectedTarget.recordId).replace(/[{}]/g, '');
+    const cleanId = cleanGuid(String(selectedTarget.recordId));
     if (cleanId.length > 0) {
       return { entityName: selectedTarget.entityType, entityId: cleanId };
     }
@@ -689,7 +689,7 @@ async function resolveClickTarget(
         const etn = parsed.searchParams.get('etn');
         const id = parsed.searchParams.get('id');
         if (etn && id) {
-          const cleanId = id.replace(/[{}]/g, '');
+          const cleanId = cleanGuid(id);
           if (cleanId.length > 0) {
             return { entityName: etn, entityId: cleanId };
           }
@@ -716,7 +716,7 @@ function getHostRecordId(): string | undefined {
     const data = (xrm?.Page as any)?.data?.entity;
     const id = data?.getId?.();
     if (typeof id === 'string' && id.length > 0) {
-      return id.replace(/[{}]/g, '');
+      return cleanGuid(id);
     }
   } catch {
     /* ignore */
@@ -740,7 +740,7 @@ function getHostRecordId(): string | undefined {
  * @param catalog - The allowed catalog subset (from resolveAllowedCatalog).
  */
 function detectPrePopulatedParent(
-  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>
+  catalog: readonly ITodoRegardingTargetCatalogEntry[]
 ): { entityType: string; recordId: string; recordName: string; lookupAttribute: string } | null {
   const xrm = getXrm();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -759,7 +759,7 @@ function detectPrePopulatedParent(
         if (lookupValue && typeof lookupValue.id === 'string' && lookupValue.id.length > 0) {
           return {
             entityType: entry.entityType,
-            recordId: String(lookupValue.id).replace(/[{}]/g, ''),
+            recordId: cleanGuid(String(lookupValue.id)),
             recordName: typeof lookupValue.name === 'string' ? lookupValue.name : '',
             lookupAttribute: entry.lookupAttribute,
           };
@@ -830,7 +830,7 @@ function setFormTextValue(fieldName: string, value: string | null): boolean {
  * (a stable string) since the picker doesn't touch the actual
  * `sprk_recordtype_ref` GUID.
  */
-function adaptCatalogForPicker(catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>): RecordTypeCatalogEntry[] {
+function adaptCatalogForPicker(catalog: readonly ITodoRegardingTargetCatalogEntry[]): RecordTypeCatalogEntry[] {
   return catalog.map(entry => ({
     recordTypeRefId: entry.entityType,
     displayName: entry.entityType,

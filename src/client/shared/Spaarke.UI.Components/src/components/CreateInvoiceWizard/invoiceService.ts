@@ -106,13 +106,13 @@ function _getCurrentUserId(): string {
         const ctx = xrm.Utility.getGlobalContext();
         const userId = ctx?.userSettings?.userId;
         if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+          return cleanGuid(userId);
         }
       }
       if (typeof xrm?.Utility?.getUserId === 'function') {
         const userId = xrm.Utility.getUserId();
         if (typeof userId === 'string' && userId.trim() !== '') {
-          return userId.replace(/^\{|\}$/g, '').toLowerCase();
+          return cleanGuid(userId);
         }
       }
     } catch {

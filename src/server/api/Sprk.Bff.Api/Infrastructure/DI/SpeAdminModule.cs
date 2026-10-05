@@ -14,15 +14,18 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 ///
 /// Non-framework DI registrations: 10 (within ADR-010 ≤15 limit)
 ///   1.  SpeAdminOptions         — Configure  (options pattern, bound from "SpeAdmin" section)
-///   2.  SecretClient            — Singleton  (Azure Key Vault client for fetching Graph credentials)
+///   2.  SecretClient            — Singleton  (shared Key Vault client — consumed by OTHER modules; see below)
 ///   3.  DataverseWebApiClient   — Singleton  (thread-safe REST client; used by SpeAuditService + SpeDashboardSyncService)
-///   4.  SpeAdminTokenProvider   — Singleton  (Phase 3: OBO token acquisition and per-app caching)
-///   5.  SpeAdminGraphService    — Singleton  (multi-config Graph client; app-only + OBO via TokenProvider)
-///   6.  SpeAuditService         — Scoped     (per-request, writes to sprk_speauditlog)
+///   4.  SpeAdminGraphService    — Singleton  (Graph via IGraphClientFactory: BFF app-only identity + delegated OBO)
+///   5.  SpeAuditService         — Scoped     (per-request, writes to sprk_speauditlog)
+///   6.  SpeAdminTenantScope     — Scoped     (cross-customer boundary)
 ///   7.  SpeDashboardSyncService — Singleton  (shared instance injected into dashboard endpoints)
 ///   8.  SpeDashboardSyncService — Hosted     (delegates to singleton instance for background execution)
 ///   9.  BulkOperationService    — Singleton  (shared instance injected into bulk endpoints)
 ///   10. BulkOperationService    — Hosted     (delegates to singleton instance for background execution)
+///
+/// SpeAdminTokenProvider (owning-app OBO with a Key Vault client secret) was removed 2026-10-04: it was
+/// reachable only through an unused method, and SPE Admin no longer authenticates as owning apps at all.
 /// </summary>
 public static class SpeAdminModule
 {
@@ -31,7 +34,6 @@ public static class SpeAdminModule
         IConfiguration configuration)
     {
         // Bind SpeAdmin configuration from "SpeAdmin" section (appsettings.json).
-        // Phase 1 uses app-only tokens; Phase 3 adds OBO via SpeAdminTokenProvider.
         // task 061 fail-fast sweep: canonical AddOptions chain with ValidateOnStart. Behavior-neutral — the
         // only annotations are [Range] on DashboardSyncIntervalMinutes (15) and MaxContainersPerPage (100),
         // both in range by default, so an absent "SpeAdmin" section binds valid defaults and boots.
@@ -40,7 +42,9 @@ public static class SpeAdminModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // Azure Key Vault SecretClient — used by SpeAdminGraphService to fetch per-config client secrets.
+        // Azure Key Vault SecretClient — registered here for historical reasons and SHARED: the
+        // credential provider (certificate fallback, AuthorizationModule) and ExternalAccessModule resolve
+        // it. SpeAdminGraphService no longer uses it — it reads no secrets since 2026-10-04.
         // Singleton: SecretClient is thread-safe and designed for reuse.
         var keyVaultUri = configuration["SpeAdmin:KeyVaultUri"]
             ?? configuration["KeyVaultUri"]
@@ -70,15 +74,9 @@ public static class SpeAdminModule
         // (SDK-based ServiceClient in GraphModule) — used here for direct REST POST to sprk_speauditlogs.
         services.AddSingleton<DataverseWebApiClient>();
 
-        // Phase 3: OBO token provider — acquires per-owning-app tokens via MSAL OBO exchange.
-        // Singleton: stateless except for the thread-safe OBO token cache and MSAL app cache.
-        // Injected optionally into SpeAdminGraphService to enable multi-app scenarios.
-        // Single-app configs continue to use app-only tokens without this provider.
-        services.AddSingleton<SpeAdminTokenProvider>();
-
-        // Multi-config SPE Graph client (app-only + OBO for multi-app configs).
-        // Singleton: stateless except for the in-memory client caches (ConcurrentDictionary + TTL).
-        // Resolves Graph credentials from Dataverse + Key Vault; caches GraphServiceClient by configId.
+        // SPE Admin Graph facade. Holds no credential: app-only work uses the BFF's own identity
+        // (IGraphClientFactory.ForApp — the managed identity on Azure) and grant / container-type work is
+        // delegated (IGraphClientFactory.ForUserAsync). Stateless singleton.
         // Full implementation: Infrastructure/Graph/SpeAdminGraphService.cs
         services.AddSingleton<SpeAdminGraphService>();
 

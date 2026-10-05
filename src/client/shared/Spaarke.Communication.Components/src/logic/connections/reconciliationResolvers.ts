@@ -67,6 +67,11 @@ export function buildResolveReview(
   };
 }
 
+// NOTE (C-7, spaarke-ontology-platform-r1 reuse audit): left as a local duplicate
+// rather than importing the canonical `cleanGuid` from `@spaarke/ui-components`.
+// This module's own barrel comment states its imports are "type-only... to keep
+// this Layer-1 module React-free at runtime" — a value import of `cleanGuid` would
+// be this file's first real runtime dependency on that package.
 /** Bare, lowercased GUID (braces stripped) or null. */
 function normGuid(value: string | null): string | null {
   if (!value) return null;

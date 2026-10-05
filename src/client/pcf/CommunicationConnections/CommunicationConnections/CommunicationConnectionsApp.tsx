@@ -275,7 +275,7 @@ function getHostRecordId(): string | undefined {
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
     if (typeof id === 'string' && id.length > 0) {
-      return id.replace(/[{}]/g, '');
+      return cleanGuid(id);
     }
   } catch {
     /* ignore */
@@ -346,7 +346,7 @@ function resolvePrimaryOpenTarget(
       const etn = parsed.searchParams.get('etn');
       const id = parsed.searchParams.get('id');
       if (etn && id) {
-        const cleanId = id.replace(/[{}]/g, '');
+        const cleanId = cleanGuid(id);
         if (cleanId.length > 0) return { entityName: etn, entityId: cleanId };
       }
     } catch {
@@ -698,7 +698,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
             `sprk_regarding_${picked.entityType}`;
           await fileSelection(field, {
             entityType: picked.entityType,
-            recordId: String(picked.id).replace(/[{}]/g, ''),
+            recordId: cleanGuid(String(picked.id)),
             recordName: typeof picked.name === 'string' ? picked.name : String(picked.id),
           });
         } catch (err) {

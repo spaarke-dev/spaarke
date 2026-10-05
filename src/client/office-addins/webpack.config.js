@@ -43,6 +43,12 @@ const ENV_CONFIG = {
   // (email-communication-solution-r4 task 072 / FR-25). Config-driven, no
   // hardcoded org — when unset, Quick Create degrades to a no-op.
   ORG_URL: process.env.ORG_URL || '',
+  // Optional: the unique name of the Spaarke model-driven app every record link opens in
+  // (spaarkeai-word-add-in-r1 task 088 / UAT-1 — `main.aspx?appname=…`). A link with no app opens in the
+  // user's DEFAULT app, which may not be Spaarke's. The unique name travels with the solution, so it is the
+  // same in every environment; a customer whose app has another name changes this one setting. UNSET →
+  // `sprk_MatterManagement`; set to an EMPTY string → record links name no app (the pre-088 behaviour).
+  SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME !== undefined ? process.env.SPAARKE_APP_NAME : 'sprk_MatterManagement',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
   // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
@@ -68,11 +74,15 @@ const ENV_CONFIG = {
  * ids are read from the XML files below so the `alternates.hide` entries can never drift from what is registered.
  *
  * Bump UNIFIED_PACKAGE_VERSION (3-part) on every package change — the admin center rejects a same-version update.
+ * It is also the version the Word pane's footer shows (`process.env.ADDIN_PACKAGE_VERSION`, task 089), so what the
+ * user sees is what the admin uploaded.
+ *
+ * 1.1.1 (task 089, UAT-10): the Word ribbon's Share is replaced by "Open Spaarke".
  */
 const UNIFIED_PACKAGE = {
   APP_ID: process.env.ADDIN_APP_ID || 'e68f3cb1-3702-4a58-8c02-972e7d1667eb',
   TEST_APP_ID: process.env.ADDIN_TEST_APP_ID || 'b490de25-d155-44cd-8825-6e125102dd84',
-  VERSION: '1.1.0',
+  VERSION: '1.1.1',
 };
 
 /** Reads the `<Id>` of a live XML add-in manifest — the id its `alternates.hide` entry must name. */
@@ -359,8 +369,11 @@ module.exports = async (env, options) => {
         'process.env.BFF_API_BASE_URL': JSON.stringify(ENV_CONFIG.BFF_API_BASE_URL),
         'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
         'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
+        'process.env.SPAARKE_APP_NAME': JSON.stringify(ENV_CONFIG.SPAARKE_APP_NAME),
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
+        // Task 089: the pane footer shows the app-package version, not a hand-maintained literal.
+        'process.env.ADDIN_PACKAGE_VERSION': JSON.stringify(UNIFIED_PACKAGE.VERSION),
       }),
       // Task 078: the combined Outlook + Word app package → dist/spaarke/.
       new SpaarkeUnifiedPackagePlugin(),

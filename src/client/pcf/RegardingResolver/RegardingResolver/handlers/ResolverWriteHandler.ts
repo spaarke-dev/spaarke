@@ -67,6 +67,7 @@ import {
   type ICoreAncestorStamp,
   type INavPropEntry,
   type IPolymorphicWebApi,
+  cleanGuid,
 } from '@spaarke/ui-components/dist/services/PolymorphicResolverService';
 import {
   TODO_REGARDING_CATALOG,
@@ -218,11 +219,11 @@ export async function discoverHostNavProps(
     }
 
     const json = (await resp.json()) as {
-      value?: Array<{
+      value?: {
         ReferencingAttribute: string;
         ReferencingEntityNavigationPropertyName: string;
         ReferencedEntity: string;
-      }>;
+      }[];
     };
 
     const entries: INavPropEntry[] = (json.value ?? []).map(r => ({
@@ -273,7 +274,7 @@ export function _resetNavPropCacheForTests(): void {
  */
 export function resolveAllowedCatalog(
   regardingTargetsRaw: string | null | undefined
-): ReadonlyArray<ITodoRegardingTargetCatalogEntry> {
+): readonly ITodoRegardingTargetCatalogEntry[] {
   if (!regardingTargetsRaw || !regardingTargetsRaw.trim()) {
     return TODO_REGARDING_CATALOG;
   }
@@ -350,7 +351,7 @@ function nulledLookupColumns(payload: Record<string, unknown>, navProps: INavPro
 export async function applyRegardingSelection(
   ctx: IResolverWriteContext,
   selection: IRegardingSelection,
-  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry> = TODO_REGARDING_CATALOG,
+  catalog: readonly ITodoRegardingTargetCatalogEntry[] = TODO_REGARDING_CATALOG,
   fetchImpl: typeof fetch = globalThis.fetch
 ): Promise<IResolverWriteResult> {
   const catalogEntry = catalog.find(c => c.entityType === selection.entityType);
@@ -406,10 +407,10 @@ export async function applyRegardingSelection(
   const clearLookups = nulledLookupColumns(payload, navProps);
 
   // Persist immediately if we have a host record; otherwise return for pre-save staging.
-  const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
+  const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      await ctx.webApi.updateRecord(ctx.hostEntity, cleanGuid(ctx.hostRecordId as string), payload);
     } catch (err) {
       return {
         success: false,
@@ -526,10 +527,10 @@ export async function clearRegarding(
 
   const clearLookups = nulledLookupColumns(payload, navProps);
 
-  const hasHostGuid = Boolean(ctx.hostRecordId && ctx.hostRecordId.replace(/[{}]/g, '').length === 36);
+  const hasHostGuid = Boolean(ctx.hostRecordId && cleanGuid(ctx.hostRecordId).length === 36);
   if (hasHostGuid) {
     try {
-      await ctx.webApi.updateRecord(ctx.hostEntity, (ctx.hostRecordId as string).replace(/[{}]/g, ''), payload);
+      await ctx.webApi.updateRecord(ctx.hostEntity, cleanGuid(ctx.hostRecordId as string), payload);
     } catch (err) {
       return {
         success: false,

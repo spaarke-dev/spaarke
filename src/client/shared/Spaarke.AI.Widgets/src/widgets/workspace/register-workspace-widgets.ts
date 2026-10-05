@@ -33,11 +33,9 @@
  */
 
 import { registerWorkspaceWidget } from '../../registry/WorkspaceWidgetRegistry';
-import type { RegistryGetAgentVisibleState } from '../../registry/WorkspaceWidgetRegistry';
 import { createWorkspaceWrapper } from './WorkspaceWidgetWrapper';
 import { safeRegister } from '@spaarke/ui-components';
 import type { WorkspaceWidgetComponent } from '../../types/widget-types';
-import type { EmailTabWidgetData } from '../../types/WorkspaceTab';
 // Assistant-contract metadata SHAPE (FR-08 + FR-15 SHAPE, R3 task 022):
 // context-type (existing `contextType` field, task 020) · overview tool(s) ·
 // per-item cards + landing target · interaction pattern. See
@@ -48,40 +46,11 @@ import { OVERVIEW_QUERY_TOOL_NAME } from '../../types/shared';
 // Widgets with no overview tool / per-item cards declare an EXPLICIT opt-out
 // marker + reason (never silent absence). See the opt-out constants below.
 import { assistantContractOptOut } from '../../types/shared';
-// Pillar 9 visibility derivations (task 073, D-C-28). The Dashboard category
-// is attached to the 'workspace' registration (WorkspaceLayoutWidget); the
-// Table category is attached to all 5 DataverseEntityViewWidget-backed
-// system widgets (documents/matters/projects/invoices/work-assignments). The
-// Email category (R2 task 040/042a/042c) is attached to the 'email'
-// registration below via the `emailWorkspaceTabVisibility` kind-guard wrapper.
-import { dashboardWidgetVisibility, emailWidgetVisibility, tableWidgetVisibility } from './pillar9-visibility';
-
-// ---------------------------------------------------------------------------
-// Email category derivation — R2 Phase C (task 042a/042c, FR-C1/C2/C4)
-//
-// Path 1 "persisted Email carrier" (see `notes/c-architecture-gap.md`): the
-// email tab's `widgetData` is expected to structurally match the persisted
-// `EmailTabWidgetData` carrier (added to `WorkspaceTabWidgetData` alongside
-// this task). This wrapper narrows `widgetData` to that shape (guarding on
-// `kind === 'Email'`) before delegating to `emailWidgetVisibility` (task 040)
-// for the actual field mapping + `EMAIL_SNIPPET_CAP_CHARS` truncation — reused
-// verbatim, not duplicated. Returns `null` for any non-Email `widgetData`,
-// including tabs not yet populated by the population task (042b).
-//
-// `emlDocumentId` (the on-demand `eml-render` fetch handle, FR-C4) is a fetch
-// handle only and is intentionally never read here — `emailWidgetVisibility`
-// does not surface it, keeping it out of the agent-visible
-// `SerializedEmailState`.
-// ---------------------------------------------------------------------------
-
-function isEmailTabWidgetData(value: unknown): value is EmailTabWidgetData {
-  return typeof value === 'object' && value !== null && (value as { kind?: unknown }).kind === 'Email';
-}
-
-const emailWorkspaceTabVisibility: RegistryGetAgentVisibleState = (widgetData: unknown) => {
-  if (!isEmailTabWidgetData(widgetData)) return null;
-  return emailWidgetVisibility(widgetData);
-};
+// Pillar 9 note (C-21, 2026-10-03): registrations no longer carry a client-side
+// agent-visibility derivation — that 4th `registerWorkspaceWidget` argument and
+// `pillar9-visibility.ts` were deleted (never called in production). The BFF
+// derives each tab's agent-visible state from `widgetData` itself
+// (`SprkChatAgentFactory.TryDeriveVisibleState`).
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase B.5 (2026-06-09):
 // Isolate each registration in its own try/catch. Without this, a synchronous
@@ -762,12 +731,7 @@ registerWorkspaceWidget(
   () =>
     import('./WorkspaceLayoutWidget').then(m => ({
       default: m.WorkspaceLayoutWidget as import('../../types/widget-types').WorkspaceWidgetComponent,
-    })),
-  // Pillar 9 visibility opt-in (task 073, D-C-28). Dashboard category:
-  // exposes `dashboardName` + optional `lastViewedSection` ONLY. Never
-  // chart data / section payloads (token economy + privacy per ADR-015).
-  // See `pillar9-visibility.ts` for the derivation rationale.
-  dashboardWidgetVisibility
+    }))
 );
 
 // ---------------------------------------------------------------------------
@@ -844,12 +808,6 @@ function createEntityViewFactory(configId: string) {
     });
 }
 
-// Pillar 9 visibility opt-in (task 073, D-C-28). Table category: exposes
-// structural state (rowCount + sort + filter + selection CARDINALITY) for
-// all 5 system table widgets. selectedRows is converted from row IDs to a
-// COUNT per SerializedTableState privacy contract — row IDs / cell content
-// never reach the agent prompt. See `pillar9-visibility.ts`.
-
 registerWorkspaceWidget(
   'documents-list',
   {
@@ -865,8 +823,7 @@ registerWorkspaceWidget(
     // 'document-viewer' tab, FR-11 — not on this list).
     assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents),
-  tableWidgetVisibility
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.documents)
 );
 
 safeRegisterWidget(
@@ -883,8 +840,7 @@ safeRegisterWidget(
     // no per-item cards.
     assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters),
-  tableWidgetVisibility
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.matters)
 );
 
 registerWorkspaceWidget(
@@ -901,8 +857,7 @@ registerWorkspaceWidget(
     // no per-item cards.
     assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects),
-  tableWidgetVisibility
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.projects)
 );
 
 registerWorkspaceWidget(
@@ -919,8 +874,7 @@ registerWorkspaceWidget(
     // no per-item cards.
     assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices),
-  tableWidgetVisibility
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.invoices)
 );
 
 registerWorkspaceWidget(
@@ -937,8 +891,7 @@ registerWorkspaceWidget(
     // no per-item cards.
     assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
-  tableWidgetVisibility
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments)
 );
 
 // spaarkeai-assistant-enhancements-r1 task 050 (2026-07-22): "My Tasks" — the user's open task-type
@@ -960,8 +913,7 @@ registerWorkspaceWidget(
     // no per-item cards.
     assistantContract: OVERVIEW_ONLY_CONTRACT,
   },
-  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.myTasks),
-  tableWidgetVisibility
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.myTasks)
 );
 
 // ai-spaarke-ai-workspace-UI-r2 FR-10 (2026-07-01): Communications direct widget.
@@ -1003,8 +955,7 @@ registerWorkspaceWidget(
     import('@spaarke/communication-components').then(m => ({
       default:
         m.CommunicationsWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
-    })),
-  tableWidgetVisibility
+    }))
 );
 
 // ---------------------------------------------------------------------------
@@ -1041,8 +992,7 @@ safeRegisterWidget(
   () =>
     import('./EmailWorkspaceWidget').then(m => ({
       default: m.EmailWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
-    })),
-  emailWorkspaceTabVisibility
+    }))
 );
 
 // ---------------------------------------------------------------------------

@@ -23,7 +23,7 @@ import { createXrmDataService } from './adapters/xrmDataServiceAdapter';
 import { createXrmUploadService } from './adapters/xrmUploadServiceAdapter';
 import { createXrmNavigationService } from './adapters/xrmNavigationServiceAdapter';
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from '@spaarke/auth';
-import { cleanGuid } from '../services/PolymorphicResolverService';
+import { cleanGuid } from './guid';
 import type { AssociationResult } from '../components/AssociateToStep/types';
 import {
   readHandoffFromUrl,
@@ -177,7 +177,7 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
     if (!xrm?.WebApi?.retrieveRecord) throw new Error('Xrm.WebApi not available');
-    const userId = xrm.Utility.getGlobalContext().userSettings.userId.replace(/[{}]/g, '');
+    const userId = cleanGuid(xrm.Utility.getGlobalContext().userSettings.userId);
     const user = await xrm.WebApi.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');
     const buId = user['_businessunitid_value'] as string;
     if (!buId) throw new Error('Could not resolve business unit');

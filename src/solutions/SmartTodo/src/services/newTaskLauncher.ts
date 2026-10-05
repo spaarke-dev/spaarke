@@ -72,6 +72,7 @@ import {
   navigateToEntityRecordSurfaceAsync,
   TODO_REGARDING_CATALOG,
   getOobModalSize,
+  cleanGuid,
 } from '@spaarke/ui-components';
 import type { ILaunchContext } from '../hooks/useLaunchContext';
 import { getXrm } from './xrmProvider';
@@ -188,7 +189,7 @@ export function resolveHostRegardingRecord(): IRegardingSource | undefined {
     }
     const ref = entity.getEntityReference();
     if (!ref) return undefined;
-    const id = typeof ref.id === 'string' ? ref.id.replace(/[{}]/g, '') : '';
+    const id = typeof ref.id === 'string' ? cleanGuid(ref.id) : '';
     const entityType: string = ref.entityType ?? ref.logicalName ?? '';
     if (!id || !entityType) return undefined;
     return {

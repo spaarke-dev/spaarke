@@ -441,9 +441,6 @@ public sealed class SpeDashboardSyncService : BackgroundService
                     }
                 }
 
-                // Evict expired Graph clients as a housekeeping step
-                _graphService.EvictExpiredClients();
-
                 concerns.Add(new ConcernOutcome
                 {
                     Concern = $"Graph containers (config {config.ConfigId})",
@@ -583,10 +580,12 @@ public sealed class SpeDashboardSyncService : BackgroundService
 
             foreach (var record in records)
             {
+                // The Key Vault secret name is deliberately NOT required: since 2026-10-04 container work
+                // runs as the BFF's own identity and no credential is read from the config. Requiring it
+                // here would silently drop every secret-free config from the dashboard.
                 if (!Guid.TryParse(record.Id, out var configId)
                     || string.IsNullOrWhiteSpace(record.ContainerTypeId)
                     || string.IsNullOrWhiteSpace(record.OwningAppId)
-                    || string.IsNullOrWhiteSpace(record.SecretKeyVaultName)
                     || !record.EnvironmentId.HasValue
                     || !tenantById.TryGetValue(record.EnvironmentId.Value, out var tenantId))
                 {
@@ -601,7 +600,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
                     ContainerTypeId: record.ContainerTypeId,
                     ClientId: record.OwningAppId,
                     TenantId: tenantId,
-                    SecretKeyVaultName: record.SecretKeyVaultName));
+                    SecretKeyVaultName: record.SecretKeyVaultName ?? string.Empty));
             }
 
             _logger.LogDebug(

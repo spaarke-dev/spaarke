@@ -48,6 +48,7 @@ import {
 import type { IDataverseClient, EntityMetadata, SavedQueryResult } from '../../services/IDataverseClient';
 import { XrmDataverseClient } from '../../services/XrmDataverseClient';
 import { OOB_MODAL_SIZES } from '../../utils/adapters/oobModalSizes';
+import { cleanGuid } from '../../utils/guid';
 import type { DataGridConfiguration, MembershipFilter } from '../../types/DataGridConfiguration';
 import { isValidDataGridConfiguration } from '../../types/DataGridConfiguration';
 import {
@@ -565,7 +566,7 @@ export function buildRecordOpenNavArgs(
   };
   navOptions: typeof LAYOUT_1_NAV_OPTIONS;
 } {
-  const cleanId = recordId.replace(/[{}]/g, '');
+  const cleanId = cleanGuid(recordId);
   const pageInput: {
     pageType: 'entityrecord';
     entityName: string;

@@ -45,28 +45,14 @@
  * @see WorkspacePaneMenu.tsx — sibling pattern this mirrors (task 089/098)
  * @see ConversationPane.tsx — mounts this in the Assistant PaneHeader rightSlot
  * @see QuickStartModal.tsx — the Quick Start modal this menu owns (task 041)
+ *
+ * The ⋮ trigger + dropdown is now the shared `PaneHeaderToolsMenu` (C-12,
+ * spaarke-ontology-platform-r1 reuse audit D5).
  */
 
 import * as React from "react";
-import {
-  makeStyles,
-  tokens,
-  Menu,
-  MenuTrigger,
-  MenuPopover,
-  MenuList,
-  MenuItem,
-  MenuGroupHeader,
-  Button,
-  Tooltip,
-  CounterBadge,
-} from "@fluentui/react-components";
-import {
-  MoreVerticalRegular,
-  RocketRegular,
-  PersonRegular,
-  NotebookRegular,
-} from "@fluentui/react-icons";
+import { PaneHeaderToolsMenu, type PaneHeaderToolsMenuItem } from "@spaarke/ui-components";
+import { RocketRegular, PersonRegular, NotebookRegular } from "@fluentui/react-icons";
 import { QuickStartModal } from "./QuickStartModal";
 
 // ---------------------------------------------------------------------------
@@ -113,29 +99,6 @@ export interface AssistantToolMenuProps {
 }
 
 // ---------------------------------------------------------------------------
-// Styles — Fluent v9 tokens only (ADR-021)
-// ---------------------------------------------------------------------------
-
-const useStyles = makeStyles({
-  trigger: {
-    minWidth: "auto",
-  },
-  triggerWrap: {
-    position: "relative",
-    display: "inline-flex",
-  },
-  badge: {
-    position: "absolute",
-    top: "2px",
-    right: "2px",
-    pointerEvents: "none",
-  },
-  menuItemBadge: {
-    marginLeft: tokens.spacingHorizontalS,
-  },
-});
-
-// ---------------------------------------------------------------------------
 // Placeholder handlers — "My Assistant" placeholder remains until task 042's
 // host wires a real `onMyAssistant`; "Quick Start" is now self-hosted (see
 // the `QuickStartModal` mount in the component body below) so it no longer
@@ -154,15 +117,18 @@ function defaultMyAssistantHandler(): void {
 // Tool catalog
 // ---------------------------------------------------------------------------
 
-interface AssistantToolEntry {
-  id: "quick-start" | "my-assistant" | "memory";
-  label: string;
-}
+type AssistantToolId = "quick-start" | "my-assistant" | "memory";
 
-const ASSISTANT_TOOLS: readonly AssistantToolEntry[] = [
-  { id: "quick-start", label: "Quick Start" },
-  { id: "my-assistant", label: "My Assistant" },
-  { id: "memory", label: "Memory" },
+const TOOL_ICONS: Record<AssistantToolId, React.ReactElement> = {
+  "quick-start": <RocketRegular />,
+  memory: <NotebookRegular />,
+  "my-assistant": <PersonRegular />,
+};
+
+const ASSISTANT_TOOLS: readonly PaneHeaderToolsMenuItem<AssistantToolId>[] = [
+  { id: "quick-start", label: "Quick Start", icon: TOOL_ICONS["quick-start"], testId: "assistant-tool-quick-start" },
+  { id: "my-assistant", label: "My Assistant", icon: TOOL_ICONS["my-assistant"], testId: "assistant-tool-my-assistant" },
+  { id: "memory", label: "Memory", icon: TOOL_ICONS.memory, testId: "assistant-tool-memory" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -179,22 +145,12 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
   highlightMyAssistant = false,
   onMemory,
 }) => {
-  const styles = useStyles();
-  const [menuOpen, setMenuOpen] = React.useState(false);
-
   // Task 041 (FR-F2) — the built-in Quick Start modal's open state. Owned
   // here (not by the host) so `ConversationPane.tsx` needs no changes: it
   // already mounts `<AssistantToolMenu onMyAssistant={...} />` with no
   // `onQuickStart` override, which is exactly the "use the internal modal"
   // path below.
   const [quickStartOpen, setQuickStartOpen] = React.useState(false);
-
-  const handleOpenChange = React.useCallback(
-    (_e: unknown, data: { open: boolean }) => {
-      setMenuOpen(data.open);
-    },
-    [],
-  );
 
   const handleQuickStart = React.useCallback(() => {
     if (onQuickStart) {
@@ -206,8 +162,7 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
   }, [onQuickStart]);
 
   const handleSelect = React.useCallback(
-    (id: AssistantToolEntry["id"]) => {
-      setMenuOpen(false);
+    (id: AssistantToolId) => {
       if (id === "quick-start") {
         handleQuickStart();
       } else if (id === "memory") {
@@ -220,78 +175,33 @@ export const AssistantToolMenu: React.FC<AssistantToolMenuProps> = ({
   );
 
   // Hide the Memory entry when the host doesn't supply a handler (back-compat / tests).
+  // MA-1 (UAT 2026-07-19): mark "My Assistant" with a trailing badge when its profile is incomplete.
   const tools = React.useMemo(
-    () => ASSISTANT_TOOLS.filter((t) => t.id !== "memory" || !!onMemory),
-    [onMemory],
+    () =>
+      ASSISTANT_TOOLS.filter((t) => t.id !== "memory" || !!onMemory).map((t) =>
+        t.id === "my-assistant" ? { ...t, trailingBadge: highlightMyAssistant } : t,
+      ),
+    [onMemory, highlightMyAssistant],
   );
 
   return (
     <>
-      <Menu open={menuOpen} onOpenChange={handleOpenChange} positioning="below-end">
-        <MenuTrigger disableButtonEnhancement>
-          <Tooltip content="Assistant tools" relationship="label">
-            {/* P2-2 follow-up (UAT 2026-07-18): the "Tools ▾" text trigger is now an
-                icon-only vertical three-dots (⋮) button — matches the Claude-Code-style
-                icon header (History / New session / ⋮). aria-label + tooltip preserved.
-                MA-1 (UAT 2026-07-19): a small badge marks an incomplete profile. */}
-            <span className={styles.triggerWrap}>
-              <Button
-                appearance="subtle"
-                size="small"
-                icon={<MoreVerticalRegular />}
-                aria-label={
-                  highlightMyAssistant ? "Assistant tools (profile setup available)" : "Assistant tools"
-                }
-                className={styles.trigger}
-                data-testid="assistant-tool-menu-trigger"
-              />
-              {highlightMyAssistant ? (
-                <CounterBadge
-                  size="tiny"
-                  appearance="filled"
-                  color="danger"
-                  dot
-                  className={styles.badge}
-                  data-testid="assistant-tool-menu-badge"
-                />
-              ) : null}
-            </span>
-          </Tooltip>
-        </MenuTrigger>
-
-        <MenuPopover data-testid="assistant-tool-menu-popover">
-          <MenuList>
-            <MenuGroupHeader>Assistant Tools</MenuGroupHeader>
-            {tools.map((tool) => (
-              <MenuItem
-                key={tool.id}
-                icon={
-                  tool.id === "quick-start" ? (
-                    <RocketRegular />
-                  ) : tool.id === "memory" ? (
-                    <NotebookRegular />
-                  ) : (
-                    <PersonRegular />
-                  )
-                }
-                onClick={() => handleSelect(tool.id)}
-                data-testid={`assistant-tool-${tool.id}`}
-              >
-                {tool.label}
-                {tool.id === "my-assistant" && highlightMyAssistant ? (
-                  <CounterBadge
-                    size="small"
-                    appearance="filled"
-                    color="danger"
-                    dot
-                    className={styles.menuItemBadge}
-                  />
-                ) : null}
-              </MenuItem>
-            ))}
-          </MenuList>
-        </MenuPopover>
-      </Menu>
+      {/* P2-2 follow-up (UAT 2026-07-18): the "Tools ▾" text trigger is now an
+          icon-only vertical three-dots (⋮) button — matches the Claude-Code-style
+          icon header (History / New session / ⋮). aria-label + tooltip preserved.
+          MA-1 (UAT 2026-07-19): a small badge marks an incomplete profile. */}
+      <PaneHeaderToolsMenu<AssistantToolId>
+        triggerAriaLabel={
+          highlightMyAssistant ? "Assistant tools (profile setup available)" : "Assistant tools"
+        }
+        groupHeader="Assistant Tools"
+        items={tools}
+        onSelect={handleSelect}
+        highlightTrigger={highlightMyAssistant}
+        triggerTestId="assistant-tool-menu-trigger"
+        triggerBadgeTestId="assistant-tool-menu-badge"
+        popoverTestId="assistant-tool-menu-popover"
+      />
 
       <QuickStartModal open={quickStartOpen} onClose={() => setQuickStartOpen(false)} />
     </>

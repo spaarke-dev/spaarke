@@ -221,10 +221,27 @@ platform. The owner chose, on 2026-10-03, ***"A now, B as its own task"***:
 ## 11. What remains
 
 - **Every other environment** needs the script after its solution import (deployment guide §7.4). Production waits
-  on the owner's uniqueness check.
+  on the owner's uniqueness check. *(2026-10-03: run everywhere it can run; see §12.)*
 - **The numbering function** (not yet a project) replaces this. To retire the interim: clear both formats and keep
   the keys. Still open from the 030 hand-off:
   - §4 overwrite-or-fill. The wizard's `{typeCode}-{random6}` coexists with `MAT-…`.
   - Whether a type change re-numbers a matter.
 - The BFF's retry and warning are proven by contract tests and by the platform behaviour in §5, but **not yet run
   live**. They arrive with the next deploy from master.
+
+## 12. Rollout to the other environments (2026-10-03, owner: *"you can run the clean up script for numbering"*)
+
+Dry run first in each, then apply only where the plan was clean. The operator's own `az` identity
+(`ralph.schroeder@spaarke.com`). `pac org list` shows three Spaarke environments: dev (done in §5), demo and Model 1
+Prod. (`HIPC DEV 2` is another tenant; it is not a Spaarke environment.)
+
+| Environment | Dry run found | Done | `-Verify` |
+|---|---|---|---|
+| `spaarke-demo` | **Matters**: 30 rows; **one duplicate number**, `LIT-2025-0847` on 2 rows. Both rows are the same matter, "Meridian Corp v. Pinnacle Industries": `39cde3e3-…` (created 03-26, **0 documents / 0 events**) and `a657db02-…` (created 04-06, **66 documents / 37 events**). A second seed run copied it. **Projects**: 12 rows, 10 blank. **No `SpaarkeCore` solution**: demo's unmanaged solution is `SpaarkeMaster`, which holds both tables with all subcomponents | The empty copy's number was blanked so the backfill numbers it (**reversal**: set `sprk_matternumber` on `39cde3e3-9d15-f111-8343-7ced8d1dc988` back to `LIT-2025-0847`, which the key will now refuse while the live copy holds it). Then `-SolutionUniqueName SpaarkeMaster -Apply`: both formats set; matter `39cde3e3-…` → `MAT-000001`; projects → `PRJ-000001…010`; key `sprk_MatterNumber` created (Active after 7 polls); `sprk_ProjectNumber` already Active; published | **PASS** — next numbers `MAT-000002` and `PRJ-000011` |
+| `spaarke-model1-prod` | 0 matters, 0 projects. Both columns are **managed** | Nothing. The script refuses to customise a managed component (ADR-027), correctly | — waits for the next **SpaarkeCore** managed import, which carries the formats and keys from dev; then run `-Apply` (it seeds only) and `-Verify` |
+
+**For the owner (demo):** two "Meridian Corp v. Pinnacle Industries" matters remain. The empty one (`MAT-000001`) can
+be deleted if it is not wanted; it was renumbered, not deleted, because deleting demo data is your call.
+
+**Deployment guide note:** the script's default solution is `SpaarkeCore`. An environment built from an unmanaged
+`SpaarkeMaster` (demo) needs `-SolutionUniqueName SpaarkeMaster`.

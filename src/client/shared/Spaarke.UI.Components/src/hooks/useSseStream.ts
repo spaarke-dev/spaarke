@@ -7,8 +7,8 @@
  * Connects to SSE endpoints via POST fetch (EventSource only supports GET).
  * Parses "data: {...}\n\n" events from the stream and accumulates token content.
  *
- * URL CONSTRUCTION: Callers MUST pass pre-built URLs from ChatApiClient.buildMessagesUrl()
- * or buildBffApiUrl() — never raw template literals. This hook receives fully-constructed
+ * URL CONSTRUCTION: Callers MUST pass pre-built URLs from buildBffApiUrl()
+ * (@spaarke/auth) — never raw template literals. This hook receives fully-constructed
  * URLs and re-acquires a fresh access token for each streaming fetch call.
  *
  * Auth v2 (D-AUTH-7): `startStream` accepts an `AccessTokenGetter` (`() => Promise<string>`)
@@ -40,7 +40,8 @@
  * @see ADR-013 — AI Architecture
  * @see ADR-022 — React 16 APIs only (useState, useEffect, useRef, useCallback)
  * @see ChatEndpoints.cs — SSE format: data: {"type":"token","content":"..."}\n\n
- * @see ChatApiClient.buildMessagesUrl() — MUST use to construct streaming URL
+ * @see buildBffApiUrl() (@spaarke/auth) — MUST use to construct streaming URL
+ *      (the @spaarke/ai-context ChatApiClient this used to cite was deleted 2026-10-03, C-14)
  */
 
 import { useState, useRef, useCallback } from 'react';
@@ -605,8 +606,7 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
  * Uses fetch() with ReadableStream to read server-sent events.
  * Handles cancellation via AbortController.
  *
- * Callers provide the full URL (built via ChatApiClient.buildMessagesUrl() or
- * buildBffApiUrl()) and a `getAccessToken` function (typically the `getAccessToken`
+ * Callers provide the full URL (built via buildBffApiUrl()) and a `getAccessToken` function (typically the `getAccessToken`
  * value from `useAuth()`). The function is invoked ONCE per stream open,
  * immediately before opening the fetch, so the token is always fresh for THIS
  * stream open (Auth v2 D-AUTH-7).
@@ -618,7 +618,7 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
  * const { content, isDone, isStreaming, error, startStream, cancelStream } = useSseStream();
  *
  * const handleSend = () => {
- *   const url = client.buildMessagesUrl(session.sessionId);
+ *   const url = buildBffApiUrl(bffBaseUrl, `/api/ai/chat/sessions/${sessionId}/messages`);
  *   // getAccessToken is re-invoked on every stream open — never snapshot it.
  *   startStream(url, { message: "Hello" }, getAccessToken);
  * };

@@ -31,6 +31,28 @@ Line 41's claim that the Q4 `sprk_assigned*` fields have no BFF writers is corre
 owner accepted the amendment under §6.5 path B in round 11, 2026-10-03. The spec's FR-32 and MUST NOT list and
 design §7 now name the one exception. Full rules: `docs/adr/ADR-034-user-record-membership.md` § "Amendment A4".
 
+###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (C-19)
+
+`.claude/adr/ADR-012-shared-components.md` cited `CommandRegistry` in the present tense as an example of a shared
+service. This PR deletes it (zero consumers, along with `EntityConfigurationService`, `CustomCommandFactory` and
+`Toolbar/CommandToolbar`: dead infrastructure from a deleted PCF that carried a loop-over-selection
+`deleteRecord`), so the example is removed. The full ADR's mention is left alone: it is past tense, and accurate
+as history. Found by the `spaarke-ontology-platform-r1` reuse audit (cleanup item C-19). The ADR-012 UI Components table also drops its `CommandToolbar` row (15 groups, was 16), and the `PageChrome` row now reads `ViewToolbar`, because `PageChrome/CommandBar` is deleted in the same PR.
+
+---
+###### 2026-10-03 — root `CLAUDE.md` Calendar row corrected; `CalendarFilterPane` exported from the components barrel
+
+Root `CLAUDE.md`'s "Calendar shared components" row described `CalendarSection` and `CalendarFilterPane` as two
+intentional variants without saying that the side pane (`src/solutions/CalendarSidePane/src/App.tsx`) actually
+renders **`CalendarSection` + `CalendarFilterOutput`**, not `CalendarFilterPane`. That migration was never finished.
+Two files in the same solution (`utils/parseParams.ts`, `utils/postMessage.ts`) imported the type
+`CalendarFilterPaneOutput` from `@spaarke/events-components`, which the package's barrels never exported, so the import
+could not resolve. **The side pane is not currently in use** (owner, 2026-10-03). It may return, so the import is
+fixed rather than the solution deleted: `Spaarke.Events.Components/src/components/index.ts` now re-exports
+`CalendarFilterPane` and its types. `IEventDateInfo` is deliberately left out, because `CalendarSection` already
+exports a different type under that name from the same barrel. Found by the `spaarke-ontology-platform-r1` reuse
+audit (finding X19) and split out of that project's PR because it is unrelated to ontology work.
+
 ###### 2026-10-03 — ADR-002 WP-1 amended: a platform-native declarative mechanism may own an invariant (spaarkeai-word-add-in-r1 task 087)
 
 Root `CLAUDE.md` (the "Dataverse write path" pointer row), `.claude/adr/ADR-002-thin-plugins.md` and

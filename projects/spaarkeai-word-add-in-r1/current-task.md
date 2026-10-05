@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-03 (by context-handoff, before /compact). 076 ✅ · 086 ✅ · 087 ✅ — all pushed (`773cc57a9`); PR #1110 open, CI running
+> **Last Updated**: 2026-10-04. 094 merged (PR #1284, `6932582b1`) and the add-in site redeployed (run 37220301006). BFF = `fb8280aee` (unchanged by 094). Waiting on the owner: re-upload package 1.1.1 (if not yet), then UAT round 4
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -18,17 +18,15 @@
 
 All relayed to UAC-r2 and acknowledged (`notes/uac-r2-findings-2026-09-30.md` §10).
 
-### ▶️ NEXT: merge PR #1110 when CI is green
+### ▶️ NEXT: owner re-uploads package 1.1.1, then UAT round 4
 
 | Field | Value |
 |---|---|
-| **Task** | none in progress — 076, 086, 087 all ✅ (88 tasks: 85 closed; 042 🔄 owner UAT; 083 🔲 blocked on UAC-r2 141; 090 🔲 wrap-up after 042) |
-| **PR** | **#1110 OPEN** — https://github.com/spaarke-dev/spaarke/pull/1110 — title/body updated for 087. Carries everything since `5e39f2bea`: 060/068 records, 079, 080 backfill records, 086, 076, **087 (root CLAUDE.md + ADR-002 + plugins.md + CHANGELOG)**, master merge `141ad4c4b`. CI restarted on the `773cc57a9` push (2026-10-03) |
-| **Next Action** | `gh pr checks 1110` → wait until `grep -c pending` = 0. Merge only when **`Router` AND `Build & Test (Debug)`** pass: `gh pr merge 1110 --merge` (**NEVER `--delete-branch`**). Tier 2 "Full Unit Tests" cancelled at its 30-min cap is advisory, not a failure. Known pre-existing flake: `PinnedMemoryEndpointsContractTests.*Pin*EmitsCounter` (metrics tag cross-talk; passes alone). After merge: fast-forward the main checkout (`C:\code_files\spaarke`, `git pull origin master`) and this worktree; record the merge SHA here; portfolio #945 stays 88/85 |
-| **Then** | Nothing executable without the owner: **042** UAT (live Word/Outlook — list in `notes/defer-issues.md` register) → **090** wrap-up with `/test-diet` (binding gate). **083** waits on UAC-r2 141's contract |
-| **Owner, open** | (a) **Production numbering**: check matter numbers are unique, then `scripts/Set-RecordNumberingSchema.ps1 -Apply` (then `-Verify`) in each environment AFTER its SpaarkeCore import (deployment guide §7.4); where tables are managed the script only seeds + backfills. (b) **078 add-in**: owner sees THREE Spaarke groups in Word ("Spaarke (TEST)" + 2 × "Spaarke") — expected if BOTH zips were uploaded (office-js #6938: Word cannot hide the XML add-in); hover *Save to Spaarke*: XML = "…Spaarke DMS", unified = "…Spaarke Document Management System". Tidy-up: remove the TEST app; unassign the Word XML add-in for Word ≥ 2501 users. Record the outcome in `notes/078-manifest-decision.md` once the owner confirms which zips were uploaded |
-| **Live checks pending the next deploy from master** | 086 AC8 (both Word Send Email choices; `main.aspx`+`data=` URL has no shipped precedent; Word-web popup-blocker risk after a slow share-link mint) · 076's BFF retry/warning (platform half verified live) |
-| **Drift checker** | `scripts/check-task-status-drift.ps1` on master is red for a PARSER reason (cannot read this index layout; fix `233ff9341` on customer-provisioning, unmerged). Verified by hand 2026-10-03: **88/88 POML↔index pairs agree** (scratchpad `status_audit.py`) |
+| **State** | PR #1124 merged `fb8280aee`. BFF on `spaarke-bff-dev` = `fb8280aee` (4/4 hashes, healthz, CORS; 9 route probes, 0 × 404). Add-in site = `fb8280aee` (run 37208025253); hosted Word manifest 1.0.10.0 with Open Spaarke |
+| **Owner** | Admin center → Integrated apps → update Spaarke with `spaarke-addin-1.1.1.zip` (artifact `spaarke-addin-unified-package`, run 37208025253). Then UAT round 4: live ACs of 088/089/091/092/093 + 086 AC8 + 076 retry/warning. Record results in `notes/042-uat-round3-2026-10-03.md` (or a round-4 note) |
+| **Owner answers (2026-10-04) → task 094 ✅** | button only ever "Save"/"Saved"; name locked once in Spaarke (Save as new to rename); Save re-enables on Word content edits; saved state survives tab switch; collision Open = Open in Word (desktop trial) + Open in browser. Add to UAT round 4 |
+| **Then** | 042 → ✅ when UAT passes; 090 wrap-up with `/test-diet`. 083 still blocked on UAC-r2 141 |
+| **Caution** | `spaarke-bff-dev` is shared; another project's deploy can overwrite this build before UAT — re-check Kudu deployments if behaviour looks old |
 
 ### Files modified this session (all committed and pushed)
 `scripts/Set-RecordNumberingSchema.ps1` (new) · `Services/Office/RecordCreationService.cs` · `OfficeService.cs` · `OfficeEndpoints.cs` ·

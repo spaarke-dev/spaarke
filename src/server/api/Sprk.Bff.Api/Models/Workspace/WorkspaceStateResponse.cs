@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Models.Workspace;
 ///
 /// <para>
 /// The <see cref="Tabs"/> list is unfiltered — the raw state. The Pillar 9 prompt
-/// builder (task 074) applies the per-widget <c>getAgentVisibleState()</c> +
+/// builder (task 074) applies the server-side <c>SprkChatAgentFactory.TryDeriveVisibleState</c> derivation +
 /// <see cref="WorkspaceTab.VisibleToAssistant"/> filter when composing the agent
 /// snapshot, per FR-33's binding "filter logic lives in prompt builder, NOT in
 /// endpoint."

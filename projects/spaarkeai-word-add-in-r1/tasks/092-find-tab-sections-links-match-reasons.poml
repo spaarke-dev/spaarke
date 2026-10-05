@@ -1,0 +1,159 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT-3/8: Find fills the pane with one scroll bar, shows Similar Documents and Matching Records as two independent sections, opens every result in Spaarke, and says why a record matched</title>
+    <phase>6 UAT round 3 (2026-10-03)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx`/`.ts` in the task pane (`FindView`, `FindResultsList`, `useFindRecordMatches`, `App.tsx`) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only; the data (match reasons, ids, record types) is already returned by the server — this is layout and wiring.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT3-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Wave W1 with 088. Disjoint: 092 owns `FindView.tsx`, `FindResultsList.tsx`, `useFindRecordMatches.ts`, `useLazyResults.ts` and `App.tsx` (the Find props only); it MUST NOT edit 088's files (`SaveFlow.tsx`, `useSaveFlow.ts`, `errorMessages.ts`, `DocumentProfileSection.tsx`, `openRecordLauncher.ts`, `webpack.config.js`, the deploy workflow, any `.cs`). Client-only: runs no `dotnet`.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, office-addins, typescript, find, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 3 (2026-10-03). UAT-3: "Find — the view port for the results needs to be full height; also there are two scroll bars; the Similar documents and Matching records should have links to open in Spaarke; the Matching records should have some indication of why they are a match". UAT-8: "Find, the 'Most Similar Documents' and the 'Matching records' should be two separate sections — not combined". Record: `notes/042-uat-round3-2026-10-03.md` §1.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>The Find tab uses the whole pane height with a single scroll bar; Similar Documents and Matching Records are separate sections, each with its own loading, empty and error state; every document, parent record and matching record opens in Spaarke; each matching record says why it matched.</goal>
+
+  <context>
+    <background>
+      - **Scrolling today**: the shell main area is `flex:1; overflow:auto` with padding (`TaskPaneShell.tsx:34-47`) —
+        scroller 1; the Find container is `height:100%; overflow:auto` with its own padding (`FindView.tsx:249-256`);
+        the results area is `overflowY:auto; maxHeight:'360px'` (`FindResultsList.tsx:123-130`) — scroller 2 and the
+        fixed height. The Send Email row sits above every tab (`App.tsx:738-776`). Lazy loading uses the viewport
+        (`useLazyResults.ts:74-81`, `useFindRecordMatches.ts:281-288`).
+      - **One section today**: `FindView.tsx:642-654` renders one `FindResultsList` with both lists;
+        `FindResultsList.tsx:488-513` has one heading "Most similar documents" (490), the parent-record block, and ONE
+        scroll area (492-511) holding documents and the records group (310-320, own heading at 320, border 177-184). The
+        empty state merges both (466-486). **Records render only after documents load**: while documents load or if
+        they fail (`FindView.tsx:628-641`), no records show.
+      - **No links today**: document rows are clickable only if `onOpenResult` is passed (`FindResultsList.tsx:237-264`)
+        and FindView never passes it (652); parent records (`HubSection`, 215-228) and matching records (`RecordRow`,
+        291-309) have no open action. Data available: a document row's `id` is the `sprk_document` id (the server also
+        sends `data.recordUrl`/`fileUrl` — `IVisualizationService.cs:245-250` — unused by the client type 52-57); a
+        record match carries `recordId` + logical `recordType` (`useFindRecordMatches.ts:115-121`).
+      - **Why a record matched — already returned**: `POST /api/ai/search/records` results carry `confidenceScore`
+        (0–1), `matchReasons` (semantic captions + "Name match: …" / "Description match: …", up to 5;
+        `RecordSearchService.cs:464-476,545-578`), `keywords`, `organizations`, `people`, `referenceNumbers`
+        (`Models/Ai/RecordSearch/RecordSearchResult.cs:34-62`), passed through after the access check
+        (`RecordSearchEndpoints.cs:310-312`). The client `RecordMatch` type drops them. Highlights may contain
+        `&lt;em&gt;` tags.
+      - **Opening**: `openRecord({ entityType, recordId })` from `services/openRecordLauncher.ts` (task 088 adds the
+        Spaarke app name inside the builder — call `openRecord`, never build a URL here). Gate on
+        `canOpenBrowserWindow` + `ORG_URL`, passed from `App.tsx` (860-873) as the Save tab already does.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-10-03">Two sections, in this order: "Most similar documents", then "Matching records". Each loads, fails and shows "none found" on its own; Matching records never waits for documents.</constraint>
+    <constraint source="this task">Exactly one scroll bar on the Find tab at any pane height: remove the 360 px cap and make Find fill the available height (`flex:1; minHeight:0` chain); do not change `TaskPaneShell` in a way that alters the Save or To Do tabs' scrolling. Lazy loading must still trigger in both sections.</constraint>
+    <constraint source="security">Render match reasons as text: convert `&lt;em&gt;…&lt;/em&gt;` to bold by parsing into React nodes; never `dangerouslySetInnerHTML`, and drop any other tag. A test feeds `&lt;script&gt;`/`&lt;img onerror&gt;` and asserts plain text.</constraint>
+    <constraint source="NFR-10">Open actions are gated by capability; with no capability rows are plain text (not dead links).</constraint>
+    <constraint source="ADR-021">Fluent v9, semantic tokens, dark mode; rows that open are keyboard-operable (Enter/Space) with an accessible name.</constraint>
+    <constraint source="ADR-038">Tests in the existing `FindView.test.tsx`, `FindResultsList.test.tsx`, `useFindRecordMatches.test.tsx` (already gated) — extend, do not weaken.</constraint>
+    <constraint source="parallel wave">Do NOT edit 088's files (see parallel-reason). Do NOT run `npm run build` (the main session does); run jest, lint and typecheck.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Find tab renders two headed sections, "Most similar documents" and "Matching records", each with its own loading, empty ("No similar documents found" / "No matching records found") and error state.</criterion>
+    <criterion testable="true">Matching records render while documents are still loading and when the documents request fails (tests for both).</criterion>
+    <criterion testable="true">No element inside Find has `maxHeight: 360px`; Find's container fills the available height; a layout test asserts a single scroll container for the results.</criterion>
+    <criterion testable="true">Clicking (or Enter on) a document row opens its `sprk_document`; a parent record opens its record; a matching record opens `recordType`/`recordId` — each via `openRecord`. With `canOpenBrowserWindow` false, none is clickable.</criterion>
+    <criterion testable="true">Each matching record shows a confidence ("NN% match") and up to 3 match reasons, with `&lt;em&gt;` rendered bold and any other markup shown as text (negative test with script/img tags).</criterion>
+    <criterion testable="true">Lazy loading still fetches the next page in each section when scrolled to its end.</criterion>
+    <criterion testable="true">Gates: the three Find suites green; full gated jest green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after a deploy): one scroll bar at any pane height; both sections; results open in Matter Management; reasons visible. If unavailable, leave open and say so.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A single scroller cannot be achieved without changing `TaskPaneShell`'s main-area overflow for every tab — STOP and report the options (the Save and To Do tabs rely on it).</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>Read the files in the background; reproduce the two scrollers and the coupled loading in a test first.</step>
+    <step>Split into two sections with independent states; fix the height chain; tests.</step>
+    <step>Add open actions (documents, parents, records) through `openRecord`; tests.</step>
+    <step>Carry `confidenceScore` + `matchReasons` through `RecordMatch`; safe rendering; tests incl. the negative.</step>
+    <step>Gates; record in `notes/092-find-tab.md`; TASK-INDEX 092 → done.</step>
+  </steps>
+
+  <justification>
+    <existing>Both result lists, the record matches with reasons, the ids and types, `openRecord` and the lazy-load hooks exist.</existing>
+    <extension>Yes — re-layout of existing components and wiring of fields the server already returns; no new route, hook family or component library entry.</extension>
+    <cost-of-doing-nothing>Find shows a small boxed list with nested scrolling, hides records behind documents, and gives the user no way to act on a result or judge it (UAT-3, UAT-8).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Find layout">
+      <steps>
+        <step>Open Find on a saved, profiled document at a tall and a short pane height: one scroll bar; two sections.</step>
+        <step>Click a document, a parent record and a matching record: each opens in Matter Management.</step>
+        <step>Each matching record shows a match % and why it matched.</step>
+      </steps>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Office dark theme: sections and reasons readable.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useFindRecordMatches.ts</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/App.tsx</file>
+    <file role="read">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Models/Ai/RecordSearch/RecordSearchResult.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/092-find-tab.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round3-2026-10-03.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/033-find-view-index-gating-decisions.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/034-records-bridge-decision.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/077-find-gaps.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+    <file>src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/092-find-tab.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-10-03. FindResultsList.tsx split into two independent sections (DocumentsSection,
+    RecordsSection) inside one shared scroll container (no maxHeight cap); FindView.tsx no longer
+    gates FindResultsList's mount on the documents fetch and dropped its own overflow:auto layer;
+    useFindRecordMatches.ts's RecordMatch gained confidenceScore + matchReasons; App.tsx passes
+    canOpenRecord to FindView. Open actions wired via a single onOpenRecord(entityType, recordId)
+    callback to the existing openRecord launcher, gated on canOpenBrowserWindow + ORG_URL. Match
+    reasons rendered via a new renderMatchReason parser (em -> bold, any other tag dropped, never
+    dangerouslySetInnerHTML). Found and handled, client-side: a hub node's id is server-prefixed and
+    the SameThread relationship's "thread-" hub carries no real record id — extractHubRecordId
+    validates GUID shape before offering an open action, degrading safely to plain text otherwise.
+    Gates: 3 Find suites 79/79 (was 57/57; +22 new tests); full gated jest 63/63 suites, 885/885
+    tests; lint 0 errors/0 warnings on all touched files; typecheck 0 errors attributed to any file
+    this task touched (project-wide count fluctuated 68->86->73 during the task because task 088 was
+    concurrently mid-edit on SaveFlow.tsx/SaveView.tsx/the office-js mock in the same worktree - not
+    this task's regression). Criterion 8 (live verification) left UNVERIFIED - no Office host in this
+    worktree, same precedent as every prior Find task. Full detail: notes/092-find-tab.md.
+  </notes>
+</task>

@@ -341,6 +341,40 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
     /// <summary>Task 156: carriers whose read fails.</summary>
     public HashSet<(string Entity, Guid Id)> CarrierFaults { get; } = new();
 
+    /// <summary>
+    /// Task 083: the caller's resolved <c>systemuserid</c> (task 067's existing resolver). Loose by default —
+    /// an unconfigured test leaves the caller Unresolved, matching the pre-083 behavior these tests already relied
+    /// on (CreateTodo's owner-team resolution does not require it when a target is named).
+    /// </summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver> CallerResolver { get; } =
+        new(MockBehavior.Loose);
+
+    /// <summary>
+    /// Task 083: task 141's user↔contact link, as <c>OfficeService.CreateTodoAsync</c> reads it
+    /// (<c>IIdentityNormalizationService.ResolveAsync(systemUserId, ct).ContactId</c>). Loose by default — an
+    /// unconfigured call returns a default (SystemUserId-only, ContactId null) <c>PersonIdentity</c>, i.e. "no
+    /// linked contact", never a throw.
+    /// </summary>
+    public Mock<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService> Identity { get; } =
+        new(MockBehavior.Loose);
+
+    /// <summary>In-memory log capture so a test can assert the "no linked contact" warning was actually written.</summary>
+    public LogCapture Logs { get; } = new();
+
+    public TodoRegardingTestWebAppFactory()
+    {
+        // Defaults so a test that does not touch these doubles keeps the PRE-083 behavior (caller unresolved,
+        // no contact) instead of a loose mock returning null for a sealed record and 500ing the request. A
+        // test overrides either Setup individually with its own It.IsAny/specific-id match.
+        CallerResolver
+            .Setup(r => r.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Unresolved("test-default-unresolved"));
+        Identity
+            .Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid systemUserId, CancellationToken _) =>
+                Task.FromResult(new Sprk.Bff.Api.Services.Ai.Membership.Models.PersonIdentity(systemUserId)));
+    }
+
     /// <summary>Columns assumed present on every probed entity — covers every sprk_regarding* lookup these tests touch.</summary>
     private static readonly IReadOnlySet<string> ProbedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
     {
@@ -400,6 +434,51 @@ public sealed class TodoRegardingTestWebAppFactory : OfficeTestWebAppFactory
                 sp.GetRequiredService<IGenericEntityService>(),
                 (string _, CancellationToken _) => Task.FromResult(ProbedColumns),
                 sp.GetRequiredService<ILogger<CoreAncestorResolver>>()));
+
+            // Task 083: the caller's systemuserid (task 067) and task 141's user↔contact link, both doubled
+            // so a test can choose whether the caller resolves and whether their linked contact exists.
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+            services.AddScoped(_ => CallerResolver.Object);
+            services.RemoveAll<Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService>();
+            services.AddSingleton(Identity.Object);
+
+            // Capture logs in-memory so a test can assert the "no linked contact" warning was actually written.
+            services.AddSingleton<ILoggerProvider>(Logs);
         });
     }
+
+    /// <summary>
+    /// In-memory <see cref="ILoggerProvider"/> capturing what the host logged, for assertion. Mirrors
+    /// <c>ProvisionProjectTestFixture.LogCapture</c> (same shape, separate copy per this task's file-ownership
+    /// boundary — see the class remarks above).
+    /// </summary>
+    public sealed class LogCapture : ILoggerProvider
+    {
+        private readonly System.Collections.Concurrent.ConcurrentQueue<LogEntry> _entries = new();
+
+        public IReadOnlyCollection<LogEntry> Entries => _entries.ToArray();
+
+        public ILogger CreateLogger(string categoryName) => new QueueLogger(_entries);
+
+        public void Dispose() { }
+
+        private sealed class QueueLogger : ILogger
+        {
+            private readonly System.Collections.Concurrent.ConcurrentQueue<LogEntry> _entries;
+
+            public QueueLogger(System.Collections.Concurrent.ConcurrentQueue<LogEntry> entries) => _entries = entries;
+
+            public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(
+                LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+                Func<TState, Exception?, string> formatter)
+                => _entries.Enqueue(new LogEntry(logLevel, formatter(state, exception)));
+        }
+    }
+
+    /// <summary>One captured log entry.</summary>
+    public sealed record LogEntry(LogLevel Level, string Message);
 }

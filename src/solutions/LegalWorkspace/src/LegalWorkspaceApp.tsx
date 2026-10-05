@@ -13,6 +13,7 @@ import {
   persistThemeToDataverse,
   getUserThemePreference,
   THEME_CHANGE_EVENT,
+  cleanGuid,
 } from "@spaarke/ui-components";
 import type { SectionRegistration } from "@spaarke/ui-components";
 import { PageHeader } from "./components/Shell/PageHeader";
@@ -125,7 +126,7 @@ export const LegalWorkspaceApp: React.FC<ILegalWorkspaceAppProps> = ({
     document.documentElement.style.setProperty('--sprk-ui-scale', String(uiScale));
   }, [embedded, uiScale]);
 
-  const cleanUserId = userId?.replace(/[{}]/g, '') ?? '';
+  const cleanUserId = cleanGuid(userId);
 
   // Workspace header state — pushed up from WorkspaceGrid via onHeaderReady.
   // Only consumed when `embedded=false` (the internal `<PageHeader>` renders

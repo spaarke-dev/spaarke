@@ -19,6 +19,7 @@
  */
 import { getXrm } from '../../services/xrmGlobal';
 import { EntityCreationService, type AuthenticatedFetchFn } from '../../services/EntityCreationService';
+import { cleanGuid } from '../../utils/guid';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import type {
   IRecordLookupTarget,
@@ -131,7 +132,7 @@ export async function resolveCurrentUserEmail(): Promise<string | undefined> {
     const xrm = getXrm();
     const userId: string | undefined = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
     if (!xrm?.WebApi || !userId) return undefined;
-    const clean = String(userId).replace(/[{}]/g, '');
+    const clean = cleanGuid(userId);
     const rec = await xrm.WebApi.retrieveRecord('systemuser', clean, '?$select=internalemailaddress');
     const email = rec?.internalemailaddress;
     return typeof email === 'string' && email.includes('@') ? email : undefined;
@@ -173,7 +174,7 @@ export function createXrmEmailComposeHandlers(options?: {
     });
     const picked = results?.[0];
     if (!picked) return null;
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(picked.id);
     return { entityType, id, name: picked.name, url: buildRecordUrl(entityType, id) };
   };
 
@@ -191,7 +192,7 @@ export function createXrmEmailComposeHandlers(options?: {
     for (const p of results) {
       const field = RECIPIENT_EMAIL_FIELD[p.entityType as string];
       if (!field) continue;
-      const id = String(p.id).replace(/[{}]/g, '');
+      const id = cleanGuid(p.id);
       try {
         const rec = await xrm.WebApi.retrieveRecord(p.entityType, id, `?$select=${field}`);
         const email = rec?.[field];
@@ -220,7 +221,7 @@ export function createXrmEmailComposeHandlers(options?: {
     const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
     const picked = results?.[0];
     if (!picked?.id || !picked?.entityType) return null;
-    const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
+    const id = cleanGuid(picked.id);
     return { entityType: picked.entityType, id, name: picked.name, url: buildRecordUrl(picked.entityType, id) };
   };
 

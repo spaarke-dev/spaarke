@@ -8,12 +8,14 @@
  * CreateWorkAssignmentWizard, CreateMatterWizard, SummarizeFilesWizard) which
  * are migrated onto this module and deleted per-wizard in tasks 021–024.
  *
- * `RecipientField` is intentionally NOT re-exported — it is an internal
- * dependency of `DraftSummaryFollowOnStep`.
+ * `DraftSummaryFollowOnStep` (+ its internal `RecipientField` and the
+ * `IRecipientItem` type) was DELETED 2026-10-03 (reuse audit C-26): never
+ * mounted by any wizard. CreateMatterWizard's draft-summary step is its own
+ * `CreateMatterWizard/DraftSummaryStep.tsx`.
  */
 
 // Config contract + canonical maps
-export type { FollowOnCardConfig, FollowOnId, IRecipientItem } from './followOnTypes';
+export type { FollowOnCardConfig, FollowOnId } from './followOnTypes';
 export { FOLLOW_ON_ID_MAP, FOLLOW_ON_LABEL_MAP, FOLLOW_ON_CANONICAL_ORDER, followOnStepId } from './followOnTypes';
 
 // The config-driven card grid
@@ -29,9 +31,6 @@ export type { IAssignWorkFollowOnStepProps, WorkAssignmentPriorityValue } from '
 
 export { CreateEventFollowOnStep } from './steps/CreateEventFollowOnStep';
 export type { ICreateEventFollowOnStepProps } from './steps/CreateEventFollowOnStep';
-
-export { DraftSummaryFollowOnStep } from './steps/DraftSummaryFollowOnStep';
-export type { IDraftSummaryFollowOnStepProps } from './steps/DraftSummaryFollowOnStep';
 
 // Net-new: Add To Do follow-on (step + create handler)
 export { AddTodoFollowOnStep, createTodoRegardingChild } from './steps/AddTodoFollowOnStep';

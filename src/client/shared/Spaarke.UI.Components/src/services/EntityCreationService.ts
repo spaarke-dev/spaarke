@@ -35,7 +35,7 @@
 import type { IWebApiLike, IWebApiWithCreate } from '../types/WebApiLike';
 import type { IUploadedFile } from '../components/FileUpload/fileUploadTypes';
 import { SdapApiClient, type DriveItem, type IndexFileRequest, type IndexFileResult } from '@spaarke/sdap-client';
-import { cleanGuid } from './PolymorphicResolverService';
+import { cleanGuid } from '../utils/guid';
 // PolymorphicResolverService not needed — document records use canonical field set only
 
 // ---------------------------------------------------------------------------
@@ -421,7 +421,7 @@ export class EntityCreationService {
    * @see design.md §5.0 (BU cascade source)
    */
   static async resolveUserBuDefaults(webApi: IWebApiLike, userId: string): Promise<IUserBuCascadeDefaults> {
-    const cleanUserId = userId.replace(/^\{|\}$/g, '');
+    const cleanUserId = cleanGuid(userId);
 
     // Step 1: user → BU id
     const userRecord = await webApi.retrieveRecord('systemuser', cleanUserId, '?$select=_businessunitid_value');

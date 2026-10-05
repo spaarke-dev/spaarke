@@ -23,6 +23,7 @@ import { TaskPaneShell, type NavigationTab, type HostType } from './components/T
 import { getAvailableTabs } from './components/TaskPaneNavigation';
 import { LinkedTodosBanner } from './components/LinkedTodosBanner';
 import { SaveView } from './components/views/SaveView';
+import { DEFAULT_SAVED_DOCUMENT_PANE_STATE, type SavedDocumentPaneState } from './components/SaveFlow';
 import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
@@ -51,6 +52,7 @@ import {
 } from './services/sendEmailService';
 import { openUrlInBrowserWindow } from './services/openRecordLauncher';
 import { cleanGuid } from './utils/cleanGuid';
+import { describeFetchFailure } from './utils/errorMessages';
 
 /**
  * Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved context may
@@ -248,6 +250,11 @@ export const App: React.FC<AppProps> = ({
   // Monotonic attempt counter: a resolution result is applied only if no newer attempt has started.
   const identityAttemptRef = useRef(0);
 
+  // Task 094 (owner, 2026-10-04: "yes save should survive tab switch"): the Save tab's saved-state
+  // bundle, lifted here so switching to To Do/Find and back does not remount it away. `SaveView`/
+  // `SaveFlow` own reading and updating it; `App` only holds the value across the tab switch.
+  const [saveFlowState, setSaveFlowState] = useState<SavedDocumentPaneState>(DEFAULT_SAVED_DOCUMENT_PANE_STATE);
+
   // Connection status
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'disconnected' | 'connecting'>('connecting');
 
@@ -435,9 +442,14 @@ export const App: React.FC<AppProps> = ({
           }),
         });
         if (!res.ok) {
-          return { ok: false, error: `Create failed (${res.status}).` };
+          // Task 091 (UAT-2, negative case): show the server's own reason, not a bare status code.
+          const described = await describeFetchFailure(res);
+          return { ok: false, error: described.message };
         }
-        return { ok: true };
+        // Task 091 (UAT-2): the server's 201 body carries the created sprk_todo id — echo it back so
+        // the confirmation can offer "Open in Spaarke" (OfficeEndpoints.cs `CreateTodoResponse`).
+        const created = (await res.json()) as { todoId?: string };
+        return { ok: true, ...(created.todoId ? { todoId: created.todoId } : {}) };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Create failed.' };
       }
@@ -451,10 +463,23 @@ export const App: React.FC<AppProps> = ({
       // Browser test harness (demo filed context) → static demo contacts.
       if (savedContext?.communicationId?.startsWith('demo-')) {
         await new Promise(resolve => setTimeout(resolve, 200));
+        // Task 091 (UAT-2): two contacts sharing a name, each with its own email — the browser harness's
+        // own demonstration of the duplicate-name problem the email field solves.
         const demo: ContactOption[] = [
-          { id: 'demo-contact-1', name: 'Jane Cooper', displayInfo: 'Acme Corp · GC' },
+          { id: 'demo-contact-1', name: 'Jane Cooper', email: 'jane.cooper@acme.test', displayInfo: 'Acme Corp · GC' },
+          {
+            id: 'demo-contact-1b',
+            name: 'Jane Cooper',
+            email: 'jane.cooper@beta.test',
+            displayInfo: 'Beta LLC · Paralegal',
+          },
           { id: 'demo-contact-2', name: 'Robert Fox', displayInfo: 'Acme Corp · Paralegal' },
-          { id: 'demo-contact-3', name: 'Wade Warren', displayInfo: 'Beta LLC · Counsel' },
+          {
+            id: 'demo-contact-3',
+            name: 'Wade Warren',
+            email: 'wade.warren@beta.test',
+            displayInfo: 'Beta LLC · Counsel',
+          },
         ];
         const q = query.toLowerCase();
         return demo.filter(c => c.name.toLowerCase().includes(q));
@@ -469,12 +494,14 @@ export const App: React.FC<AppProps> = ({
           return [];
         }
         const data = (await res.json()) as {
-          results?: { id: string; name: string; displayInfo?: string }[];
+          results?: { id: string; name: string; displayInfo?: string; email?: string }[];
         };
         return (data.results ?? []).map(r => ({
           id: r.id,
           name: r.name,
           ...(r.displayInfo ? { displayInfo: r.displayInfo } : {}),
+          // Task 091 (UAT-2): additive, from the server's new EntitySearchResult.Email.
+          ...(r.email ? { email: r.email } : {}),
         }));
       } catch {
         return [];
@@ -793,6 +820,10 @@ export const App: React.FC<AppProps> = ({
             onSearchContacts={handleSearchContacts}
             onGoToSave={() => setCurrentTab('save')}
             {...(todoRegardingContext ? { savedContext: todoRegardingContext } : {})}
+            // Task 091 (UAT-2, NFR-10): same pattern as FindView.canOpenRecord / SaveView.canOpenRecord —
+            // decided from the live adapter's capabilities, never a hostType check. Gates the created-To-Do
+            // confirmation's "Open in Spaarke" link.
+            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
           />
         )}
 
@@ -808,6 +839,9 @@ export const App: React.FC<AppProps> = ({
             // silently. The retry re-runs task 013's resolution.
             {...(documentIdentity !== undefined ? { documentIdentity } : {})}
             onRetryDocumentIdentity={retryDocumentIdentity}
+            // Task 094: lifts the Save tab's saved-state bundle above its own mount lifecycle.
+            savedState={saveFlowState}
+            onSavedStateChange={setSaveFlowState}
             getAccessToken={async () => {
               // Task 040 / FR-B0: `AuthService.getAccessToken()` ignores any
               // scope argument (see AuthService.ts) — removed as dead code.
@@ -869,6 +903,10 @@ export const App: React.FC<AppProps> = ({
             onRetryDocumentIdentity={retryDocumentIdentity}
             onGoToSave={() => setCurrentTab('save')}
             itemNoun={findItemNoun}
+            // task 092 (UAT-3, NFR-10): same pattern as SaveView's canOpenRecord — decided from the
+            // live adapter's capabilities, never a hostType check. Gates whether Find's document,
+            // parent-record and matching-record rows open in Spaarke or render as plain text.
+            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
           />
         )}
 
