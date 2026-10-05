@@ -1261,6 +1261,41 @@ public sealed class H8SpeContainerTypeHandlerTests
     }
 
     [Fact]
+    public async Task AC51_AnH8QuarantineClearedBeforeTheTypeWentInDoubt_IsNotTheOperatorsCheck_NoTypeIsCreated()
+    {
+        // Owner round 57 item 3 (VL7): only a clearance AT OR AFTER the moment the type went in doubt is the operator's
+        // acknowledgement. An earlier H8 quarantine that an operator cleared (here: an hour before the container-type POST
+        // got no answer) says nothing about the type in doubt — H8 must still refuse to create a type.
+        var run = BuildRun();
+        var typeInDoubtSince = DateTimeOffset.UtcNow.AddHours(-1);
+        run.InterStepState.SpeContainerCreation = new SpeContainerCreationRecord
+        {
+            ContainerTypeInDoubtSince = typeInDoubtSince,
+            Status = SpeContainerCreationRecord.StatusContainerTypeInDoubt,
+        };
+        run.Quarantine = new QuarantineInfo
+        {
+            State = QuarantineState.Cleared,
+            Reason = "an earlier H8 quarantine",
+            QuarantinedByHandler = H8SpeContainerTypeHandler.HandlerIdentifier,
+            QuarantinedAt = typeInDoubtSince.AddHours(-2),
+            ClearedAt = typeInDoubtSince.AddHours(-1),
+            ClearedBy = "operator-oid",
+        };
+        var repo = new FakeRepository(run, etag: "etag-51");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.ContainerTypeCreationInDoubt);
+        provisioner.CallCount.Should().Be(0, "a clearance older than the doubt is not the operator's check — no type is created");
+        repo.LastWrittenRun!.InterStepState.SpeContainerCreation!.ContainerTypeInDoubtSince.Should().NotBeNull();
+    }
+
+    [Fact]
     public async Task AC48_APreRound41HandOff_NextToADifferentTypedRoot_IsBoundToo_NeverOrphaned()
     {
         const string legacy = "b!llllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll";

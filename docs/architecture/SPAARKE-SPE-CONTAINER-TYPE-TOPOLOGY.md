@@ -373,11 +373,17 @@ route whose answer spans the whole SharePoint Embedded tenant (security alerts, 
 app permissions, consuming apps, registration). Those routes serve only a root-unit admin of a deployment that carries
 the BFF setting `SpeAdmin__PlatformOperatorEnvironment=true` — a DEPLOYMENT setting (Bicep
 `speAdminPlatformOperatorEnvironment`, `config/environments.json` → `scripts/Deploy-BffApi.ps1`), never a Dataverse column
-a customer admin could clear. It is set only for Spaarke-operated environments (dev, Spaarke's own operator environment);
-**customer environments never carry it** — customer provisioning does not emit it, a missing setting is `false`, and every
-other caller gets the same `403 spe.admin.deny.platform_operator_required`. The container-type routes that act with the
-CALLER's own delegated token (list / get / create types, settings, owners) are not gated: Graph authorizes them by the
-caller's own SharePoint Embedded administrator role, and the BFF lends no identity.
+a customer admin could clear. It is set only for Spaarke-operated environments, and **today only `dev` carries it** (owner
+round 57 item 1): Spaarke's production operator environment does not exist yet (the stopped `spaarke-bff-prod`, `demo` in
+`config/environments.json`, which declares `false`), and the change that stands it up adds the marker — its registry key,
+its `.bicepparam` line, its name in `SpeAdminOperatorEnvironmentMarkerGuardTests`, and the App Service setting. Until then
+every other environment refuses those routes. The registry declaration must be a JSON boolean: `Deploy-BffApi.ps1` fails on
+any other type (PowerShell reads the string `"false"` as true — round 57 item 3). **Customer environments never carry it**
+— customer provisioning does not emit it, a missing setting is `false`, and every other caller gets the same
+`403 spe.admin.deny.platform_operator_required`. The container-type routes that act with the CALLER's own delegated token
+(list / get / create types, settings, owners) are not gated, by decision (round 57 item 2, accepting D38): Graph authorizes
+them by the caller's own SharePoint Embedded administrator role, and the BFF lends no identity, so gating them would only
+remove legitimate screens.
 
 ---
 

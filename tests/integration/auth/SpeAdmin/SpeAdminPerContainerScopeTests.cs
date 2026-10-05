@@ -851,6 +851,66 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         _fixture.Graph.AllRequests.Should().BeEmpty();
     }
 
+    [Theory]
+    [InlineData("GET", "/api/spe/containertypes/{t}/consumers")]
+    [InlineData("POST", "/api/spe/containertypes/{t}/consumers")]
+    public async Task ATypeRoute_WhenTheTypeRulesOwnConfigTableReadFaults_Is503_AndNothingIsSent(string method, string path)
+    {
+        // Owner round 57 item 3: the test above meets its fault in the operator rule. This one reaches the container-type
+        // rule's OWN read fault: a root admin of the Spaarke-operated host passes the operator rule and the configId rule
+        // (both read filtered rows only); the type rule alone reads the WHOLE config table, and that read faults.
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        StubContainers();
+        _fixture.Dataverse.FaultUnfilteredQueriesOn(ConfigSet);
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA)),
+            HttpStatusCode.ServiceUnavailable);
+
+        problem["errorCode"].GetString().Should().Be(UnverifiableCode);
+        _fixture.Logs.Lines.Should().Contain(l =>
+            l.Message.Contains("could not read the scope for a container-type route", StringComparison.Ordinal),
+            "the container-type rule's own fault path answered, not an earlier rule");
+        HandlerConfigReads().Should().Be(0, "the handler never ran");
+        _fixture.Graph.AllRequests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/spe/containertypes/{t}/permissions")]
+    [InlineData("POST", "/api/spe/containertypes/{t}/consumers")]
+    public async Task ATypeRoute_WhenTheConfigTableReadIsAFullPage_Is503_NeverJudgedOnATruncatedTable(string method, string path)
+    {
+        // Owner round 57 item 3: the container-type rule judges "every config of the type is reachable" over the WHOLE table.
+        // A read that returns the read limit (5000 rows) may be truncated. Here the row the cap drops is exactly the one
+        // that must refuse: a config of type T whose business unit is outside this environment's hierarchy. Judged on the
+        // 5000 rows it sees, the root admin would reach every config of T and act on a type another customer also carries.
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        for (var i = 3; i < SpeAdminTenantScope.WholeTableReadLimit; i++)
+        {
+            _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.Parse($"f0000000-0000-0000-0000-{i:D12}"), null, TypeX));
+        }
+
+        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.Parse("cf000000-0000-0000-0000-0000000000f0"),
+            Guid.Parse("1f000000-0000-0000-0000-0000000000ff"), TypeT));
+        StubContainers();
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA)),
+            HttpStatusCode.ServiceUnavailable);
+
+        problem["errorCode"].GetString().Should().Be(UnverifiableCode);
+        _fixture.Logs.Lines.Should().Contain(l =>
+            l.Message.Contains("rows (the read limit)", StringComparison.Ordinal)
+            && l.Message.Contains("container-type route", StringComparison.Ordinal),
+            "the container-type rule's own full-page refusal answered");
+        HandlerConfigReads().Should().Be(0, "the handler never ran");
+        _fixture.Graph.AllRequests.Should().BeEmpty();
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Census — every container route is in the table; none spells the container any other way
     // ─────────────────────────────────────────────────────────────────────────

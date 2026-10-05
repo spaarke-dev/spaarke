@@ -271,18 +271,23 @@ if ($zipSize -gt 100) {
 # tenant or a whole container type (security alerts / secure score; container-type permissions / consumers / register)
 # serve a root-unit admin. It is a DEPLOYMENT setting — never a Dataverse column a customer admin could edit — and it is
 # set ONLY for a Spaarke-operated environment: config/environments.json -> environments.<Environment>
-# .speAdminPlatformOperatorEnvironment = true. Declared true: the setting is made true (slot and production — a swap
-# carries it). Declared false or absent: a live 'true' FAILS the deploy — a customer environment must never carry it.
+# .speAdminPlatformOperatorEnvironment = true (today only 'dev' — owner round 57 item 1; Spaarke's production operator
+# environment adds it in the change that stands it up). Declared true: the setting is made true (slot and production — a
+# swap carries it). Declared false or absent: a live 'true' FAILS the deploy — a customer environment must never carry it.
+# The declaration must be a JSON BOOLEAN: any other type FAILS the deploy (round 57 item 3 — a [bool] cast made the string
+# "false" true). The parse lives in scripts/common/SpeAdminOperatorMarker.ps1, which Spaarke.ArchTests runs.
 Write-Host ""
 Write-Host "[pre-deploy] SPE admin Spaarke-operator marker..." -ForegroundColor Cyan
+. (Join-Path $PSScriptRoot "common/SpeAdminOperatorMarker.ps1")
 $markerName = "SpeAdmin__PlatformOperatorEnvironment"
-$markerDeclared = $false
 $markerConfigPath = Join-Path $RepoRoot "config/environments.json"
-if (Test-Path $markerConfigPath) {
-    $markerEntry = (Get-Content $markerConfigPath -Raw | ConvertFrom-Json).environments.$Environment
-    if ($null -ne $markerEntry -and $null -ne $markerEntry.PSObject.Properties['speAdminPlatformOperatorEnvironment']) {
-        $markerDeclared = [bool]$markerEntry.speAdminPlatformOperatorEnvironment
-    }
+try {
+    $markerDeclared = Get-SpeAdminOperatorMarkerDeclaration -RegistryPath $markerConfigPath -Environment $Environment
+} catch {
+    Write-Host ""
+    Write-Host "  OPERATOR MARKER DECLARATION INVALID — $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "  Write true only for a Spaarke-operated environment, false (or leave the key out) for every other one." -ForegroundColor Yellow
+    exit 1
 }
 
 $markerSlots = @($null)

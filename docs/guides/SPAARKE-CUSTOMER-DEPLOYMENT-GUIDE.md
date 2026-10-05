@@ -697,8 +697,8 @@ The BFF's SPE admin routes whose answer spans the **whole SharePoint Embedded te
 **whole container type** (its app permissions, consuming apps, registration) serve only a root-unit administrator of a
 **Spaarke-operated** environment. Under Model 1 every customer environment has its own root-unit administrator, so the
 root check alone cannot confine them; the deployment setting `SpeAdmin__PlatformOperatorEnvironment=true` marks Spaarke's
-own environments (dev, and Spaarke's own operator environment). It is a deployment setting, not a Dataverse column, because
-a customer administrator can edit a column.
+own environments — **today only `dev`** (round 57 item 1; Spaarke's production operator environment adds it in the change
+that stands it up). It is a deployment setting, not a Dataverse column, because a customer administrator can edit a column.
 
 - **Customer environments never carry it** — Model 1 shared stamp, Model 2 stamp, every per-customer setting set. Customer
   provisioning (the L2 control plane, the canonical app-settings catalog, `customer.bicep`, the Model 1 stack) does not emit
@@ -706,8 +706,14 @@ a customer administrator can edit a column.
   carry the setting at all. `SpeAdminOperatorEnvironmentMarkerGuardTests` fails the build if any of them names it.
 - **Missing = false = refused** (fail closed); a value that is not a boolean stops the BFF at startup.
 - **Spaarke-operated environments** declare `"speAdminPlatformOperatorEnvironment": true` in `config/environments.json`
-  (today: `dev`); `scripts/Deploy-BffApi.ps1` then sets the App Service setting on the slot(s) it deploys to, and FAILS a
-  deploy to an environment that carries the setting without declaring it.
+  (today only `dev`); `scripts/Deploy-BffApi.ps1` then sets the App Service setting on the slot(s) it deploys to, and FAILS a
+  deploy to an environment that carries the setting without declaring it. The declaration must be a JSON boolean (`true` /
+  `false`, unquoted): the deploy FAILS on any other type, because PowerShell reads the string `"false"` as true (round 57
+  item 3; the parse is `scripts/common/SpeAdminOperatorMarker.ps1`, which `SpeAdminOperatorEnvironmentMarkerGuardTests` runs).
+- **Standing up Spaarke's production operator environment** (the stopped `spaarke-bff-prod` / `demo`, which declares `false`
+  today) is the change that adds the marker: its registry key set to `true`, `param speAdminPlatformOperatorEnvironment =
+  true` in its `.bicepparam`, its name in `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, and the
+  App Service setting (the next `Deploy-BffApi.ps1` run sets it). Until then it refuses those routes (fail closed).
 - A customer root-unit admin calling those routes gets `403 spe.admin.deny.platform_operator_required` — the same answer as
   a leaf admin anywhere.
 
@@ -1290,6 +1296,7 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-01 | §6.5.2: a registration link that does not land in a target environment is NOT retried by this BFF (the job scans only `Dataverse:ServiceUrl`) and how App Insights shows it; the cost of leaving a stamp report-only | `unified-access-control-r2` task 141 second verifier fix round (`task/uac-r2-141-f2`) |
 | 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
 | 2026-10-05 | §5 H8 row + §7.5: H8's creation record is TYPED (`interStepState.speContainerCreation`) — round 41's gate-evidence record did not survive the Cosmos serializer, so production resumes created a second root container; a recorded type's containers are listed and adopted before a root container is created; container-type / root-container creations with no answer are recorded (type: QuarantineRequired `spe-container-type-creation-in-doubt` until an operator checks; root: waited for). §6.5.4: the SPE admin operator-environment marker — never on a customer stamp | `unified-access-control-r2` task 165, owner round 49 (`task/uac-r2-165-f2-v2`) |
+| 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 
 ---
 

@@ -36,5 +36,7 @@ param enableAiFoundry = false
 
 // Dev is a SPAARKE-OPERATED environment (unified-access-control-r2 task 165, owner round 49 item 1): the BFF's SPE admin
 // routes that span the whole SharePoint Embedded tenant or a whole container type serve its root-unit admin. A customer
-// stamp NEVER sets this (default false in model2-full.bicep; the setting is then not emitted at all).
+// stamp NEVER sets this (default false in model2-full.bicep; the setting is then not emitted at all). Dev is the ONLY
+// parameter file that sets it today (owner round 57 item 1): Spaarke's production operator environment adds this line to
+// its own parameter file in the change that stands it up.
 param speAdminPlatformOperatorEnvironment = true

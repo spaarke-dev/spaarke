@@ -30,7 +30,8 @@ public class SpeAdminOptions
     public int MaxContainersPerPage { get; set; } = 100;
 
     /// <summary>
-    /// Whether THIS deployment is a Spaarke-operated environment (dev, Spaarke's own operator environment) — the only
+    /// Whether THIS deployment is a Spaarke-operated environment (today only dev; Spaarke's production operator environment
+    /// carries it from the change that stands it up — owner round 57 item 1) — the only
     /// place the SPE admin routes whose answer spans the whole SharePoint Embedded tenant or a whole container type may be
     /// used (unified-access-control-r2 task 165, owner round 49 item 1): the security alerts and secure score, and the
     /// app-only container-type permission, consumer and register routes.

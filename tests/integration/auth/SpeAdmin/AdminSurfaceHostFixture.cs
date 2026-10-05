@@ -251,6 +251,12 @@ public sealed class FakeDataverseTables
     public ConcurrentDictionary<string, bool> FaultingQueries { get; } = new();
 
     /// <summary>
+    /// Entity sets whose WHOLE-TABLE QueryAsync (no filter) throws while their filtered reads still answer — so a test can
+    /// fault only a rule that reads the whole table (task 165, owner round 57 item 3: the container-type rule's own read).
+    /// </summary>
+    public ConcurrentDictionary<string, bool> FaultingUnfilteredQueries { get; } = new();
+
+    /// <summary>
     /// Ids a RetrieveAsync does not find although QueryAsync still returns the row — a record deleted between the
     /// tenant-scope filter's read and the handler's own read (the race the handlers' not-found paths answer). The value
     /// chooses HOW it is missing: false = the client returns null; true = it throws the Web API's 404.
@@ -262,6 +268,7 @@ public sealed class FakeDataverseTables
         _tables.Clear();
         Calls.Clear();
         FaultingQueries.Clear();
+        FaultingUnfilteredQueries.Clear();
         RetrieveMisses.Clear();
     }
 
@@ -269,6 +276,8 @@ public sealed class FakeDataverseTables
         _tables.GetOrAdd(entitySet, _ => new List<Dictionary<string, object?>>()).Add(row);
 
     public void FaultQueriesOn(string entitySet) => FaultingQueries[entitySet] = true;
+
+    public void FaultUnfilteredQueriesOn(string entitySet) => FaultingUnfilteredQueries[entitySet] = true;
 
     public IReadOnlyList<DataverseCall> CallsOn(string entitySet, params string[] operations) =>
         Calls.Where(c => c.EntitySet == entitySet && (operations.Length == 0 || operations.Contains(c.Operation)))
@@ -334,7 +343,8 @@ public sealed class FakeDataverseTables
 
         Calls.Enqueue(new DataverseCall("Query", entitySet, null, filter));
 
-        if (FaultingQueries.ContainsKey(entitySet))
+        if (FaultingQueries.ContainsKey(entitySet)
+            || (string.IsNullOrWhiteSpace(filter) && FaultingUnfilteredQueries.ContainsKey(entitySet)))
         {
             throw new HttpRequestException(
                 $"Simulated Dataverse fault on {entitySet}.", null, HttpStatusCode.ServiceUnavailable);
