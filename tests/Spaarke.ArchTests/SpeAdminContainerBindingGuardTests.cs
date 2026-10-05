@@ -707,7 +707,10 @@ public sealed class SpeAdminContainerBindingGuardTests
 
         // The backfill refuses a non-conforming name BEFORE it reads the vault (as the BFF does).
         var backfill = StripPowerShellComments(File.ReadAllText(Path.Combine(RepoRoot, "scripts", "Backfill-SpeContainerBusinessUnitStamp.ps1")));
-        var judged = backfill.IndexOf("Test-SpeConfigSecretNameAllowed $SecretName", StringComparison.Ordinal);
+        // The exact refusal shape — "if the name is not allowed, throw" — so a weakened condition does not pass as a judge.
+        var judge = Regex.Match(backfill,
+            @"if\s*\(\s*-not\s*\(\s*Test-SpeConfigSecretNameAllowed\s+\$SecretName\s*\)\s*\)\s*\{\s*throw\b", RegexOptions.IgnoreCase);
+        var judged = judge.Success ? judge.Index : -1;
         var vaultRead = backfill.IndexOf("az keyvault secret show", StringComparison.Ordinal);
         Assert.True(judged > 0 && vaultRead > judged,
             $"the backfill must judge the secret name before it reads the vault (judged at {judged}, read at {vaultRead})");

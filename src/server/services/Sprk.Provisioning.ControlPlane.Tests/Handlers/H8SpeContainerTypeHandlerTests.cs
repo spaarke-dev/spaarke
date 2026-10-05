@@ -910,15 +910,37 @@ public sealed class H8SpeContainerTypeHandlerTests
         };
         var repo = new FakeRepository(run, etag: "etag-35");
         var provisioner = FakeProvisioner.Success("dddddddd-0000-0000-0000-000000000002", "b!second");
-        var verifier = FakeVerifier.ReplicationPending("404 — still replicating");
+        var verifier = FakeVerifier.NotVerified("GET returned 403 Forbidden", isDelegatedTokenTrap: false);
         var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote());
 
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        result.Should().BeOfType<HandlerResult.Success>();
+        result.Should().BeOfType<HandlerResult.Failure>().Which.Class.Should().Be(FailureClass.QuarantineRequired);
         provisioner.CallCount.Should().Be(0, "the run already holds a container type and root container");
         verifier.LastRequest!.ContainerId.Should().Be(RootContainerId);
-        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNull("the unbound hand-off is withdrawn");
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNull(
+            "the unbound hand-off is withdrawn — even when this entry stops short of completing");
+    }
+
+    [Fact]
+    public async Task AC40_AnUnboundHandOff_IsWithdrawn_EvenWhenTheEntryStopsBeforeReadingItsRecord()
+    {
+        // The pre-round-41 pending path left SpeContainerId set; this entry fails reading the root business unit (5b) —
+        // its failure write must not carry the unbound hand-off forward.
+        var run = BuildRun();
+        run.InterStepState.ContainerTypeId = ContainerTypeId;
+        run.InterStepState.SpeContainerId = RootContainerId;
+        var repo = new FakeRepository(run, etag: "etag-40");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote(),
+            FakeRootBusinessUnitReader.Throws(new HttpRequestException("Dataverse 503")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode
+            .Should().Be(SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNull();
+        provisioner.CallCount.Should().Be(0);
     }
 
     [Fact]

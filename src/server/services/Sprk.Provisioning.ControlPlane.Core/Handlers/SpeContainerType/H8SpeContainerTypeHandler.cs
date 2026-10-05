@@ -354,6 +354,12 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
+        // (5a) InterStepState.SpeContainerId is H7's hand-off and is written ONLY by MarkCompleteAsync, after the bind (owner
+        //      round 41 item 1). H8 is not complete (5), so a value here predates the bind — the pre-round-41
+        //      replication-pending path wrote the UNBOUND container's id — and it is withdrawn before ANY write this entry
+        //      makes, so no persisted state of an incomplete H8 hands a container to H7.
+        run.InterStepState.SpeContainerId = null;
+
         // (5b) The root container's owner (unified-access-control-r2 task 165, owner round 35 item 1): every SPE
         //      container is stamped with its owning business unit at creation — here the ROOT business unit of the
         //      customer's Dataverse environment (H5 output; under D-12 the environment is the customer's own). Resolved
@@ -403,9 +409,6 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         //      stopped before completing: the 24h replication wait (7b), a quarantined verification, bind or KV step, or
         //      a crash. A re-entry RESUMES with it — it never calls ProvisionAsync for a recorded root container (that
         //      created a second container type and root container on every resume and orphaned the first one UNBOUND).
-        //      InterStepState.SpeContainerId is H7's hand-off and is written ONLY by MarkCompleteAsync, after the bind;
-        //      a value here predates the bind (the pre-round-41 replication-pending path wrote it), so it is withdrawn.
-        run.InterStepState.SpeContainerId = null;
         var recorded = ReadRecordedCreation(run);
         if (recorded.Inconsistent)
         {

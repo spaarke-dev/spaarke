@@ -21,8 +21,13 @@
 > backfill `-Bind` + `-Verify` listing every unbound container; the pre-deploy / onboarding gate in the onboarding guide),
 > `sprk_keyvaultsecretname` allow-listed (`spe-owning-app-`; 400 / 409 / read guards; `-Verify` script), security alerts
 > and secure score platform-operator-only, container-type permission/consumer reads under the every-config rule — plus the
-> verifier's items 4, 5 (the two unbitten guards) and 7 (the business-unit list projected). Still open: only the manual
-> live gates (§9, §11.16, §12.9 — the backfill `-Apply` / `-Bind` and the dev config rename among them).
+> verifier's items 4, 5 (the two unbitten guards) and 7 (the business-unit list projected). **Follow-up round f2-v1**
+> (branch `task/uac-r2-165-f2-v1`, **§13**) closes **owner round 41 items 1-5** — H8 records what it created and RESUMES
+> with it (the replication-pending path no longer orphans an unbound container, no second container type; the container is
+> handed to H7 only once bound; H7 waits for H8), unbound containers in no dashboard view, the three dev test containers'
+> `-Bind` decided, the dev config's secret-name repair as a dry-run/`-Apply`/`-Verify` script, the container-search total
+> guard proven, the creation guard following every route (the verifier's seeds H1/H2 now RED), the `\z` anchor, and the
+> H5/H8 root-business-unit read settled from code and put in live gate (d). Still open: only the manual live gates (§13.9).
 
 ---
 
@@ -1137,8 +1142,8 @@ binds or removes), the topology doc, `scripts/README.md`, and §11.2 of this not
 - **Search totals (scope discovered, D12 amended):** Graph's total is forwarded only to a platform operator from whose page
   nothing was removed AND only when there is no further page — a later page may hold unbound or another environment's
   containers, which no admin reaches. Container search never had a Graph total (the collection reports none).
-- **Dashboard (decision D18):** the aggregate `unattributedContainerCount` / storage stays in a platform operator's full
-  view: it names no container (no id, no name), reaches none, and is the alarm that a backfill / `-Bind` is owed.
+- **Dashboard (decision D18 — REVERSED by owner round 41 item 2, §13.2):** ~~the aggregate `unattributedContainerCount` /
+  storage stays in a platform operator's full view~~. Unbound containers are now in no dashboard view at all.
 - **Backfill:** `-Bind '<containerId>=<businessUnitId>'` (repeatable; split at the last `=`; validated against the
   hierarchy before any container is read; records win — a disagreeing `-Bind` is `BIND-CONFLICT`; never overwrites; unused
   → `BIND-UNUSED`); `-Verify` lists every still-unbound container ("Containers still UNBOUND (n)") and exits 1 on any, on a
@@ -1234,6 +1239,9 @@ null-check test (ADR-038).
 - ArchTests: `SpeAdminContainerBindingGuardTests` rewritten (§12.2), incl. the secret-prefix agreement.
 
 ### 12.9 Manual gates (main session; dev; live writes only with the owner's approval)
+
+> **SUPERSEDED by §13.9** (round 41: gate (a) step 3 is decided, gate (b) is a script and never deletes the config,
+> gate (d) also checks the root-business-unit read). Kept for the record.
 
 - **(a) Container binding gate — BLOCKS deploying this branch's BFF to an environment.** From the repo root, `az login`
   as an operator who can read Dataverse and the vault:
@@ -1419,10 +1427,16 @@ the BFF or L2 (the only csproj changes are the two `<Compile … Link>` items).
 
 ### 12.15 Decisions (this round)
 
-- **D18 — the dashboard's unattributed AGGREGATE stays in a platform operator's full view** (round 35 item 2 is about
-  reaching containers; the aggregate names none and is the backfill alarm).
-- **D19 — H8 binds after verification**, not at creation inside `ProvisionAsync` (the 24h addressability window); the
-  bind is still before anything durable consumes the container (KV write, H7 handoff, CompletedPhase).
+- **D18 — REVERSED by owner round 41 item 2 (§13.2).** It said the unattributed aggregate stays in a platform operator's
+  full view. Under Model 1 the root admin of ANY environment is that environment's platform operator, so an aggregate over
+  a shared type's unbound containers counted other customers' containers. Unbound containers now leave every view.
+- **D19 — H8 binds after verification**, not at creation inside `ProvisionAsync` (the 24h addressability window).
+  **Corrected in f2-v1 (owner round 41 item 1):** as first written ("the bind is still before anything durable consumes the
+  container — KV write, H7 handoff, CompletedPhase") this was FALSE on the replication-pending path — the unbound root
+  container's id was written to `InterStepState.SpeContainerId` (H7's hand-off) before any bind, and a resume re-created
+  the container type and root container, orphaning the first one unbound. Since §13.1 it is true on every path: H8 RECORDS
+  its creation at once (`InterStepState.ContainerTypeId` + the T6 gate naming the root container — not the hand-off),
+  resumes with it, writes `SpeContainerId` only on completion after the bind and the KV write, and H7 depends on H8.
 - **D20 — the secret-name rule is enforced in four layers** (POST/PUT 400; filter 409 on credential routes; the
   cache-front guards; the vault reads) and each is proven alone (§12.12) — the filter cannot cover the background job, and
   the vault-read guard cannot cover a cached client.
@@ -1437,6 +1451,7 @@ the BFF or L2 (the only csproj changes are the two `<Compile … Link>` items).
 ### 12.16 Not closed
 
 Only the manual live gates of §12.9 (live writes: the backfill `-Apply` / `-Bind`, the dev config rename, the
-post-deploy probes, the next real H8 run) and f1's §11.16 (i)/(k). One H8 behaviour outside this task is recorded for
-customer-provisioning-orchestration-r1 (resume after the 24h wait re-provisions) with its complete fix — it predates
-task 165 and is that project's handler logic.
+post-deploy probes, the next real H8 run) and f1's §11.16 (i)/(k). ~~One H8 behaviour outside this task is recorded for
+customer-provisioning-orchestration-r1~~ — **corrected by owner round 41 item 1: it was this task's scope (round 35 gave
+task 165 the H8 change) and deferring it contradicted the "scope discovered is added to this task" constraint and round
+15. It is FIXED in §13.1.**
