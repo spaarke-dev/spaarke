@@ -2109,6 +2109,67 @@ public class DocumentContainerRelocatorTests
         rig.Locks.Released.Should().BeEmpty();
     }
 
+    /// <summary>A lock store that answers every take, renewal and release "yes" — a store that has stopped excluding anyone.</summary>
+    private sealed class AlwaysTakenLocks : Sprk.Bff.Api.Services.Jobs.IIdempotencyService
+    {
+        public Task<bool> IsEventProcessedAsync(string eventId, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+        public Task MarkEventAsProcessedAsync(string eventId, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
+            => Task.CompletedTask;
+
+        public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task<bool> TryAcquireProcessingLockAsync(
+            string eventId, string ownerId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task<bool> RenewProcessingLockAsync(
+            string eventId, string ownerId, TimeSpan lockDuration, CancellationToken cancellationToken = default)
+            => Task.FromResult(true);
+
+        public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+
+    [Fact]
+    public async Task OneRelocator_NeverRunsTwoMovesOfOneDocumentAtOnce_EvenWhenItsLockStoreStopsExcluding()
+    {
+        // The relocator keeps its own record of the documents it is moving: a second move of the same document on the same
+        // instance (a caller that relocates in parallel) is refused even if the lock store answers "taken" to both.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var rig = new Rig(world);
+        var relocator = rig.NewRelocator(locks: new AlwaysTakenLocks());
+        var paused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        rig.BeforeDownload = async (_, _) =>
+        {
+            if (paused.TrySetResult())
+            {
+                await resume.Task;
+            }
+        };
+
+        try
+        {
+            var moving = Task.Run(() => relocator.RelocateIfMisplacedAsync(DocumentId, apply: true, RelocationPurpose.MakeSecure));
+            await paused.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+            var second = await relocator.RelocateIfMisplacedAsync(DocumentId, apply: true, RelocationPurpose.MakeSecure);
+
+            second.State.Should().Be(RelocationState.Failed);
+            second.Detail.Should().Contain("another relocation of this document is running");
+            rig.Copies.Should().BeEmpty();
+            resume.SetResult();
+            (await moving.WaitAsync(TimeSpan.FromSeconds(30))).State.Should().Be(RelocationState.Relocated);
+            rig.Copies.Should().ContainSingle();
+        }
+        finally
+        {
+            resume.TrySetResult();
+        }
+    }
+
     [Fact]
     public async Task ALockStoreThatAnswersTakenWithoutHoldingTheLock_RunsNothing()
     {

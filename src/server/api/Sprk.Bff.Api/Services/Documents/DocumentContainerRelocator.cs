@@ -1259,12 +1259,6 @@ public sealed class DocumentContainerRelocator
         Guid documentId, Entity row, string currentDrive, string currentItem, SettleSummary summary, RelocationPurpose purpose,
         CancellationToken ct)
     {
-        if (LockKnownLost(documentId))
-        {
-            summary.AddPending(LockLost(documentId, "before the re-copy of a source edited after its move"));
-            return new RecopyResult(summary, null);
-        }
-
         var changed = summary.Changed.OrderBy(c => c.Entry.At).ToList();
         var current = await ReadHistoryAsync(currentDrive, currentItem, VersionRecordOf(row), ct).ConfigureAwait(false);
         if (current.Failure is not null)
