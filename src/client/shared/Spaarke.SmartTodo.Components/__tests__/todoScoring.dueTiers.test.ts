@@ -14,9 +14,10 @@ const ORIGINAL_TZ = process.env.TZ;
 process.env.TZ = 'America/New_York';
 
 jest.mock('@spaarke/ui-components', () => ({
-  parseDueDate: jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal').parseDueDate,
-  daysBetweenLocalMidnight: jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal')
-    .daysBetweenLocalMidnight,
+  // The REAL shared date primitives (parseDueDate, daysBetweenLocalMidnight and
+  // the task-081 tier function dueUrgencyForDays) from source — the whole
+  // module, so a newly used export cannot silently arrive as undefined.
+  ...jest.requireActual('../../Spaarke.UI.Components/src/utils/dateLocal'),
 }));
 
 import { computeDueLabel, parseDueDate } from '../src/utils/todoScoring';

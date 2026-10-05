@@ -14,6 +14,8 @@
 import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from './ConfigurationLoader';
 import { logger } from '../utils/logger';
+import { computeEventDueDays } from '../utils/eventDueDate';
+import { parseDueDate } from '../../../../shared/Spaarke.UI.Components/src/utils/dateLocal';
 import { injectContextFilter, applyMaxItems, substituteParameters, type ISubstitutionParams } from './fetchXmlBuilders';
 
 // VHVU-050 — pure FetchXML-string helpers now live in ./fetchXmlBuilders.
@@ -280,27 +282,12 @@ export async function resolveQuery(inputs: IQueryResolutionInputs): Promise<IRes
 }
 
 /**
- * Calculate days until a due date from today
- */
-function calculateDaysUntilDue(dueDate: Date): {
-  daysUntilDue: number;
-  isOverdue: boolean;
-} {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate);
-  due.setHours(0, 0, 0, 0);
-  const diffMs = due.getTime() - today.getTime();
-  const daysUntilDue = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  return { daysUntilDue, isOverdue: daysUntilDue < 0 };
-}
-
-/**
  * Map a Dataverse entity record to IEventRecord
  */
 function mapRecordToEvent(record: Record<string, unknown>): IEventRecord {
-  const dueDate = record.sprk_duedate ? new Date(record.sprk_duedate as string) : new Date();
-  const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
+  // DateOnly `sprk_duedate` → LOCAL midnight; calendar-day difference (task 081 / H2).
+  const dueDate = parseDueDate(record.sprk_duedate as string | undefined) ?? new Date();
+  const { daysUntilDue, isOverdue } = computeEventDueDays(dueDate);
 
   // Event type from formatted value annotation or FetchXML link-entity alias
   const eventTypeName =

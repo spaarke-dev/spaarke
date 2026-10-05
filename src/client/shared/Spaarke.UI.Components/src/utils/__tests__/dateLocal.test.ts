@@ -14,7 +14,7 @@ const ORIGINAL_TZ = process.env.TZ;
 // Must be set before the import below (Date/Intl read TZ at construction time).
 process.env.TZ = 'America/New_York';
 
-import { parseDueDate, daysBetweenLocalMidnight } from '../dateLocal';
+import { parseDueDate, daysBetweenLocalMidnight, dueUrgencyForDays } from '../dateLocal';
 
 afterAll(() => {
   if (ORIGINAL_TZ === undefined) {
@@ -72,5 +72,24 @@ describe('daysBetweenLocalMidnight', () => {
 
     const due = parseDueDate(tomorrowIso)!;
     expect(daysBetweenLocalMidnight(today, due)).toBe(1);
+  });
+});
+
+describe('dueUrgencyForDays — the one 3/7/10 tier function (task 081 / C-17)', () => {
+  it.each([
+    [-1, 'overdue'],
+    [0, '3d'],
+    [3, '3d'],
+    [4, '7d'],
+    [7, '7d'],
+    [8, '10d'],
+    [10, '10d'],
+    [11, 'none'],
+  ] as const)('%i day(s) → %s', (days, tier) => {
+    expect(dueUrgencyForDays(days)).toBe(tier);
+  });
+
+  it('no due date → none', () => {
+    expect(dueUrgencyForDays(null)).toBe('none');
   });
 });

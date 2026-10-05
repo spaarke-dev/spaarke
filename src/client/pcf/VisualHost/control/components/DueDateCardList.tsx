@@ -18,6 +18,7 @@ import type { IChartDefinition } from '../types';
 import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { resolveQuery, injectContextFilter, type ISubstitutionParams } from '../services/ViewDataService';
 import { logger } from '../utils/logger';
+import { mapEventToCardProps } from '../utils/eventDueDate';
 
 export interface IDueDateCardListVisualProps {
   chartDefinition: IChartDefinition;
@@ -26,76 +27,6 @@ export interface IDueDateCardListVisualProps {
   onClickAction?: (recordId: string, entityName?: string, recordData?: Record<string, unknown>) => void;
   onViewListClick?: () => void;
   fetchXmlOverride?: string;
-}
-
-/**
- * Calculate days until due date from today
- */
-function calculateDaysUntilDue(dueDate: Date): {
-  daysUntilDue: number;
-  isOverdue: boolean;
-} {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(dueDate);
-  due.setHours(0, 0, 0, 0);
-  const diffMs = due.getTime() - today.getTime();
-  const daysUntilDue = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
-  return { daysUntilDue, isOverdue: daysUntilDue < 0 };
-}
-
-/**
- * Map a Dataverse event record to EventDueDateCard props
- */
-function mapEventToCardProps(record: Record<string, unknown>): IEventDueDateCardProps {
-  // v1.4.15 — Date selection for both the displayed date AND the days-left
-  // calc honors the chart's "5-day window" semantics:
-  //   - If sprk_duedate is today or in the future, use it (planned date is
-  //     still the active deadline).
-  //   - Else if sprk_finalduedate is today or in the future, use that
-  //     (the extended date is now the active deadline — sprk_duedate has
-  //     passed but the event is still within the 5-day window via finalduedate).
-  //   - Else fall back to whichever date exists (overdue edge case).
-  // This matches the FetchXML `next-x-days` OR filter so the card always
-  // shows + counts down to whichever date kept the event qualified.
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
-
-  const duedateStr = record.sprk_duedate as string | undefined;
-  const finalduedateStr = record.sprk_finalduedate as string | undefined;
-  const duedate = duedateStr ? new Date(duedateStr) : null;
-  const finalduedate = finalduedateStr ? new Date(finalduedateStr) : null;
-
-  let dueDate: Date;
-  if (duedate && duedate.getTime() >= todayMs) {
-    dueDate = duedate;
-  } else if (finalduedate && finalduedate.getTime() >= todayMs) {
-    dueDate = finalduedate;
-  } else {
-    dueDate = duedate || finalduedate || new Date();
-  }
-
-  const { daysUntilDue, isOverdue } = calculateDaysUntilDue(dueDate);
-
-  // Event type from FetchXML link-entity alias or formatted value
-  const eventTypeColor = (record['eventtype.sprk_eventtypecolor'] as string) || undefined;
-  const eventTypeName =
-    (record['_sprk_eventtype_ref_value@OData.Community.Display.V1.FormattedValue'] as string) ||
-    (record['eventtype.sprk_name'] as string) ||
-    'Event';
-
-  return {
-    eventId: (record.sprk_eventid as string) || '',
-    eventName: (record.sprk_eventname as string) || 'Untitled Event',
-    eventTypeName,
-    dueDate,
-    daysUntilDue,
-    isOverdue,
-    eventTypeColor: eventTypeColor || undefined,
-    description: record.sprk_description as string | undefined,
-    assignedTo: (record['_sprk_assignedto_value@OData.Community.Display.V1.FormattedValue'] as string) || undefined,
-  };
 }
 
 export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
@@ -150,7 +81,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
         // Execute the resolved FetchXML (from override, custom, or view)
         const encodedFetchXml = encodeURIComponent(fetchXml);
         const result = await webApi.retrieveMultipleRecords(resolved.entityName, `?fetchXml=${encodedFetchXml}`);
-        setCards(result.entities.map(mapEventToCardProps));
+        setCards(result.entities.map(record => mapEventToCardProps(record)));
       } else {
         // Fallback: FetchXML query with link-entity for event type
         // Uses attribute names (not navigation property names) for reliable cross-environment support
@@ -185,7 +116,7 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
 
         const encodedFallback = encodeURIComponent(fallbackFetchXml);
         const result = await webApi.retrieveMultipleRecords(entityName, `?fetchXml=${encodedFallback}`);
-        setCards(result.entities.map(mapEventToCardProps));
+        setCards(result.entities.map(record => mapEventToCardProps(record)));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
