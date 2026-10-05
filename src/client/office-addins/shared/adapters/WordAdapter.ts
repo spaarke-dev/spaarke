@@ -720,6 +720,11 @@ export class WordAdapter implements IHostAdapter {
       // task 036 / FR-15: `Office.context.mailbox` does not exist in Word — always false. Never
       // reachable via a `hostType` conditional in a view; the view reads this flag.
       canComposeEmail: false,
+      // task 096 (UAT round 4): Word's Email tab — an in-pane form (shared compose engine) that attaches the
+      // open document. It needs no Office API beyond what the pane already uses, so the only gate is the build
+      // setting: held OFF until the send route authorizes each attachment and association (owner 2026-10-04,
+      // task 097 note §6). Read per call, so a test can switch it.
+      canEmailFromPane: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true',
       // task 040 / FR-19: linked-todos is spec'd Outlook-only (spec.md Assumptions) — Word has no
       // `sprk_communication` counterpart for the banner's query to key off.
       canShowLinkedTodos: false,

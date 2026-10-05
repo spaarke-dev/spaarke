@@ -134,6 +134,17 @@ export interface HostCapabilities {
    */
   canComposeEmail: boolean;
   /**
+   * Whether the pane offers its own **Email tab** — an in-pane email form, built from the shared Spaarke compose
+   * engine, that sends the open document as an ATTACHMENT from the user's own mailbox and records the email
+   * against the document's related record (spaarkeai-word-add-in-r1 task 096, owner UAT round 4 items 6-8).
+   *
+   * True for Word: the pane's item is a document, which the form attaches by its `sprk_document` id. False for
+   * Outlook, by the owner's 2026-10-04 decision ("Outlook unchanged"): the pane's item there is itself an email,
+   * and Send Email keeps opening Outlook's native compose window ({@link canComposeEmail}). The tab table
+   * (`TaskPaneNavigation.getAvailableTabs`) gates the Email tab on this flag, never on `hostType` (NFR-10).
+   */
+  canEmailFromPane: boolean;
+  /**
    * Whether the host can show the linked-to-dos indicator banner (`LinkedTodosBanner`, count of
    * `sprk_todo` rows carrying `sprk_regardingcommunication` for the current item) —
    * spaarkeai-word-add-in-r1 task 040 / FR-19, formalizing smart-todo-decoupling-r3 FR-28 / A-1.

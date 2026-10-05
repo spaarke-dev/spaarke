@@ -23,7 +23,7 @@ import {
   WeatherSunnyRegular,
   ColorRegular,
 } from '@fluentui/react-icons';
-import { getAvailableTabs, type NavigationTab } from './TaskPaneNavigation';
+import { getAvailableTabs, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
 import type { ThemePreference } from '../hooks/useTheme';
 import { useAnnounce } from '../hooks/useAnnounce';
@@ -33,7 +33,7 @@ import { useAnnounce } from '../hooks/useAnnounce';
  *
  * Consolidates what used to be two stacked rows (logo/actions header + tab row) into
  * ONE toolbar (email-communication-intelligence-r2 UI feedback, owner 2026-09-02):
- *   [ logo ] [ Save ] [ Create To Do ] ……… [ ⋮  → Theme · Settings · Account ]
+ *   [ Save ] [ To Do ] [ Find ] [ Email (Word, task 096) ] ……… [ ⋮  → Theme · Settings · Account ]
  *
  * Tabs are left-aligned; the per-user tools (theme/settings/account) collapse into a
  * three-dots overflow on the right. Fluent UI v9 only (ADR-021).
@@ -78,6 +78,8 @@ const useStyles = makeStyles({
 
 export interface TaskPaneToolbarProps {
   hostType?: HostType;
+  /** Task 096: host capabilities for capability-gated tabs (the Word-only Email tab). */
+  capabilities?: Partial<TabCapabilities>;
   /** Whether to render the tab strip (hidden pre-auth). */
   showTabs?: boolean;
   selectedTab?: NavigationTab;
@@ -112,6 +114,7 @@ function activeBadge(isActive: boolean): React.ReactElement | null {
 
 export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   hostType = 'outlook',
+  capabilities,
   showTabs = true,
   selectedTab,
   onTabChange,
@@ -124,7 +127,7 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   onThemeChange,
 }) => {
   const styles = useStyles();
-  const tabs = getAvailableTabs(hostType);
+  const tabs = getAvailableTabs(hostType, capabilities);
   const hasOverflow = Boolean(onThemeChange || onSettings || (isAuthenticated && (userName || userEmail)));
 
   // NFR-11: announce tab changes to screen readers via the React-owned live region

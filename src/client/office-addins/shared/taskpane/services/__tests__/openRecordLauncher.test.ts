@@ -17,7 +17,6 @@ import {
   openDesktopUrl,
   openFileUrl,
   openRecord,
-  openUrlInBrowserWindow,
 } from '../openRecordLauncher';
 
 /** Runs `fn` with `SPAARKE_APP_NAME` set to `value` (`undefined` = unset), restoring it afterwards. */
@@ -263,23 +262,6 @@ describe('openRecord', () => {
     expect(windowOpenSpy).not.toHaveBeenCalled();
 
     windowOpenSpy.mockRestore();
-  });
-});
-
-describe('openUrlInBrowserWindow (task 086 / FR-15 — the Word Send Email choice reuses this opener)', () => {
-  it('calls the default opener (Office.context.ui.openBrowserWindow) with the given url', () => {
-    const openBrowserWindowSpy = jest.fn();
-    (global.Office.context.ui as unknown as { openBrowserWindow: jest.Mock }).openBrowserWindow = openBrowserWindowSpy;
-
-    openUrlInBrowserWindow('https://outlook.office.com/mail/deeplink/compose?subject=Hi');
-
-    expect(openBrowserWindowSpy).toHaveBeenCalledWith('https://outlook.office.com/mail/deeplink/compose?subject=Hi');
-  });
-
-  it('calls an injected opener instead of the default when one is supplied', () => {
-    const opener = jest.fn();
-    openUrlInBrowserWindow('https://example.test/', opener);
-    expect(opener).toHaveBeenCalledWith('https://example.test/');
   });
 });
 

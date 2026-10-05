@@ -522,8 +522,8 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
     if (!form.environmentId) newErrors.environmentId = "Environment is required.";
     if (!form.containerTypeId.trim()) newErrors.containerTypeId = "Container Type ID is required.";
     if (!form.owningAppId.trim()) newErrors.owningAppId = "Owning App ID is required.";
-    if (!form.keyVaultSecretName.trim())
-      newErrors.keyVaultSecretName = "Key Vault secret name is required.";
+    // Key Vault secret name is optional: SPE Admin authenticates as the BFF's own (managed) identity and
+    // reads no credential from this config. Requiring it only forced a placeholder value.
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -711,22 +711,21 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
               {/* ── Key Vault Secret Name ── */}
               <div className={styles.formFullWidth}>
                 <Field
-                  label="Key Vault Secret Name"
-                  required
-                  hint="Enter only the Key Vault secret name — never paste or enter the actual secret value here."
+                  label="Key Vault Secret Name (not used)"
+                  hint="Leave blank. Never paste a secret value here."
                   validationMessage={errors.keyVaultSecretName}
                   validationState={errors.keyVaultSecretName ? "error" : "none"}
                 >
                   <Input
                     value={form.keyVaultSecretName}
                     onChange={(_e, d) => setField("keyVaultSecretName", d.value)}
-                    placeholder="e.g. spe-owning-app-secret"
                     aria-describedby="kv-secret-hint"
                   />
                 </Field>
                 <span id="kv-secret-hint" className={styles.secretNameHelper}>
-                  The system retrieves the actual credential from Azure Key Vault at runtime using this name.
-                  Do not enter the credential value itself.
+                  Not used. SPE Admin works as the BFF&apos;s own managed identity, so no secret is read
+                  from this configuration. Container access comes from granting that identity on the
+                  container type (Consuming Tenants panel).
                 </span>
               </div>
 

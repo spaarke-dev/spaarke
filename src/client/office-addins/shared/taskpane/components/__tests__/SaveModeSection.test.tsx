@@ -87,12 +87,14 @@ function Harness({
   identity,
   onRetry,
   theme = webLightTheme,
+  initialChoice = null,
 }: {
   identity: DocumentIdentityState | undefined;
   onRetry?: () => void;
   theme?: Theme;
+  initialChoice?: SaveModeChoice | null;
 }): React.ReactElement {
-  const [choice, setChoice] = React.useState<SaveModeChoice | null>(null);
+  const [choice, setChoice] = React.useState<SaveModeChoice | null>(initialChoice);
   const resolution = resolveSaveMode(identity, choice);
   return (
     <FluentProvider theme={theme}>
@@ -110,21 +112,23 @@ function Harness({
 const target = () => screen.getByTestId('target').textContent;
 
 describe('SaveModeSection (task 024)', () => {
-  it('resolved: states that Save adds a new version of the named document, and offers an explicit override', () => {
+  it('resolved (version mode): renders no radios and no controls — Save just saves a new version (task 095)', () => {
     render(<Harness identity={RESOLVED} />);
 
-    const versionRadio = screen.getByRole('radio', { name: 'A new version of “Engagement Letter”' });
-    expect(isChecked(versionRadio)).toBe(true);
-    expect(screen.getByText(/Save will add a new version to “Engagement Letter” in Spaarke/)).toBeTruthy();
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('button')).toBeNull();
     expect(target()).toBe(JSON.stringify(VERSION));
+  });
 
-    fireEvent.click(screen.getByRole('radio', { name: 'A new document' }));
+  it('create mode offers "Keep as version", which returns to version mode (task 095)', () => {
+    render(<Harness identity={RESOLVED} initialChoice="new" />);
 
-    expect(isChecked(screen.getByRole('radio', { name: 'A new document' }))).toBe(true);
     expect(screen.getByText(/The existing document is not changed/)).toBeTruthy();
     expect(target()).toBe(JSON.stringify(CREATE));
 
-    fireEvent.click(versionRadio);
+    fireEvent.click(screen.getByRole('button', { name: 'Keep as version' }));
+
+    expect(screen.queryByRole('button', { name: 'Keep as version' })).toBeNull();
     expect(target()).toBe(JSON.stringify(VERSION));
   });
 
@@ -188,7 +192,7 @@ describe('SaveModeSection (task 024)', () => {
   });
 
   it('renders under the dark theme (ADR-021 — colors come from theme tokens)', () => {
-    render(<Harness identity={RESOLVED} theme={webDarkTheme} />);
-    expect(isChecked(screen.getByRole('radio', { name: 'A new version of “Engagement Letter”' }))).toBe(true);
+    render(<Harness identity={RESOLVED} initialChoice="new" theme={webDarkTheme} />);
+    expect(screen.getByRole('button', { name: 'Keep as version' })).toBeTruthy();
   });
 });

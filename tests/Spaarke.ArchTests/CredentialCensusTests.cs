@@ -65,6 +65,10 @@ public class CredentialCensusTests
     //      why the line reads as it now does.
     //
     // =============================================================================================
+    // REMOVED 2026-10-04 (sdap-SPE-admin-app-r2): SpeAdminTokenProvider.cs (1 site) and
+    // SpeAdminGraphService.cs (2 sites). SPE Admin now authenticates as the BFF's own identity
+    // (IGraphClientFactory.ForApp) or delegated; it constructs no confidential client. ADR-028 E-1 no
+    // longer covers any SpeAdmin path. A site reappearing in either file fails this census.
     private static readonly IReadOnlyList<CensusEntry> Census = new[]
     {
         new CensusEntry(
@@ -87,25 +91,7 @@ public class CredentialCensusTests
                 + "already possible here. Different tenant and different app registration from the BFF's, "
                 + "so it cannot use the BFF's credential provider."),
 
-        new CensusEntry(
-            FileName: "SpeAdminTokenProvider.cs",
-            Sites: 1,
-            Identity: "Per-container-type OWNING APPLICATION registrations (not the BFF's)",
-            CredentialSource: "Client secret fetched from Key Vault per request, by a secret name held in Dataverse",
-            Reason:
-                "ADR-028 E-1. These are other customers' application identities; MI-FIC would have to be "
-                + "federated onto each of their own app registrations, which is not this project's to do."),
 
-        new CensusEntry(
-            FileName: "SpeAdminGraphService.cs",
-            Sites: 2,
-            Identity: "Per-business-unit OWNING APPLICATION registrations (not the BFF's)",
-            CredentialSource: "Client secret fetched from Key Vault, by a name resolved from Dataverse configuration",
-            Reason:
-                "ADR-028 E-1, same as SpeAdminTokenProvider. TWO sites in this file — the count is "
-                + "explicit so that removing one and adding another elsewhere in the file cannot pass "
-                + "unnoticed. These are Azure.Identity credentials rather than MSAL clients; the census "
-                + "counts confidential clients by function, not by SDK."),
 
         new CensusEntry(
             FileName: "ReportingEmbedService.cs",

@@ -185,6 +185,23 @@ public sealed class GraphWireMockFixture : IDisposable
     }
 
     /// <summary>
+    /// Serves <paramref name="jsonBody"/> for a PUT — used for create-or-replace resources such as an
+    /// <c>applicationPermissionGrant</c>, where the VERB is part of the contract (task 041 measured the
+    /// POST alternative failing live).
+    /// </summary>
+    public GraphWireMockFixture StubPut(string pathPrefix, string jsonBody, int statusCode = 201)
+    {
+        _server
+            .Given(Request.Create().WithPath(new WireMock.Matchers.WildcardMatcher($"{pathPrefix}*")).UsingPut())
+            .RespondWith(Response.Create()
+                .WithStatusCode(statusCode)
+                .WithHeader("Content-Type", "application/json")
+                .WithBody(jsonBody));
+
+        return this;
+    }
+
+    /// <summary>
     /// Serves <paramref name="jsonBody"/> for a POST — used for <c>/search/query</c> and other
     /// action endpoints where the REQUEST BODY is the thing worth asserting.
     /// </summary>

@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>SECURITY: /api/communications/send attaches any document and links any record without checking the caller — authorize both per item, and fix the outbound archive writing a document id into sprk_graphitemid</title>
+    <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization change on a live BFF route (`.cs`), plus a data-correctness fix and tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security: a per-item authorization gap reachable by every signed-in user; must reuse the existing evaluators exactly and fail closed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the shared Communication module (`Services/Communication/**`, `Api/CommunicationEndpoints.cs`, `Api/Filters/CommunicationAuthorizationFilter.cs`) — run `/conflict-check` first; other projects (email-communication-intelligence-r2) own this surface.</parallel-reason>
+    <deps>096</deps>
+    <tags>bff-api, security, authorization, communication, integration-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Found by task 096's code review (2026-10-04, `notes/096-email-tab.md`); owner decision the same day: *"Fix it here before shipping"* and fix the archive bug in the same task. The Word Email tab (096) ships in the same deploy as this fix.</prompt>
+
+  <role>SPAARKE BFF security engineer: endpoint-filter authorization (ADR-008), OBO vs app-only access (ADR-028), SPE file access (ADR-007).</role>
+
+  <goal>`POST /api/communications/send` (and `/send-bulk`, which shares the code) sends only documents the caller can read and associates the communication only with records the caller may link to; anything else is refused with a clear reason before any mail is sent. The outbound archive stores correct Graph identifiers.</goal>
+
+  <context>
+    <background>
+      - **The gap (096 review)**: `CommunicationAuthorizationFilter` (`Api/Filters/CommunicationAuthorizationFilter.cs`) only
+        requires an authenticated caller with an `oid`. `CommunicationService` downloads each `AttachmentDocumentIds` entry
+        with the **app's** identity (`CommunicationService.cs` ~`:1074`/`:1427` → the attachment fetch) and never checks
+        that the caller can read the `sprk_document`. `Associations` are written to the `sprk_communication` row
+        (`MapAssociationFieldsAsync`, ~`:874`) without checking the caller's access to those records. So any signed-in user
+        can email any document by id and file an email against any record — an IDOR, on both the `User` and `SharedMailbox`
+        send modes.
+      - **Reuse the existing evaluators — do not invent new ones**: per-document Read — the repo's document access check
+        (`DocumentAuthorizationFilter` / `IAiAuthorizationService` per-document, or `CallerRecordAccessProbe` +
+        `OperationAccessPolicy` as tasks 064/084 used; `SpeFileStore.DownloadFileAsUserAsync` is the reviewer's suggestion
+        for reading the file AS the user). Per-record link — the same probe/policy the Office paths use for filing
+        (`entity.associate_document`-style AppendTo, task 084's `EvaluateFilingAccessAsync` shape, or the read gate task 064
+        used for To Do sources — choose and justify). Denied and not-found must be indistinguishable (task 064's rule).
+      - **The archive bug**: with `ArchiveToSpe` on, the outbound archive writes a `sprk_document` id into
+        `sprk_graphitemid` (096 note). Find the write (around `:446-480` and `ArchiveToSpeAsync`), fix it to store the Graph
+        item id, regression-test it.
+      - **Callers to keep working**: the Spaarke email page (`SendEmailPage` / `EmailComposer`), the Word Email tab (096,
+        `SendMode.User`, one attachment = the user's own saved document, one association = its record), any server/AI caller
+        of `CommunicationService` (find them — an app-only internal caller must not start failing; decide per caller and state
+        it).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">Authorization happens before any mail is sent: refuse the whole request (403, a stable error code, the offending item NOT named when that would confirm existence) if any attachment or association is not permitted. Fail closed when the check itself fails (503/500 — never send).</constraint>
+    <constraint source="ADR-028">User-initiated sends are authorized as the caller (OBO identity / caller probe). Do not widen any role; do not add app-only reads to make a check pass.</constraint>
+    <constraint source="this task">Reuse the existing access evaluators named in the background; no new authorization service. If none fits, ESCALATE (trigger 1).</constraint>
+    <constraint source="this task">`/send-bulk` gets the same checks (shared code path) — verify, do not assume.</constraint>
+    <constraint source="CLAUDE.md §10">BFF obligations: placement stated; publish size owed to the main session (this worktree is not comparable); CVE check; `/conflict-check` before editing the Communication module.</constraint>
+    <constraint source="ADR-038">Tests in KEEP paths: contract tests for the route (caller CAN read → 200; CANNOT read one attachment → 403 and no send; association not permitted → 403 and no send; probe failure → fail closed), a seeded negative control (remove the check → the 403 tests fail), and a regression test for the archive field. No `Mock&lt;HttpMessageHandler&gt;`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">A send whose every attachment the caller can read and every association the caller may link to succeeds as before (User and SharedMailbox modes).</criterion>
+    <criterion testable="true">One attachment the caller cannot read (or that does not exist) → 403 with a stable code, nothing sent, no `sprk_communication` row; denied and not-found are indistinguishable.</criterion>
+    <criterion testable="true">One association the caller may not link to → 403, nothing sent, no row.</criterion>
+    <criterion testable="true">The access check itself failing → the request fails closed (no send).</criterion>
+    <criterion testable="true">`/send-bulk` enforces the same checks (test).</criterion>
+    <criterion testable="true">Seeded negative control: with the new check removed, the 403 tests fail; restored, they pass. Both outputs recorded.</criterion>
+    <criterion testable="true">Archive: an outbound archive stores the Graph item id (not a `sprk_document` id) in `sprk_graphitemid` — regression test red before, green after.</criterion>
+    <criterion testable="true">Every other caller of `CommunicationService` is listed with its verdict (unaffected / now checked / app-only by design, with reason).</criterion>
+    <criterion testable="true">Gates: build 0/0; Communication + Office test scopes green; ArchTests green (incl. `RouteAuthorizationGuardTests` — add the route to its census if it is not governed); CVE clean.</criterion>
+    <criterion testable="true">Live (after deploy): the Word Email tab still sends the user's own document; an attempt with a document id the user cannot read is refused. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>No existing evaluator can answer "may this caller read document X / link record Y" for these entity types — STOP and report; a new authorization service is a design decision for the owner.</trigger>
+    <trigger>An existing internal (server/AI) caller of `CommunicationService` legitimately sends documents the initiating user cannot read — STOP and report it before changing its behaviour.</trigger>
+    <trigger>`/conflict-check` shows another active project editing these Communication files — coordinate before editing.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>`/conflict-check`; read the filter, the service's attachment/association/archive paths, and every caller.</step>
+    <step>Reproduce the gap in a contract test first (it must pass a send it should refuse).</step>
+    <step>Add the per-attachment Read and per-association link checks using existing evaluators; fail closed; tests; seeded control.</step>
+    <step>Fix the archive field; regression test.</step>
+    <step>Gates; `notes/097-communications-send-authorization.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The send route, the per-document and per-record access evaluators (tasks 032/064/084) and the user-context file read (`SpeFileStore.DownloadFileAsUserAsync`) exist.</existing>
+    <extension>Yes — adds checks to the existing route using existing evaluators, and corrects one field write. No new route or service.</extension>
+    <cost-of-doing-nothing>Any signed-in user can email any Spaarke document by id and file mail against any record; the Word Email tab would ship as a new caller of that hole.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Filters/CommunicationAuthorizationFilter.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Api/CommunicationEndpoints.cs</file>
+    <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/DriveItemOperations.cs</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/097-communications-send-authorization.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/096-email-tab.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/064-todo-source-gate.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/084-pickable-equals-savable.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+    <file>projects/spaarkeai-word-add-in-r1/notes/097-communications-send-authorization.md</file>
+  </outputs>
+
+  <notes>
+    2026-10-04: BLOCKED on escalation trigger 3 before any code edit. `/conflict-check` found that
+    unified-access-control-r2 task 161 (#1100), commits 7f9159027 and 0f8cc61ea, merged and pushed to
+    origin/integ/uac-r2-batch4 but not on master, already authorizes /send and /send-bulk. It checks Read on
+    every attachment, AppendTo on every association, sends one 403 code for unknown and denied ids, fails
+    closed, and checks the bulk request once. It reuses existing evaluators through
+    CommunicationRecordAuthorizationFilter. UAC task 146 also edits ArchiveOutboundAttachmentsAsync but does
+    not fix the archive bug. Archive bug confirmed at CommunicationService.cs:2330/2342. The fix should use
+    the SOURCE document's own drive and item ids, not ArchiveContainerId. Recommendation: do not deploy the
+    Word Email tab until UAC-r2 is on master; re-scope 097 to the archive fix (after UAC lands) and the live
+    check. All acceptance criteria are OPEN. Details:
+    notes/097-communications-send-authorization.md.
+    OWNER DECISION 2026-10-04 (option 1): "yes we can follow your recommendation - ensure we have this fully documented". The authorization is UAC-r2 task 161's (one implementation). The Word Email tab (096) is held off by a build setting (ADDIN_EMAIL_TAB_ENABLED, default off) until 161 is on master and deployed. 097 is re-scoped to the archive fix (after UAC-r2 task 146 lands on the same lines) plus the live checks. Full record: notes/097-communications-send-authorization.md section 6.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

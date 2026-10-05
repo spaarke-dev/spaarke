@@ -176,10 +176,9 @@ Three further reasons, all pointing the same way:
 - **Consent surface.** Model 2 customers consent to the *owning* app. Merged, they are consenting to
   something that also carries the BFF's API scopes, redirect URIs, and Dataverse/Mail permissions.
 - **Auth v4.** The BFF identity is deliberately secret-free ([ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) A4).
-  Owning apps are exception **E-1** and may carry secrets (the BFF's `SpeAdminGraphService` still signs in
-  as owning apps with Key Vault client secrets — T250). Merging drags that exception back onto the
-  identity auth-v4 worked to clean. Since task 248 the L2 control plane needs no owning-app secret or
-  certificate at all — see "Owning-app credential" below.
+  Owning apps are exception **E-1** and may carry secrets (SPE Admin no longer uses any — §6B). Merging drags that
+  exception back onto the identity auth-v4 worked to clean. Since task 248 the L2 control plane needs no owning-app
+  secret or certificate either — see "Owning-app credential" below.
 
 > ⚠️ **The existing app is the merged shape.** `170c98e1…` is named **`SDAP-PCF-CLIENT`** while being
 > the container type's owning app. That is the artifact to unwind, not the pattern to extend — and
@@ -285,6 +284,12 @@ certificate and no client secret**; nothing is stored in any Key Vault.
 
 The admin-center creation flow prompts for a client secret on the owning app; none was added, and none
 should be. Setup procedure: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](../guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).
+
+> ⚠️ **Grant the identity the BFF actually authenticates as.** With `Graph:ManagedIdentity:Enabled=true`
+> (every Azure environment), the BFF's app-only Graph client is its **user-assigned managed identity**, not
+> its app registration — on dev, appId `5967251e…` (`mi-bff-api-dev`), not `1e40baad…`. A grant naming the
+> app registration does not give that client access. (Verified 2026-10-04: dev's `Spaarke PAYGO 1`
+> registration carries `full` grants for both.) This is also the identity SPE Admin uses — §6B.
 
 ---
 
@@ -423,15 +428,25 @@ sprk_specontainertypeconfigid · sprk_containertypeid · sprk_owningappid
 sprk_keyvaultsecretname · _sprk_environment_value   (→ sprk_speenvironment.sprk_tenantid)
 ```
 
-Mapping: **`sprk_owningappid` → `ContainerTypeConfig.ClientId`** and `sprk_keyvaultsecretname` →
-`SecretKeyVaultName`. The record's `OwningAppId`/`OwningAppTenantId`/`OwningAppSecretName` properties
-(marked *"Phase 3 — multi-app"*) are **never populated** — single-app mode is the only mode implemented.
+Mapping: **`sprk_owningappid` → `ContainerTypeConfig.ClientId`** (and, identically, `OwningAppId`) and
+`sprk_keyvaultsecretname` → `SecretKeyVaultName`. *(Corrected 2026-10-04: an earlier version of this page
+said the `OwningApp*` properties were never populated; `ResolveConfigAsync` sets them to the same values.)*
+
+**Since 2026-10-04 no credential is read from this record** (§6B). What each column now does:
+
+| Column | Used for |
+|---|---|
+| `sprk_containertypeid` | Which container type the config is about |
+| `sprk_owningappid` | Default `owningAppId` when **creating** a container type — nothing else |
+| `_sprk_environment_value` → `sprk_tenantid` | **Load-bearing.** The tenant guard (§6B) refuses a config whose tenant is blank or is not the BFF's |
+| `sprk_keyvaultsecretname` | **Nothing.** Optional on the form and the API; leave it blank |
 
 ### 🔴 Everything else on the "Edit Container Type Config" form is inert
 
 | Form section | Read by the BFF? |
 |---|---|
-| Container Type ID · Owning App Client ID · Key Vault Secret Name · Environment | ✅ **yes** |
+| Container Type ID · Owning App Client ID · Environment | ✅ **yes** |
+| Key Vault Secret Name | ❌ **no** — since 2026-10-04 (§6B) |
 | **Storage & Sharing** (Max Storage Per Container, Sharing Capability, Item Versioning) | ❌ **no** |
 | **Permissions** (delegated + application checkboxes) | ❌ **no** |
 | **Consuming App Registration** (Client ID, KV Secret Name) | ❌ **no** |
@@ -455,39 +470,61 @@ tab and create two surfaces that disagree.
 
 ---
 
-## 6B. 🔴 The owning-app credential — secret-only today
+## 6B. ✅ SPE Admin identity — secret-free (resolved 2026-10-04)
 
-**`SpeAdminGraphService` authenticates as the owning app with `new ClientSecretCredential(...)`**
-(:5698, :5886). There is **no federated-credential path**.
+**SPE Admin never authenticates as a container type's owning app.** It uses two identities, neither of
+which holds a secret:
 
-This surprises people because the BFF's *own* identity is secret-free — but those are different things:
-
-| | Mechanism | ADR-028 |
+| Work | Identity | Mechanism |
 |---|---|---|
-| BFF acting as **itself** | MI-issued federated client assertion — **no secret** | **A4** |
-| BFF acting as **a per-customer owning app** | `ClientSecretCredential` — **secret required** | **E-1** (a separate exception) |
+| **Container work** — containers, items, recycle bin, search, security, dashboard sync, bulk jobs | **The BFF's own app-only identity** — on Azure, its user-assigned managed identity (dev: `mi-bff-api-dev`, appId `5967251e…`) | `IGraphClientFactory.ForApp()` — the same client every other SPE path in the BFF uses |
+| **Grants and container types** — Consuming Tenants panel, Register, create/settings/owners | **The signed-in SPE administrator**, delegated | The BFF's existing on-behalf-of exchange |
 
-**Consequence**: an owning app created with *only* a federated credential (0 secrets, 0 certificates)
-**cannot be used by the SPE Admin app**. Its config will resolve, then fail at token acquisition.
+Access for the BFF's identity comes from an **`applicationPermissionGrant` on the container type's
+registration** in its tenant (§3A) — **never from ownership**.
 
-⚠️ **A placeholder such as `null` in Key Vault Secret Name does not avoid this** — the literal string
-is passed to Key Vault, the lookup fails, and every app-only operation for that config fails. The
-config looks saved and is non-functional.
+### What it replaced, and why the "obvious" fix was a dead end
 
-**Two paths:**
+It used to authenticate app-only **as each owning app**, with a client secret fetched from Key Vault by
+the config's secret name (ADR-028 exception E-1). A config without a usable secret — the Model 1 config
+held the literal `null` — failed every container operation.
 
-1. **Add a client secret** to the owning app and store it in Key Vault. Works today, zero code. Cost:
-   one secret per container type — the sprawl §3A warns about.
-2. **Add FIC support to `SpeAdminGraphService`** — resolve the owning-app token from the BFF's managed
-   identity instead of a secret. Secret-free and aligned with auth-v4.
+The intuitive secret-free fix was to federate each **owning app** to the BFF's managed identity. Microsoft's
+rules make that unworkable ([Configure an application to trust a managed identity](https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation-config-app-trust-managed-identity)):
 
-**(2) is reuse, not invention**: the control plane already does MI→owning-app via a federated
-credential (`sprk-controlplane-dev-uami-assertion` on the Model 1 owning app). ⚠️ Note that credential
-trusts the **control-plane UAMI**, not the BFF's identity — so adopting (2) also requires adding the
-BFF's managed identity as a federated credential on each owning app.
+- **The managed identity and the app registration must be in the same tenant**, and
+- **an app registration holds at most 20 federated credentials.**
 
-Tracked for `sdap-SPE-admin-app-r3`; sequenced **after** `customer-provisioning-orchestration-r1`
-lands the MI pattern.
+Under D-12 every customer has its own BFF and managed identity, so: **Model 1** → one federated credential
+per customer on the Model 1 owner ⇒ a hard **20-customer cap**; **Model 2** → each customer's identity lives
+in the *customer's* tenant while the owner lives in Spaarke's ⇒ **not supported at all**. Grants have
+neither limit: each customer's BFF identity is granted on the registration in its own tenant.
+
+### 🔴 Tenant guard — fail closed
+
+The BFF's identity can only act in its own tenant. App-only work is **refused** for a config whose
+environment tenant is blank, or is not the BFF's (`TENANT_ID`) — otherwise the client would list the *BFF's*
+tenant's containers under another tenant's config. Manage a container type from the BFF deployed in its tenant.
+
+### Onboarding a container type for SPE Admin (operator steps)
+
+1. **Grant the BFF's identity on the registration.** SPE Admin → Container Types → the type →
+   **Consuming Tenants → Add**: appId = **the BFF managed identity's appId** (dev `5967251e-171c-46fe-a6c2-ef843c90309d`),
+   application permissions `full`, delegated permissions `full` *(mirrors the dev type's existing grant)*.
+   Requires the **SharePoint Embedded Administrator** (or Global Administrator) Entra role. New grants can
+   take **up to an hour** to propagate.
+2. **App roles on the BFF identity** (one-time per BFF, Entra admin):
+   `FileStorageContainer.Selected` ✅ (dev has it) · `SecurityEvents.Read.All` — **needed by the Security
+   tab**; dev's managed identity does **not** have it yet (the old owning app did).
+3. **Config record**: leave *Key Vault Secret Name* blank; make sure the linked environment's tenant id is set.
+
+Verified state (2026-10-04, read-only probe): on dev type `Spaarke PAYGO 1` (`8a6ce34c…`) the BFF managed
+identity already holds `full` app-only and delegated — broader than the owning app's own grant — so dev
+loses nothing. The Model 1 registration needs step 1.
+
+ADR-028 E-1 no longer covers any SPE Admin path: the census and allowlist rows for `SpeAdminGraphService`
+and the (removed) `SpeAdminTokenProvider` were deleted from `CredentialCensusTests` / `CredentialGuardTests`,
+so a secret-bearing credential reappearing there fails the build.
 
 ---
 

@@ -91,9 +91,9 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// <c>Infrastructure/Graph/GraphClientFactory.cs</c> —
 /// <c>Create(apiAppId)</c> with <c>configuration["API_APP_ID"] ?? throw</c>
 /// (required config, throws — NOT a fallback);
-/// <c>Services/SpeAdmin/SpeAdminTokenProvider.cs</c> —
+/// <c>Services/SpeAdmin/SpeAdminTokenProvider.cs</c> (removed 2026-10-04) —
 /// <c>Create(config.OwningAppId)</c> per-request BU config (request-context
-/// derivation, the strongest current shape);
+/// derivation, the strongest shape at the time);
 /// <c>Api/Agent/AgentTokenService.cs</c> — <c>Create(_options.ClientId)</c>
 /// options-bound;
 /// <c>Services/Ai/Handlers/Dataverse/DataverseUserClient.cs</c> and
@@ -244,7 +244,7 @@ public class I6_ObAppRegDerivationTests
     public void CreateArgPredicate_PassesDerivedShapes()
     {
         Assert.False(IsNonDerivedAppRegExpression("apiAppId"));                   // GraphClientFactory
-        Assert.False(IsNonDerivedAppRegExpression("config.OwningAppId"));         // SpeAdminTokenProvider
+        Assert.False(IsNonDerivedAppRegExpression("config.OwningAppId"));         // shape of the former SpeAdminTokenProvider
         Assert.False(IsNonDerivedAppRegExpression("_options.ClientId"));          // AgentTokenService
         Assert.False(IsNonDerivedAppRegExpression("clientId"));                   // DataverseUserClient / DataverseAccessDataSource
         // Fallback to ANOTHER config key is still config-derived (no literal default).

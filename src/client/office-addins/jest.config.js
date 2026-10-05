@@ -57,8 +57,16 @@ module.exports = {
     // or pulling the React-bearing components barrel.
     '^@spaarke/communication-components/logic/connections/provenance$':
       '<rootDir>/../shared/Spaarke.Communication.Components/src/logic/connections/provenance.ts',
+    // Task 096: the Email tab renders the REAL shared compose engine through its `SendEmailPane` wrapper (same
+    // exact alias as webpack.config.js) — tests exercise the shared component itself, never a copy. Its bare
+    // imports (react, Fluent, lexical) resolve from this package's node_modules via `modulePaths` below.
+    '^@spaarke/ui-components/send-email-pane$':
+      '<rootDir>/../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
+  // Task 096: shared sources aliased above live outside this package and have no node_modules of their own in
+  // CI — their bare imports fall back to this package's node_modules (one React, one Fluent, one lexical).
+  modulePaths: ['<rootDir>/node_modules'],
   // Ignore transforming node_modules except for specific packages
   transformIgnorePatterns: [
     'node_modules/(?!(@azure|@fluentui)/)',

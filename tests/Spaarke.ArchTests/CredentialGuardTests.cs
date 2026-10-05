@@ -60,6 +60,9 @@ public class CredentialGuardTests
     //      the migration did not finish.
     //
     // =============================================================================================
+    // REMOVED 2026-10-04 (sdap-SPE-admin-app-r2): SpeAdminTokenProvider.cs and SpeAdminGraphService.cs.
+    // SPE Admin no longer binds owning-app secrets — app-only work runs as the BFF's own identity and
+    // grant management is delegated. Do not re-add these rows: route through IGraphClientFactory.
     private static readonly IReadOnlyList<AllowlistEntry> Allowlist = new[]
     {
         new AllowlistEntry(
@@ -105,7 +108,7 @@ public class CredentialGuardTests
                 + "(resolved from Key Vault upstream), because L2 provisions into an environment that "
                 + "belongs to the customer's tenant. MI-FIC would have to be federated onto each "
                 + "customer's registration, which is not ours to do — the same reasoning that "
-                + "allowlists SpeAdminTokenProvider. Contrast DataverseRegistryConcurrencyStore, which "
+                + "once allowlisted SpeAdminTokenProvider (removed 2026-10-04). Contrast DataverseRegistryConcurrencyStore, which "
                 + "hit the ADMIN env as the BFF's OWN identity and was migrated to the L2 UAMI on "
                 + "2026-08-27 rather than allowlisted."),
 
@@ -118,7 +121,7 @@ public class CredentialGuardTests
                 + "(resolved from Key Vault upstream), because L2 provisions into an environment that "
                 + "belongs to the customer's tenant. MI-FIC would have to be federated onto each "
                 + "customer's registration, which is not ours to do — the same reasoning that "
-                + "allowlists SpeAdminTokenProvider. Contrast DataverseRegistryConcurrencyStore, which "
+                + "once allowlisted SpeAdminTokenProvider (removed 2026-10-04). Contrast DataverseRegistryConcurrencyStore, which "
                 + "hit the ADMIN env as the BFF's OWN identity and was migrated to the L2 UAMI on "
                 + "2026-08-27 rather than allowlisted."),
 
@@ -131,25 +134,11 @@ public class CredentialGuardTests
                 + "(resolved from Key Vault upstream), because L2 provisions into an environment that "
                 + "belongs to the customer's tenant. MI-FIC would have to be federated onto each "
                 + "customer's registration, which is not ours to do — the same reasoning that "
-                + "allowlists SpeAdminTokenProvider. Contrast DataverseRegistryConcurrencyStore, which "
+                + "once allowlisted SpeAdminTokenProvider (removed 2026-10-04). Contrast DataverseRegistryConcurrencyStore, which "
                 + "hit the ADMIN env as the BFF's OWN identity and was migrated to the L2 UAMI on "
                 + "2026-08-27 rather than allowlisted."),
 
-        new AllowlistEntry(
-            FileName: "SpeAdminTokenProvider.cs",
-            Adr: "ADR-028 E-1",
-            Reason:
-                "Authenticates as OTHER APPLICATIONS' registrations, not the BFF's — per-container-type "
-                + "owning apps whose secrets are fetched from Key Vault per request, by a secret NAME "
-                + "held in Dataverse. Those identities are not ours to migrate; MI-FIC would have to be "
-                + "federated onto each customer's own app registration."),
 
-        new AllowlistEntry(
-            FileName: "SpeAdminGraphService.cs",
-            Adr: "ADR-028 E-1",
-            Reason:
-                "Same as SpeAdminTokenProvider — per-business-unit owning-app credentials, fetched from "
-                + "Key Vault by a name resolved from Dataverse configuration. Not the BFF identity."),
 
         new AllowlistEntry(
             FileName: "ReportingEmbedService.cs",
