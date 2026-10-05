@@ -1,5 +1,7 @@
 # UI Dialog & Shell Standardization
 
+> **Portfolio**: [Project #1125](https://github.com/spaarke-dev/spaarke/issues/1125) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Completed
 > **Completed**: 2026-03-19
 

@@ -40,6 +40,14 @@ module.exports = {
       "<rootDir>/test/__mocks__/spaarke-ui-components-services.ts",
     "^@spaarke/ui-components$":
       "<rootDir>/test/__mocks__/spaarke-ui-components.tsx",
+    // task 092, 2026-10-04 — `legalWorkspaceSectionRegistry.test.ts` imports
+    // `sectionRegistry.ts`, whose `composeEditor.registration.ts` section
+    // imports `@spaarke/compose-components` (not otherwise a dependency of
+    // this package). Same stub-for-type-checking pattern as the entries above.
+    "^@spaarke/compose-components$":
+      "<rootDir>/test/__mocks__/spaarke-compose-components.tsx",
+    "^@spaarke/ai-widgets$":
+      "<rootDir>/test/__mocks__/spaarke-ai-widgets.tsx",
   },
   setupFilesAfterEnv: ["<rootDir>/test/jest.setup.ts"],
   // Coverage thresholds left empty in the initial 0.1.0 release — NFR-05

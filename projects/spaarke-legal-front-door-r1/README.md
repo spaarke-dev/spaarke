@@ -1,5 +1,7 @@
 # spaarke-legal-front-door-r1
 
+> **Portfolio**: [Project #1222](https://github.com/spaarke-dev/spaarke/issues/1222) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 Corporate **legal intake / "legal front door"** module initiative — business users submit legal service requests; the legal team receives, triages, prioritizes, assigns (internal or outside counsel), works, and manages them; requesters get visibility into their own requests.
 
 ## Contents

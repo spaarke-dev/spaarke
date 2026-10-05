@@ -1,5 +1,7 @@
 # sdap-bff.api-test-suite-repair
 
+> **Portfolio**: [Project #1179](https://github.com/spaarke-dev/spaarke/issues/1179) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: ✅ **COMPLETE** (closed 2026-05-31) — All 14 success criteria satisfied; Failed: 540 → 0; 20 real-bug entries documented; CI gate operational; anti-drift governance shipped. Outcomes A-D delivered. See [`ledgers/exit-ledger.md`](ledgers/exit-ledger.md) for evidence + [`notes/lessons-learned.md`](notes/lessons-learned.md) for retrospective.
 > **Created**: 2026-05-31
 > **Closed**: 2026-05-31

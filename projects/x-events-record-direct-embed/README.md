@@ -1,5 +1,7 @@
 # Events Record Direct Embed
 
+> **Portfolio**: [Project #1274](https://github.com/spaarke-dev/spaarke/issues/1274) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 Adapt the existing `EventsPage.html` web resource to serve as a context-aware, embedded Events tab inside any Dataverse entity form (Matter, Project, Invoice, Work Assignment, etc.).
 
 ## Quick Links

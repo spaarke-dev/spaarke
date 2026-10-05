@@ -31,10 +31,39 @@
  * package root (they were backported in 16.14 for the new JSX transform), so this
  * alias always has a valid, symbol-compatible target.
  *
- * SCOPE: applied ONLY to TrackingFieldTrio (the sole control that bundles a
- * React-subpath importer today). Every other control receives an empty config —
- * this file is a strict no-op for the other 16 controls. If another control later
- * bundles a dependency that imports React subpaths, add its name below.
+ * SCOPE (ORIGINAL): applied ONLY to TrackingFieldTrio (the sole control that
+ * bundled a React-subpath importer at the time). Every other control received
+ * an empty config — this file was a strict no-op for the other 16 controls.
+ *
+ * EXTENDED (task 092, master build/test baseline repair, 2026-10-04) —
+ * UpdateRelatedButton: a FLAT-structure control (its `ControlManifest.Input.xml`
+ * sits directly at the control's root, unlike nested controls such as
+ * VisualHost/ScopeConfigEditor/the Communication PCFs, whose manifest is one
+ * folder deeper). `pcf-scripts`' custom-webpack discovery always resolves
+ * `<controlPath>/../webpack.config.js` — for a NESTED control that lands back
+ * on the control's own root (where each of those controls keeps its own
+ * `webpack.config.js`); for a FLAT control, `controlPath` IS the control's own
+ * root, so `..` lands here, on this SHARED file, instead. (Confirmed
+ * empirically: a `webpack.config.js` placed directly inside
+ * `UpdateRelatedButton/` was silently never read — no error, the original
+ * crash just persisted unchanged, the exact same class of silent-no-op this
+ * file's own header already documents for the `pcfAllowCustomWebpack` gate.)
+ *
+ * UpdateRelatedButton's `index.ts` does
+ * `import { resolveThemeWithUserPreference } from '@spaarke/ui-components'`
+ * (the bare barrel specifier), pulling `useChatFileAttachment.ts`'s
+ * `import('pdfjs-dist')` / `import('mammoth')` into its single-chunk bundle —
+ * the same root cause as the other 8 PCFs fixed by task 092 (see
+ * `../CommunicationActions/webpack.config.js` for the full writeup).
+ * UpdateRelatedButton never calls the chat-attachment extraction path, so stub
+ * both packages the same way.
+ *
+ * SCOPE (CURRENT): this file now branches on TWO control names
+ * (TrackingFieldTrio, UpdateRelatedButton), each getting its own distinct
+ * config; every other control still receives an empty config — a strict
+ * no-op. If another FLAT control later needs a custom webpack tweak, add its
+ * name as a new branch below (do not reuse an existing branch's config for a
+ * different control unless the need is identical).
  */
 const path = require('path');
 
@@ -47,6 +76,16 @@ if (controlName === 'TrackingFieldTrio') {
       alias: {
         'react/jsx-runtime': path.join(reactDir, 'jsx-runtime.js'),
         'react/jsx-dev-runtime': path.join(reactDir, 'jsx-dev-runtime.js'),
+      },
+    },
+  };
+} else if (controlName === 'UpdateRelatedButton') {
+  module.exports = {
+    resolve: {
+      alias: {
+        // Loud stubs, not `false` — see ../shared/stubs/pdfjsDistUnreachable.js for why.
+        'pdfjs-dist$': path.resolve(__dirname, 'shared/stubs/pdfjsDistUnreachable.js'),
+        'mammoth$': path.resolve(__dirname, 'shared/stubs/mammothUnreachable.js'),
       },
     },
   };

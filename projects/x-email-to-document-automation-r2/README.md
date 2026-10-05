@@ -1,5 +1,7 @@
 # Email-to-Document Automation R2
 
+> **Portfolio**: [Project #1272](https://github.com/spaarke-dev/spaarke/issues/1272) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Implementation Complete (Wrap-up Pending)
 > **Created**: 2026-01-13
 > **Type**: API Enhancement + Ribbon UI

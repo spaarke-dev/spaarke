@@ -1,5 +1,7 @@
 # AI File Entity Metadata Extraction
 
+> **Portfolio**: [Project #1254](https://github.com/spaarke-dev/spaarke/issues/1254) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2025-12-11
 >
 > **Status**: Complete

@@ -1,5 +1,7 @@
 # Analysis Workspace + SprkChat Integration
 
+> **Portfolio**: [Project #1131](https://github.com/spaarke-dev/spaarke/issues/1131) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Branch**: `work/ai-analysis-workspace-sprkchat-integration-r1`
 > **Created**: 2026-03-26

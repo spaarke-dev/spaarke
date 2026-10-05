@@ -1,5 +1,7 @@
 # AI Playbook Assistant Completion (ai-playbook-node-builder-r3)
 
+> **Portfolio**: [Project #1258](https://github.com/spaarke-dev/spaarke/issues/1258) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Type**: Completion Project
 > **Created**: 2026-01-19
