@@ -12,7 +12,7 @@
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7). AMENDED in round f2 (main-session round 34 item 7, binding): the /healthz/catalog checks are memoized for 30 s - new Infrastructure/HealthChecks/MemoizedHealthCheck.cs, and the two catalog registrations in Infrastructure/DI/RoutingModule.cs and Infrastructure/DI/ComposeModule.cs use it; EndpointMappingExtensions.cs reads the tag from CatalogHealthChecks.Tag. None is a parallel-unsafe zone; integ/uac-r2-batch4 edits EndpointMappingExtensions.cs in other regions (note section 18.9). AMENDED in round f2-v1 (main-session round 43 item 2, binding): Infrastructure/HealthChecks/MemoizedHealthCheck.cs gains the evaluation bound (the same file f2 added); no other src/ file changes in f2-v1 (note section 19.6).</parallel-reason>
+    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7). AMENDED in round f2 (main-session round 34 item 7, binding): the /healthz/catalog checks are memoized for 30 s - new Infrastructure/HealthChecks/MemoizedHealthCheck.cs, and the two catalog registrations in Infrastructure/DI/RoutingModule.cs and Infrastructure/DI/ComposeModule.cs use it; EndpointMappingExtensions.cs reads the tag from CatalogHealthChecks.Tag. None is a parallel-unsafe zone; integ/uac-r2-batch4 edits EndpointMappingExtensions.cs in other regions (note section 18.9). AMENDED in round f2-v1 (main-session round 43 item 2, binding): Infrastructure/HealthChecks/MemoizedHealthCheck.cs gains the evaluation bound (the same file f2 added); no other src/ file changes in f2-v1 (note section 19.6). Round f2-v2 (main-session round 52, owner round 56) changes no src/ file: tests/Spaarke.ArchTests only (note section 20.4).</parallel-reason>
     <deps>none</deps>
     <tags>testing, security, auth, archtest, bff-api</tags>
     <estimated-effort>2-3 days</estimated-effort>
@@ -1052,6 +1052,54 @@ The route counts in the background come from a Python approximation of the scann
       PUBLISH SIZE: base 700c3960d 45.65 MB (47,872,599 bytes) vs branch 8c6d49718 45.66 MB (47,873,044 bytes) = +445 bytes,
       Compress-Archive, 212 files each, 4 PDBs each (included). No package change (CVE set unchanged).
     </outcome>
+    <outcome date="2026-10-05" branch="task/uac-r2-167-f2-v2" base="8223691bc" result="completed; last fix round (owner round 56); class d-f items recorded as known limits" round="fix f2-v2 (the f2-v1 verifier's items 1-10 + main-session round 52 + owner round 56)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 20 and "Known limits (owner round 56)".
+      Round 52 (decided, so it stands under round 56) chose RUNTIME proofs; they are built against the REAL BFF booted
+      in-process from Program.cs as Development and as Production (tests/Spaarke.ArchTests/BootedBff.cs; every mapping gate on;
+      a loopback handshake-only Redis lets CacheModule connect in Production). The verifier's proposed TEXT fixes were drafted
+      and removed before commit: each closes a class (d) bypass the runtime proofs already decide (owner round 56: record, do
+      not build).
+      ITEM 1 / CRITERION 12 (class d for the text rule; closed by round 52 item 1): NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime
+      evaluates an anonymous principal through the booted app's own IAuthorizationService and handlers against every
+      registered policy, the default and fallback policies and the middleware policy of every non-anonymous endpoint; no
+      authentication scheme may authenticate a credential-less request; every authorization pipeline stage must be the
+      framework's. Control: the verifier's three handlers compiled (shadowed lambda, local function, reflection), a
+      credential-less scheme, a replaced service, no fallback. Text rule unchanged, limits stated.
+      ITEM 2 / ROUND 43 ITEM 1 (class d for the text pin; closed by round 52 item 2): NoDevelopmentOnlyRouteIsMappedInProduction
+      (the Production boot maps no pinned development-only route; the routes that differ between boots are exactly that set)
+      and NoServerCodeWritesTheHostEnvironmentName (an IL scan of every production project under src/server for a framework
+      EnvironmentName setter; the L2 Worker now built by the ArchTests target; an unbuilt project fails closed).
+      ITEM 3 (class d for the text rule; closed by round 52 item 3): a retired ledger entry resolves only when neither boot
+      maps its verb and path (LedgerViolations' mappedAtRunTime); no booted app, no resolution. ProofTest text checks of
+      f2-v1 stay for the named regression test, limits stated.
+      ITEM 4 (round 52 item 4): a bearer counts only when the last Authorization assignment to that client or message before
+      the request is new AuthenticationHeaderValue("Bearer", non-empty token); Authorization = null never counts.
+      ALSO: TheScannerAndTheBootedAppAgreeOnEveryRoute (430 = 430; keeps the runtime absence checks non-vacuous) and
+      TheAnonymousSurfaceAtRunTimeIsThePinnedSurface (round 52 item 1's exemption, pinned at run time).
+      SEEDING (note 20.3, real source, restored and touched): f2v2-1 the verifier's SeedOpen handler: 1 failed (runtime proof);
+      f2v2-2 env.EnvironmentName = Development before IsDevelopment(): 4 failed; f2v2-3 a deleted route re-mapped unreadably:
+      3 failed (ledger, agreement, Rule A); f2v2-3p the route really deleted: green; f2v2-4 Authorization = null in
+      ScopePersonasEndpointTests: 1 failed naming the test.
+      TESTS: Guard 86/86 (76 + 10 new); ArchTests 417/417; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests
+      403 passed, 25 skipped, 0 failed of 428; BFF unit suite 14230 passed / 1 failed / 54 skipped of 14285 (contended, 29 m) -
+      the one failure (IdentifierReverseLookupRungTests.Fr12_NewRecordFraming_..., a confidence value) passed on an isolated
+      re-run (class 21/21); this round changes no src/ file and no unit test.
+      PUBLISH SIZE: not re-measured - no src/ file, BFF csproj or BFF package changed. CVE: Spaarke.ArchTests has no
+      vulnerable packages (dotnet list package --vulnerable --include-transitive).
+      INTEGRATION: keep ONE IL reader (task 132's IlCallScan or this CompiledIl), note 20.6.
+    </outcome>
+    <justification-of-new-files round="f2-v2">
+      tests/Spaarke.ArchTests/BootedBff.cs, CompiledIl.cs, RouteAuthorizationGuardTests.Runtime.cs and
+      RouteAuthorizationGuardTests.Compiled.cs (ArchTests KEEP path, partial parts of the existing guard), plus
+      Microsoft.AspNetCore.Mvc.Testing 10.0.11 and the L2 Worker in Spaarke.ArchTests.csproj. Main-session round 52 (binding)
+      requires the guard to check sign-in, development-only mappings and retired-route absence against the REAL booted
+      application. EXISTING: the BFF test projects' WebApplicationFactory fixtures (not referenced by ArchTests; none boots
+      Production; each replaces authentication with a fake, which would void the sign-in proof); no IL reader on this branch
+      (task 132's is unmerged - keep one at integration). EXTENSION: ArchTests cannot reference those fixtures without their
+      fakes. COST OF DOING NOTHING: round 52's decided runtime proofs cannot run inside the guard, so the text heuristics the
+      verifier defeated stay the only check. No BFF service, registration, endpoint, option, job, column or BFF package
+      (CLAUDE.md section 10 not triggered). No Dataverse plugin (ADR-002).
+    </justification-of-new-files>
     <justification-of-src-change round="f2-v1">
       Main-session round 43 item 2 (binding). No NEW surface: the existing MemoizedHealthCheck.State gains an
       EvaluationTimeout constructor argument and property; CatalogHealthChecks gains the EvaluationTimeout constant beside

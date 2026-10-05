@@ -7,7 +7,9 @@
 > **Branch**: `task/uac-r2-167` from `work/unified-access-control-r2` @ `6b243f092`; verifier round r1 on
 > `task/uac-r2-167-r1` (§15); verifier round r2 on `task/uac-r2-167-r2` (§16); fix round f1 on `task/uac-r2-167-f1`
 > (§17 — owner round 14 items 1-2 and the r2 verifier's residuals); fix round f2 on `task/uac-r2-167-f2` (§18 —
-> main-session round 34 items 4, 5 and 7 and the f1 verifier's items 4-9; **nothing left open**). **`src/` changes, each by
+> main-session round 34 items 4, 5 and 7 and the f1 verifier's items 4-9; **nothing left open**); fix round f2-v1 on
+> `task/uac-r2-167-f2-v1` (§19); fix round f2-v2 on `task/uac-r2-167-f2-v2` (§20 — main-session round 52's runtime proofs,
+> the LAST round under owner round 56; class d-f items in "Known limits (owner round 56)"). **`src/` changes, each by
 > owner decision**: round r1 (owner round 12 item 1) rate-limited `GET /healthz`, `GET /healthz/catalog` and `GET /ping`;
 > round f1 (owner round 14) moved those three to a dedicated `"health-probe"` policy (`RateLimitingModule.cs`) and set
 > the authorization FallbackPolicy (`AuthorizationModule.ApplyFallbackPolicy`), plus comment-only corrections in three
@@ -1307,3 +1309,128 @@ No test calls Dataverse or Azure; the publish-size measurement was a local build
 ### 19.9 `.claude/` edits for the main session
 
 None new in f2-v1. §17.8's `bff-deploy` skill text still stands.
+
+## 20. Fix round f2-v2 (2026-10-05) — branch `task/uac-r2-167-f2-v2` — the LAST fix round (owner round 56)
+
+Base `8223691bc` (`task/uac-r2-167-f2-v1`). Binding inputs: the f2-v1 verifier's items 1-10, **main-session round 52**
+(verify behaviour against the real application; source heuristics only with exactly stated limits) and **owner round 56**
+(relayed by `NOTE-FROM-MAIN.md`, decisions note `58121bd09`): fix (a) runtime defects, (b) compounding maintainability
+defects, (c) measurable performance problems; RECORD (d) adversarial-only guard bypasses, (e) rare fail-closed edges and
+(f) seed requests for minor branches as known limits; build no new machinery for (d)-(f); rounds 1-55 stand. No `src/`
+file changes in f2-v2 (tests only); no live write. Commits: `0b5160df8` (tests) and the docs commit.
+
+**How round 56 shaped this round.** Round 52 (decided before round 56, so it stands) chose RUNTIME proofs for items 1-4.
+Those are built. The verifier's proposed TEXT fixes (bind `requirement` to the handler parameter, refuse
+`context.Requirements`, refuse reflection; an "unconditional top-level assertion" rule and a `goto` ban for ProofTests; a
+full credential-flow model for presence evidence; an IL rule over `AuthorizationHandlerContext`; bans on other
+environment-switch channels) were drafted first and then **removed before commit**: each closes a class (d) bypass the
+runtime proofs already decide, so under round 56 they are known limits (`## Known limits (owner round 56)`), not machinery.
+
+### 20.1 Per item, with its round-56 class
+
+| # | Item | Class | What was done | Where |
+|---|---|---|---|---|
+| 1, 7 | MEDIUM — `NothingButAnAuthenticatedUserSatisfiesSignIn` accepts a `.Succeed(` whose `requirement` is a shadowing lambda / local-function parameter, or reflection; the verifier's runtime check admitted an anonymous user to SystemAdmin | **(d)** for the text rule (only deliberately adversarial handler code reaches it); the decided fix (round 52 item 1) is the runtime proof | **Closed by the runtime proof.** `NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime` boots the REAL BFF (`BootedBff`: `Program.cs` end to end, Development and Production) and evaluates an anonymous principal (no identity; an unauthenticated identity), through the app's own `IAuthorizationService` and registered handlers with an `HttpContext` resource as the middleware passes it, against every registered policy (read from `AuthorizationOptions`' own policy map; non-vacuity asserts more than 20, `SystemAdmin` among them), the default and fallback policies, and the policy `AuthorizationMiddleware` builds for every endpoint that is not explicitly anonymous (`CombineAsync` + `IAuthorizationRequirementData`; non-vacuity asserts more than 700 endpoint evaluations across the two boots — 430 and 429 endpoints, 16 and 15 of them anonymous). It also asserts no authentication scheme authenticates a credential-less request and that every pipeline stage (`IAuthorizationService`, policy provider, handler provider, evaluator, context factory, `IPolicyEvaluator`, result handler) is the framework's own (a framework-internal subclass from the same assembly allowed — .NET 10 registers `DefaultAuthorizationServiceImpl`). Control `RuntimeSignIn_NegativeControl_EachAdmissionFails` runs the SAME function every build over a real ASP.NET Core authorization stack with the verifier's three handlers compiled (shadowed lambda, local function, reflection), a credential-less scheme, a replaced service and no fallback. The text rule is unchanged and its header now states its limits. Seeded on real source (f2v2-1). | `RouteAuthorizationGuardTests.Runtime.cs`, `BootedBff.cs` |
+| 2, 8 | LOW-MEDIUM — round 43's IsDevelopment-only pin does not see `env.EnvironmentName = Development;` before the check | **(d)** for the text pin; the decided fix (round 52 item 2) is the Production boot + an IL ban | **Closed.** `NoDevelopmentOnlyRouteIsMappedInProduction`: the BFF booted with `EnvironmentName = Production` maps none of the pinned development-only routes, and the routes that differ between the Development and Production boots are exactly that pinned set (an unpinned environment-dependent route, or a Production-only one, fails). `NoServerCodeWritesTheHostEnvironmentName` reads the compiled IL (`CompiledIl`) of EVERY production project under `src/server` — BFF, Spaarke.Core / .Dataverse / .Scheduling, L2 Core / Api / Worker (the Worker is now built by the ArchTests `BuildL2ForCosmosGuard` target) — for a call to a framework type's `EnvironmentName` setter (through either interface, a lambda, a helper, `WebApplicationOptions` or `HostApplicationBuilderSettings`); a missing build fails closed. No text check was added for the same write (it would duplicate the IL ban — round 56 class b). Controls: the verifier's write and two relatives compiled into ArchTests; a read-only positive. Seeded on real source (f2v2-2). | `RouteAuthorizationGuardTests.Runtime.cs`, `RouteAuthorizationGuardTests.Compiled.cs`, `CompiledIl.cs` |
+| 3, 9 | LOW — a retired route's ProofTest whose absence assertion never runs (`goto`, false `if`, `try/catch`, unused lambda) is accepted | **(d)** for the text rule; the decided fix (round 52 item 3) is absence judged at run time | **Closed by the runtime check.** `LedgerViolations` takes `mappedAtRunTime`; a ledger entry whose key the scanner no longer finds resolves only when neither boot maps its verb and path (shape match: parameter names and constraints erased). Without a booted app a retired entry cannot resolve. The ProofTest rules of f2-v1 (exists, compiled by a CI-run project, plain runnable test, names the verb + path, asserts absence) stay as the NAMED regression test's check; that they do not prove the assertion is reached is a stated known limit. Controls: a still-mapped route and a missing booted app each fail. Seeded on real source: the deleted route re-mapped in a form the scanner cannot read turns the guard red (f2v2-3); the route really deleted is green (f2v2-3p). | `RouteAuthorizationGuardTests.cs` "RETIRED SWEEP ROUTES" |
+| 4, 10 | LOW — `Authorization = null` (client or message) counts as a bearer | **(d)** in general; round 52 item 4 decided "a null assignment never counts" | **Closed, simply.** A bearer counts only when the LAST assignment to that client's `DefaultRequestHeaders.Authorization` (or that message's `Headers.Authorization`) before the request is `new AuthenticationHeaderValue("Bearer", token)` (any qualification, or target-typed `new(…)`) with a token that is not `null` / `default` / empty; when the method assigns nothing, class setup's last assignment (or a signed-in factory) counts as before. Endpoint-table evidence (`EndpointTable.AssertMapped` / `Maps` — the booted app's `EndpointDataSource`) is unchanged and is the recommended proof. Controls: the verifier's seed, bearer-then-null, null on a message, empty / null / `string.Empty` token, another scheme, the constructor's bearer nulled by the test; three positives. Seeded on real source (f2v2-4). Remaining limits stated in the rule's doc and below. | `RouteAuthorizationGuardTests.cs` "NO TEST PROVES A ROUTE EXISTS…" |
+| 5, 6 | The verifier's verified-closed list and its own runs | — | Not reopened; re-run in full (§20.5). | — |
+
+### 20.2 Built beyond the four items, each with its CLAUDE.md §11 answer (and why it is not round-56 machinery)
+
+- **`BootedBff` + `HandshakeOnlyRedis`** (`tests/Spaarke.ArchTests/BootedBff.cs`). *Existing*: the BFF test projects' own
+  `WebApplicationFactory<Program>` fixtures — not referenced by ArchTests, none boots Production, and each replaces
+  authentication with a fake handler (which would void the sign-in proof). *Extension*: ArchTests cannot reference those
+  projects without their fakes. *Cost of doing nothing*: round 52's decided runtime proofs cannot run inside the guard.
+  The loopback listener answers only StackExchange.Redis's connect handshake; it exists because `CacheModule` (correctly)
+  refuses an in-memory cache outside Development/Testing and connects with `AbortOnConnectFail`. No request uses the cache.
+- **`TheScannerAndTheBootedAppAgreeOnEveryRoute`** (+ control). *Cost of doing nothing* — a realistic failure, not (d): the
+  two runtime ABSENCE checks above are only as good as the boot's coverage; a boot that maps less than the source (a
+  mapping gate left off) makes them pass vacuously. It also catches a route mapped from code the scanner does not read (a
+  shared library or another assembly). Today: 430 = 430 (the two `MapHealthChecks` endpoints map any verb; the scanner
+  keys them GET — matched).
+- **`TheAnonymousSurfaceAtRunTimeIsThePinnedSurface`**. Round 52 item 1 exempts exactly "the pinned AnonymousByDesign
+  routes" from the sign-in proof; this pins that exemption at run time (Development: 16; Production: 15).
+- **`CompiledIl`** (`tests/Spaarke.ArchTests/CompiledIl.cs`). *Existing on this branch*: none — task 132's `IlCallScan` is
+  on its own unmerged branch. **At integration two IL readers would be a duplicate mechanism (class b): keep ONE** (§20.6).
+- **`Microsoft.AspNetCore.Mvc.Testing` 10.0.11 in `Spaarke.ArchTests.csproj`** — test-only, the version the three BFF test
+  projects already use; `dotnet list package --vulnerable --include-transitive` on ArchTests: no vulnerable packages.
+- **The L2 Worker in the ArchTests build target** — needed for "src/server/**" coverage; one more compile (it references
+  only Core). The Cosmos secret guard, which scans every built L2 assembly, passes with it.
+
+### 20.3 Seeding proofs (f2-v2) — each on REAL source, built, run, captured, restored with `git checkout` and touched
+
+| # | Item | Seeded | Result (guard class, 86 tests) |
+|---|---|---|---|
+| f2v2-1 | 1 — the verifier's exact seed | new `Infrastructure/Authorization/SeedOpen.cs` (`SeedOpenRequirement`; `SeedOpenHandler` whose body is `context.Requirements.ToList().ForEach(requirement => context.Succeed(requirement));`), `services.AddSingleton<IAuthorizationHandler, SeedOpenHandler>()`, and `p.Requirements.Add(new SeedOpenRequirement());` in SystemAdmin | **1 failed**: `NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime` — "Development: policy 'SystemAdmin' ADMITS AN ANONYMOUS CALLER (a principal with no identity) — requirements: DenyAnonymousAuthorizationRequirement, SeedOpenRequirement, AssertionRequirement" and every SystemAdmin endpoint, in both boots (22 lines). (f2-v1: 76/76 green.) The local-function and reflection variants, run on the pre-simplification draft, failed the same runtime test; both are compiled controls every build. |
+| f2v2-2 | 2 — the verifier's exact seed | `OfficeEndpoints.MapSaveEndpoints`: `env.EnvironmentName = Microsoft.Extensions.Hosting.Environments.Development;` before `if (env.IsDevelopment())` | **4 failed**: `NoDevelopmentOnlyRouteIsMappedInProduction` ("POST /api/office/save-debug: pinned as an IsDevelopment()-only mapping, but the BFF booted as PRODUCTION maps it"), `TheAnonymousSurfaceAtRunTimeIsThePinnedSurface` ("Production: POST /api/office/save-debug carries AllowAnonymous at run time but is not in …"), `NoServerCodeWritesTheHostEnvironmentName` ("Sprk.Bff.Api.dll …OfficeEndpoints::MapSaveEndpoints: writes Microsoft.Extensions.Hosting.IHostEnvironment.EnvironmentName"), and `EachBootIsTheEnvironmentItWasAskedFor` (the Production host now reports Development). (f2-v1: green.) |
+| f2v2-3 | 3 — round 52's seed: a deleted route re-mapped | S-79's waiver deleted, `ResolvedBy = "161"`, ProofTest = a runnable absence proof in `tests/integration/regression/ZzProofs.cs`; the route re-registered as `MapGet("/{id:guid}/" + "status", …)` (the scanner cannot read it) | **3 failed**: the ledger ("S-79 …: the key is absent from the source scan, but the BOOTED BFF still maps it (Development: GET /api/communications/{id:guid}/status; Production: …)"), `TheScannerAndTheBootedAppAgreeOnEveryRoute` ("…the booted app maps it, but the source scanner never found it"), and Rule A (the unreadable registration). |
+| f2v2-3p | 3 — positive | the same ledger state with the route really deleted | **86/86 green**. |
+| f2v2-4 | 4 — the verifier's exact seed | `ScopePersonasEndpointTests.GetPersonas_EndpointExists_AcceptsGet`: the `EndpointTable.AssertMapped` line removed and the bearer line changed to `_client.DefaultRequestHeaders.Authorization = null;` | **1 failed**: `NoTestProvesRoutePresenceWithAnAnonymousRequest` naming exactly `ScopePersonasEndpointTests.cs:48 GetPersonas_EndpointExists_AcceptsGet`. (f2-v1: green.) |
+
+After the last restore `git status` showed only `NOTE-FROM-MAIN.md` (never committed). Over `integ/uac-r2-batch4`'s test
+tree (exported read-only) the presence rule flags only files 167 already rewrote on its own branches and §18.5's two
+`SurvivingSiblings_AreStillRouted_401WithoutABearer` tests — nothing new.
+
+### 20.4 Placement, quality gates and ADRs
+
+- **No BFF surface** (CLAUDE.md §10): no `src/` file changes; no endpoint, service, DI registration, option, job, column,
+  package, PCF or Dataverse plugin (ADR-002). **Publish size not re-measured**: nothing under `src/`, no BFF csproj and no
+  BFF package changed (the only csproj change is `tests/Spaarke.ArchTests`).
+- **Tests** on KEEP paths (ADR-038 A1, `tests/Spaarke.ArchTests`). ADR-038 bans: none (no `Mock<HttpMessageHandler>`, no
+  DI-registration test — the pipeline-stage check asserts which implementation DECIDES, the behaviour the proof depends on —
+  no ctor null-check test).
+- **Code review** (coverage-first; none Critical): *Warning (low)* — ArchTests now boots the BFF twice (~10-20 s under
+  load; full ArchTests 2-3 min on a contended machine, 1 min uncontended). *Suggestion* — the runtime sign-in proof reads
+  `AuthorizationOptions`' private policy map by reflection; it fails loudly (not vacuously) if the framework renames it.
+  *Suggestion* — the Production boot depends on the fake Redis answering StackExchange.Redis 2.7.27's handshake; a
+  library upgrade that changes it fails the boot loudly.
+- **ADR check**: ADR-003 ✓ (every new check fails closed: no booted app → a retired entry cannot resolve; an unbuilt
+  server project → the IL rule throws; an unreadable policy map → throws) · ADR-008 ✓ (authorization unchanged; proven at
+  run time) · ADR-010 ✓ (no DI change) · ADR-038 ✓ · ADR-002 ✓. No §6.5 escalation.
+- **Complexity** (CLAUDE.md §11.5): two new partial files, each one reason to change (run-time proofs; compiled-code
+  rule), plus `BootedBff.cs` and `CompiledIl.cs` (infrastructure). The main rules file grows by ~110 lines.
+
+### 20.5 Test runs (final state)
+
+Run 2026-10-05 12:45-13:27 on the committed test code (`0b5160df8`), the machine shared with other agents' suites.
+
+| Suite | Result |
+|---|---|
+| Affected: `RouteAuthorizationGuardTests` | **86 / 86 passed** (76 + 10 new: `EachBootIsTheEnvironmentItWasAskedFor`, `TheScannerAndTheBootedAppAgreeOnEveryRoute`, `ScannerAgreement_NegativeControl_EachDisagreementFails`, `NoDevelopmentOnlyRouteIsMappedInProduction`, `DevelopmentOnly_NegativeControl_EachEnvironmentLeakFails`, `TheAnonymousSurfaceAtRunTimeIsThePinnedSurface`, `NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime`, `RuntimeSignIn_NegativeControl_EachAdmissionFails`, `NoServerCodeWritesTheHostEnvironmentName`, `EnvironmentNameWrite_NegativeControl_EachCompiledWriteFails`) |
+| Affected: `CosmosProvisioningSecretGuardTests` (now also scans the built Worker) | green |
+| `tests/Spaarke.ArchTests` (NetArchTest, full) | **417 / 417 passed**, 0 skipped (2 m 28 s) |
+| `Sprk.Bff.Api.IntegrationTests` (full) | **104 / 104 passed** (13 s) |
+| `Spe.Integration.Tests` (full) | **403 passed, 25 skipped, 0 failed** of 428 (7 m 35 s) — the 25 are the suite's own live-environment skips |
+| `Sprk.Bff.Api.Tests` (BFF unit, full) | **14,230 passed, 1 failed, 54 skipped** of 14,285 (29 m 02 s, contended). The one failure, `IdentifierReverseLookupRungTests.Fr12_NewRecordFraming_ReferencedIdentifier_CappedSubThreshold_NotAutoFiledAlone` ("Expected match.Confidence to be 0.65, but found 0.9"), **passed on an isolated re-run** (the class: 21 / 21). This round changes no `src/` file and no unit test; f2-v1's run of the same suite was 14,231 / 0 / 54. |
+
+### 20.6 For the main session at integration
+
+- **ONE IL reader.** Task 132's `IlCallScan` (branch `task/uac-r2-132-f1-v1c-v2`) and this round's `CompiledIl` both read
+  method-body IL with `System.Reflection.Metadata`. Whichever merges second should switch to the first's reader (or the
+  two merge into one file) — two readers would be a duplicate mechanism (owner round 56 class b). `CompiledIl.Uses` needs
+  only "every call-like instruction with its target's type, assembly and member name".
+- **Retired sweep routes now need the booted app to agree.** Each §18.2 row recorded at integration resolves only once its
+  route is absent from both boots — which holds on `integ/uac-r2-batch4`, where the routes are deleted.
+- **Open PR #1301** (word-add-in-r1) edits the waiver list in master's `RouteAuthorizationGuardTests.cs`; on 167 the
+  waivers live in `RouteAuthorizationGuardTests.Ledger.cs` (the usual reconciliation), and its two new routes
+  (`GET /api/office/search/{list}`, `GET /api/office/quickcreate/defaults`) will also appear in the booted endpoint table,
+  which the agreement test then requires the scanner to see (it will — they are plain `MapGet`s).
+- **New in ArchTests' build**: the L2 Worker project, and `Microsoft.AspNetCore.Mvc.Testing`.
+
+### 20.7 `.claude/` edits for the main session
+
+None new in f2-v2.
+
+## Known limits (owner round 56)
+
+One line each; none is fixed by design (classes d-f). The runtime proofs named in §20.1 decide each behaviour.
+
+- **(d)** Sign-in text rule (`NothingButAnAuthenticatedUserSatisfiesSignIn`) matches `requirement` by name: a shadowing lambda / local-function parameter, reflection, `dynamic`, a method group or an `[UnsafeAccessor]` passes it — any such REGISTERED handler fails `NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime`.
+- **(d)** The runtime sign-in proof evaluates policies, not HTTP requests: a custom middleware placed before `UseAuthorization` that answers a request itself is outside it.
+- **(d)** The development-only text pin (`IsMappedOnlyInDevelopment`) does not see an `EnvironmentName` write; the IL ban and the Production boot do.
+- **(d)** The IL ban covers framework `EnvironmentName` setters only — not `UseEnvironment`, `Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", …)`, an `--environment` argument, a hand-written `IHostEnvironment`, reflection or `[UnsafeAccessor]`; test assemblies are not scanned.
+- **(d)** A retired route's ProofTest is still checked by text: an absence assertion behind `goto`, a false `if`, a swallowing `try/catch` or a never-invoked lambda passes that check — absence itself is judged from the booted app.
+- **(d)** A deployed route's ProofTest (deny test) is checked for being runnable, not for its assertion being reached.
+- **(d/e)** Presence evidence orders `Authorization` assignments by position, not control flow (a bearer only under a false `if` counts), and does not see `DefaultRequestHeaders.Clear()` / `Remove("Authorization")`, `Add("Authorization", …)`, an object-initializer header, or a client reassigned after its bearer.
+- **(e)** The booted endpoint table is the one this configuration produces (every mapping gate on); a route behind a gate no test sets would show as "scanned but not mapped" in the agreement test (fails closed).
