@@ -1,5 +1,7 @@
 # AI Document Intelligence R4 - Playbook Scope Implementation
 
+> **Portfolio**: [Project #1251](https://github.com/spaarke-dev/spaarke/issues/1251) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: In Progress
 > **Started**: 2026-01-04
 > **Branch**: `feature/ai-document-intelligence-r4`

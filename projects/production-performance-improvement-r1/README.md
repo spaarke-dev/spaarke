@@ -1,5 +1,7 @@
 # Production Performance Improvement R1
 
+> **Portfolio**: [Project #1174](https://github.com/spaarke-dev/spaarke/issues/1174) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-03-13
 > **Status**: Complete (34/35 tasks; Task 005 blocked on external dependency)
 

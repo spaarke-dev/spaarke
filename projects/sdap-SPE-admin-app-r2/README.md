@@ -1,5 +1,7 @@
 # SDAP SPE Admin App — R2 (make it work, on current SPE platform)
 
+> **Portfolio**: [Project #1191](https://github.com/spaarke-dev/spaarke/issues/1191) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: DESIGN (re-scoped 2026-08-20) · execution not started, operator-gated
 > **Lineage**: follow-on to [`sdap-SPE-admin-app-r1`](../sdap-SPE-admin-app-r1/) (the original build — 75 tasks, closed in one day, Mar 2026)
 > **Origin**: code-quality-and-assurance-r3 follow-on (RED-1), **re-scoped** after live diagnosis + platform research

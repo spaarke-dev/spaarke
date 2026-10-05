@@ -1,5 +1,7 @@
 # Spaarke Insights Engine (r1)
 
+> **Portfolio**: [Project #1140](https://github.com/spaarke-dev/spaarke/issues/1140) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Design complete; pipeline-ready (2026-05-28)
 > **Created**: 2026-05-19 · **Last Aligned**: 2026-05-28
 > **Owner**: Spaarke Engineering

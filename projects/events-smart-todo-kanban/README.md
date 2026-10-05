@@ -1,5 +1,7 @@
 # Smart To Do Kanban Board
 
+> **Portfolio**: [Project #1161](https://github.com/spaarke-dev/spaarke/issues/1161) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: In Progress
 > **Branch**: `work/bff-matter-endpoints`
 > **Module**: LegalWorkspace (Code Page — React 18 SPA)

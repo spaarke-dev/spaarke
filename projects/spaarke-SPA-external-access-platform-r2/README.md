@@ -1,5 +1,7 @@
 # Spaarke External Access Platform (R2) — Module-Host SPA Foundation + Legal Front Door
 
+> **Portfolio**: [Project #1235](https://github.com/spaarke-dev/spaarke/issues/1235) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Last Updated**: 2026-08-06
 >
 > **Status**: In Progress (INITIALIZED — tasks generated; execution owner-gated wave-by-wave)
