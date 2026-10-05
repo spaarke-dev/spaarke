@@ -187,6 +187,7 @@ itself ends every row on it before its shares are revoked (Step 3.6).
 | xvi | The unsecure of a filed record ends its inherited rows FIRST (Step 3.6) and stops (children_incomplete, retryable) if it cannot | A row left `Shared` after Step 4's revoke reads, at a later re-secure, as an operator's removal |
 | xvii | Inherited rows are left out of task 142's ledger-roots scan (`IsAssignedToScanRow`) | They are not Assigned-To rows (no contact / organization subject — the materializer already ignores them); counting them would truncate and fail 142's job in a large environment |
 | xviii | A stranded isolated create (creator not shared AND the row not deletable) is named to the user (chat error / Office warning) | Never "shared to you" for a row only an administrator can open; the job shares it to `sprk_createdbyperson` |
+| xix | A share on a matter / project whose flag is EMPTY lists the records filed under it and reports each (unverifiable → `children_incomplete`, `filedRecordsNotUpdated`); a share on an ORDINARY one reads nothing filed under it | Round 17 item 3 (an empty flag is never "not secure"); the first round short-circuited both as "not secure" |
 
 ## 7. Placement (CLAUDE.md §10) and component justification (§11)
 
@@ -223,7 +224,9 @@ same module):
 | Job: cursor, empty-flag scan, unvisited-provenance pass, ResultJson `emptyFlagParents` / `resumeAfter` / `unfiledProvenance`; `/unsecure-project` Step 3.6 (`inheritedSharesNotEnded`); `/share-user` / `/unshare-user` `filedRecordsNotUpdated` | the same job and endpoints | additive | the verifier's items 11-13 and round 30's "failures report through children_incomplete" |
 
 The first r1 commit's `SecureChildShareSynchronizer.InheritedMirrorAsync` (`a58cbd8ee`) was REMOVED in r1c: replaced by
-`StillJustifiedByParentsAsync` over `IsolatedParentMirrorAsync` (interpretation xv).
+`StillJustifiedByParentsAsync` over `IsolatedParentMirrorAsync` (interpretation xv). `SecureFilingParent.Isolated` (and the
+Secure-team read in `ReadParentAsync` that filled it) was REMOVED too: nothing ever read it (the verifier's A24 seed could
+not bite it); every consumer of a parent's isolation asks the synchronizer when it acts.
 
 ## 8. Tests (KEEP paths, ADR-038)
 
@@ -274,6 +277,17 @@ The first r1 commit's `SecureChildShareSynchronizer.InheritedMirrorAsync` (`a58c
   mapping rule targeting `sprk_issecure` skipped; resolver/plan disagreement → nothing created; re-file refused before the
   PATCH for a creator walled off the matter, off the record's own list, unnameable, or with a secure+unreadable filing.
 - **r1 — `AssignedAccessReconciliationJobTests.ARootHoldingOnlyInheritedShareProvenance_IsNotACandidate`** (142's job).
+- **r1 — harness fidelity:** `ProvisionProjectTestFixture` now registers the synchronizer SCOPED over the host's real
+  `SecureShareNoAccessGuard` (as `ExternalAccessModule` does); it was a singleton over a guard that walls nobody, so the
+  mirror's No Access guard was never exercised through this host (the verifier's A19 seed could not bite).
+
+**r1 results (2026-10-04, `task/uac-r2-158-r1c`).** The 158 classes: **105/105** (`SecureRootInheritanceTests` 23,
+`SecureRootInheritanceWriterTests` 37, `SecureRootInheritanceRound31Tests` 41 incl. a 5-case theory,
+`SecureRootCreateRouteTests` 4). Affected (all of `tests/integration/data-mutation/ExternalAccess`, the chat tool
+ownership tests, 142's job, share and marker classes, provisioning, unsecure): **674/674**. **Full BFF unit suite** (once,
+at the end): **Passed 15324 / Failed 0 / Skipped 54** (Total 15378, 24 m 33 s). **NetArchTest:** **373/373**.
+**Integration:** `Sprk.Bff.Api.IntegrationTests` **104/104**; `Spe.Integration.Tests` **403 passed / 25 skipped / 0
+failed**. No contention failures this time.
 - Construction sites of the four writers updated (`SecureRootFilingGateFixtures.NothingSecure()`); the provisioning
   fixture registers the REAL inheritance and mirrors each root's container; `SecureChildTransitionTests`' decoy child root
   is now filed under the root's EVENT (a work assignment filed directly under a secure project is task 158's to secure).
@@ -325,6 +339,107 @@ of a refusal (fixed: `CheckRefileAsync` catches it), and the secure-if-any rule 
 unreadable (fixed: interpretation iii). The full-suite run found a third: an unfiled project's create was READ back
 after it was written (the Office contract tests warned and slowed) — a create now passes its own columns, so a row
 filed under nothing costs no read (S42/S43 pin it).
+
+### 9 r1c. Seeds of the fix round (the harness: `seeds158.py`, restored byte-identical from memory and touched)
+
+Each seed removes ONE guard of rounds 30 / 31, the job's r1 changes or the verifier's batch (runtime-false
+conditions, never a constant `if (false)`), builds (analyzers off for speed), runs the 158 classes + 142's job tests +
+the share / mirror classes (330-336 tests), records what went red, and restores the file byte-identical from memory
+(verified, then touched). **86 runs: 80 bit first time; the 6 that did not were each closed — a test added (R18,
+R19, R37, J08), a harness gap fixed (J14: the provisioning fixture's synchronizer used a guard that walls nobody; it now
+uses the host's real guard, as production registers it), or dead data removed (J10) — and re-seeded: all bit.** The
+verifier's second batch: A3 = J12, A16 = J13, A18 = J07, A19 = J14 / J14b, A20 = R26, A21 = J08 / J08b, A22 = J09,
+A23 = J11, A24 = J10 (removed). `git status -- src` clean after every batch.
+
+| Seed | Guard removed | Result | Red (first; +n more) |
+|---|---|---|---|
+| R01 | provisioning asks the record's own list AS FLAGGED (the verifier's CRITICAL defect) | bit | `TheJob_ResumingARecordWhoseCreatorIsWalled_RefusesBeforeTheFlagOrTheShare` (+1) |
+| R02 | provisioning skips the secure parents' No Access lists | bit | `ProvisioningAMatter_WhoseFiledRecordsCreatorIsWalledOffTheMatter_LeavesThatRecordAndReportsIt` (+1) |
+| R03 | provisioning ignores a parent that cannot be read | bit | `ASecureParentBesideAnUnreadableOne_IsNotSecured_BecauseTheCreatorsWallsCannotBeChecked` |
+| R04 | the RESUME branch shares a walled creator | bit | `TheJob_ResumingARecordWhoseCreatorIsWalled_RefusesBeforeTheFlagOrTheShare` |
+| R05 | the FORWARD branch shares a walled creator | bit | `ProvisioningAMatter_WhoseFiledRecordsCreatorIsWalledOffTheMatter_LeavesThatRecordAndReportsIt` (+3) |
+| R06 | CheckForSecuringAsync reads the flag (NotSecure on an unflagged record) | bit | `TheJob_ResumingARecordWhoseCreatorIsWalled_RefusesBeforeTheFlagOrTheShare` (+2) |
+| R07 | the prospective create ignores the organizations its payload references | bit | `ChatCreate_WhenTheCallerIsWalledOffAnOrganizationTheRecordWouldReference_IsRefused_AndNothingIsCreated` |
+| R08 | a re-file skips the recorded creator's walls | bit | `ChatUpdate_UnderASecureMatterWhileItsPairNamesAMatterWhoseFlagCannotBeRead_IsRefusedBeforeThePatch` (+3) |
+| R09 | a re-file whose creator cannot be named proceeds | bit | `ChatUpdate_WhenTheRecordsCreatorCannotBeNamed_IsRefusedBeforeThePatch` |
+| R10 | a re-file ignores an unreadable second parent | bit | `ChatUpdate_UnderASecureMatterWhileItsPairNamesAMatterWhoseFlagCannotBeRead_IsRefusedBeforeThePatch` |
+| R11 | a re-file skips the secure parents' lists | bit | `ChatUpdate_WhenTheCreatorIsOnTheSecureMattersNoAccessList_IsRefusedBeforeThePatch` |
+| R12 | a re-file skips the record's own list | bit | `ChatUpdate_WhenTheCreatorIsOnTheRecordsOwnNoAccessList_IsRefusedBeforeThePatch` |
+| R13 | the plan never asks the writer's as-caller G5 | bit | `OfficeQuickCreate_WhenTheCallerCannotFileUnderTheSecureMatter_Is403_AndNothingIsCreated` (+4) |
+| R14 | a create ignores an unreadable second parent | bit | `ChatCreate_UnderASecureMatterAndOneWhoseFlagCannotBeRead_IsRefused_AndNothingIsCreated` |
+| R15 | a create skips the secure parents' lists | bit | `ChatCreate_ConfirmedThroughTheGate_ByACallerWalledOffTheSecureMatter_IsRefused_AndNothingIsCreated` (+2) |
+| R16 | a create skips its own prospective list | bit | `ChatCreate_WhenTheCallerIsWalledOffAnOrganizationTheRecordWouldReference_IsRefused_AndNothingIsCreated` |
+| R17 | a create proceeds when the list cannot be read | bit | `ChatCreate_WhenTheNoAccessListCannotBeRead_IsRefused_AndNothingIsCreated` |
+| R18 | a create proceeds on an unresolved topology with a team id (weak) -- see note | not-bitten | NOT BITTEN (weak seed) -> test added, re-seeded as R18b |
+| R19 | a create for nobody proceeds | not-bitten | NOT BITTEN -> test added (R19b) |
+| R20 | an incomplete isolated create is always deleted (even when its creator can open it) | bit | `ChatCreate_WhenTheContainerCannotBeCreated_TheRecordStaysSecureForItsCreator_AndTheJobCompletesIt` |
+| R21 | a row whose creator could not be shared is never deleted | bit | `ChatCreate_WhenTheCreatorCannotBeShared_TheIsolatedRowIsRemoved_AndNothingIsCreated` (+1) |
+| R22 | a stranded row is not named | bit | `ChatCreate_WhenTheCreatorCannotBeSharedNorTheRowRemoved_SaysSo_AndTheJobSharesItToTheCreator` (+1) |
+| R23 | chat: a removed row reported as created | bit | `ChatCreate_WhenTheCreatorCannotBeShared_TheIsolatedRowIsRemoved_AndNothingIsCreated` |
+| R24 | chat: a stranded row reported as shared to you | bit | `ChatCreate_WhenTheCreatorCannotBeSharedNorTheRowRemoved_SaysSo_AndTheJobSharesItToTheCreator` |
+| R25 | chat: a plan refusal loses its code | bit | `ChatCreate_ConfirmedThroughTheGate_ByACallerWalledOffTheSecureMatter_IsRefused_AndNothingIsCreated` (+7) |
+| R26 | the isolated create does not name the Secure team | bit | `ChatCreate_ConfirmedThroughTheGate_OfAWorkAssignmentUnderASecureMatter_IsCreatedSecure_EndToEnd` (+2) |
+| R27 | the isolated create is not flagged in the create | bit | `ChatCreate_AWorkAssignmentUnderASecureMatter_IsCreatedIntoIsolation_AndComesOutSecure` |
+| R28 | resolver/plan disagreement creates a row | bit | `CreateRecord_AWorkAssignmentTheResolverPutsUnderTheSecureTeam_ButTheSecurePlanDoesNot_IsRefused_Task158r1` |
+| R29 | the chat create never plans | bit | `ChatCreate_ConfirmedThroughTheGate_ByACallerWalledOffTheSecureMatter_IsRefused_AndNothingIsCreated` (+12) |
+| R30 | G5 skips AppendTo on a pair-named secure parent | bit | `ChatCreate_UnderASecureMatterByThePair_WithoutAppendToOnTheMatter_IsDenied_AndNothingIsCreated` |
+| R31 | Office: created into the caller's unit | bit | `OfficeQuickCreate_OfAProjectFromASecureMatter_IsCreatedSecure_EndToEnd` (+2) |
+| R32 | Office: a removed project reported as created | bit | `OfficeCreate_WhenTheMakerCannotBeShared_TheProjectIsRemoved_AndTheCreateRefused` |
+| R33 | Office: a stranded project warned as shared to you | bit | `OfficeCreate_WhenTheMakerCannotBeSharedNorTheProjectRemoved_WarnsSo` |
+| R34 | Office: a mapping rule may write sprk_issecure | bit | `OfficeCreate_AMappingRuleTargetingTheSecureFlag_IsSkipped` |
+| R35 | Office G5: no Create privilege check | bit | `OfficeCreate_WhenTheCallerCannotCreateProjects_IsRefused_AndNothingIsCreated` |
+| R36 | Office G5: no AppendTo check | bit | `OfficeQuickCreate_WhenTheCallerCannotFileUnderTheSecureMatter_Is403_AndNothingIsCreated` (+1) |
+| R37 | Office G5: no token → proceeds (would NRE/deny) | build-fail | BUILD-FAIL (nullable) -> re-seeded as R37b with a test |
+| P01 | an unreadable provenance gives sharees anyway | bit | `SharingOnTheMatter_WhenTheProvenanceCannotBeRead_GivesNothing_AndReportsChildrenIncomplete` |
+| P02 | a Declined row does not withhold the mirror | bit | `AnOperatorsRemovalOnTheFiledRecord_IsNeverUndoneWhileTheParentStillSharesIt` (+1) |
+| P03 | an out-of-band removal on the filed record is not recorded Declined | bit | `TheJob_RecordsAnOutOfBandRemovalOnTheFiledRecordAsDeclined_AndNeverReAddsIt` (+1) |
+| P04 | the job never ends a source the parent stopped sharing (out-of-band unshare) | bit | `ATeamSharee_IsPassedOn_RecordedWithItsTeam_AndEndedWhenTheMatterNoLongerSharesIt` (+2) |
+| P05 | an unreadable parent in the job's provenance step is silently skipped | bit | `TheJob_WhenAParentThatPassedAShareOnCannotBeRead_FailsTheRun_NamingTheRecord` |
+| P06 | provenance not recorded | bit | `ATeamSharee_IsPassedOn_RecordedWithItsTeam_AndEndedWhenTheMatterNoLongerSharesIt` (+22) |
+| P07 | a provenance write failure reported as complete | bit | `TheJob_WhenTheProvenanceCannotBeWritten_FailsTheRun` |
+| P08 | an undecided intersection (untrusted parent) treated as justified | bit | `UnsharingFromTheMatter_HoldsTheShare_WhenEveryReadParentCarriesItButAnotherCannotBeTrusted` |
+| P09 | a read parent that no longer carries the person does not end it | bit | `ATeamSharee_IsPassedOn_RecordedWithItsTeam_AndEndedWhenTheMatterNoLongerSharesIt` (+7) |
+| P10 | an untrusted parent does not make the intersection undecided | bit | `UnsharingFromTheMatter_HoldsTheShare_WhenEveryReadParentCarriesItButAnotherCannotBeTrusted` |
+| P11 | an independent Assigned-To row does not keep the share | bit | `UnsharingFromTheMatter_KeepsAShareAnIndependentLedgerRowAlsoJustifies` |
+| P12 | a modified inherited share is removed | bit | `UnsharingFromTheMatter_KeepsAnInheritedShareThatWasRaisedSince` |
+| P13 | S5: the last reader is removed | bit | `UnsharingFromTheMatter_NeverRemovesTheFiledRecordsLastReader` |
+| P14 | a raised share is revoked instead of put back | bit | `UnsharingFromTheMatter_PutsARaisedShareBackToWhatItWasBefore` |
+| P15 | a direct (covered) share is not recorded kept-direct | bit | `UnsharingFromTheMatter_KeepsADirectShareThatAlreadyCarriedTheMirror` |
+| P16 | an unsecure leaves the inherited rows live | bit | `UnsecuringAFiledRecord_EndsWhatItsParentPassedOn_SoSecuringItAgainPassesTheShareeOnAgain` (+1) |
+| P17 | the unsecure never ends the provenance | bit | `UnsecuringAFiledRecord_EndsWhatItsParentPassedOn_SoSecuringItAgainPassesTheShareeOnAgain` (+1) |
+| P18 | /unshare-user on a parent that is no longer secure ends what it passed on | bit | `UnsharingFromAMatterThatIsNoLongerSecure_EndsNothingItPassedOn` (+1) |
+| P19 | /unshare-user fan-out on an unreadable parent reported as done | bit | `UnsharingFromTheMatter_WhenTheMatterCannotBeReadForTheFanOut_ReportsTheFiledRecordAsNotUpdated` |
+| P20 | /unshare-user does not fan out | bit | `AnOperatorsRemovalOnTheFiledRecord_IsNeverUndoneWhileTheParentStillSharesIt` (+11) |
+| P21 | /unshare-user fan-out failures not reported | bit | `UnsharingFromTheMatter_HoldsTheShare_WhenEveryReadParentCarriesItButAnotherCannotBeTrusted` (+1) |
+| P22 | /share-user fan-out failures not reported | bit | `SharingOnTheMatter_WhenTheProvenanceCannotBeRead_GivesNothing_AndReportsChildrenIncomplete` |
+| P23 | the job does not reconcile records re-filed away | bit | `TheJob_EndsAnInheritedShareOnARecordReFiledAwayFromTheParent_WhenTheParentUnsharesOutsideTheBff` (+1) |
+| P24 | the reconcile looks at the visited records instead | bit | `TheJob_EndsAnInheritedShareOnARecordReFiledAwayFromTheParent_WhenTheParentUnsharesOutsideTheBff` (+1) |
+| P25 | the reconcile silently skips an unreadable parent | bit | `TheJob_WhenAParentOfAReFiledRecordCannotBeRead_FailsTheRun_AndEndsNothing` |
+| P26 | the job reports success with the reconcile incomplete | bit | `TheJob_WhenAParentOfAReFiledRecordCannotBeRead_FailsTheRun_AndEndsNothing` |
+| P27 | 142's scan counts inherited rows | bit | `ARootHoldingOnlyInheritedShareProvenance_IsNotACandidate` |
+| P28 | the synchronizer re-adds a declined principal | bit | `AnOperatorsRemovalOnTheFiledRecord_IsNeverUndoneWhileTheParentStillSharesIt` (+2) |
+| P29 | a parent that is no longer isolated is treated as isolated | bit | `UnsharingFromAMatterThatIsNoLongerSecure_EndsNothingItPassedOn` (+1) |
+| J01 | A5 / item 11: deferral reported as success | bit | `TheJob_ProvisionsAtMostItsBoundPerRun_AndTheNextRunSecuresTheRest` |
+| J02 | the cursor is ignored | bit | `TheJob_ContinuesFromItsCursor_SoRecordsBehindOnesThatKeepFailingAreReached` |
+| J03 | item 12: empty-flag parents not scanned | bit | `TheJob_ReportsARecordFiledUnderAParentWhoseFlagIsEmpty` |
+| J04 | item 13: only the D spelling is listed | bit | `TheJob_FindsAPairInEverySpellingTheDecisionAccepts` (+1) |
+| J05 | A2: unconfirmed pair candidates dropped | bit | `AFiledRecordWhosePairTypeCannotBeRead_IsReportedByTheJobAndTheTransition_AndNothingIsWritten` |
+| J06 | A6: isolation ignores the container | bit | `TheJob_CompletesAFiledRecordThatIsTeamOwnedAndFlaggedButHasNoContainer` (+2) |
+| J07 | A18: pair type ignored | bit | `ProvisioningAMatter_SecuresTheWorkAssignmentsAndProjectsFiledUnderIt_AndGivesThemItsSharee` (+1) |
+| J08 | A21: parent-flag check in the pass removed | not-bitten | NOT BITTEN: equal behaviour except reads / an EMPTY flag -> J08b, J08c with tests; an EMPTY flag no longer short-circuits |
+| J09 | A22: an EMPTY parent flag read as not secure | bit | `TheJob_ReportsARecordFiledUnderAParentWhoseFlagIsEmpty` (+10) |
+| J10 | A24: parent isolation ignores the owner | not-bitten | NOT BITTEN: SecureFilingParent.Isolated was never read by anything -> REMOVED (dead data), no guard left |
+| J11 | A23: after-write skips every write that names its columns | bit | `ActionCore_RefilingUnderASecureMatter_SecuresIt` (+3) |
+| J12 | A3: /share-user does not pass the sharee on | bit | `AnOperatorsRemovalOnTheFiledRecord_IsNeverUndoneWhileTheParentStillSharesIt` (+14) |
+| J13 | A16: provisioning Step 8 skipped | bit | `AFiledRecordWhosePairTypeCannotBeRead_IsReportedByTheJobAndTheTransition_AndNothingIsWritten` (+5) |
+| J14 | A19: the root mirror skips the walls | not-bitten | NOT BITTEN: the fixture synchronizer walled nobody -> host guard wired, test added, J14b |
+| R18b | a create proceeds into isolation with no resolved Secure team | bit | `ChatCreate_WhenTheSecureOwnerTeamCannotBeResolved_IsRefused_AndNothingIsCreated` |
+| R19b | a create for nobody proceeds (re-run) | bit | `ThePlan_ForACreateUnderASecureMatterForNobody_Refuses` |
+| R37b | Office G5: no bearer token → asked anyway | bit | `OfficeCreate_WhenTheCallersRightsCannotBeChecked_IsRefused_AndNothingIsCreated` |
+| J08b | A21: a pass over an ORDINARY parent reads what is filed under it | bit | `SharingOnAnOrdinaryMatter_ReadsNothingFiledUnderIt` |
+| J08c | round 17: an EMPTY parent flag read as 'nothing to pass on' on the share route | bit | `SharingOnAMatterWhoseFlagIsEmpty_ReportsTheFiledRecordsAsNotUpdated` |
+| J14b | A19: the root mirror skips the walls (re-run with the host's real guard) | bit | `TheJob_NeverPassesOnASharee_WhoIsOnTheFiledRecordsNoAccessList` |
+
 
 ## 10. Manual live gates (main session; round 11 approved them at integration) — exact commands
 
