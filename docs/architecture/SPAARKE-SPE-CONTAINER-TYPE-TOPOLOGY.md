@@ -322,15 +322,26 @@ a container type cannot be deleted while any container of it exists anywhere.
 Because one container type serves several customers (Model 1), "a container of this config's type" is **not** "this
 customer's container". Every container therefore carries its owning Dataverse business unit as a `fileStorageContainer`
 custom property, **`spaarkeBusinessUnitId`** (canonical GUID, not searchable) — unified-access-control-r2 task 165, owner
-round 20:
+rounds 20 and 35. The name is ONE C# constant (`src/server/shared/Contracts/SpeContainerBusinessUnitBinding.cs`,
+source-linked into the BFF and the L2 control plane) and ONE PowerShell constant (`scripts/common/SpeContainerBinding.ps1`);
+an ArchTest pins both and fails on any creation site that does not stamp.
 
-- **Stamped at creation** by every BFF creation path — the SPE admin plane (`POST /api/spe/containers`: the config's unit,
-  or the creating admin's for a unit-less config) and secure-record provisioning (the Secure Record unit). A stamp that
-  does not read back removes the container again. Existing containers: `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1`
-  (dry run / `-Apply` / `-Verify`) derives the owner only from authoritative records and LISTS any it cannot derive.
+- **Stamped at creation by EVERY creation path** (round 35 item 1) — the BFF's SPE admin plane (`POST /api/spe/containers`:
+  the config's unit, or the creating admin's for a unit-less config) and secure-record provisioning (the Secure Record
+  unit); the L2 control plane's **H8** root container (the new environment's root business unit, after verification);
+  `scripts/New-BusinessUnitContainer.ps1` (the business unit it is run for), `scripts/Provision-Customer.ps1` step 10 (the
+  root business unit) and `scripts/Create-NewContainerType.ps1 -CreateTestContainer` (`-TestContainerBusinessUnitId`). A
+  stamp that does not read back removes the container again. Existing containers:
+  `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1` (dry run / `-Apply` / `-Verify`) derives the owner only from
+  authoritative records, takes an explicit `-Bind <containerId>=<businessUnitId>` for a container no record claims, and
+  its `-Verify` lists — and fails on — every container still unbound.
 - **Authorized per container** on every container, item, column, custom-property, permission, recycle-bin and bulk route:
-  a container bound to the admin's own unit or a descendant; an **unbound** container only for a **root-unit** admin; an
-  unreadable binding fails closed. Lists and searches are trimmed the same way.
+  a container bound to the admin's own unit or a descendant; an **unbound** (or malformed) container by **no** admin
+  route — root-unit admins included (round 35 item 2: under Model 1 a root admin of any environment whose config names a
+  shared type would otherwise reach another customer's unbound containers); every refusal is the same 404, logged with
+  its reason (`unbound`, `malformed`, `absent`, `other_type`, `out_of_scope`); an unreadable binding fails closed. Lists
+  and searches are trimmed the same way. **Manual gate:** the backfill's `-Apply` + `-Verify` exit 0 in every environment
+  before task 165's BFF is deployed there, and before a further environment is onboarded onto a shared type.
 - **Server-owned**: the custom-property route refuses to set or change it.
 - **Read one container at a time**: on the containers **collection** Graph accepts `$select=customProperties`, echoes it
   in `@odata.context`, and drops it from every row (measured 2026-10-04, beta and v1.0) — the same silent shape
@@ -338,7 +349,9 @@ round 20:
 
 Because sharing a type no longer exposes containers, configs of different customers may name the same container type,
 owning app and its secret; the consuming app stays per customer. The app-only container-type routes (type permissions,
-consuming-app registrations, register) refuse a write to a type that a config the admin cannot reach also carries.
+consuming-app registrations, register) refuse a read or a write of a type that a config the admin cannot reach also
+carries (round 35 item 5 — the reads list every customer's consuming app). A config's owning-app secret name must start
+`spe-owning-app-` (round 35 item 3): the BFF resolves no other Key Vault secret.
 
 ---
 

@@ -1056,6 +1056,34 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Safety model:** dry-run default (`-WhatIf` also forces preview even combined with `-Apply`); idempotent (compares the derived value against the row's current value, not just null-vs-populated); a disagreeing existing stamp is reported as a `Conflict` and never overwritten; an escalation gate (>50,000 total candidates, or any entity >20% unresolvable) blocks `-Apply` until `-AcknowledgeEscalation` is passed. Full detail: `Get-Help .\Backfill-CoreAncestorStamps.ps1 -Full` and [`projects/unified-access-control-r2/notes/phase3-backfill-runbook.md`](../projects/unified-access-control-r2/notes/phase3-backfill-runbook.md).
 
+### `Backfill-SpeContainerBusinessUnitStamp.ps1`
+**Purpose:** Binds EXISTING SharePoint Embedded containers to the business unit that owns them (the container custom property
+named in `common/SpeContainerBinding.ps1`). The BFF's SPE admin plane authorizes every container route per container and
+reaches **no** unbound container (unified-access-control-r2 task 165, owner rounds 20 and 35). The owner is derived only from
+authoritative records (`businessunit.sprk_containerid`, a secure root's own container, the admin-plane `CreateContainer`
+audit row); a container no record claims is bound only by an explicit `-Bind '<containerId>=<businessUnitId>'`.
+**Usage:** 🔴 Per environment — a **manual gate** before task 165's BFF is deployed there, and before a further environment
+is onboarded onto a container type another environment already uses (`-Verify` must exit 0).
+**Lifecycle:** ✅ Maintained (task 165 f1 2026-10-04; `-Bind` + unbound listing f2)
+**Dependencies:** Azure CLI (`az login`: Dataverse + the BFF Key Vault for the owning apps' secrets), PowerShell 7+
+**Safety model:** dry run by default (`-WhatIf` forces it); write-ahead reversal manifest (`-RevertManifest <csv> -Apply`
+undoes); every write read back; never overwrites a stamp (MISMATCH / FOREIGN / MALFORMED / BIND-CONFLICT are listed);
+`-MaxWritesPerRun` samples; `-Verify` lists every still-unbound container and fails on it, on a mismatch, an unreadable
+binding or a config whose containers could not be listed.
+
+```powershell
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault>            # dry run
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Apply
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Bind '<containerId>=<buId>' -Apply
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify   # must exit 0
+```
+
+**Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
+`Invoke-SpeContainerBindOrRemove` (stamp, read back, remove the container if the stamp did not land), used by every script
+that creates a container (`New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
+`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`). `SpeAdminContainerBindingGuardTests`
+fails the build on a script that creates a container without it.
+
 ### `Backfill-RecordOwnership.ps1`
 **Purpose:** Re-owns EXISTING **app-owned** `sprk_document` / `sprk_todo` rows to a business unit's DEFAULT OWNER TEAM, record-first — the backfill for write-path invariant **I-6**. Before task 080 every BFF-created record was owned by the BFF application user in the ROOT business unit, which no child-business-unit user can read at Deep depth. The team comes from the record the row is filed against (document: `sprk_matter` → `sprk_project` → `sprk_invoice` → `sprk_workassignment`; To Do: record regarding → document → communication), mirroring `RecordOwnershipResolver`. Rows filed against nothing are **reported, never written** — the create was app-only, so the data does not record who made it ("we can't guess").
 **Usage:** 🔴 One-time (per environment); idempotent — re-owned rows are no longer candidates.
@@ -1188,6 +1216,17 @@ pwsh scripts/Test-SpeContainerPermissionPaging.ps1 -ContainerId 'b!...' -AccessT
 **Related**: `projects/unified-access-control-r2/notes/task-024-spe-paging-parity.md` §1 (record the verdict there); `notes/decisions/spe-paging-and-revoke-honesty-design.md` §0; GitHub #968, #969.
 
 ---
+
+### `Test-SpeConfigSecretNames.ps1`
+**Purpose:** READ-ONLY. Lists the SPE container-type configs whose `sprk_keyvaultsecretname` is outside the BFF's allow-list
+(ONE pinned prefix, `spe-owning-app-`; unified-access-control-r2 task 165, owner round 35 item 3). The BFF refuses such a
+config (409) and never reads the secret it names. Renaming is a manual gate: store the owning app's secret under a
+conforming name, then update the config.
+**Usage:** 🔴 Per environment, before / after deploying task 165's BFF. **Lifecycle:** ✅ Maintained (task 165 f2, 2026-10-04)
+
+```powershell
+.\Test-SpeConfigSecretNames.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify   # exit 1 while any config does not conform
+```
 
 ### `tests/bicep-e2e-dry-run.ps1`
 **Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 4 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep, stacks/model1-shared.bicep) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.

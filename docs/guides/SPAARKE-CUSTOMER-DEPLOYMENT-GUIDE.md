@@ -383,7 +383,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **8 authoritative solutions** (§11.1a): SpaarkeCore, webresources, then 6 tier-3 parallel | All 8 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
-| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s) | Container GET succeeds; container ID persisted to Dataverse + KV | `spe-{customerId}` |
+| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s). **Binds the root container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1); runs after **H3 and H5** | Container GET succeeds; stamp reads back; container ID persisted to Dataverse + KV | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
@@ -400,6 +400,9 @@ H0 --> H1 --> H2a --> { H2b (indexes), H4 (KV), H5 (dv-env) }   # 3-way parallel
                             |
                             v
                        H4 --> H3 (needs KV for secrets) --> { H8 (SPE), H9 (BFF deploy) }
+                                                                 ^
+                                                    H5 (dv-env) -+   # H8 also needs H5: it binds the root container
+                                                                     # to the environment's root business unit (task 165)
 
 H5 --> H6 (solutions) --> H7 --> H10 (needs H6) --> H11
                                     |
@@ -765,6 +768,15 @@ Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct
 
 **H8** provisions container-type + root container. **T6 fix**: uses confidential-client (app-only) token with cert bootstrapped from KV — delegated tokens produce `public client not allowed` 403s.
 
+**Business-unit binding (unified-access-control-r2 task 165, owner round 35 items 1-2).** Every SPE container carries the
+business unit that owns it as the custom property `spaarkeBusinessUnitId`, and the BFF's SPE admin plane reaches **no**
+unbound container — not even for a root-unit administrator. H8 therefore runs after H5, reads the new environment's
+**root** business unit before creating anything (no environment URL or no root unit → Resumable, nothing created), and
+once the root container is verified readable stamps it, reads the stamp back, and **removes** the container if the stamp
+did not land (QuarantineRequired: `spe-container-binding-failed` / `…-not-removed` / `…-infra-fault`). Only a bound container
+is handed to H7. Every other creation path follows the same rule: the BFF, `New-BusinessUnitContainer.ps1`,
+`Provision-Customer.ps1` step 10, `Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`.
+
 Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId`) AND KV secret (`customer-{customerId}-spe-container-id`) — enables I4 invariant enforcement.
 
 **Lead-time**: container-type replication up to 24h; H0 preflight ensures cert-bootstrap done, so this is not an in-pipeline wait.
@@ -983,7 +995,31 @@ pac admin create-environment `
 # Phase 5 — SPE (confidential-client — T6 fix)
 .\scripts\Create-NewContainerType.ps1 -CustomerId "acme"
 .\scripts\Register-*.ps1                 # per SPE registration ceremony
-.\scripts\New-BusinessUnitContainer.ps1 -CustomerId "acme"
+# Creates the business unit's container AND binds it to that unit (stamp, read back, or the container is removed —
+# task 165, owner round 35 item 1); sprk_containerid is written only for a bound container.
+.\scripts\New-BusinessUnitContainer.ps1 `
+    -BusinessUnitId "<bu-guid>" -BusinessUnitName "<bu name>" `
+    -ContainerTypeId "<container-type-id>" -DataverseUrl "<dv-org-url>" `
+    -OwningAppId "<owning-app-id>" -TenantId "<tenant-guid>" `
+    -KeyVaultName "<customer-kv>" -CertSecretName "<spe-cert-secret>"
+
+# Phase 5b — SPE container BINDING GATE (task 165, owner round 35 item 2 — MANUAL GATE, BLOCKING).
+# No SPE admin route reaches an unbound container. Before task 165's BFF is deployed to an environment, and before a
+# further environment is onboarded onto a container type another environment already uses, EVERY container of every
+# config must be bound. Dry run first (read-only), then -Apply, then -Verify — which must exit 0:
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>"
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>" -Apply
+#   containers no record claims are listed UNDERIVABLE: bind each to its owner explicitly (or remove it) —
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>" `
+    -Bind '<containerId>=<businessUnitId>' -Apply
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>" -Verify   # MUST exit 0
+# When onboarding onto a SHARED container type, run the -Verify above in EVERY environment that already uses the type —
+# a container of the type left unbound in one environment is otherwise nobody's to administer.
+
+# Phase 5c — SPE config Key Vault secret names (task 165, owner round 35 item 3). The BFF resolves only owning-app secret
+# names starting 'spe-owning-app-'; a config naming anything else is refused (409) until it is renamed (manual gate:
+# store the secret under a conforming name, then update the config). Read-only check, MUST exit 0:
+.\scripts\Test-SpeConfigSecretNames.ps1 -EnvironmentUrl "<dv-org-url>" -Verify
 
 # Phase 6 — BFF deploy
 .\scripts\Deploy-BffApi.ps1 -CustomerId "acme" -Slot production

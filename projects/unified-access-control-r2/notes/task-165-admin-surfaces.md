@@ -650,6 +650,10 @@ logged, so `-Verify` could pass without having seen them. Fixed in this round: s
   - Secure-record provisioning, `ProvisionProjectEndpoint` → `SpeFileStore.CreateContainerAsync(…, owningBusinessUnitId)`
     → `ContainerOperations.CreateContainerAsync`: stamped with the **Secure Record unit** the record is isolated into
     (`secureBuId`), same read-back, on failure `DELETE` + throw (provisioning's existing failure path answers).
+  - **CORRECTED in f2 (§12.2):** this round's claim that no other path creates a container held for the BFF only. Three
+    in-repo paths outside the BFF created UNSTAMPED containers — the L2 H8 handler, `scripts/New-BusinessUnitContainer.ps1`
+    (the documented onboarding step) and `scripts/Provision-Customer.ps1` — plus `scripts/Create-NewContainerType.ps1
+    -CreateTestContainer`. All four stamp now, and the guard scans all of `src/` and `scripts/`.
   - No other BFF path creates a container: `SpeAdminContainerBindingGuardTests.EveryContainerCreationPath_BindsTheNewContainer`
     scans `src/server/api/Sprk.Bff.Api` for every container `POST` and requires the binding call in the same method
     (seeds S1/S2).
@@ -1001,6 +1005,10 @@ tests cover it.
 - **D17 — `-Verify` fails on a config it could not list** (§11.1): a pass must not claim containers it never saw.
 
 ### 11.15 Findings outside the 15 items — complete fixes proposed (not implemented here; for the main session)
+
+> **Superseded by follow-up round f2 (§12):** (a), (b) and (c) are IMPLEMENTED under owner round 35 items 1-4 — they were
+> scope discovered during execution and belonged in this task (constraint 21; round 15). (d) is now listed by
+> `scripts/Test-SpeConfigSecretNames.ps1 -Verify` and refused by the BFF with 409 until it is renamed (manual gate §12.9).
 
 - **(a) D-12 Model 1, shared consuming tenant.** Customers have dedicated Dataverse environments but share the SPE
   consuming tenant and container type. "Unbound → root-unit admin" is evaluated per environment, so the ROOT admin of
