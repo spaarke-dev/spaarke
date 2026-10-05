@@ -57,6 +57,8 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
@@ -178,6 +180,44 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadAsByteArrayAsync();
         body.Should().Equal(payload, "an authorized, in-project download streams the app-only SPE bytes");
+    }
+
+    [Fact]
+    public async Task DocumentVersions_OfAMovedFile_ReportTheOriginalDates_AndNoAuthor_ToAnExternalParticipant()
+    {
+        // unified-access-control-r2 task 166 f1-v2, owner round 45 item 1: a relocation replays a file's history; Graph
+        // dates each replayed version at the move. The relocation's record keeps the ORIGINAL date, and the history an
+        // external participant sees is unchanged by the move — which includes never being shown who wrote a version.
+        var original = new DateTimeOffset(2024, 2, 3, 4, 5, 6, TimeSpan.Zero);
+        var replayedAt = new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero);
+        _fixture.StorageResolverMock
+            .Setup(r => r.GetSpePointersAsync(DocumentX, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("b!drive-ext-2", "item-ext-2"));
+        _fixture.SpeFileOperationsMock
+            .Setup(s => s.ListFileVersionsAsync("b!drive-ext-2", "item-ext-2", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VersionInfoDto>
+            {
+                new("2.0", null, replayedAt.AddMinutes(1), 200, "SharePoint App"),
+                new("1.0", null, replayedAt, 100, "SharePoint App"),
+            });
+        _fixture.DataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_document", DocumentX, It.Is<string[]>(c => c.Contains(RelocatedVersionHistory.Column)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", DocumentX)
+            {
+                [RelocatedVersionHistory.Column] =
+                    $$"""{"v":1,"item":"item-ext-2","versions":[{"id":"1.0","by":"Alice Original","at":"{{original:O}}","size":100}]}""",
+            });
+
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA }, documentProjectId: ProjectA);
+
+        var response = await client.GetAsync($"/api/v1/external/projects/{ProjectA}/documents/{DocumentX}/versions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "body was: {0}", await response.Content.ReadAsStringAsync());
+        var body = System.Text.Json.Nodes.JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var versions = body["versions"]!.AsArray();
+        var replayed = versions.Single(v => v!["versionId"]!.GetValue<string>() == "1.0")!;
+        DateTimeOffset.Parse(replayed["createdAt"]!.GetValue<string>()).Should().Be(original, "the replayed version's ORIGINAL date");
+        versions.Should().OnlyContain(v => v!["createdByName"] == null, "no author is shown on the external surface");
     }
 
     // ================================================================================
@@ -817,6 +857,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Mock<ITenantCache> TenantCacheMock { get; } = new(MockBehavior.Loose);
     public StubDataverseWebApiClient Dataverse { get; } = new();
 
+    /// <summary>The app-only Dataverse seam (<c>IDataverseService</c>, also <c>IGenericEntityService</c>).</summary>
+    public Mock<IDataverseService> DataverseServiceMock { get; } = new(MockBehavior.Loose);
+
     /// <summary>
     /// The identity-binding row store (task 141). CIAM contact resolution and the invite path read it; a CIAM
     /// caller's contact is header-driven on top of it (<see cref="HeaderDrivenIdentityStore"/>).
@@ -974,10 +1017,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<IGraphClientFactory>();
             services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
 
-            var dataverseServiceMock = new Mock<IDataverseService>();
-            dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            DataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
-            services.AddSingleton(dataverseServiceMock.Object);
+            services.AddSingleton(DataverseServiceMock.Object);
 
             // ── Module-boundary doubles ──────────────────────────────────────────
             services.RemoveAll<IDocumentStorageResolver>();

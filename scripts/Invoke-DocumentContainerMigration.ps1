@@ -236,7 +236,7 @@ function Invoke-Pass([string] $ExpectedMode) {
         foreach ($changed in @($r.sourceChangedAfterMoveRows)) {
             if ($changed) {
                 Write-Host ("  SOURCE CHANGED AFTER MOVE: {0}/{1} (document {2}) — {3}" -f $changed.sourceDrive, $changed.sourceItem,
-                    $changed.documentId, $(if ($changed.newItem) { "re-copied with $($changed.carriedVersions) later version(s) into $($changed.newItem)" } else { 'not closed yet (see its pending line); the next -Apply run re-copies it' }))
+                    $changed.documentId, $(if ($changed.newItem) { "re-copied with $($changed.carriedVersions) later version(s) into $($changed.newItem); " + $(if ($changed.editIsCurrent) { 'the edit is current (its author may write the document)' } else { "the edit is in the history only (its author may not write the document); the document's own content stays current" }) } else { 'not closed yet (see its pending line); the next -Apply run re-copies it' }))
             }
         }
         foreach ($truncated in @($r.versionsTruncatedRows)) {

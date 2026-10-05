@@ -48,8 +48,11 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// record's file: the transition is complete and the report lists it (<see cref="DocumentRelocationOutcome.KeptForOtherRecords"/>);
 /// the entry stays so a later pass deletes the source once nothing references it. A source EDITED after the move no longer
 /// matches its witness: it is reported (<see cref="DocumentRelocationOutcome.SourceChangedAfterMove"/>, never deleted as
-/// it stands) and closed by the relocator itself — re-copy (the document's current file and history, then the source's
-/// versions written after the move), verify, re-point — never by a manual step;</item>
+/// it stands) and closed by the relocator itself — re-copy (the document's current file and history, and the source's
+/// versions written after the move), verify, re-point — never by a manual step. Every such edit is carried (nothing is
+/// lost), but it becomes the document's CURRENT content only when its author may write the document now; otherwise it is
+/// kept in the history and the document's own content stays current (the old file stayed writable by the old container's
+/// audience, and a move must never let someone who lost access with it change the document);</item>
 /// <item><b>index</b>: the new item indexed and the old item's chunks removed, through ONE <c>Services/Ai/PublicContracts</c>
 /// facade (<see cref="IRelocatedFileIndexing"/>, ADR-013).</item>
 /// </list>
@@ -122,6 +125,7 @@ public sealed class DocumentContainerRelocator
     private readonly SpeFileStore _spe;
     private readonly IRelocatedFileIndexing _indexing;
     private readonly IIdempotencyService _locks;
+    private readonly IAccessDataSource _access;
     private readonly TimeProvider _time;
     private readonly ILogger<DocumentContainerRelocator> _logger;
 
@@ -131,6 +135,7 @@ public sealed class DocumentContainerRelocator
         SpeFileStore spe,
         IRelocatedFileIndexing indexing,
         IIdempotencyService locks,
+        IAccessDataSource access,
         ILogger<DocumentContainerRelocator> logger,
         TimeProvider? timeProvider = null)
     {
@@ -139,6 +144,7 @@ public sealed class DocumentContainerRelocator
         _spe = spe ?? throw new ArgumentNullException(nameof(spe));
         _indexing = indexing ?? throw new ArgumentNullException(nameof(indexing));
         _locks = locks ?? throw new ArgumentNullException(nameof(locks));
+        _access = access ?? throw new ArgumentNullException(nameof(access));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _time = timeProvider ?? TimeProvider.System;
     }
@@ -987,12 +993,14 @@ public sealed class DocumentContainerRelocator
 
     /// <summary>
     /// Closes every source in <paramref name="summary"/> that was edited after its move: a NEW copy, in the document's
-    /// current container, of the document's current file WITH its history (originals as recorded), followed by each
-    /// edited source's versions written after its witness, oldest first; verified against the source's current content;
-    /// the row re-pointed to it (the replaced file becomes an old item of the ledger, with its own witness, and each edited
-    /// source's witness becomes its current state); then settled — so the replaced file and each source are deleted on
-    /// this same call unless they change again. Nothing the document or the source held is lost: both histories are in the
-    /// new copy. A failure leaves everything as it was and is reported pending; the next call retries.
+    /// current container, of the document's current file WITH its history (originals as recorded) and each edited
+    /// source's versions written after its witness, oldest first; verified; the row re-pointed to it (the replaced file
+    /// becomes an old item of the ledger, with its own witness, and each edited source's witness becomes its current
+    /// state); then settled — so the replaced file and each source are deleted on this same call unless they change again.
+    /// Nothing the document or the source held is lost: both histories are in the new copy. The last edit becomes the
+    /// CURRENT content only when its author may write the document now (<see cref="MayWriteAsync"/>); otherwise it is
+    /// history and the document's own content stays current. A failure leaves everything as it was and is reported
+    /// pending; the next call retries.
     /// </summary>
     private async Task<RecopyResult> RecopyChangedSourcesAsync(
         Guid documentId, Entity row, string currentDrive, string currentItem, SettleSummary summary, RelocationPurpose purpose,
@@ -1006,10 +1014,10 @@ public sealed class DocumentContainerRelocator
             return new RecopyResult(summary, null);
         }
 
-        var steps = new List<ReplayStep>(current.Steps);
+        var edits = new List<ReplayStep>();
         var ledger = summary.Ledger;
         var reports = new List<SourceChangedAfterMove>();
-        SpeItemCreator? finalFacts = null;
+        SpeItemCreator? lastSourceFacts = null;
         foreach (var source in changed)
         {
             var history = await ReadHistoryAsync(source.Entry.SourceDrive, source.Entry.SourceItem, record: null, ct).ConfigureAwait(false);
@@ -1020,15 +1028,28 @@ public sealed class DocumentContainerRelocator
                 return new RecopyResult(summary, null);
             }
 
-            var edits = history.After(source.Entry.Witness?.Version);
-            steps.AddRange(edits);
+            var after = history.After(source.Entry.Witness?.Version);
+            edits.AddRange(after);
             ledger = ledger.With(source.Entry with { Witness = history.Witness, Source = LedgerSourceState.Pending });
-            finalFacts = history.Facts;
-            reports.Add(new SourceChangedAfterMove(documentId, source.Entry.SourceDrive, source.Entry.SourceItem, edits.Count, null));
+            lastSourceFacts = history.Facts;
+            reports.Add(new SourceChangedAfterMove(documentId, source.Entry.SourceDrive, source.Entry.SourceItem, after.Count, null));
         }
 
+        // EVERY version written at the old location after the move is carried, so nothing is lost. The last of them becomes
+        // the document's CURRENT content only when the person who wrote it may write the document NOW (Dataverse's own
+        // answer for that person, RetrievePrincipalAccess) — the old file stayed writable by the old container's audience,
+        // and a move must never let someone who lost access with it change the document. Otherwise (no such right, an
+        // app-only write, an answer that cannot be had: fail closed) the edits go into the history BEFORE the document's
+        // own current content, which stays current; each keeps its original author in the version record.
+        var editIsCurrent = await MayWriteAsync(documentId, edits[^1].Origin.ByUser, ct).ConfigureAwait(false);
+        var steps = editIsCurrent
+            ? current.Steps.Concat(edits).ToList()
+            : current.Steps.Take(current.Steps.Count - 1).Concat(edits).Append(current.Steps[^1]).ToList();
+        var finalFacts = editIsCurrent ? lastSourceFacts! : current.Facts!;
+        reports = reports.Select(r => r with { EditIsCurrent = editIsCurrent }).ToList();
+
         var moved = await MoveAsync(documentId, row, currentDrive, currentItem, currentDrive,
-            new ReplayPlan(steps, finalFacts!, current.Witness, current.Facts!.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
+            new ReplayPlan(steps, finalFacts, current.Witness, current.Facts!.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
             ledger, LedgerSourceState.Pending, ct).ConfigureAwait(false);
         if (moved.Failure is not null)
         {
@@ -1064,6 +1085,33 @@ public sealed class DocumentContainerRelocator
         }
 
         return new RecopyResult(settled, rowAfter);
+    }
+
+    /// <summary>
+    /// May the person <paramref name="authorObjectId"/> (an Entra object id) write the document NOW? Dataverse's own
+    /// answer for that principal (<see cref="IAccessDataSource.GetUserAccessAsync"/>: RetrievePrincipalAccess, which
+    /// factors in roles, teams and sharing). Not a person, no answer, or a fault: <see langword="false"/> (ADR-003).
+    /// </summary>
+    private async Task<bool> MayWriteAsync(Guid documentId, string? authorObjectId, CancellationToken ct)
+    {
+        if (!Guid.TryParse(authorObjectId, out var author) || author == Guid.Empty)
+        {
+            return false;
+        }
+
+        try
+        {
+            var snapshot = await _access.GetUserAccessAsync(author.ToString("D"), documentId.ToString("D"), userAccessToken: null, ct)
+                .ConfigureAwait(false);
+            return snapshot.AccessRights.HasFlag(AccessRights.Write);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[DOCUMENT-RELOCATE] whether {Author} may write document {DocumentId} could not be read; their edit is kept in the "
+                + "history, not made current.", author, documentId);
+            return false;
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -1957,7 +2005,10 @@ public sealed record KeptSource(Guid DocumentId, string SourceDrive, string Sour
 /// <param name="SourceItem">The edited source.</param>
 /// <param name="CarriedVersions">How many of the source's versions written after the move the re-copy carried.</param>
 /// <param name="NewItem">The document's file after the re-copy.</param>
-public sealed record SourceChangedAfterMove(Guid DocumentId, string SourceDrive, string SourceItem, int CarriedVersions, string? NewItem);
+/// <param name="EditIsCurrent">The last carried edit became the document's current content — only when its author may
+/// write the document now; otherwise the edits are in the history and the document's own content stays current.</param>
+public sealed record SourceChangedAfterMove(
+    Guid DocumentId, string SourceDrive, string SourceItem, int CarriedVersions, string? NewItem, bool EditIsCurrent = false);
 
 /// <summary>
 /// A moved file whose history the target container could not hold in full (owner round 45 item 1: <c>versions-truncated</c>,

@@ -495,11 +495,18 @@ Client startup validates no hardcoded URL fallbacks (per task 024).
   strict derived-container rule, and is set to `true` only after `scripts/Invoke-DocumentContainerMigration.ps1 -Verify`
   passes on that environment (task 166 note §20). `DocumentContainerMigration__WritesEnabled` is set only by that
   script's `-Apply`, for the run.
-- ⚠️ **Schema before any file relocation** (task 166 f1-v1): run `scripts/Set-DocumentRelocationSchema.ps1 -Apply` then
-  `-Verify` on the environment's Dataverse before the migration's `-Apply` and before Make Secure is used. It creates
-  `sprk_document.sprk_relocationpending`, the row's relocation ledger (what a moved file still owes: a source delete, a
-  re-key, the index); every relocation reads it and fails closed — nothing moves — until it exists.
-  `scripts/Set-DocumentPointerFieldSecurity.ps1` then locks it with the pointer columns (BFF-written only).
+- ⚠️ **Schema, then field security, before any file relocation** (task 166 f1-v1 / f1-v2): run
+  `scripts/Set-DocumentRelocationSchema.ps1 -Apply` then `-Verify` on the environment's Dataverse, then
+  `scripts/Set-DocumentPointerFieldSecurity.ps1` (dry run → `-ClientNoLongerWritesPointers -Apply` → `-Verify`), before
+  the migration's `-Apply` and before Make Secure is used. The schema script creates two columns, both **field-secured
+  from creation** (no window in which a user could write them): `sprk_document.sprk_relocationpending`, the row's
+  relocation ledger (what a moved file still owes — a source delete, a re-key, the index — and the old item's witness, its
+  size / quickXorHash / version when its copy was verified, the only thing a later call deletes it against), and
+  `sprk_document.sprk_relocatedversions`, the version record (the ORIGINAL author, date and size of every version a move
+  replayed into the copy — Graph cannot set them; the version history routes report them). Every relocation reads both
+  and fails closed — nothing moves — until they exist; the field-security script grants the BFF-managed reader / writer
+  profiles on them, and until it does, a BFF application user that does not hold System Administrator cannot write them,
+  so relocations keep failing closed (retried) in between.
 - `PowerBi__AllowedWorkspaces__{n}__WorkspaceId` (+ optional `__CustomerBusinessUnitId`) when the Reporting module is
   enabled — the workspaces the catalog may act on; empty refuses every report ([reporting-admin.md](reporting-admin.md#environment-variables)).
 

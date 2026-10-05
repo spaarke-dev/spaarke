@@ -772,9 +772,10 @@ public static class ExternalProjectDataEndpoints
                     VersionLabel = v.Id,
                     CreatedAt = v.LastModifiedDateTime.ToString("o"),
                     FileSizeBytes = v.Size,
-                    // Graph's lastModifiedBy (or the relocation's recorded original author). Null when Graph names
-                    // no one — never invented; the client types it optional and renders a dash.
-                    CreatedByName = v.LastModifiedBy,
+                    // CreatedByName stays null on the EXTERNAL surface: an external participant has never been shown
+                    // who wrote a version, and task 166 f1-v2 (round 45 item 1: "the history a user sees is unchanged")
+                    // keeps it so — only the dates of replayed versions are the recorded originals. Showing internal
+                    // authors to external contacts is a disclosure decision of its own, not a side effect of a move.
                 })
                 .ToList();
 

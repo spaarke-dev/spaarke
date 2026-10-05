@@ -250,9 +250,10 @@ public sealed class ExternalDocumentVersionDto
     public string CreatedAt { get; init; } = "";
 
     /// <summary>
-    /// Who wrote the version: Graph's <c>lastModifiedBy</c> display name, or — for a version a relocation replayed into a
-    /// moved file — the ORIGINAL author the relocation recorded (unified-access-control-r2 task 166, owner round 45 item 1).
-    /// Null when Graph names no one; never fabricated.
+    /// Always null on the external surface: an external participant is not shown who wrote a version (internal authors
+    /// are a disclosure decision of their own). Kept in the contract because the client already types it optional;
+    /// fabricating an author would be worse than omitting one. (<c>VersionInfoDto</c> carries the author since
+    /// unified-access-control-r2 task 166 f1-v2 for the internal history route only.)
     /// </summary>
     [JsonPropertyName("createdByName")]
     public string? CreatedByName { get; init; }

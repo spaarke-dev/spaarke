@@ -238,7 +238,7 @@ public class DocumentContainerRelocatorTests
                     return true;
                 });
             Relocator = new DocumentContainerRelocator(
-                resolver, world.EntityService!, Spe.Object, Indexing, Locks, NullLogger<DocumentContainerRelocator>.Instance);
+                resolver, world.EntityService!, Spe.Object, Indexing, Locks, Access, NullLogger<DocumentContainerRelocator>.Instance);
         }
 
         /// <summary>The ADR-004 processing lock, in memory (the Redis-backed store's contract: one holder per key).</summary>
@@ -267,6 +267,36 @@ public class DocumentContainerRelocatorTests
         }
 
         public InMemoryLocks Locks { get; } = new();
+
+        /// <summary>
+        /// Dataverse's answer "may this person write the document?" (RetrievePrincipalAccess) at the IAccessDataSource
+        /// boundary: by Entra object id; the document's creator may, anyone else may not unless a test says so.
+        /// </summary>
+        internal sealed class PrincipalAccess : IAccessDataSource
+        {
+            public Dictionary<string, AccessRights> Rights { get; } = new(StringComparer.OrdinalIgnoreCase)
+            {
+                [Creator] = AccessRights.Read | AccessRights.Write,
+            };
+
+            public List<(string User, string Resource)> Asked { get; } = new();
+
+            public Task<AccessSnapshot> GetUserAccessAsync(string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default)
+            {
+                Asked.Add((userId, resourceId));
+                return Task.FromResult(new AccessSnapshot
+                {
+                    UserId = userId,
+                    ResourceId = resourceId,
+                    AccessRights = Rights.GetValueOrDefault(userId, AccessRights.None),
+                });
+            }
+
+            public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
+                => throw new NotSupportedException("the relocator asks about the document only");
+        }
+
+        public PrincipalAccess Access { get; } = new();
 
         public const string CopyItem = "01COPYINTHETARGET";
         public const string TargetRoot = "01ROOTOFTHETARGETDRIVE";
@@ -1257,12 +1287,9 @@ public class DocumentContainerRelocatorTests
         rig.LedgerOf(DocumentId).Should().BeNull();
     }
 
-    [Fact]
-    public async Task ASourceEditedAfterTheMove_IsReportedWithTheRowId_AndReCopiedWithItsEdits_ThenDeleted()
+    /// <summary>A Make Secure move whose source delete fails, then a save to the OLD file by <paramref name="editor"/>.</summary>
+    private static async Task<(World World, Rig Rig, DateTimeOffset EditedAt)> MovedThenEditedAtTheOldLocationAsync(string editor)
     {
-        // Round 45 item 4: the source no longer matches its witness — reported source-changed-after-move with the row id,
-        // never deleted as it stands, and closed by the relocator's own re-entry: re-copy (the document's file and history,
-        // then the source's edits), verify, re-point. Nothing is lost and nobody acts by hand.
         var world = Environment();
         world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
         var rig = new Rig(world) { DeleteFails = (drive, item) => drive == CustomerAContainer && item == Item };
@@ -1275,9 +1302,21 @@ public class DocumentContainerRelocatorTests
         rig.Versions[(CustomerAContainer, Item)] =
         [
             new VersionInfoDto("1.0", null, Rig.Written, 1234, Rig.CreatorName) { LastModifiedByUserId = Creator },
-            new VersionInfoDto("2.0", null, editedAt, 2000, "Late Editor") { LastModifiedByUserId = OtherPersonObjectId.ToString("D") },
+            new VersionInfoDto("2.0", null, editedAt, 2000, "Late Editor") { LastModifiedByUserId = editor },
         ];
         rig.DeleteFails = (_, _) => false;
+        return (world, rig, editedAt);
+    }
+
+    [Fact]
+    public async Task ASourceEditedAfterTheMove_IsReportedWithTheRowId_AndReCopiedWithItsEdits_ThenDeleted()
+    {
+        // Round 45 item 4: the source no longer matches its witness — reported source-changed-after-move with the row id,
+        // never deleted as it stands, and closed by the relocator's own re-entry: re-copy (the document's file and history,
+        // then the source's edits), verify, re-point. Nothing is lost and nobody acts by hand. The editor may write the
+        // document, so the edit becomes its current content.
+        var (world, rig, editedAt) = await MovedThenEditedAtTheOldLocationAsync(OtherPersonObjectId.ToString("D"));
+        rig.Access.Rights[OtherPersonObjectId.ToString("D")] = AccessRights.Read | AccessRights.Write;
 
         var second = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
 
@@ -1286,17 +1325,59 @@ public class DocumentContainerRelocatorTests
         changed.DocumentId.Should().Be(DocumentId, "reported with the row id");
         changed.SourceItem.Should().Be(Item);
         changed.CarriedVersions.Should().Be(1, "exactly the version written after the move");
+        changed.EditIsCurrent.Should().BeTrue();
         rig.ItemOf(DocumentId).Should().Be(changed.NewItem).And.NotBe(Rig.CopyItem, "re-pointed to the re-copy");
         rig.DriveOf(DocumentId).Should().Be(SecureContainer);
         world.ItemFacts(CustomerAContainer, Item).Should().BeNull("re-copied, so the edited source is deleted against its new witness");
         world.ItemFacts(SecureContainer, Rig.CopyItem).Should().BeNull("the replaced copy is deleted too — its history is in the re-copy");
         rig.LedgerOf(DocumentId).Should().BeNull();
         world.ItemFacts(SecureContainer, changed.NewItem!)!.Size.Should().Be(2000, "the document now carries the edit");
+        rig.Access.Asked.Should().Contain((OtherPersonObjectId.ToString("D"), DocumentId.ToString("D")),
+            "the editor's right is Dataverse's answer for that person on this document");
 
         var history = await rig.ReportedHistoryAsync(DocumentId);
         history.Select(v => (v.LastModifiedBy, v.LastModifiedDateTime)).Should().Equal(
             [("Late Editor", editedAt), (Rig.CreatorName, Rig.Written)],
             "newest first: the edit made after the move, then the original — each with its ORIGINAL author and date");
+    }
+
+    [Fact]
+    public async Task AnEditAtTheOldLocation_ByAPersonWhoMayNotWriteTheDocument_IsKeptInItsHistory_ButNeverBecomesCurrent()
+    {
+        // The old file stayed writable by the old (shared) container's audience. A person who lost access with the move
+        // must not change the secure document through it: the edit is carried (nothing is lost; its author is recorded),
+        // but the document's own content stays current — fail closed.
+        var (world, rig, editedAt) = await MovedThenEditedAtTheOldLocationAsync(OtherPersonObjectId.ToString("D"));
+
+        var second = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        second.Complete.Should().BeTrue();
+        var changed = second.SourceChangedAfterMove.Should().ContainSingle(c => c.NewItem != null).Subject;
+        changed.EditIsCurrent.Should().BeFalse();
+        world.ItemFacts(SecureContainer, rig.ItemOf(DocumentId)!)!.Size.Should().Be(1234, "the document's own content stays current");
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull("the edit is in the history, so the source is closed");
+        var history = await rig.ReportedHistoryAsync(DocumentId);
+        history.Select(v => (v.LastModifiedBy, v.LastModifiedDateTime, v.Size)).Should().Equal(
+            [(Rig.CreatorName, Rig.Written, 1234L), ("Late Editor", editedAt, 2000L)],
+            "newest first: the document's own content, current; the edit kept in the history with its author");
+    }
+
+    [Fact]
+    public async Task AnEditAtTheOldLocation_WhoseAuthorsRightCannotBeRead_IsNeverMadeCurrent()
+    {
+        var (world, rig, _) = await MovedThenEditedAtTheOldLocationAsync(Creator);
+        var faulty = new Mock<IAccessDataSource>();
+        faulty.Setup(a => a.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse unavailable"));
+        var relocator = new DocumentContainerRelocator(rig.Resolver, world.EntityService!, rig.Spe.Object, rig.Indexing, rig.Locks,
+            faulty.Object, NullLogger<DocumentContainerRelocator>.Instance);
+
+        var second = await relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        second.Complete.Should().BeTrue();
+        second.SourceChangedAfterMove.Should().ContainSingle(c => c.NewItem != null).Which.EditIsCurrent.Should().BeFalse(
+            "an answer that cannot be had is not a right (ADR-003)");
+        world.ItemFacts(SecureContainer, rig.ItemOf(DocumentId)!)!.Size.Should().Be(1234);
     }
 
     [Fact]

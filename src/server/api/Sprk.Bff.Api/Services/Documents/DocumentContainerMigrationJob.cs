@@ -25,7 +25,11 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// is not verifiably the row's own, a missing item) are listed for an administrator; the flip changes nothing for them.
 /// Documents the interim rule refuses and the strict rule would serve (<c>servedOnlyAfterFlip</c> — the census classes the
 /// interim rule refuses by design) are counted and listed, so no disagreement between the two rules is invisible. Every
-/// source kept because rows of other records still use it is listed (<c>sourceKeptForOtherRecords</c>).</para>
+/// source kept because rows of other records still use it is listed (<c>sourceKeptForOtherRecords</c>). Two STATED
+/// outcomes of owner round 45 are counted and listed without blocking a clean run: a source edited after its move
+/// (<c>sourceChangedAfterMove</c>, with the row id — the relocation re-copies it itself; one it could not close yet is
+/// also <c>pending</c>) and a moved file's history the target container's version limit truncated
+/// (<c>versionsTruncated</c>, with counts).</para>
 /// <para><b>Re-entry.</b> Each document's relocation ledger is settled when the pass reaches it (write mode): a source
 /// whose delete failed, a source kept for a row that is now gone, a re-key or an index step that did not complete — so a
 /// repeat pass completes what an earlier one (or a Make Secure call) left owing.</para>
@@ -354,6 +358,7 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
                         sourceItem = changed.SourceItem,
                         carriedVersions = changed.CarriedVersions,
                         newItem = changed.NewItem,
+                        editIsCurrent = changed.EditIsCurrent,
                     });
                 }
             }

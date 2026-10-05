@@ -1183,8 +1183,8 @@ public class DriveItemOperations
         {
             var graphClient = _factory.ForApp();
 
-            var versions = await graphClient.Drives[driveId].Items[itemId]
-                .Versions.GetAsync(cancellationToken: ct);
+            var versionsBuilder = graphClient.Drives[driveId].Items[itemId].Versions;
+            var versions = await versionsBuilder.GetAsync(cancellationToken: ct);
 
             if (versions?.Value == null)
             {
@@ -1193,7 +1193,16 @@ public class DriveItemOperations
                 return Array.Empty<VersionInfoDto>();
             }
 
-            var mapped = versions.Value
+            // Every page (task 166 f1-v2, owner round 45 item 1): a relocation replays the WHOLE history, so a long one
+            // must never be cut silently at the first page.
+            var all = new List<DriveItemVersion>(versions.Value);
+            while (!string.IsNullOrEmpty(versions?.OdataNextLink))
+            {
+                versions = await versionsBuilder.WithUrl(versions.OdataNextLink).GetAsync(cancellationToken: ct);
+                all.AddRange(versions?.Value ?? []);
+            }
+
+            var mapped = all
                 .Where(v => v.Id != null)
                 .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
                 .Select(ToVersionInfo)
