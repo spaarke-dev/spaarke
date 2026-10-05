@@ -141,6 +141,12 @@ export const EmailView: React.FC<EmailViewProps> = ({
         getAccessToken,
         ...(clearTokenCache ? { clearTokenCache } : {}),
         observer: {
+          onNotSent: message => {
+            // No request was made, so nothing went out — safe to try again once signed in.
+            const text = `Email not sent — ${message}`;
+            setOutcome({ kind: 'error', message: text });
+            announce(text, 'assertive');
+          },
           onTransportError: message => {
             // No response at all: the server may or may not have sent it (a dropped connection after the send).
             const text = `Email may not have been sent — no response from Spaarke (${message}). Check your Sent Items before sending again.`;

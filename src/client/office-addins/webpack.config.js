@@ -49,6 +49,10 @@ const ENV_CONFIG = {
   // same in every environment; a customer whose app has another name changes this one setting. UNSET →
   // `sprk_MatterManagement`; set to an EMPTY string → record links name no app (the pre-088 behaviour).
   SPAARKE_APP_NAME: process.env.SPAARKE_APP_NAME !== undefined ? process.env.SPAARKE_APP_NAME : 'sprk_MatterManagement',
+  // Optional: switches Word's Email tab (task 096) on. Default OFF — owner decision 2026-10-04 (task 097 note
+  // §6): the tab stays off until `/api/communications/send` authorizes attachments and associations
+  // (unified-access-control-r2 task 161) on master AND deployed. Only the exact string "true" turns it on.
+  ADDIN_EMAIL_TAB_ENABLED: process.env.ADDIN_EMAIL_TAB_ENABLED === 'true' ? 'true' : 'false',
   // Optional: fallback MSAL popup redirect URI used only when the Office host
   // does not support NAA (`OfficeNaaStrategy`'s legacy-client fallback path).
   // Defaults to `${origin}/auth-callback.html` inside AuthService when unset.
@@ -395,6 +399,7 @@ module.exports = async (env, options) => {
         'process.env.SMARTTODO_CODEPAGE_URL': JSON.stringify(ENV_CONFIG.SMARTTODO_CODEPAGE_URL),
         'process.env.ORG_URL': JSON.stringify(ENV_CONFIG.ORG_URL),
         'process.env.SPAARKE_APP_NAME': JSON.stringify(ENV_CONFIG.SPAARKE_APP_NAME),
+        'process.env.ADDIN_EMAIL_TAB_ENABLED': JSON.stringify(ENV_CONFIG.ADDIN_EMAIL_TAB_ENABLED),
         'process.env.FALLBACK_REDIRECT_URI': JSON.stringify(ENV_CONFIG.FALLBACK_REDIRECT_URI),
         'process.env.BUILD_DATE': JSON.stringify(BUILD_DATE),
         // Task 089: the pane footer shows the app-package version, not a hand-maintained literal.
@@ -429,7 +434,10 @@ module.exports = async (env, options) => {
           vendor: {
             test: /[\\/]node_modules[\\/]/,
             name: 'vendors',
-            chunks: 'all',
+            // 'initial', not 'all': packages reached only through a lazy import (the Email tab's compose engine
+            // and its rich-text editor) stay in that lazy chunk instead of the startup `vendors` bundle every pane
+            // loads (task 096 review).
+            chunks: 'initial',
           },
         },
       },

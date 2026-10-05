@@ -107,11 +107,12 @@ describe('recipient search', () => {
 describe('createPaneAuthenticatedFetch', () => {
   const SEND_URL = 'https://bff.test/api/communications/send';
   let fetchMock: jest.Mock;
-  const observer = { onTransportError: jest.fn(), onSentWithoutRecord: jest.fn() };
+  const observer = { onNotSent: jest.fn(), onTransportError: jest.fn(), onSentWithoutRecord: jest.fn() };
 
   beforeEach(() => {
     fetchMock = jest.fn();
     (global as unknown as { fetch: unknown }).fetch = fetchMock;
+    observer.onNotSent.mockReset();
     observer.onTransportError.mockReset();
     observer.onSentWithoutRecord.mockReset();
   });
@@ -177,11 +178,33 @@ describe('createPaneAuthenticatedFetch', () => {
     expect(observer.onTransportError).toHaveBeenCalledWith('Failed to fetch');
   });
 
-  it('no token → onTransportError and no request is made', async () => {
+  it('no token → onNotSent (certainly not sent), never onTransportError ("may have been sent"), and no request', async () => {
     const f = createPaneAuthenticatedFetch({ getAccessToken: async () => null, observer });
 
     await expect(f(SEND_URL, { method: 'POST' })).rejects.toThrow('You are not signed in to Spaarke.');
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(observer.onTransportError).toHaveBeenCalledWith('You are not signed in to Spaarke.');
+    expect(observer.onNotSent).toHaveBeenCalledWith('You are not signed in to Spaarke.');
+    expect(observer.onTransportError).not.toHaveBeenCalled();
+  });
+
+  it.each([`${SEND_URL}?trace=1`, `${SEND_URL}/`])(
+    'recognises the send route despite a query string or trailing slash (%s)',
+    async url => {
+      fetchMock.mockResolvedValue(fakeResponse(200, { communicationId: null }));
+      const f = createPaneAuthenticatedFetch({ getAccessToken: async () => 'tok', observer });
+
+      await f(url, { method: 'POST' });
+
+      expect(observer.onSentWithoutRecord).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('a 2xx from another route is not taken for a send', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(200, {}));
+    const f = createPaneAuthenticatedFetch({ getAccessToken: async () => 'tok', observer });
+
+    await f('https://bff.test/api/communications/send-bulk', { method: 'POST' });
+
+    expect(observer.onSentWithoutRecord).not.toHaveBeenCalled();
   });
 });

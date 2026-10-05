@@ -41,25 +41,44 @@ describe('taskPaneWidthService (task 095)', () => {
     ['OfficeOnline', 405],
     ['PC', 395],
     ['Mac', 345],
-  ])('requests %s width %i via setWidth', (platform, width) => {
+  ])('requests %s width %i via setWidth from the default width', (platform, width) => {
     const setWidth = installOffice({ platform });
-    expect(requestWiderTaskPane()).toBe(width);
+    expect(requestWiderTaskPane(width - TASK_PANE_WIDTH_INCREASE_PX)).toBe(width);
     expect(setWidth).toHaveBeenCalledWith(width);
+  });
+
+  it('never shrinks a pane already at or beyond the target (a user who dragged it wider keeps it)', () => {
+    const setWidth = installOffice({ platform: 'OfficeOnline' });
+    expect(requestWiderTaskPane(405)).toBeNull();
+    expect(requestWiderTaskPane(480)).toBeNull();
+    expect(setWidth).not.toHaveBeenCalled();
+  });
+
+  it('defaults the current width to the pane viewport (window.innerWidth)', () => {
+    const setWidth = installOffice({ platform: 'OfficeOnline' });
+    const original = window.innerWidth;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 330 });
+    try {
+      expect(requestWiderTaskPane()).toBe(405);
+      expect(setWidth).toHaveBeenCalledWith(405);
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: original });
+    }
   });
 
   it('does nothing when TaskPaneApi 1.1 is unsupported', () => {
     const setWidth = installOffice({ supported: false });
-    expect(requestWiderTaskPane()).toBeNull();
+    expect(requestWiderTaskPane(330)).toBeNull();
     expect(setWidth).not.toHaveBeenCalled();
   });
 
   it('does nothing on an unknown platform, or when the API object is absent', () => {
     const setWidth = installOffice({ platform: 'iOS' });
-    expect(requestWiderTaskPane()).toBeNull();
+    expect(requestWiderTaskPane(300)).toBeNull();
     expect(setWidth).not.toHaveBeenCalled();
 
     installOffice({ extensionLifeCycle: {} });
-    expect(requestWiderTaskPane()).toBeNull();
+    expect(requestWiderTaskPane(330)).toBeNull();
   });
 
   it('never throws, even if setWidth does', () => {
@@ -67,7 +86,7 @@ describe('taskPaneWidthService (task 095)', () => {
     setWidth.mockImplementation(() => {
       throw new Error('boom');
     });
-    expect(() => requestWiderTaskPane()).not.toThrow();
-    expect(requestWiderTaskPane()).toBeNull();
+    expect(() => requestWiderTaskPane(330)).not.toThrow();
+    expect(requestWiderTaskPane(330)).toBeNull();
   });
 });

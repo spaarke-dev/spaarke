@@ -37,13 +37,17 @@ interface TaskPaneLifeCycle {
 
 /**
  * Asks the host for the wider task pane. Returns the width requested, or `null` when nothing was requested
- * (API unsupported, unknown platform, or a failure). Never throws.
+ * (API unsupported, unknown platform, the pane is already at least that wide, or a failure). Never throws.
+ *
+ * Widen only, never shrink: the pane runs at load, so a pane the user has already dragged wider than the target
+ * (`currentWidth`, the pane's own viewport width) is left alone rather than snapped back on every open.
  */
-export function requestWiderTaskPane(): number | null {
+export function requestWiderTaskPane(currentWidth: number = window.innerWidth): number | null {
   try {
     if (!Office.context.requirements.isSetSupported('TaskPaneApi', '1.1')) return null;
     const width = preferredTaskPaneWidth(String(Office.context.platform));
     if (width === null) return null;
+    if (Number.isFinite(currentWidth) && currentWidth >= width) return null;
     const taskpane = (Office as unknown as TaskPaneLifeCycle).extensionLifeCycle?.taskpane;
     if (!taskpane || typeof taskpane.setWidth !== 'function') return null;
     taskpane.setWidth(width);

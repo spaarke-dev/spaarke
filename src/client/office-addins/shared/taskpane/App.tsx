@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState, useCallback } from 'react';
 import {
   FluentProvider,
   Spinner,
@@ -24,7 +24,6 @@ import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
 import { FindView, type FindItemNoun } from './components/views/FindView';
-import { EmailView } from './components/views/EmailView';
 import type {
   SavedTodoContext,
   CreateTodoInput,
@@ -48,6 +47,11 @@ import {
 import { fileNameFromWebUrl } from './services/quickSaveHelpers';
 import { cleanGuid } from './utils/cleanGuid';
 import { describeFetchFailure } from './utils/errorMessages';
+
+// Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
+// rich-text editor, which Outlook (no Email tab) and Word with the tab held off would otherwise download and parse
+// for nothing.
+const EmailView = lazy(() => import('./components/views/EmailView').then(module => ({ default: module.EmailView })));
 
 /**
  * Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved context may
@@ -846,35 +850,37 @@ export const App: React.FC<AppProps> = ({
             that also gates the tab itself (NFR-10). A thin container over the shared compose engine; it sends
             as the user with the document attached and the email associated to the same record. */}
         {currentTab === 'email' && tabCapabilities.canEmailFromPane && (
-          <EmailView
-            document={
-              savedContext?.documentId
-                ? {
-                    documentId: savedContext.documentId,
-                    documentName: savedContext.documentName ?? null,
-                    fileName: savedContext.fileName ?? null,
-                  }
-                : null
-            }
-            // Task 096: distinguishes "still checking" and "could not confirm" from a genuinely new document, so
-            // the tab never tells the user a document is not in Spaarke when the check merely failed.
-            {...(documentIdentity === 'checking'
-              ? { identityStatus: 'checking' as const }
-              : documentIdentity !== undefined &&
-                  documentIdentity.kind !== 'resolved' &&
-                  documentIdentity.kind !== 'new'
-                ? { identityStatus: 'unconfirmed' as const }
-                : {})}
-            relatedRecord={buildSendEmailRelatedRecordInput(savedContext)}
-            orgUrl={process.env.ORG_URL}
-            bffBaseUrl={apiBaseUrl}
-            {...(userEmail ? { fromMailbox: userEmail } : {})}
-            getAccessToken={getPaneAccessToken}
-            clearTokenCache={clearPaneTokenCache}
-            onSearchContacts={handleSearchContacts}
-            canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
-            onGoToSave={() => setCurrentTab('save')}
-          />
+          <Suspense fallback={<Spinner size="small" label="Loading email…" />}>
+            <EmailView
+              document={
+                savedContext?.documentId
+                  ? {
+                      documentId: savedContext.documentId,
+                      documentName: savedContext.documentName ?? null,
+                      fileName: savedContext.fileName ?? null,
+                    }
+                  : null
+              }
+              // Task 096: distinguishes "still checking" and "could not confirm" from a genuinely new document, so
+              // the tab never tells the user a document is not in Spaarke when the check merely failed.
+              {...(documentIdentity === 'checking'
+                ? { identityStatus: 'checking' as const }
+                : documentIdentity !== undefined &&
+                    documentIdentity.kind !== 'resolved' &&
+                    documentIdentity.kind !== 'new'
+                  ? { identityStatus: 'unconfirmed' as const }
+                  : {})}
+              relatedRecord={buildSendEmailRelatedRecordInput(savedContext)}
+              orgUrl={process.env.ORG_URL}
+              bffBaseUrl={apiBaseUrl}
+              {...(userEmail ? { fromMailbox: userEmail } : {})}
+              getAccessToken={getPaneAccessToken}
+              clearTokenCache={clearPaneTokenCache}
+              onSearchContacts={handleSearchContacts}
+              canOpenRecord={hostAdapter.getCapabilities().canOpenBrowserWindow}
+              onGoToSave={() => setCurrentTab('save')}
+            />
+          </Suspense>
         )}
 
         {currentTab === 'share' && (

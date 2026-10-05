@@ -147,7 +147,12 @@ export function toRecipientLookupItems(contacts: ContactOption[]): PaneRecipient
 
 /** What the transport observed that the engine itself does not report to the host. */
 export interface PaneEmailTransportObserver {
-  /** The request never got a response (offline, token unavailable). Nothing was sent. */
+  /**
+   * No request was made (no token for the first attempt), so the email was certainly NOT sent — distinct from
+   * {@link onTransportError}, where the user must check Sent Items before trying again.
+   */
+  onNotSent: (message: string) => void;
+  /** A request went out but no response came back (offline, dropped connection): the email MAY have been sent. */
   onTransportError: (message: string) => void;
   /**
    * The send route answered 2xx but without a `communicationId`: the BFF records the `sprk_communication`
@@ -166,7 +171,16 @@ export interface CreatePaneAuthenticatedFetchInput {
   observer: PaneEmailTransportObserver;
 }
 
-const SEND_ROUTE_SUFFIX = '/api/communications/send';
+const SEND_ROUTE_PATH = '/api/communications/send';
+
+/** True for the send route itself, whatever query string or trailing slash the engine adds. */
+function isSendRoute(url: string): boolean {
+  try {
+    return new URL(url, 'https://placeholder.invalid').pathname.replace(/\/+$/, '').endsWith(SEND_ROUTE_PATH);
+  } catch {
+    return false;
+  }
+}
 
 /**
  * The engine's injected `authenticatedFetch` (ADR-028: the shared lib never sees a token). Attaches the pane's
@@ -183,9 +197,16 @@ export function createPaneAuthenticatedFetch(input: CreatePaneAuthenticatedFetch
   };
 
   return async (url: string, init?: RequestInit): Promise<Response> => {
+    let token: string;
+    try {
+      token = await getToken();
+    } catch (err) {
+      input.observer.onNotSent(err instanceof Error ? err.message : 'You are not signed in to Spaarke.');
+      throw err;
+    }
+
     let response: Response;
     try {
-      const token = await getToken();
       response = await authenticatedJsonFetch(url, init ?? {}, token, {
         getRetryToken: getToken,
         ...(input.clearTokenCache ? { onBeforeRetry: input.clearTokenCache } : {}),
@@ -196,7 +217,7 @@ export function createPaneAuthenticatedFetch(input: CreatePaneAuthenticatedFetch
       throw err;
     }
 
-    if (response.ok && url.endsWith(SEND_ROUTE_SUFFIX)) {
+    if (response.ok && isSendRoute(url)) {
       try {
         const payload = (await response.clone().json()) as Record<string, unknown>;
         if (!payload['communicationId'] && !payload['CommunicationId']) {

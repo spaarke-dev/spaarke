@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-04 (by context-handoff, before /compact). Owner decided 097 (option 1); next = the Email-tab switch, then the round-4 PR
+> **Last Updated**: 2026-10-04 (after the round-4 review). Email-tab switch in; review fixes in; next = the round-4 PR
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,9 +9,9 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **Next: the Email-tab hold switch, then the round-4 PR** (097 decided by the owner — option 1, note §6) |
+| **Task** | **Round-4 PR** (095 + 096 held off + switch + review fixes). Switch + review done 2026-10-04 (`notes/042-uat-round4-2026-10-04.md` §5) |
 | **Owner decision 2026-10-04** | *"yes we can follow your recommendation - ensure we have this fully documented"* → the send-route authorization is UAC-r2 task 161's (one implementation); the Word Email tab (096) is held OFF until 161 is on master + deployed; 097 = the archive fix (after UAC-r2 146) + live checks, later |
-| **Next Action** | 1) Add build setting `ADDIN_EMAIL_TAB_ENABLED` (default **off**), injected like `ORG_URL` in `src/client/office-addins/webpack.config.js` + `.github/workflows/deploy-office-addins.yml`; Word's `canEmailFromPane` = Word AND the setting (adapter capability; tests for on/off). 2) Run `code-review` + `adr-check` skills on the round-4 diff (095's review was inline). 3) Build add-in with the CI env values; gated jest; lint; typecheck. 4) Commit, open a PR (095 + 096-held + switch), merge on `Router` + `Build & Test (Debug)` (`gh pr merge N --merge`, NEVER `--delete-branch`). 5) ONE dev BFF deploy via `/bff-deploy` (owner already chose this; carries 083) — confirm with the owner first only if another project's deploy is mid-flight. 6) Add-in site auto-deploys on the master push. 7) Tell UAC-r2 that the Word Email tab waits on 161 and that this project owns the archive fix after their 146. 8) UAT round 5 |
+| **Next Action** | DONE: 1) switch `ADDIN_EMAIL_TAB_ENABLED` (default off), 2) code-review + adr-check (no Critical; fixes in §5 of the round-4 note), 3) build/jest/lint/typecheck green. NEXT: 4) the round-4 PR — merge on `Router` + `Build & Test (Debug)` (`gh pr merge N --merge`, NEVER `--delete-branch`). 5) ONE dev BFF deploy via `/bff-deploy` (owner already chose this; carries 083). 6) Add-in site auto-deploys on the master push. 7) Tell UAC-r2 that the Word Email tab waits on 161 and that this project owns the archive fix after their 146. 8) UAT round 5. Pending owner: spec.md ADR-012 Tensions row amendment (round-4 note §5) |
 | **Re-upload?** | **No** for round 4: manifests unchanged, package stays 1.1.1 (095's +75 px width is a runtime call). Owner already has `C:\code_files\spaarke-addin-package\spaarke-addin-1.1.1.zip` |
 | **Main checkout** | `C:\code_files\spaarke` is on ANOTHER session's branch (`chore/portfolio-board-hygiene`). Never `git pull` there — `git fetch origin && git branch -f master origin/master` (memory: main-checkout-may-be-on-another-branch) |
 
