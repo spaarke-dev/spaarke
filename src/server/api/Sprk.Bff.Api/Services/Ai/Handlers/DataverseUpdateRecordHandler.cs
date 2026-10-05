@@ -288,7 +288,10 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
                 return LogOutcome(context, tablename, recordId,
                     Error(tool,
                         $"The update was written, but record {recordId:D} is now filed under a secure record and could not be made " +
-                        $"secure yet ({secured.ReasonCode}: {secured.Detail}). It is retried automatically within a few minutes.",
+                        $"secure yet ({secured.ReasonCode}: {secured.Detail}). " +
+                        (secured.CompletesAutomatically
+                            ? "It is retried automatically within a few minutes."
+                            : "Retrying will not change that on its own, so an administrator needs to review it."),
                         secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt),
                     stopwatch);
             }

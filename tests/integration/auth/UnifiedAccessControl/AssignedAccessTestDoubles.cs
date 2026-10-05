@@ -118,9 +118,15 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
+        /// <summary>
+        /// Task 158 r1c-v1: only UPDATES fail (a create still lands) — e.g. a write-ahead row created, its share written, and
+        /// the confirmation of that row failing.
+        /// </summary>
+        public bool FailLedgerUpdates { get; set; }
+
         internal override Task UpdateLedgerAsync(Guid rowId, AssignedAccessLedgerWrite write, CancellationToken ct)
         {
-            if (FailLedgerWrites)
+            if (FailLedgerWrites || FailLedgerUpdates)
                 throw new HttpRequestException("Simulated ledger write failure.");
 
             lock (_gate)
@@ -163,7 +169,16 @@ internal static class AssignedAccessTestDoubles
             }
         }
 
-        internal override Task<Guid> CreateInheritedLedgerAsync(
+        /// <summary>
+        /// Task 158 r1c-v1: runs just before an inherited-share create lands — a CONCURRENT pass creating the same row in the
+        /// window between this pass's read and its create (the race the alternate key settles).
+        /// </summary>
+        public Action<string>? BeforeInheritedCreate { get; set; }
+
+        /// <summary>Task 158 r1c-v1: inherited-share creates that lost the race to the alternate key (answered <c>null</c>).</summary>
+        public List<string> InheritedCreateConflicts { get; } = new();
+
+        internal override Task<Guid?> CreateInheritedLedgerAsync(
             ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
             AssignedAccessLedgerWrite write, CancellationToken ct)
         {
@@ -171,10 +186,16 @@ internal static class AssignedAccessTestDoubles
                 throw new HttpRequestException("Simulated ledger write failure.");
 
             var key = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal);
+            BeforeInheritedCreate?.Invoke(key);
             lock (_gate)
             {
+                // The production store's conflict path (the alternate key answered 412 and the row reads back): nothing is
+                // written over the row a concurrent pass created; the caller is told it did not record.
                 if (Ledger.Any(r => r.LedgerKey == key))
-                    throw new InvalidOperationException($"Duplicate ledger key {key} — the inheritance created a row that exists.");
+                {
+                    InheritedCreateConflicts.Add(key);
+                    return Task.FromResult<Guid?>(null);
+                }
 
                 var row = new AssignedAccessLedgerRow
                 {
@@ -190,8 +211,33 @@ internal static class AssignedAccessTestDoubles
                 Apply(row, write with { SystemUserId = null });
                 Ledger.Add(row);
                 Writes.Add(("create", key, write.State));
-                return Task.FromResult(row.Id);
+                return Task.FromResult<Guid?>(row.Id);
             }
+        }
+
+        /// <summary>
+        /// Task 158 r1c-v1: inserts an inherited-share row as a concurrent pass would have written it (no fault, no hook) —
+        /// the race seeds.
+        /// </summary>
+        public AssignedAccessLedgerRow SeedInheritedRow(
+            ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
+            AssignedAccessLedgerWrite write)
+        {
+            var row = new AssignedAccessLedgerRow
+            {
+                Id = Guid.NewGuid(),
+                LedgerKey = InheritedLedgerKey(rootType, rootId, parentTable, parentId, principal),
+                SourceField = InheritedSourceField(parentTable, parentId),
+                ProjectId = rootType == ExternalGrantRootType.Project ? rootId : null,
+                MatterId = rootType == ExternalGrantRootType.Matter ? rootId : null,
+                WorkAssignmentId = rootType == ExternalGrantRootType.WorkAssignment ? rootId : null,
+                SystemUserId = principal.Kind == DataversePrincipalKind.SystemUser ? principal.Id : null,
+                SubjectTeamId = principal.Kind == DataversePrincipalKind.Team ? principal.Id : null,
+            };
+            Apply(row, write with { SystemUserId = null });
+            lock (_gate)
+                Ledger.Add(row);
+            return row;
         }
 
         internal override Task<AssignedRootSnapshot?> ReadRootAsync(
@@ -248,8 +294,9 @@ internal static class AssignedAccessTestDoubles
                 throw new HttpRequestException("Simulated scan failure.");
             lock (_gate)
             {
-                // The production predicate (task 158 r1): live rows, inherited-share provenance rows left out.
-                var roots = Ledger.Where(IsAssignedToScanRow)
+                // The production OData filter's predicate (task 158 r1): live rows, inherited-share provenance rows left out.
+                // AssignedAccessStoreODataTests pins the production filter itself over an evaluating Web API double.
+                var roots = Ledger.Where(r => r.State != AssignedAccessState.Revoked && InheritedSourceOf(r.SourceField) is null)
                     .Select(RootOf).Where(r => r is not null).Select(r => r!.Value).Distinct().ToList();
                 return Task.FromResult<(IReadOnlyList<AssignedRootRef>, bool)>((roots, false));
             }

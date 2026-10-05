@@ -644,15 +644,23 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         // complete — never reported as a plain success (ADR-003). Nobody outside its sharing sees it meanwhile; the
         // secure-root inheritance job completes it within minutes.
         // Created into isolation, NOT shared to the caller, and the delete failed too: say exactly that (task 158 r1).
+        // Task 158 r1c-v1 (verifier item 7): a self-heal is promised only when the job can deliver it — never after
+        // provisioning REFUSED (e.g. the caller walled off between the plan and the provisioning), which every run refuses again.
         if (secured is { RowStranded: true })
         {
             return Error(tool,
                 $"Record {createdId:D} was created in '{tablename}' as a secure record, but it could not be shared to you and " +
-                $"could not be removed again ({secured.ReasonCode}: {secured.Detail}). It is shared to you automatically within " +
-                "a few minutes; until then only an administrator can open it.",
+                $"could not be removed again ({secured.ReasonCode}: {secured.Detail}). " +
+                (secured.CompletesAutomatically
+                    ? "It is shared to you automatically once that step succeeds (it is retried every few minutes); until then " +
+                      "only an administrator can open it."
+                    : "It will not be shared to you automatically: only an administrator can open it, and an administrator needs " +
+                      "to review and remove it."),
                 secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
 
+        // (Shared to the caller means provisioning got past its refusals — every refusal comes before the creator's share — so
+        // what is left is a fault the job retries: the promise below holds.)
         if (secured is { IsComplete: false })
         {
             return Error(tool,

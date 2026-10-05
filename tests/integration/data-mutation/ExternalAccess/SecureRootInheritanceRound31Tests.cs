@@ -102,11 +102,12 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         TraceIdentifier = "trace-158-r1",
     };
 
-    private async Task<IResult> ShareAsync(string recordType, Guid recordId, Guid user)
+    private async Task<IResult> ShareAsync(string recordType, Guid recordId, Guid user,
+        ExternalAccessLevel level = ExternalAccessLevel.Collaborate)
     {
         using var scope = _fixture.Services.CreateScope();
         return await InternalShareEndpoints.ShareAsync(
-            new ShareRecordWithUserRequest(recordType, recordId, user, ExternalAccessLevel.Collaborate),
+            new ShareRecordWithUserRequest(recordType, recordId, user, level),
             scope.ServiceProvider.GetRequiredService<IDataverseRecordShareService>(), _users.Client, new Mock<ITenantCache>().Object,
             new InternalUserShareTests.StubCallerRightsProbe(
                 AccessRights.Read | AccessRights.Write | AccessRights.Append | AccessRights.AppendTo | AccessRights.Delete
@@ -971,5 +972,452 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
 
         run.Success.Should().BeTrue(run.ErrorMessage);
         ShouldBeSecure(workAssignment, "completed through the re-entry branch");
+    }
+
+    // ══ Task 158 r1c-v1 — write-ahead provenance (verifier item 1) and the reverse rule's remaining gaps (items 3, 4) ═══
+
+
+    /// <summary>
+    /// Verifier item 1 (CONFIRMED by its probe; this is the probe, kept): the provenance cannot be written. Before r1c-v1 the
+    /// share was written first, so the retry found it with no row and recorded it as DIRECT (covered-by-existing) — the run
+    /// said success, and the matter's unshare never removed it (round 30 broken). The row is now written BEFORE the share: a
+    /// row that cannot be written writes no share (the run fails); the next run records and writes it; the unshare removes it.
+    /// </summary>
+    [Fact]
+    public async Task AProvenanceWriteFault_NeverLeavesAShareThatLooksDirect_SoTheParentsUnshareStillRemovesIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.InheritedLedger.FailLedgerWrites = true;
+
+        (await _job.RunAsync()).Success.Should().BeFalse();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "no share is written whose origin could not be recorded");
+
+        _fixture.InheritedLedger.FailLedgerWrites = false;
+        var retry = await _job.RunAsync();
+
+        retry.Success.Should().BeTrue(retry.ErrorMessage);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Shared, "passed on by the matter — never recorded as direct access");
+        row.Reason.Should().BeNull("confirmed: the share read back");
+
+        (await UnshareAsync("matter", matter, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "round 30: removed from the filed record with the parent");
+    }
+
+    /// <summary>
+    /// Write-ahead, the other fault: the row was recorded and the share written, but CONFIRMING the row failed. The run is not
+    /// a success; the share stays on record as passed on (unconfirmed), so the next run confirms it from the share in place,
+    /// and the matter's unshare removes it.
+    /// </summary>
+    [Fact]
+    public async Task AConfirmationFault_LeavesTheShareOnRecordAsPassedOn_SoTheNextRunConfirmsIt_AndTheUnshareRemovesIt()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.InheritedLedger.FailLedgerUpdates = true;
+
+        (await _job.RunAsync()).Success.Should().BeFalse();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "its row was recorded first, so the share was written");
+        var unconfirmed = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        unconfirmed.State.Should().Be(AssignedAccessState.Shared);
+        unconfirmed.Reason.Should().Be(AssignedAccessReason.SharePending);
+        unconfirmed.GrantedLevel.Should().Be(Mirror);
+
+        _fixture.InheritedLedger.FailLedgerUpdates = false;
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().BeNull("confirmed by the share in place");
+
+        await UnshareAsync("matter", matter, Colleague);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+    }
+
+    /// <summary>
+    /// Write-ahead: an unconfirmed row whose share IS in place is still the matter's share — the matter's unshare removes it
+    /// even before any pass confirmed it.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_RemovesAShareStillUnconfirmedOnRecord()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.InheritedLedger.FailLedgerUpdates = true;
+        await _job.RunAsync();
+        _fixture.InheritedLedger.FailLedgerUpdates = false;
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+    }
+
+    /// <summary>
+    /// Write-ahead: the row was recorded but its share never landed (the share write failed). The next run writes it again —
+    /// it is never read as an operator's removal (Declined), which would withhold the matter's sharee for good.
+    /// </summary>
+    [Fact]
+    public async Task ARecordedShareThatNeverLanded_IsWrittenAgainByTheNextRun_NeverReadAsARemoval()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.FailShareForPrincipal = Colleague;
+
+        (await _job.RunAsync()).Success.Should().BeFalse();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.SharePending);
+
+        _fixture.FailShareForPrincipal = null;
+        var retry = await _job.RunAsync();
+
+        retry.Success.Should().BeTrue(retry.ErrorMessage);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Shared);
+        row.Reason.Should().BeNull();
+    }
+
+    /// <summary>
+    /// Write-ahead: the matter unshares the colleague while their recorded share never landed — the row ends with nothing
+    /// removed (assignment-ended: nothing of the rule's is on the record), never "kept as modified".
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_EndsARecordedShareThatNeverLanded_RemovingNothing()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.FailShareForPrincipal = Colleague;
+        await _job.RunAsync();
+        _fixture.FailShareForPrincipal = null;
+
+        (await UnshareAsync("matter", matter, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Revoked);
+        row.Reason.Should().Be(AssignedAccessReason.AssignmentEnded);
+    }
+
+    /// <summary>
+    /// Verifier item 1, the race: a concurrent pass (the <c>/share-user</c> pass-on against the job) records the same
+    /// (record, matter, colleague) between this pass's read and its write. The alternate key settles it: this pass writes
+    /// NOTHING over that row and writes no share on its stale decision; the next pass decides on the row as it stands.
+    /// </summary>
+    [Fact]
+    public async Task ARowAConcurrentPassRecordsFirst_IsNeverOverwritten_AndNoShareIsWrittenOnTheStaleDecision()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        AssignedAccessLedgerRow? concurrent = null;
+        _fixture.InheritedLedger.BeforeInheritedCreate = key =>
+        {
+            if (concurrent is null && key.Contains(Colleague.ToString("D"), StringComparison.Ordinal))
+            {
+                concurrent = _fixture.InheritedLedger.SeedInheritedRow(ExternalGrantRootType.WorkAssignment, workAssignment, "sprk_matter", matter,
+                    DataversePrincipalRef.User(Colleague),
+                    new AssignedAccessLedgerWrite(AssignedAccessState.Shared, AssignedAccessReason.SharePending, GrantedLevel: Mirror));
+            }
+        };
+
+        var first = await _job.RunAsync();
+
+        first.Success.Should().BeFalse("its record lost the race: decided again on the next pass");
+        _fixture.InheritedLedger.InheritedCreateConflicts.Should().ContainSingle();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "no share on a decision made without seeing that row");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.SharePending,
+            "the concurrent pass's row is never overwritten");
+
+        _fixture.InheritedLedger.BeforeInheritedCreate = null;
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+        await UnshareAsync("matter", matter, Colleague);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+    }
+
+    /// <summary>
+    /// Verifier item 1, the race as the verifier traced it: this pass found the colleague's share in place with no row and
+    /// would record it as DIRECT — but a concurrent pass's row for that share lands just before. The covered-by-existing record
+    /// loses to the key and writes nothing: the share stays recorded as passed on, so the matter's unshare removes it.
+    /// </summary>
+    [Fact]
+    public async Task ADirectAccessRecordThatLosesTheRace_NeverOverwritesTheShareAConcurrentPassRecordedAsPassedOn()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Colleague), RecordShareLevels.RightsCsvForMask(Mirror));
+        _fixture.InheritedLedger.BeforeInheritedCreate = key =>
+        {
+            if (key.Contains(Colleague.ToString("D"), StringComparison.Ordinal) && !Provenance(workAssignment).Any(r => r.SystemUserId == Colleague))
+            {
+                _fixture.InheritedLedger.SeedInheritedRow(ExternalGrantRootType.WorkAssignment, workAssignment, "sprk_matter", matter,
+                    DataversePrincipalRef.User(Colleague), new AssignedAccessLedgerWrite(AssignedAccessState.Shared, null, GrantedLevel: Mirror));
+            }
+        };
+
+        (await _job.RunAsync()).Success.Should().BeFalse("its record lost the race: reported, decided on the next pass");
+
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Shared, "never downgraded to covered-by-existing (direct)");
+        _fixture.InheritedLedger.BeforeInheritedCreate = null;
+        await UnshareAsync("matter", matter, Colleague);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "round 30: still removed with the matter's share");
+    }
+
+    /// <summary>
+    /// S5 on the reverse rule, made complete: the colleague's inherited share is kept as the record's LAST reader — but it is
+    /// still the share the matter passed on, so its row stays live. Once someone else can open the record, the next run removes
+    /// it (an ended row would have left it for good).
+    /// </summary>
+    [Fact]
+    public async Task AShareKeptAsTheLastReader_IsRemovedOnceSomeoneElseCanOpenTheRecord()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Creator));
+        await UnshareAsync("matter", matter, Colleague);
+        var kept = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        kept.State.Should().Be(AssignedAccessState.Shared, "still the share the matter passed on");
+        kept.Reason.Should().Be(AssignedAccessReason.KeptLastReader);
+
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Creator), ProvisionProjectEndpoint.CreatorAccessRights);
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "someone else can open it now");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+    }
+
+    /// <summary>
+    /// The misclassification on the S5 path (the same defect as verifier item 1): a share kept as the last reader, then shared
+    /// on the matter again, is recorded as passed on — never as direct access — so the matter's next unshare removes it.
+    /// </summary>
+    [Fact]
+    public async Task AShareKeptAsTheLastReader_ThatTheMatterSharesAgain_IsStillPassedOn_NeverRecordedAsDirect()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        SecuredWorkAssignment(workAssignment, matter);
+        await ShareAsync("matter", matter, Colleague);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Creator));
+        await UnshareAsync("matter", matter, Colleague);
+
+        await ShareAsync("matter", matter, Colleague);
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Shared);
+        row.Reason.Should().BeNull("an ordinary inherited share again");
+
+        _fixture.SeedShare(workAssignment, DataversePrincipalRef.User(Creator), ProvisionProjectEndpoint.CreatorAccessRights);
+        await UnshareAsync("matter", matter, Colleague);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+    }
+
+    /// <summary>
+    /// Write-ahead over an operator's own share: the colleague was shared on the filed record by an operator (Adopted) at View
+    /// Only, and the matter later passes a HIGHER level on. The raise is the rule's, so it is recorded - the operator's level
+    /// as the level it raised from - and the matter's unshare takes back only the raise, leaving the operator's share as the
+    /// operator set it (before r1c-v1 the raise went unrecorded and was kept for good).
+    /// </summary>
+    [Fact]
+    public async Task ARaiseOverAnOperatorsOwnShare_IsRecorded_SoTheParentsUnshareTakesBackOnlyTheRaise()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        _fixture.SeedShare(matter, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        (await ShareAsync("workassignment", workAssignment, Colleague, ExternalAccessLevel.ViewOnly))
+            .Should().BeOfType<Ok<ShareRecordWithUserResponse>>();
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Adopted);
+        var operators = _fixture.ShareMaskOf(workAssignment, Colleague);
+
+        _fixture.SeedShare(matter, DataversePrincipalRef.User(Colleague), ProvisionProjectEndpoint.CollaboratorAccessRights);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(operators | Mirror, "raised to what the matter passes on");
+
+        await UnshareAsync("matter", matter, Colleague);
+
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(operators, "only the rule's raise is taken back");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.PriorLevelRestored);
+    }
+
+    /// <summary>
+    /// Verifier item 3 (the mask comparison in the reverse rule): the work assignment was re-filed from the matter to a secure
+    /// project that shares the colleague only at View Only. The matter's unshare must not count the project as justifying the
+    /// whole share — it carries LESS than the matter passed on: the matter's share is taken back, and the project's View Only
+    /// is given back in the same call, so the colleague holds exactly what the project passes on.
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_LeavesExactlyWhatAnotherParentPassesOnAtALowerLevel()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecureProject(_fixture, project);
+        _fixture.SeedShare(project, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project));
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "re-filing is not an unshare");
+
+        var result = await UnshareAsync("matter", matter, Colleague);
+
+        result.Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        var viewOnly = RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights));
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(viewOnly,
+            "never kept at the matter's level by a parent that carries less; the project's own level, at once");
+        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague
+                && r.SourceField == AssignedAccessStore.InheritedSourceField("sprk_matter", matter))
+            .Reason.Should().Be(AssignedAccessReason.AccessRemoved);
+        var fromProject = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague
+            && r.SourceField == AssignedAccessStore.InheritedSourceField("sprk_project", project));
+        fromProject.State.Should().Be(AssignedAccessState.Shared);
+        fromProject.GrantedLevel.Should().Be(viewOnly);
+    }
+
+    /// <summary>The work assignment of the item-3 tests: passed the colleague by the matter, then re-filed under a project that shares them at View Only.</summary>
+    private async Task<(Guid Matter, Guid Project, Guid WorkAssignment)> ReFiledUnderAProjectSharingLessAsync()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecureProject(_fixture, project);
+        _fixture.SeedShare(project, DataversePrincipalRef.User(Colleague), RecordShareLevels.ViewOnlyRights);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project));
+        return (matter, project, workAssignment);
+    }
+
+    /// <summary>
+    /// Verifier item 3, the give-back that fails: the matter's share is taken back, but what the project still passes on
+    /// cannot be given back (the write fails) - reported through children_incomplete (filedRecordsNotUpdated), never "done".
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_WhenWhatAnotherParentPassesOnCannotBeGivenBack_ReportsIt()
+    {
+        var (matter, _, workAssignment) = await ReFiledUnderAProjectSharingLessAsync();
+        _fixture.FailShareForPrincipal = Colleague;
+
+        var (status, code, body) = Problem(await UnshareAsync("matter", matter, Colleague));
+
+        status.Should().Be(500);
+        code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().Be(1);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the matter's share was taken back; the project's could not be given");
+
+        _fixture.FailShareForPrincipal = null;
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(RecordShareLevels.ChildMirrorMask(Mask(RecordShareLevels.ViewOnlyRights)),
+            "the job gives it back");
+    }
+
+    /// <summary>
+    /// Verifier item 3, the give-back that cannot be decided: the work assignment is ALSO filed under a project flagged secure
+    /// but not isolated (its mirror cannot be trusted), so what the remaining parents pass on cannot be given back yet -
+    /// reported, never "done".
+    /// </summary>
+    [Fact]
+    public async Task UnsharingFromTheMatter_WhenWhatTheRemainingParentsPassOnCannotBeDecided_ReportsIt()
+    {
+        var (matter, _, workAssignment) = await ReFiledUnderAProjectSharingLessAsync();
+        var untrusted = Guid.NewGuid();
+        _fixture.SeedProject(untrusted, isSecure: true); // flagged, owned by a user: not isolated
+        FilePair(_fixture, "sprk_workassignment", workAssignment, untrusted, RecordTypeRef(_fixture, "sprk_project"));
+
+        var (status, code, body) = Problem(await UnshareAsync("matter", matter, Colleague));
+
+        status.Should().Be(500);
+        code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
+        body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().Be(1);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0);
+    }
+
+    /// <summary>
+    /// Verifier item 4 (the decline set in the job's step (b)): an operator removed the colleague on the work assignment while
+    /// it was under the matter (Declined); it was then re-filed under a secure project that also shares the colleague — still
+    /// not given, the matter's share persisting. The matter's share then ends outside the BFF: ONE run ends the decline and,
+    /// in the same pass, gives the colleague the project's share.
+    /// </summary>
+    [Fact]
+    public async Task TheJob_EndsADeclineFromAParentTheRecordWasReFiledAwayFrom_AndGivesTheNewParentsShareInTheSameRun()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecureProject(_fixture, project, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        (await UnshareAsync("workassignment", workAssignment, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingproject", new Microsoft.Xrm.Sdk.EntityReference("sprk_project", project));
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "declined while the matter's share persists");
+
+        _fixture.RemoveShare(matter, DataversePrincipalRef.User(Colleague));
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror,
+            "the decline ended with the matter's share, and the project's share is given in the same run");
+    }
+
+    /// <summary>
+    /// New in r1c-v1 (task 142's criterion 9 applied to round 30): task 143's enforcer removes a WALLED colleague's inherited
+    /// share from the filed record — a known cause, not an operator's removal. The row waits (Skipped,
+    /// removed-by-no-access) instead of Declined, and once the wall is lifted the matter's share is passed on again.
+    /// </summary>
+    [Fact]
+    public async Task AShareTheNoAccessEnforcerRemoved_IsPassedOnAgainOnceTheWallIsLifted_NeverReadAsAnOperatorsRemoval()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        var wall = _fixture.NoAccessList.DenySystemUserOnRecord(Colleague, workAssignment);
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Colleague)); // task 143's enforcer
+
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        var waiting = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        waiting.State.Should().Be(AssignedAccessState.Skipped);
+        waiting.Reason.Should().Be(AssignedAccessReason.RemovedByNoAccess);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "walled");
+
+        _fixture.NoAccessList.Lift(wall);
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeTrue(run.ErrorMessage);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "passed on again once the wall is lifted");
+    }
+
+    /// <summary>
+    /// ADR-003 on that decision: the inherited share was removed while the colleague's No Access state cannot be checked —
+    /// neither re-added nor recorded either way, and the run is not a success.
+    /// </summary>
+    [Fact]
+    public async Task AnInheritedShareRemovedWhileTheNoAccessListCannotBeChecked_IsNeitherReAddedNorRecorded_AndTheRunFails()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Colleague));
+        _fixture.NoAccessList.FaultsWhenSubjectNames = Colleague;
+
+        var run = await _job.RunAsync();
+
+        run.Success.Should().BeFalse();
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "nothing re-added on an undecided answer");
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Shared, "nothing recorded either way");
+        row.Reason.Should().BeNull();
     }
 }

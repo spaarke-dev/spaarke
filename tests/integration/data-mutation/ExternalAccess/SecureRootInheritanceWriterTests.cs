@@ -161,8 +161,12 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                 NullLogger<RecordOwnershipResolver>.Instance),
             appOnly, IdentityNormalizationFixtures.NoLinkedContact(), _gate);
 
-    /// <summary>The app-only create seam: the row lands in the fixture as the application created it (createdby = app).</summary>
-    private Mock<IFieldMappingDataverseService> AppCreatesIntoTheWorld()
+    /// <summary>
+    /// The app-only create seam: the row lands in the fixture as the application created it (createdby = app).
+    /// <paramref name="afterCreate"/> (task 158 r1c-v1): what changes right after the create — between the plan and the
+    /// provisioning that completes it (a race the plan's own checks cannot close).
+    /// </summary>
+    private Mock<IFieldMappingDataverseService> AppCreatesIntoTheWorld(Action<Guid>? afterCreate = null)
     {
         var service = new Mock<IFieldMappingDataverseService>(MockBehavior.Strict);
         service
@@ -175,6 +179,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                     isSecure: fields.TryGetValue("sprk_issecure", out var flag) && flag is true,
                     createdBy: AppUser, createdByPerson: BoundId(fields, "sprk_CreatedByPerson@odata.bind"));
                 ApplyFiling(table, id, fields);
+                afterCreate?.Invoke(id);
             })
             .Returns(Task.CompletedTask);
         return service;
@@ -253,7 +258,8 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
 
         result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("could not be shared to you and could not be removed").And.NotContain("as a secure record shared to you");
+        result.ErrorMessage.Should().Contain("could not be shared to you and could not be removed").And.NotContain("as a secure record shared to you")
+            .And.Contain("shared to you automatically once that step succeeds", "a fault: the job's retry does share it (verifier item 7)");
         var created = _writes.Should().ContainSingle().Subject.Id;
         World.Has("sprk_workassignment", created).Should().BeTrue();
         _fixture.IsSecureOf(created).Should().BeTrue("still secure — never a business-unit-visible row");
@@ -525,6 +531,9 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
     private readonly List<Entity> _officeCreates = new();
 
+    /// <summary>Task 158 r1c-v1: what changes right after the Office create — between its plan and its provisioning.</summary>
+    private Action<Guid>? _afterOfficeCreate;
+
     private RecordCreationService OfficeCreator(
         Guid sourceMatter, Guid typeRef, FieldMappingRuleEntity? extraRule = null, bool withBearerToken = true)
     {
@@ -539,6 +548,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                     isSecure: row.GetAttributeValue<bool?>("sprk_issecure") == true,
                     createdBy: AppUser, createdByPerson: row.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column)?.Id);
                 ApplyFiling("sprk_project", id, row.Attributes.ToDictionary(a => a.Key, a => (object?)a.Value));
+                _afterOfficeCreate?.Invoke(id);
                 return Task.FromResult(id);
             });
         entities
@@ -657,7 +667,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
         result.Succeeded.Should().BeFalse();
         result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
-        result.Failure.Detail.Should().Contain("removed again");
+        result.Failure.Detail.Should().Contain("removed again").And.Contain("Try again in a few minutes", "a fault: a retry can succeed");
         World.Deletes.Should().ContainSingle();
         _fixture.IsSecureOf(World.Deletes.Single().Id).Should().BeNull("read back gone");
     }
@@ -676,11 +686,120 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         var result = await OfficeCreateProjectFrom(secure);
 
         result.Succeeded.Should().BeTrue(result.Failure?.Detail);
-        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed"));
+        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed")
+            && w.Contains("shared to you automatically once that step succeeds"), "a fault: the job's retry does share it");
         result.Warnings.Should().NotContain(w => w.Contains("as a secure record shared to you"));
         _fixture.IsSecureOf(result.RecordId).Should().BeTrue();
         _fixture.OwningTeamOf(result.RecordId).Should().Be(SecureTeam);
         _fixture.ShareMaskOf(result.RecordId, Creator).Should().Be(0);
+    }
+
+    // ══ Task 158 r1c-v1 — the verifier's items 2 and 7 ══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Verifier item 2 (round 31 item 2: "deletes the just-created row (READ BACK)"): the compensation delete ANSWERS success
+    /// but the row survives. The read-back finds it, so the create is never reported as removed / not created: the tool says
+    /// the row exists and could not be shared or removed, it stays secure and team-owned, and the job shares it later.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheCompensationDeleteAnswersSuccessButTheRowSurvives_SaysSo_NeverNotCreated()
+    {
+        var (secure, _) = Matters();
+        _fixture.FailShareForPrincipal = Creator;
+        World.DeletesIgnored = true;
+
+        var result = await CreateWorkAssignmentUnder(secure, AppCreatesIntoTheWorld().Object);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be shared to you and could not be removed").And.NotContain("NOT created");
+        var created = _writes.Should().ContainSingle().Subject.Id;
+        World.Deletes.Should().ContainSingle(d => d.Id == created, "the delete was asked, and answered success");
+        World.Has("sprk_workassignment", created).Should().BeTrue("yet the row survived — only the read-back tells");
+        _fixture.IsSecureOf(created).Should().BeTrue("still secure and team-owned: never a business-unit-visible row");
+        _fixture.OwningTeamOf(created).Should().Be(SecureTeam);
+
+        _fixture.FailShareForPrincipal = null;
+        World.DeletesIgnored = false;
+        (await new SecureRootInheritanceJobRunner(_fixture).RunAsync()).Success.Should().BeTrue();
+        ShouldBeSecure(created, "the job's re-entry shares it to the person who created it");
+    }
+
+    /// <summary>Verifier item 2, Office: the delete answers success but the project survives — warned as existing, never refused as removed.</summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheCompensationDeleteAnswersSuccessButTheProjectSurvives_WarnsSo_NeverRefusedAsRemoved()
+    {
+        var (secure, _) = Matters();
+        _fixture.FailShareForPrincipal = Creator;
+        World.DeletesIgnored = true;
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeTrue("the project exists: the delete did not remove it");
+        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed"));
+        World.Deletes.Should().ContainSingle(d => d.Id == result.RecordId);
+        World.Has("sprk_project", result.RecordId).Should().BeTrue();
+        _fixture.IsSecureOf(result.RecordId).Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Verifier item 7: the creator is walled off the secure matter BETWEEN the create's plan and its provisioning (a race the
+    /// plan's own check cannot close). Provisioning refuses the creator and the row cannot be removed. Every job run refuses it
+    /// again — so the tool must NOT promise that it is shared automatically: it says an administrator must act.
+    /// </summary>
+    [Fact]
+    public async Task ChatCreate_WhenTheCreatorIsWalledOffAfterThePlan_AndTheRowCannotBeRemoved_PromisesNoSelfHeal()
+    {
+        var (secure, _) = Matters();
+        World.DeletesFail = true;
+
+        var result = await CreateWorkAssignmentUnder(secure,
+            AppCreatesIntoTheWorld(afterCreate: _ => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure)).Object);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be shared to you and could not be removed")
+            .And.Contain("will not be shared to you automatically").And.Contain("administrator")
+            .And.NotContain("automatically once");
+        var created = _writes.Should().ContainSingle().Subject.Id;
+        _fixture.ShareMaskOf(created, Creator).Should().Be(0);
+
+        World.DeletesFail = false;
+        var run = await new SecureRootInheritanceJobRunner(_fixture).RunAsync();
+        run.Success.Should().BeFalse("the job refuses the walled creator on every run: no self-heal");
+        _fixture.ShareMaskOf(created, Creator).Should().Be(0);
+    }
+
+    /// <summary>Verifier item 7, Office: a maker walled off after the plan, the project not removable — no self-heal promised.</summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheMakerIsWalledOffAfterThePlan_AndTheProjectCannotBeRemoved_PromisesNoSelfHeal()
+    {
+        var (secure, _) = Matters();
+        World.DeletesFail = true;
+        _afterOfficeCreate = _ => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeTrue(result.Failure?.Detail);
+        result.Warnings.Should().ContainSingle(w => w.Contains("could not be shared to you and could not be removed")
+            && w.Contains("will not be shared to you automatically"));
+        result.Warnings.Should().NotContain(w => w.Contains("automatically once"));
+    }
+
+    /// <summary>
+    /// Verifier item 7, Office, the removed case: a maker walled off after the plan — the project is removed again, and the
+    /// refusal is named instead of "try again in a few minutes" (a retry is refused the same way).
+    /// </summary>
+    [Fact]
+    public async Task OfficeCreate_WhenTheMakerIsWalledOffAfterThePlan_TheProjectIsRemoved_AndNoRetryIsSuggested()
+    {
+        var (secure, _) = Matters();
+        _afterOfficeCreate = _ => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure);
+
+        var result = await OfficeCreateProjectFrom(secure);
+
+        result.Succeeded.Should().BeFalse();
+        result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
+        result.Failure.Detail.Should().Contain("removed again").And.NotContain("Try again");
+        result.Failure.Code.Should().StartWith("sdap.provision.").And.Contain("no_access");
     }
 
     /// <summary>G5, Office: the caller lacks AppendTo on the secure matter — refused (403 kind), nothing created.</summary>
@@ -817,13 +936,16 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
             inner.DeleteAsync(relativePath, cancellationToken);
     }
 
-    private Task<ToolResult> ChatRefile(Guid workAssignment, Guid matter)
+    /// <param name="afterPatch">Task 158 r1c-v1: what changes right after the caller's PATCH — between the re-file's pre-check
+    /// and the securing that follows it.</param>
+    private Task<ToolResult> ChatRefile(Guid workAssignment, Guid matter, Action? afterPatch = null)
     {
         var user = new PatchingUserClient(new SecureChildOwnershipAiToolTests.ScriptedUserClient(Creator), (path, body) =>
         {
             using var doc = JsonDocument.Parse(body);
             ApplyFiling("sprk_workassignment", workAssignment,
                 doc.RootElement.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone()));
+            afterPatch?.Invoke();
         });
         return new DataverseUpdateRecordHandler(
                 user, new StampWorld().AfterWriteRestamp, CreateLogger<DataverseUpdateRecordHandler>(),
@@ -840,6 +962,45 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
                 })) with
                 { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(DataverseUpdateRecordHandler)), CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Verifier item 7, the re-file: securing a re-filed work assignment did not finish because of a FAULT (its container
+    /// could not be created) — the job retries it, and the tool says so.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_WhenSecuringTheReFiledRecordFaults_SaysItIsRetriedAutomatically()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+        _fixture.SpeContainerCreationSucceeds = false;
+
+        var result = await ChatRefile(workAssignment, secure);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be made secure yet").And.Contain("retried automatically");
+    }
+
+    /// <summary>
+    /// Verifier item 7, the re-file: the creator is walled off the secure matter BETWEEN the re-file's pre-check and the
+    /// securing (a race the pre-check cannot close). Provisioning refuses on every run, so the tool must not promise a retry
+    /// that cannot succeed: an administrator needs to review it.
+    /// </summary>
+    [Fact]
+    public async Task ChatUpdate_WhenTheCreatorIsWalledOffAfterThePreCheck_PromisesNoAutomaticRetry()
+    {
+        var (secure, ordinary) = Matters();
+        var workAssignment = Guid.NewGuid();
+        FiledWorkAssignment(_fixture, workAssignment, "sprk_regardingmatter", "sprk_matter", ordinary);
+
+        var result = await ChatRefile(workAssignment, secure,
+            afterPatch: () => _fixture.NoAccessList.DenySystemUserOnRecord(Creator, secure));
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("could not be made secure yet").And.Contain("administrator")
+            .And.NotContain("retried automatically");
+        _fixture.ShareMaskOf(workAssignment, Creator).Should().Be(0);
     }
 
     /// <summary>AC 2, chat update: re-filing an ordinary work assignment under a SECURE matter secures it.</summary>

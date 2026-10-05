@@ -199,12 +199,20 @@ internal sealed class SecureChildShareWorld
     /// <summary>Task 158 r1: deletes from this row fail (Dataverse refusing the compensation delete).</summary>
     public bool DeletesFail { get; set; }
 
+    /// <summary>
+    /// Task 158 r1c-v1 (verifier item 2): deletes ANSWER success but the row survives — only a read-back can tell (the
+    /// shape task 133's "accepted, not applied" revoke double models for shares).
+    /// </summary>
+    public bool DeletesIgnored { get; set; }
+
     /// <summary>Task 158 r1: an <see cref="IGenericEntityService.DeleteAsync"/> of this world.</summary>
     public void Delete(string table, Guid id)
     {
         Deletes.Add((table, id));
         if (DeletesFail)
             throw new InvalidOperationException("Test: Dataverse refused the delete.");
+        if (DeletesIgnored)
+            return;
         _rows.Remove((table, id));
         OnDeleted?.Invoke(table, id);
     }

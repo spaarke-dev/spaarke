@@ -751,18 +751,31 @@ public static class InternalShareEndpoints
         if (childrenDone && filed.IsComplete)
             return null;
 
+        // Task 158 r1c-v1 (verifier item 3): records whose removed share their OTHER secure parents still pass on in part,
+        // where that part could not be given back yet — the opposite direction from a share not removed, so its own sentence.
+        var filedNotRegiven = filed.NotRegiven;
+        var filedNotEnded = filed.IsComplete ? 0 : filedNotRegiven > 0 && filed.NotDone == 0 ? 0 : Math.Max(filed.NotDone, 1);
+        var regivenSentence = filedNotRegiven == 0
+            ? string.Empty
+            : $" On {filedNotRegiven} secure work assignment(s) or project(s) filed under it, the access the other secure records " +
+              "they are filed under still give this person could not be given back yet; it is given back automatically within a " +
+              "few minutes.";
+
         if (childrenDone)
         {
             logger.LogWarning(
                 "[USER-SHARE] {SystemUserId}'s share on {RootType} {RootId} is gone (removed={Removed}), but the inherited shares it " +
-                "had passed on were not all ended: {Detail} (caller {CallerOid}). The secure-root inheritance job completes it.",
-                systemUserId, root.Type, root.Id, removed, filed.Detail, callerOid);
+                "had passed on were not all ended or given back: {Detail} (caller {CallerOid}). The secure-root inheritance job " +
+                "completes it.", systemUserId, root.Type, root.Id, removed, filed.Detail, callerOid);
             return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle,
-                "This user's access to the record was removed, but the access this record gave them on " +
-                $"{Math.Max(filed.NotDone, 1)} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
-                "they may still open those. They are removed automatically within a few minutes, or you can try again.",
+                (filedNotEnded == 0
+                    ? "This user's access to the record was removed."
+                    : "This user's access to the record was removed, but the access this record gave them on " +
+                      $"{filedNotEnded} secure work assignment(s) or project(s) filed under it could not be removed yet, so " +
+                      "they may still open those. They are removed automatically within a few minutes, or you can try again.")
+                + regivenSentence,
                 systemUserId, children, ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
-                ("filedRecordsNotUpdated", Math.Max(filed.NotDone, 1)));
+                ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
         }
 
         logger.LogWarning(
@@ -781,9 +794,9 @@ public static class InternalShareEndpoints
               "updated yet, so they may still open those. They are removed automatically within a few minutes, or you can " +
               "try again.";
 
-        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail, systemUserId, children,
+        return ChildrenIncomplete(httpContext, ChildrenIncompleteTitle, detail + regivenSentence, systemUserId, children,
             ("removed", removed), ("childrenNotUpdated", children.ChildrenNotUpdated),
-            ("filedRecordsNotUpdated", filed.IsComplete ? 0 : Math.Max(filed.NotDone, 1)));
+            ("filedRecordsNotUpdated", filedNotEnded + filedNotRegiven));
     }
 
     private const string ChildrenIncompleteTitle = "Related records not all updated";

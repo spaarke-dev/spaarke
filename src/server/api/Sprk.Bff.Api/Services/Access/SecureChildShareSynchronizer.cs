@@ -440,10 +440,18 @@ public sealed class SecureChildShareSynchronizer
     /// cannot be read: <see cref="SecureChildShareSyncStatus.Failed"/>, nothing written. A parent flagged secure but not
     /// isolated (a failed provisioning): held, nothing written (its mirror cannot be trusted; leaving it out would WIDEN the
     /// intersection). A write or read-back that fails: <see cref="SecureChildShareSyncStatus.Incomplete"/>.</para>
+    /// <para><b>Write-ahead provenance</b> (task 158 r1c-v1, verifier item 1): <paramref name="recordIntent"/>, when given, is
+    /// called for each principal right BEFORE its share is granted or raised, with the write about to be made and the
+    /// isolated parents it is passed on from. It records where the share comes from before the share exists, so a fault (or
+    /// a concurrent pass) between the share and its record can never leave a share this rule wrote looking like direct
+    /// access. It answers <c>false</c> — never throws — when it could not record it: that principal's share is NOT written
+    /// (<see cref="InheritedShareAction.Failed"/>; the pass is incomplete and retried): nothing is added whose origin could
+    /// not be recorded.</para>
     /// </remarks>
     public async Task<SecureChildShareSyncResult> SyncInheritedRootAsync(
         string rootTable, Guid rootId, IReadOnlyCollection<(string Table, Guid Id)> secureParents, CancellationToken ct,
-        IReadOnlySet<DataversePrincipalRef>? declined = null)
+        IReadOnlySet<DataversePrincipalRef>? declined = null,
+        Func<InheritedShareOutcome, IReadOnlyList<(string Table, Guid Id)>, CancellationToken, Task<bool>>? recordIntent = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rootTable);
         ArgumentNullException.ThrowIfNull(secureParents);
@@ -538,6 +546,7 @@ public sealed class SecureChildShareSynchronizer
         var held = false;
         var written = new Dictionary<DataversePrincipalRef, int>();
         var outcomes = new Dictionary<DataversePrincipalRef, InheritedShareOutcome>();
+        var from = isolatedParents.Select(p => (p.Table, p.Id)).ToList();
 
         foreach (var (principal, mask) in desired!.OrderBy(p => p.Key.Id))
         {
@@ -587,6 +596,16 @@ public sealed class SecureChildShareSynchronizer
             }
 
             var target = current | mask;
+            var intended = new InheritedShareOutcome(principal, mask, current, target,
+                current == 0 ? InheritedShareAction.Granted : InheritedShareAction.Raised);
+            if (recordIntent is not null && !await recordIntent(intended, from, ct).ConfigureAwait(false))
+            {
+                // Write-ahead: no share whose origin is not on record (verifier item 1) — retried by the next pass.
+                failed = true;
+                outcomes[principal] = intended with { MaskAfter = current, Action = InheritedShareAction.Failed };
+                continue;
+            }
+
             try
             {
                 if (current == 0)
@@ -603,8 +622,7 @@ public sealed class SecureChildShareSynchronizer
                 }
 
                 written[principal] = target;
-                outcomes[principal] = new InheritedShareOutcome(principal, mask, current, target,
-                    current == 0 ? InheritedShareAction.Granted : InheritedShareAction.Raised);
+                outcomes[principal] = intended;
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -670,7 +688,7 @@ public sealed class SecureChildShareSynchronizer
             Detail: detail)
         {
             Inherited = outcomes.Values.ToList(),
-            InheritedFrom = isolatedParents.Select(p => (p.Table, p.Id)).ToList(),
+            InheritedFrom = from,
         };
     }
 

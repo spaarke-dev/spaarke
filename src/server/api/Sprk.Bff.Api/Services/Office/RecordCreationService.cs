@@ -594,19 +594,28 @@ public sealed class RecordCreationService
                     RecordCreationFailureKind.SecureFilingFailed,
                     secured.ReasonCode ?? "sdap.inherit.unexpected_result",
                     "The project is filed under a secure record, so it is created secure and shared to you, and that share could " +
-                    "not be made, so the new project was removed again. Nothing was created. Try again in a few minutes."));
+                    "not be made, so the new project was removed again. Nothing was created. " +
+                    (secured.CompletesAutomatically ? "Try again in a few minutes." : $"{secured.Detail}.")));
             }
 
+            // Task 158 r1c-v1 (verifier item 7): a self-heal is promised only when the job can deliver it — never after
+            // provisioning REFUSED the maker (e.g. walled off between the plan and the provisioning): every run refuses again.
             if (secured.RowStranded)
             {
-                // Not shared to the maker and not removable: it exists, and only an administrator can open it until the job
-                // shares it to the maker (task 158 r1) — never reported as "shared to you".
+                // Not shared to the maker and not removable: it exists, and only an administrator can open it — never
+                // reported as "shared to you".
                 warnings.Add(
                     "The project was created as a secure record, but it could not be shared to you and could not be removed " +
-                    $"again ({secured.ReasonCode}); it is shared to you automatically within a few minutes.");
+                    $"again ({secured.ReasonCode}); " +
+                    (secured.CompletesAutomatically
+                        ? "it is shared to you automatically once that step succeeds (it is retried every few minutes)."
+                        : "it will not be shared to you automatically — only an administrator can open it, and an administrator " +
+                          "needs to review and remove it."));
             }
             else if (!secured.IsComplete)
             {
+                // Shared to the maker: provisioning got past its refusals (all come before the creator's share), so what is
+                // left is a fault the job retries.
                 warnings.Add(
                     "The project was created as a secure record shared to you, but securing it could not be finished yet " +
                     $"({secured.ReasonCode}); it is completed automatically within a few minutes.");

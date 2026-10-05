@@ -148,8 +148,21 @@ public static class AssignedAccessReason
     /// <summary>Task 158 r1: the parent's share ended; another secure parent of the filed record still passes it on, so it is kept.</summary>
     public const string KeptOtherSource = "kept-other-source";
 
-    /// <summary>Task 158 r1: the parent's share ended; removing it would leave nobody able to open the record (S5), so it is kept.</summary>
+    /// <summary>
+    /// Task 158 r1: the parent's share ended; removing it would leave nobody able to open the record (S5), so it is kept. Since
+    /// r1c-v1 the row stays <see cref="AssignedAccessState.Shared"/> with this reason (the share is still the one the rule
+    /// passed on): every later pass tries again, and removes it once someone else can open the record.
+    /// </summary>
     public const string KeptLastReader = "kept-last-reader";
+
+    /// <summary>
+    /// Task 158 r1c-v1 (verifier item 1 — write-ahead provenance): the reason of an inherited-share row recorded BEFORE its
+    /// share is written (<see cref="AssignedAccessState.Shared"/>, <c>sprk_grantedlevel</c> = the mask about to be written,
+    /// optionally followed by <c>;raised-from-mask:N</c>). Confirmed — this marker dropped — once the share reads back. A
+    /// later pass that finds it unconfirmed decides from the live share: the mask in place → confirmed; the mask from before
+    /// → the write never landed (written again, never read as a removal); anything else → changed by someone else.
+    /// </summary>
+    public const string SharePending = "share-pending";
 
     /// <summary>
     /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
@@ -557,8 +570,15 @@ public class AssignedAccessStore
         return live.Count > MaxScanRows ? (live.Take(MaxScanRows).ToList(), true) : (live, false);
     }
 
-    /// <summary>Creates an inherited-share row; a duplicate-key loss re-reads it and updates instead.</summary>
-    internal virtual async Task<Guid> CreateInheritedLedgerAsync(
+    /// <summary>
+    /// Creates an inherited-share row and answers its id — or <c>null</c> when a concurrent pass created the row for the same
+    /// (filed root, parent, principal) first (the alternate key answered 409/412 and the row reads back). Task 158 r1c-v1
+    /// (verifier item 1): the loser NEVER writes over that row — not a confirmed or pending share with a "covered by existing"
+    /// one, not an operator's Declined / Adopted with a share — because its decision was made on a read that did not see it.
+    /// The caller treats <c>null</c> as "not recorded" (the pass is incomplete and the next one decides on the row as it is).
+    /// Any other fault, or a conflict whose row cannot be read back, propagates.
+    /// </summary>
+    internal virtual async Task<Guid?> CreateInheritedLedgerAsync(
         ExternalGrantRootType rootType, Guid rootId, string parentTable, Guid parentId, DataversePrincipalRef principal,
         AssignedAccessLedgerWrite write, CancellationToken ct)
     {
@@ -578,8 +598,10 @@ public class AssignedAccessStore
             if (existing.FirstOrDefault() is not { } row)
                 throw;
 
-            await UpdateLedgerAsync(row.Id, write with { SystemUserId = null }, ct).ConfigureAwait(false);
-            return row.Id;
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] Inherited-share row {Key} was created concurrently ({RowId}); left as it is — the next pass " +
+                "decides on it.", key, row.Id);
+            return null;
         }
     }
 
@@ -737,7 +759,9 @@ public class AssignedAccessStore
     /// Task 158 r1: the inherited-share provenance rows (<see cref="InheritedSourcePrefix"/>) share this table but are not
     /// Assigned-To rows — the materializer ignores them (no contact / organization subject), and they are left out of this
     /// scan so they never count toward its <see cref="MaxScanRows"/> bound (an environment with many inherited shares would
-    /// otherwise truncate — and fail — the Assigned-To job's run). <see cref="IsAssignedToScanRow"/> is the same predicate.
+    /// otherwise truncate — and fail — the Assigned-To job's run). The OData filter is the ONE statement of that predicate
+    /// (task 158 r1c-v1, verifier item 5: an in-memory copy of it was removed — it could never differ, so nothing pinned
+    /// it); <c>AssignedAccessStoreODataTests</c> drives this method over an in-memory Web API that evaluates the filter.
     /// </remarks>
     internal virtual async Task<(IReadOnlyList<AssignedRootRef> Roots, bool Truncated)> ScanLedgerRootsAsync(CancellationToken ct)
     {
@@ -751,7 +775,6 @@ public class AssignedAccessStore
 
         var truncated = rows.Count > MaxScanRows;
         var roots = rows.Take(MaxScanRows)
-            .Where(IsAssignedToScanRow)
             .Select(RootOf)
             .Where(r => r is not null)
             .Select(r => r!.Value)
@@ -759,13 +782,6 @@ public class AssignedAccessStore
             .ToList();
         return (roots, truncated);
     }
-
-    /// <summary>
-    /// Task 158 r1: a live ledger row the Assigned-To job revisits — any row but an inherited-share provenance row (the
-    /// predicate <see cref="ScanLedgerRootsAsync"/>'s filter states in OData).
-    /// </summary>
-    internal static bool IsAssignedToScanRow(AssignedAccessLedgerRow row)
-        => row.State != AssignedAccessState.Revoked && InheritedSourceOf(row.SourceField) is null;
 
     /// <summary>The root a ledger row is held at, or <c>null</c> for a row with none.</summary>
     internal static AssignedRootRef? RootOf(AssignedAccessLedgerRow row)
