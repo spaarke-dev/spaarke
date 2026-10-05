@@ -62,10 +62,16 @@ public sealed record PolicyVersionSnapshot(
 /// instead.</b> <see cref="PredicateCompiler"/>, this class and the future evaluator (task 031) all live in the
 /// SAME <c>Sprk.Bff.Api</c> assembly, so <c>internal</c> would not stop the evaluator calling it; nesting the
 /// compiler privately here would break its standalone tested contract (task 021's
-/// <c>PredicateCompilerTests</c>). The single path is enforced by an architecture test instead —
-/// <c>tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs</c> (task 022 rework round 2, finding F11)
-/// fails the build if any <c>Sprk.Bff.Api</c> method other than this class (and the compiler itself) calls a
-/// <c>PredicateCompiler.Compile*</c> method.</para>
+/// <c>PredicateCompilerTests</c>). The single path is enforced by an architecture test instead,
+/// <c>tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs</c> (task 022 rework round 2 finding F11,
+/// extended round 3 finding L1), which scans <c>Sprk.Bff.Api</c>'s IL. <b>Exactly what it enforces</b>: outside
+/// this class and <see cref="PredicateCompiler"/>, no method may call, take a delegate to (<c>ldftn</c>), or
+/// build an expression tree over (<c>ldtoken</c>) any <c>PredicateCompiler.Compile*</c> method; and outside
+/// <see cref="PredicateCompiler"/> (and the record itself), no method may construct a
+/// <see cref="CompiledPredicate"/> (<c>newobj</c>) or copy one with <c>with</c> (its compiler-generated
+/// <c>&lt;Clone&gt;$</c>). <b>What it does NOT enforce</b>: reflection (<c>MethodInfo.Invoke</c>,
+/// <c>Activator.CreateInstance</c>), <c>dynamic</c> dispatch, and code in other assemblies — those remain a
+/// code-review concern.</para>
 /// <para><b>The §0.3 template vocabulary</b> is <see cref="CompiledPredicate.TemplateEligibleFields"/>, defined
 /// once, in the compiler (coordinator decisions F5, 2026-10-04, and F3, rework round 2): a subject <c>when</c>
 /// field (any operator — the subject is one row), or an <c>exists</c>-clause field the clause PINS to exactly

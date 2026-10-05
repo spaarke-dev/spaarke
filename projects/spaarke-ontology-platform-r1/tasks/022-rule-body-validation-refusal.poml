@@ -177,4 +177,20 @@
     <test-run>BFF build: 0 warnings, 0 errors. Signals-filtered: 243/243, three consecutive runs. Arch guard: 2/2. The full suite is not run here; it is left to the main session.</test-run>
     <publish-size-note>Not measured: no package or .csproj change. The round-2 diff is plain C# logic, a JSON schema edit, doc comments and test code.</publish-size-note>
   </rework>
+
+  <rework date="2026-10-05" round="3" trigger="third-independent-review-PASS-WITH-FINDINGS">
+    <disposition>All findings (M1-M3, L1-L7) are FIXED. The per-finding table and pinning tests are in notes/022-progress.md "Rework round 3".
+      M1: an unpaired UTF-16 surrogate escape in a property name (thrown by the strict parse's duplicate-name check, or by the name walk) is now "not valid JSON" (schema_invalid) in RuleBodySchemaValidator, and a PredicateCompilationException in both PredicateCompiler entry points. The value case is covered too. "Never throws for Existence" is now true.
+      M2: the no-leak log test uses a distinctive non-null body and template, and covers body and template refusals.
+      M3: metric reasons are asserted for template_malformed and for internal_error; the latter is forced through the existing injected TimeProvider, and no production seam was added.
+      L1: the arch IL scan also flags ldtoken of Compile*, newobj of CompiledPredicate, and its Clone method (used by with). Permanent negative-control fixtures prove each detector. The doc states that reflection, dynamic and other assemblies are not covered.
+      L2: 'then' is reserved and refused. Grep confirmed nothing needs it: the seeded Path B body has none, and only two test fixtures carried "then": {}, now removed.
+      L3: canonical decimal emission into FetchXML; pins compare numbers by decimal value and strings ordinally. The case/accent-insensitive Dataverse eq is documented, and the FactValues doc is softened.
+      L4: the doc is corrected; a 'when' value may be NULL under a not-equal filter.
+      L5: the same-value positive case was added.
+      L6: the doc now names the seven reasons.
+      L7: the round-2 mutation summary is restated exactly.
+      Each negative test was verified to fail with its fix reverted, using three separate mutation runs plus two arch-guard runs.</disposition>
+    <test-run>BFF build (--no-incremental): 0 warnings, 0 errors. Signals-filtered: 274/274, three consecutive runs. This task's files: PolicyVersionValidatorTests 77, PredicateCompilerTests 76, RuleBodySchemaValidatorTests 53, SignalWriterTests 38. Arch guard: 7/7. The full suite, publish size, CVE scan and conflict-check are left to the main session.</test-run>
+  </rework>
 </task>

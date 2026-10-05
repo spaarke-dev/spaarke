@@ -25,9 +25,11 @@ public static class OntologyWriterEvents
     /// admins may author policy rows directly in the Spaarke Platform app (bypassing the BFF), so the
     /// evaluator (task 031) re-validates every policy version's <c>sprk_rulebody</c> at evaluation time and
     /// must fail closed and loudly, never silently producing zero Signals. ONE EventId covers every
-    /// policy-validation refusal; the structured <c>reason</c> property (one of the six bounded sub-reasons
-    /// added to <see cref="Telemetry.OntologyWriterFailureReason"/> in the task 022 rework — review finding
-    /// #7) distinguishes WHICH. Structured properties: <c>policyVersionId</c>, <c>policyCode</c> and
+    /// policy-validation refusal; the structured <c>reason</c> property distinguishes WHICH. It is one of the
+    /// SEVEN bounded policy-validation sub-reasons on <see cref="Telemetry.OntologyWriterFailureReason"/>:
+    /// <c>rule_type_unsupported</c>, <c>rule_body_too_large</c>, <c>schema_invalid</c>, <c>compile_refused</c>,
+    /// <c>template_token_outside_read_set</c>, <c>template_malformed</c> and <c>internal_error</c> (task 022
+    /// rework round 1 review finding #7; <c>rule_body_too_large</c> added in round 2). Structured properties: <c>policyVersionId</c>, <c>policyCode</c> and
     /// <c>reason</c> ONLY — never the rule body, the message template, or the validator's field-level error
     /// text (all of which may echo admin-authored config content).
     /// </summary>

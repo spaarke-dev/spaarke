@@ -529,11 +529,74 @@ public class PredicateCompilerTests
         act.Should().Throw<PredicateCompilationException>().WithMessage("*cross-clause variable reference*");
     }
 
-    [Fact]
-    public void Compile_InRangeDecimalNumber_PassesThroughVerbatim()
+    // Round 3, finding L3: numbers reach FetchXML as a canonical invariant decimal, never the raw JSON spelling.
+    [Theory]
+    [InlineData("12345.67", "12345.67")]
+    [InlineData("1e2", "100")]
+    [InlineData("1E-3", "0.001")]
+    [InlineData("-5", "-5")]
+    public void Compile_Number_IsEmittedAsACanonicalInvariantDecimal(string json, string expected)
     {
-        Condition(Compiler().Compile(Body("""{"sprk_amount":12345.67}""")), "sprk_amount")
-            .Attribute("value")!.Value.Should().Be("12345.67");
+        Condition(Compiler().Compile(Body("{\"sprk_amount\":" + json + "}")), "sprk_amount")
+            .Attribute("value")!.Value.Should().Be(expected);
+    }
+
+    // =====================================================================================
+    // Round 3, finding M1: an unpaired UTF-16 surrogate escape in a property name is a PredicateCompilationException
+    // from BOTH entry points -- never the InvalidOperationException JsonProperty.Name throws.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("""{"sprk_\ud800":1}""")]
+    [InlineData("""{"sprk_name":"a\udc00"}""")]
+    public void Compile_UnpairedSurrogateEscape_IsRefusedAsACompilationError(string filter)
+    {
+        var act = () => Compiler().Compile(Body(filter));
+
+        act.Should().Throw<PredicateCompilationException>().WithMessage("*not valid JSON*");
+    }
+
+    [Theory]
+    [InlineData("""{"sprk_\ud800":1}""")]     // name: thrown by the strict parse's duplicate-name check
+    [InlineData("""{"sprk_name":"a\udc00"}""")] // value: thrown by GetString while compiling
+    public void CompileSchemaValidated_UnpairedSurrogateEscape_IsRefusedAsACompilationError(string filter)
+    {
+        // The schema is skipped here, so the compiler's own reads are what must be contained.
+        var act = () => Compiler().CompileSchemaValidated(Body(filter), subjectId: null);
+
+        act.Should().Throw<PredicateCompilationException>().WithMessage("*not valid JSON*unpaired UTF-16 surrogate*");
+    }
+
+    // =====================================================================================
+    // Round 3, findings L3 + L5: two exists clauses pinning the SAME value -> eligible; pins compare by value.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("1", "1")]
+    [InlineData("1", "1.0")]
+    [InlineData("100", "1e2")]
+    [InlineData("\"Fee\"", "[\"Fee\"]")]
+    public void Compile_TwoExistsClausesPinningTheSameFieldToTheSameValue_IsTemplateEligible(string first, string second)
+    {
+        var body = "{\"type\":\"Existence\",\"subject\":\"sprk_matter\",\"all\":[" +
+                   "{\"exists\":\"sprk_communication\",\"path\":\"sprk_regardingmatter\",\"filter\":{\"sprk_direction\":" + first + "}}," +
+                   "{\"exists\":\"sprk_communication\",\"path\":\"sprk_regardingmatter\",\"filter\":{\"sprk_direction\":" + second + "}}]}";
+
+        var compiled = Compiler().Compile(body);
+
+        compiled.TemplateEligibleFields.Should().Contain("sprk_direction");
+        compiled.AmbiguousTemplateFields.Should().NotContain("sprk_direction");
+    }
+
+    [Fact]
+    public void Compile_TwoExistsClausesPinningStringsDifferingOnlyInCase_IsAmbiguous()
+    {
+        // Documented conservative choice (L3): strings compare ordinally although Dataverse 'eq' is case-insensitive.
+        var body = "{\"type\":\"Existence\",\"subject\":\"sprk_matter\",\"all\":[" +
+                   "{\"exists\":\"sprk_communication\",\"path\":\"sprk_regardingmatter\",\"filter\":{\"sprk_name\":\"Fee\"}}," +
+                   "{\"exists\":\"sprk_communication\",\"path\":\"sprk_regardingmatter\",\"filter\":{\"sprk_name\":\"fee\"}}]}";
+
+        Compiler().Compile(body).AmbiguousTemplateFields.Should().Contain("sprk_name");
     }
 
     // =====================================================================================

@@ -28,8 +28,8 @@
       }
     },
     "then": {
-      "description": "The signal to produce when every clause holds (signalType/severity/proposedAction/evidenceRefs). Validated structurally only here; semantic validation is a later task's concern. A 'messageTemplate' property is REFUSED here and anywhere else in the body by RuleBodySchemaValidator (task 022 rework round 2, F8): the sentence template's single source is the sprk_policyversion.sprk_messagetemplate column, the only template checked against the predicate's read set (section 0.3).",
-      "type": "object"
+      "description": "RESERVED, and refused (task 022 rework round 3, L2): no task defines 'then' and no code reads it. Early drafts put signalType/severity/messageTemplate/proposedAction here; those now live in their own sprk_policyversion columns (the sentence template's single source is sprk_messagetemplate, the only template checked against the predicate's read set, section 0.3). Listed here only so the refusal is explicit rather than an anonymous additionalProperties failure; RuleBodySchemaValidator reports it with its own message before schema evaluation.",
+      "not": {}
     }
   },
   "$defs": {

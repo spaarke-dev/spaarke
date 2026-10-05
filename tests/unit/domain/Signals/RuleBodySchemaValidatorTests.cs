@@ -43,8 +43,7 @@ public class RuleBodySchemaValidatorTests
               "path": "sprk_matter",
               "filter": { "sprk_revisedon": { ">=": "now-30d" } }
             }
-          ],
-          "then": {}
+          ]
         }
         """;
 
@@ -67,8 +66,7 @@ public class RuleBodySchemaValidatorTests
               "path": "sprk_matter",
               "filter": { "sprk_revisedon": { ">": "$commitment.sprk_receiveddate" } }
             }
-          ],
-          "then": {}
+          ]
         }
         """;
 
@@ -370,26 +368,63 @@ public class RuleBodySchemaValidatorTests
     // thrown. Both cases previously escaped as unhandled ArgumentException/FormatException.
     // =====================================================================================
 
-    [Fact]
-    public void Validate_WithTopLevelDuplicateKey_IsRefused_NeverThrows()
+    /// <summary>Pathological-but-parseable bodies (round 1 finding #1; round 3 finding M1). Shared with
+    /// <c>PolicyVersionValidatorTests</c>, which asserts the same rows end-to-end as <c>schema_invalid</c>.</summary>
+    public static TheoryData<string> PathologicalBodies => new()
     {
-        // Two "subject" keys at the top level. Before the fix, JsonNode.Parse's eager JsonObject construction
-        // threw an unhandled ArgumentException ("An item with the same key has already been added") here.
-        const string body = """
-            {
-              "type": "Existence",
-              "subject": "sprk_matter",
-              "subject": "sprk_communication",
-              "all": [
-                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "a": "b" } }
-              ]
-            }
-            """;
+        // Two top-level "subject" keys: JsonNode construction used to throw ArgumentException.
+        """{"type":"Existence","subject":"sprk_matter","subject":"sprk_communication","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"a":"b"}}]}""",
+        // 1e999999: the schema library's GetDecimal used to throw FormatException.
+        """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_amount":1e999999}}]}""",
+        // M1: an unpaired high-surrogate escape in a FILTER PROPERTY NAME threw InvalidOperationException.
+        """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_\ud800":1}}]}""",
+        // M1: an unpaired low-surrogate escape in a property name nested under a top-level object.
+        """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"a":"b"}}],"then":{"x\udc00":1}}""",
+        // M1 companion: the same escape in a VALUE (already refused before round 3; pinned so it stays so).
+        """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_name":"a\ud800"}}]}""",
+    };
 
+    [Theory]
+    [MemberData(nameof(PathologicalBodies))]
+    public void Validate_WithPathologicalBody_IsRefused_NeverThrows(string body)
+    {
         var act = () => _sut.Validate(RuleType.Existence, body);
 
         var result = act.Should().NotThrow().Subject;
         result.IsValid.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("""{"sprk_\ud800":1}""")]
+    [InlineData("""{"x":{"y\udc00":1}}""")]
+    public void Validate_WithUnpairedSurrogateInPropertyName_IsRefusedAsInvalidJson(string filter)
+    {
+        // Round 3, finding M1: reported as what it is (not valid JSON), not as an internal error.
+        var body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":""" +
+                   filter + "}]}";
+
+        var result = _sut.Validate(RuleType.Existence, body);
+
+        result.Errors.Should().ContainSingle().Which.Should().StartWith("sprk_rulebody is not valid JSON");
+    }
+
+    // =====================================================================================
+    // Round 3, finding L2 (coordinator decision): 'then' is reserved and refused outright.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("{}")]
+    [InlineData("""{"signalType":100000003,"severity":100000001}""")]
+    [InlineData("""{"msgTemplate":"Unreconciled {{sprk_budgetamount}}"}""")] // a messageTemplate lookalike
+    public void Validate_WithThenProperty_IsRefusedAsReserved(string then)
+    {
+        var body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"a":"b"}}],"then":""" +
+                   then + "}";
+
+        var result = _sut.Validate(RuleType.Existence, body);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().ContainSingle().Which.Should().StartWith("/then: 'then' is reserved");
     }
 
     [Fact]
@@ -407,28 +442,6 @@ public class RuleBodySchemaValidatorTests
                   "path": "sprk_regardingmatter",
                   "filter": { "sprk_triagecategory": "a", "sprk_triagecategory": "b" }
                 }
-              ]
-            }
-            """;
-
-        var act = () => _sut.Validate(RuleType.Existence, body);
-
-        var result = act.Should().NotThrow().Subject;
-        result.IsValid.Should().BeFalse();
-    }
-
-    [Fact]
-    public void Validate_WithExtremeNumericLiteral_IsRefused_NeverThrows()
-    {
-        // 1e999999 is syntactically valid JSON but overflows every .NET numeric type the schema library's
-        // numeric-keyword evaluation reads it as. Before the fix this threw an unhandled FormatException out
-        // of JsonElement.GetDecimal.
-        const string body = """
-            {
-              "type": "Existence",
-              "subject": "sprk_matter",
-              "all": [
-                { "exists": "sprk_communication", "path": "sprk_regardingmatter", "filter": { "sprk_amount": 1e999999 } }
               ]
             }
             """;

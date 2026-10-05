@@ -22,13 +22,17 @@ namespace Sprk.Bff.Api.Services.Signals;
 /// coordinator decision). A token's value must be exactly ONE well-defined value for the firing subject, so a
 /// field is eligible only when:
 /// <list type="bullet">
-/// <item>it is read by the subject's own <c>when</c> filter — with ANY operator, because the subject is one row
-/// whose own value the evaluator reads; or</item>
+/// <item>it is read by the subject's own <c>when</c> filter — with any operator, because the subject is ONE row,
+/// so the field has at most one value for it. That value is not guaranteed NON-NULL (task 022 rework round 3,
+/// finding L4): Dataverse <c>ne</c> (from <c>&lt;&gt;</c>) includes rows whose column is null.
+/// <see cref="SignalWriter.RenderSentence"/> refuses a null fact, so it surfaces as a refused write, never as
+/// blank text; or</item>
 /// <item>it is read by an <c>exists</c> clause that PINS it to exactly one value — a bare scalar, <c>{"=": v}</c>,
 /// or an <c>in</c> list of exactly one element. A range/<c>&lt;&gt;</c>/multi-value <c>in</c> filter can match N
-/// related rows carrying N different values, so "the" value would be undefined. For such a token the value IS
-/// the clause's pinned literal. If the field is read by more than one <c>exists</c> clause, EVERY occurrence
-/// must pin it and all pins must agree.</item>
+/// related rows carrying N different values, so "the" value would be undefined. For such a token the value is
+/// the clause's pinned literal (see <c>SignalWriteRequest.FactValues</c> for the string-collation caveat). If the
+/// field is read by more than one <c>exists</c> clause, EVERY occurrence must pin it and all pins must agree —
+/// numbers by decimal value, strings ordinally (round 3, finding L3).</item>
 /// </list>
 /// Never a <c>notExists</c> clause's field: a firing subject has, by definition, no matching row there, so
 /// only the fact of absence is known (literal template text can state that).</param>
@@ -210,10 +214,10 @@ public sealed partial class PredicateCompiler
     /// <remarks>
     /// <b>Who may call this.</b> Within <c>Sprk.Bff.Api</c>, only <see cref="PolicyVersionValidator"/> may call
     /// any <c>Compile*</c> method of this class (it uses <see cref="CompileSchemaValidated"/>, so the schema is
-    /// evaluated once). Pinned by the architecture test <c>PredicateCompilerCallerGuardTests</c> (task 022
-    /// rework round 2, finding F11): the evaluator (task 031) must obtain a predicate via
-    /// <see cref="PolicyVersionValidator.TryPrepareForEvaluation"/>, never here. Public for its own
-    /// maintain-class tests (<c>PredicateCompilerTests</c>).
+    /// evaluated once): the evaluator (task 031) must obtain a predicate via
+    /// <see cref="PolicyVersionValidator.TryPrepareForEvaluation"/>. Public for its own maintain-class tests
+    /// (<c>PredicateCompilerTests</c>). See <see cref="PolicyVersionValidator"/>'s remarks for exactly what the
+    /// architecture test <c>PredicateCompilerCallerGuardTests</c> enforces, and what it does not.
     /// </remarks>
     public CompiledPredicate Compile(string ruleBodyJson, Guid? subjectId = null)
     {
@@ -263,9 +267,36 @@ public sealed partial class PredicateCompiler
         {
             throw new PredicateCompilationException("Rule body is not valid JSON (duplicate keys are refused): " + ex.Message);
         }
+        catch (InvalidOperationException)
+        {
+            // Round 3, finding M1: with AllowDuplicateProperties=false, Parse itself unescapes every property name
+            // to compare them, and an unpaired UTF-16 surrogate escape there throws InvalidOperationException.
+            throw new PredicateCompilationException(UnreadableTextMessage);
+        }
     }
 
+    private const string UnreadableTextMessage =
+        "Rule body is not valid JSON: it contains text that cannot be read as a string (for example an unpaired " +
+        "UTF-16 surrogate escape such as \\ud800).";
+
     private CompiledPredicate CompileParsed(JsonElement root, Guid? subjectId)
+    {
+        try
+        {
+            return CompileParsedCore(root, subjectId);
+        }
+        catch (InvalidOperationException)
+        {
+            // Task 022 rework round 3, finding M1: an unpaired UTF-16 surrogate escape in a STRING VALUE passes the
+            // strict parse (only property names are unescaped there -- see ParseBounded), but READING it
+            // (GetString) throws InvalidOperationException. Reachable through CompileSchemaValidated, which skips
+            // the schema validator that would otherwise refuse it first. Refused with the compiler's own exception
+            // type, so Compile/CompileSchemaValidated keep their single documented failure contract.
+            throw new PredicateCompilationException(UnreadableTextMessage);
+        }
+    }
+
+    private CompiledPredicate CompileParsedCore(JsonElement root, Guid? subjectId)
     {
         // Resolved once, so every clause in the query shares one anchor (to whole seconds, for a stable text).
         var nowUtc = TruncateToSeconds(_timeProvider.GetUtcNow().ToUniversalTime());
@@ -415,7 +446,7 @@ public sealed partial class PredicateCompiler
     private sealed class PositiveFieldUse
     {
         private readonly HashSet<string> _entities = new(StringComparer.Ordinal);
-        private readonly List<string?> _existsPins = new();
+        private readonly List<object?> _existsPins = new();
         private bool _readByWhen;
 
         public void RecordWhen(string subjectEntity)
@@ -424,8 +455,9 @@ public sealed partial class PredicateCompiler
             _entities.Add(subjectEntity);
         }
 
-        /// <param name="pin">The single value the clause pins the field to, or <c>null</c> if it does not.</param>
-        public void RecordExists(string relatedEntity, string? pin)
+        /// <param name="pin">The single value the clause pins the field to (see <see cref="PinOf"/>), or
+        /// <c>null</c> if it does not.</param>
+        public void RecordExists(string relatedEntity, object? pin)
         {
             _entities.Add(relatedEntity);
             _existsPins.Add(pin);
@@ -442,7 +474,11 @@ public sealed partial class PredicateCompiler
 
             if (_readByWhen)
             {
-                // The subject is one row: its own value is defined whatever the operator.
+                // The subject is ONE row, so the field has at most one value for it -- but not necessarily a
+                // non-null one: Dataverse 'ne' (from '<>') INCLUDES rows whose column is null (task 022 rework
+                // round 3, finding L4), and an unfiltered-by-value operator says nothing about nullness either.
+                // SignalWriter.RenderSentence refuses a null fact, so a null here surfaces as a refused write, never
+                // as blank text; task 031 must expect it.
                 return TemplateFieldClass.Eligible;
             }
 
@@ -452,25 +488,39 @@ public sealed partial class PredicateCompiler
                 return TemplateFieldClass.Unpinned;
             }
 
-            return _existsPins.Distinct(StringComparer.Ordinal).Count() == 1
+            // Pins compare by VALUE (finding L3): numbers as System.Decimal (1 == 1.0 == 1e0), everything else as
+            // the ordinal string the condition was emitted with.
+            return _existsPins.Distinct().Count() == 1
                 ? TemplateFieldClass.Eligible
                 : TemplateFieldClass.Ambiguous; // two clauses pinning DIFFERENT values
         }
     }
 
+    /// <summary>
+    /// The comparable identity of a pinned value (task 022 rework round 3, finding L3): a JSON number is its
+    /// <see cref="decimal"/> value (boxed — <see cref="decimal.Equals(object)"/> is value-based, so 1 and 1.0
+    /// compare equal); anything else is the exact string emitted into FetchXML. <b>Strings stay ordinal</b>, which
+    /// is conservative: Dataverse string <c>eq</c> is case- and accent-insensitive under the org collation, so
+    /// <c>"Fee"</c> and <c>"fee"</c> pinned by two clauses would match the same rows yet are refused here as
+    /// ambiguous rather than guessed equal.
+    /// </summary>
+    private static object PinOf(JsonElement value, string emitted) =>
+        value.ValueKind == JsonValueKind.Number ? value.GetDecimal() : emitted;
+
     /// <param name="recordPositive">Non-null ONLY when <paramref name="filter"/> is a POSITIVE filter (the body's
     /// own "when", or an "exists" clause); called once per field with the single value the condition pins the
-    /// field to (a scalar, <c>{"=": v}</c>, or a one-element <c>in</c>), or <c>null</c> when it does not.</param>
+    /// field to (a scalar, <c>{"=": v}</c>, or a one-element <c>in</c>; see <see cref="PinOf"/>), or <c>null</c>
+    /// when it does not.</param>
     private static IEnumerable<XElement> CompileFilterConditions(
         string entityName, JsonElement filter, DateTimeOffset nowUtc, string where,
-        Action<string, string?>? recordPositive)
+        Action<string, object?>? recordPositive)
     {
         var conditions = new List<XElement>();
 
         foreach (var field in filter.EnumerateObject())
         {
             var attribute = RequireIdentifier(field.Name, where);
-            string? pin = null;
+            object? pin = null;
 
             var at = $"{where}.{field.Name}";
 
@@ -486,7 +536,8 @@ public sealed partial class PredicateCompiler
             switch (value.ValueKind)
             {
                 case JsonValueKind.Array:
-                    var values = value.EnumerateArray().Select(v => FormatScalar(v, nowUtc, at)).ToList();
+                    var elements = value.EnumerateArray().ToList();
+                    var values = elements.Select(v => FormatScalar(v, nowUtc, at)).ToList();
                     if (values.Count == 0)
                     {
                         throw new PredicateCompilationException($"{at}: an empty id list matches nothing; refusing to compile.");
@@ -502,7 +553,7 @@ public sealed partial class PredicateCompiler
                         new XAttribute("attribute", attribute),
                         new XAttribute("operator", "in"),
                         values.Select(v => new XElement("value", v))));
-                    pin = values.Count == 1 ? values[0] : null; // 'in' of exactly one value pins the field
+                    pin = values.Count == 1 ? PinOf(elements[0], values[0]) : null; // one-value 'in' pins the field
                     break;
 
                 case JsonValueKind.Object:
@@ -515,13 +566,13 @@ public sealed partial class PredicateCompiler
                     var op = MapOperator(ops[0].Name, at);
                     var operand = FormatScalar(ops[0].Value, nowUtc, at);
                     conditions.Add(Condition(attribute, op, operand));
-                    pin = op == "eq" ? operand : null; // only {"=": v} pins; ranges and <> do not
+                    pin = op == "eq" ? PinOf(ops[0].Value, operand) : null; // only {"=": v} pins
                     break;
 
                 default:
                     var scalar = FormatScalar(value, nowUtc, at);
                     conditions.Add(Condition(attribute, "eq", scalar));
-                    pin = scalar; // a bare scalar is eq
+                    pin = PinOf(value, scalar); // a bare scalar is eq
                     break;
             }
 
@@ -584,14 +635,16 @@ public sealed partial class PredicateCompiler
                 // same per-value rules to 'when'): a number must be representable as System.Decimal -- the same
                 // bound the schema library's numeric evaluation enforces (it reads values via GetDecimal). Without
                 // this, "1e999999" reached FetchXML verbatim as value="1e999999".
-                if (!value.TryGetDecimal(out _))
+                if (!value.TryGetDecimal(out var number))
                 {
                     throw new PredicateCompilationException(
                         $"{at}: numeric literal {value.GetRawText()} is outside the supported range (it must be " +
                         "representable as a System.Decimal).");
                 }
 
-                return value.GetRawText();
+                // Round 3, finding L3: emitted CANONICALLY (plain invariant decimal), never the raw JSON text --
+                // "1e2" becomes "100" and "1E-3" becomes "0.001", so FetchXML never carries exponent notation.
+                return number.ToString(CultureInfo.InvariantCulture);
 
             case JsonValueKind.True:
                 return "1";

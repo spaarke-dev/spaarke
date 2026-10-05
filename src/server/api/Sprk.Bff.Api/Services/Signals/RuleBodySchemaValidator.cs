@@ -91,6 +91,11 @@ public sealed class RuleBodySchemaValidator
     /// hold unvalidated §0.3 prose. Matched case-insensitively at any depth.</summary>
     public const string ForbiddenMessageTemplateProperty = "messageTemplate";
 
+    /// <summary>The top-level rule-body property refused as reserved (task 022 rework round 3, finding L2,
+    /// coordinator decision): early drafts put the Signal's type/severity/template/action under <c>then</c>, but
+    /// those now live in their own <c>sprk_policyversion</c> columns and no task defines or reads <c>then</c>.</summary>
+    public const string ReservedThenProperty = "then";
+
     /// <summary>
     /// The bounded refusal message for an over-length body (finding F2). Shared so every layer reports the same
     /// text and a caller can recognise it.
@@ -109,10 +114,11 @@ public sealed class RuleBodySchemaValidator
     /// question about the TYPE, not a property of the authored content. <see cref="PolicyVersionValidator"/>
     /// never reaches it (it refuses those types first as <c>rule_type_unsupported</c>).</para>
     /// <para>For <see cref="RuleType.Existence"/> it never throws for any body, however pathological: blank,
-    /// over-length (refused before parsing, finding F2), malformed or duplicate-key JSON, a forbidden
-    /// <c>messageTemplate</c> property (finding F8), or a number such as <c>1e999999</c> whose schema
-    /// evaluation throws <see cref="FormatException"/>/<see cref="OverflowException"/> inside the library — all
-    /// become an ordinary <see cref="RuleBodyValidationResult.Failure(string)"/>.</para>
+    /// over-length (refused before parsing, finding F2), malformed or duplicate-key JSON, an unpaired UTF-16
+    /// surrogate escape in a property name or a value (round 3, finding M1), a forbidden <c>messageTemplate</c>
+    /// property (finding F8), the reserved <c>then</c> property (round 3, finding L2), or a number such as
+    /// <c>1e999999</c> whose schema evaluation throws <see cref="FormatException"/>/<see cref="OverflowException"/>
+    /// inside the library — all become an ordinary <see cref="RuleBodyValidationResult.Failure(string)"/>.</para>
     /// </remarks>
     /// <exception cref="NotSupportedException"><paramref name="ruleType"/> has no authored schema.</exception>
     public RuleBodyValidationResult Validate(RuleType ruleType, string? ruleBodyJson)
@@ -153,11 +159,34 @@ public sealed class RuleBodySchemaValidator
                     "checked against what the predicate reads (section 0.3).");
             }
 
+            // Task 022 rework round 3, finding L2: 'then' is RESERVED. No task defines it and nothing reads it, so
+            // an open object there could only carry unvalidated content (e.g. a messageTemplate lookalike).
+            if (strictDoc.RootElement.ValueKind == JsonValueKind.Object
+                && strictDoc.RootElement.TryGetProperty(ReservedThenProperty, out _))
+            {
+                return RuleBodyValidationResult.Failure(
+                    $"/{ReservedThenProperty}: '{ReservedThenProperty}' is reserved; no task defines it yet, and no " +
+                    "code reads it. Remove it from sprk_rulebody (the Signal's sentence, headline and proposed " +
+                    "action live in their own sprk_policyversion columns).");
+            }
+
             node = JsonSerializer.SerializeToNode(strictDoc.RootElement);
         }
         catch (JsonException ex)
         {
             return RuleBodyValidationResult.Failure($"sprk_rulebody is not valid JSON: {ex.Message}");
+        }
+        catch (InvalidOperationException)
+        {
+            // Task 022 rework round 3, finding M1: an unpaired UTF-16 surrogate escape (e.g. "\ud800") in a
+            // PROPERTY NAME throws InvalidOperationException ("Cannot read incomplete UTF-16 JSON text") wherever
+            // the name is unescaped -- inside Parse's own duplicate-name check (AllowDuplicateProperties=false), or
+            // in the name walk / TryGetProperty below it. In a VALUE the same escape surfaces as a JsonException
+            // from SerializeToNode, handled above. Either way the text is not valid JSON for this validator's
+            // purposes -- a refusal, never an escaping exception. Fixed message: the exception text is not echoed.
+            return RuleBodyValidationResult.Failure(
+                "sprk_rulebody is not valid JSON: it contains text that cannot be read as a string (for example " +
+                "an unpaired UTF-16 surrogate escape such as \\ud800 in a property name).");
         }
 
         if (node is null)

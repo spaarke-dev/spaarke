@@ -5,6 +5,7 @@ using Microsoft.Extensions.Time.Testing;
 using Sprk.Bff.Api.Services.Signals;
 using Sprk.Bff.Api.Telemetry;
 using Sprk.Bff.Api.Tests.Services.Communication; // reuse CapturingLogger<T>/LogEntry (internal, same assembly)
+using Sprk.Bff.Api.Tests.Services.Signals; // RuleBodySchemaValidatorTests.PathologicalBodies (shared theory rows)
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Domain.Signals;
@@ -350,11 +351,13 @@ public class PolicyVersionValidatorTests
     // end-to-end through the validator (RuleBodySchemaValidatorTests covers the same inputs in isolation).
     // =====================================================================================
 
-    [Fact]
-    public void ValidateForSave_DuplicateTopLevelKey_IsRefused_NeverThrows_ReasonSchemaInvalid()
+    // Rows: duplicate key, 1e999999, and (round 3, finding M1) unpaired UTF-16 surrogate escapes in property
+    // names and in a value. Before M1 the property-name rows were contained only by the catch-all and came back
+    // as internal_error; they must be schema_invalid.
+    [Theory]
+    [MemberData(nameof(RuleBodySchemaValidatorTests.PathologicalBodies), MemberType = typeof(RuleBodySchemaValidatorTests))]
+    public void ValidateForSave_PathologicalBody_IsRefused_NeverThrows_ReasonSchemaInvalid(string body)
     {
-        const string body = """{"type":"Existence","subject":"sprk_matter","subject":"sprk_communication","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"a":"b"}}]}""";
-
         var act = () => Sut().ValidateForSave("Existence", body, messageTemplate: null);
 
         var result = act.Should().NotThrow().Subject;
@@ -363,15 +366,52 @@ public class PolicyVersionValidatorTests
     }
 
     [Fact]
-    public void ValidateForSave_ExtremeNumericLiteral_IsRefused_NeverThrows_ReasonSchemaInvalid()
+    public void TryPrepareForEvaluation_UnpairedSurrogateInPropertyName_RecordsSchemaInvalid_NotInternalError()
     {
-        const string body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_amount":1e999999}}]}""";
+        var scope = Guid.NewGuid();
+        PolicyInvalidMetricScope.Value = scope;
+        var (listener, reasons) = ListenPolicyInvalidReasonsScoped(scope);
+        using var listenerScope = listener;
+        const string body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_\ud800":1}}]}""";
 
-        var act = () => Sut().ValidateForSave("Existence", body, messageTemplate: null);
+        Sut().TryPrepareForEvaluation(Snapshot("Existence", body), subjectId: null, out _);
 
-        var result = act.Should().NotThrow().Subject;
+        reasons().Should().Equal(OntologyWriterFailureReason.SchemaInvalid);
+    }
+
+    // =====================================================================================
+    // Round 3, finding L2: 'then' is reserved -- refused end-to-end as schema_invalid.
+    // =====================================================================================
+
+    [Fact]
+    public void ValidateForSave_ThenProperty_IsRefusedAsReserved_ReasonSchemaInvalid()
+    {
+        const string body = """{"type":"Existence","subject":"sprk_matter","all":[{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_direction":1}}],"then":{"signalType":100000003}}""";
+
+        var result = Sut().ValidateForSave("Existence", body, messageTemplate: null);
+
         result.IsValid.Should().BeFalse();
         result.Reason.Should().Be(OntologyWriterFailureReason.SchemaInvalid);
+        result.Errors.Should().ContainSingle().Which.Should().StartWith("/then: 'then' is reserved");
+    }
+
+    // =====================================================================================
+    // Round 3, findings L3 + L5: pins compare by VALUE; two clauses pinning the SAME value stay eligible.
+    // =====================================================================================
+
+    [Theory]
+    [InlineData("100000000", "100000000")] // identical literal
+    [InlineData("1", "1.0")]               // L3: same decimal value, different JSON spelling
+    [InlineData("100", "1e2")]
+    public void ValidateForSave_TemplateReferencingFieldPinnedToTheSameValueByTwoClauses_IsAccepted(string first, string second)
+    {
+        var body = """{"type":"Existence","subject":"sprk_matter","all":[""" +
+                   """{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_direction":""" + first + "}}," +
+                   """{"exists":"sprk_communication","path":"sprk_regardingmatter","filter":{"sprk_direction":{"=":""" + second + "}}}]}";
+
+        var result = Sut().ValidateForSave("Existence", body, "Direction {{sprk_direction}}.");
+
+        result.IsValid.Should().BeTrue(string.Join("; ", result.Errors));
     }
 
     [Theory]
@@ -617,28 +657,45 @@ public class PolicyVersionValidatorTests
     // "not valid JSON" -- a tautology that would have passed even with a real leak, since the substring it
     // checked for never appeared either way. Fixed: assert the EXACT structured field set and the EXACT
     // rendered message, so any additional interpolated content (a future accidental leak) breaks this test.
-    [Fact]
-    public void TryPrepareForEvaluation_InvalidBody_LogsExactlyTheAllowedStructuredFields_NoBodyOrTemplateLeak()
+    // Round 3, finding M2: the body AND the template are distinctive and non-null, so a leak of either into the
+    // log would change the rendered message or add a field -- the exact-message + exact-keys asserts then fail.
+    // (Round 2 used a null template, so a template leak could not have been detected.) One row per refusal
+    // stage: a body refusal (schema_invalid) and a TEMPLATE refusal (template_malformed /
+    // template_token_outside_read_set), where the template is the very thing being refused.
+    [Theory]
+    [InlineData("{ SECRET-BODY not valid json", "SECRET-TEMPLATE {{sprk_direction}}", OntologyWriterFailureReason.SchemaInvalid)]
+    [InlineData(null, "SECRET-TEMPLATE {{sprk-x}}", OntologyWriterFailureReason.TemplateMalformed)]
+    [InlineData(null, "SECRET-TEMPLATE {{sprk_receiveddate}}", OntologyWriterFailureReason.TemplateTokenOutsideReadSet)]
+    public void TryPrepareForEvaluation_Refusal_LogsExactlyTheAllowedStructuredFields_NoBodyOrTemplateLeak(
+        string? body, string template, string expectedReason)
     {
         var logger = new CapturingLogger<PolicyVersionValidator>();
         var sut = Sut(logger);
 
-        sut.TryPrepareForEvaluation(Snapshot("Existence", "{ not valid json"), subjectId: null, out _);
+        sut.TryPrepareForEvaluation(Snapshot("Existence", body ?? PinnedExistenceBody, template), subjectId: null, out _);
 
-        var errorEntry = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
+        var errorEntry = logger.Entries.Should().ContainSingle().Subject;
+        errorEntry.Level.Should().Be(LogLevel.Error);
         errorEntry.EventId.Id.Should().Be(OntologyWriterEvents.PolicyVersionInvalid.Id);
         errorEntry.Fields.Keys.Should().BeEquivalentTo(new[] { "PolicyVersionId", "PolicyCode", "Reason", "{OriginalFormat}" });
+        errorEntry.Field("Reason").Should().Be(expectedReason);
 
         var expectedMessage =
             $"Policy version {PolicyVersionId} ({PolicyCode}) failed rule-body validation at evaluation time; " +
-            $"producing no Signal for it and continuing with the other policies (reason={OntologyWriterFailureReason.SchemaInvalid}).";
+            $"producing no Signal for it and continuing with the other policies (reason={expectedReason}).";
         errorEntry.Message.Should().Be(expectedMessage);
+        errorEntry.Message.Should().NotContain("SECRET");
     }
 
     [Fact]
     public void TryPrepareForEvaluation_TemplateFailure_AlsoLogsAndMeters()
     {
-        // Review finding #11: the TEMPLATE-failure path's log, not only the schema-failure path's.
+        // Review finding #11: the TEMPLATE-failure path's log, not only the schema-failure path's. Round 3,
+        // finding M3: and its METRIC reason, not only the log.
+        var scope = Guid.NewGuid();
+        PolicyInvalidMetricScope.Value = scope;
+        var (listener, reasons) = ListenPolicyInvalidReasonsScoped(scope);
+        using var listenerScope = listener;
         var logger = new CapturingLogger<PolicyVersionValidator>();
         var sut = Sut(logger);
 
@@ -649,7 +706,43 @@ public class PolicyVersionValidatorTests
         var errorEntry = logger.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error).Subject;
         errorEntry.EventId.Id.Should().Be(OntologyWriterEvents.PolicyVersionInvalid.Id);
         errorEntry.Field("Reason").Should().Be(OntologyWriterFailureReason.TemplateMalformed);
+        reasons().Should().Equal(OntologyWriterFailureReason.TemplateMalformed);
     }
+
+    // Round 3, finding M3: the internal_error path's metric + log. After M1 no known authored input reaches it,
+    // so it is forced through a seam that already exists -- PredicateCompiler's injected TimeProvider -- throwing
+    // an exception type nothing in the validator names. No production seam was added for this.
+    [Fact]
+    public void TryPrepareForEvaluation_UnexpectedExceptionInsideValidation_RecordsInternalError_LogsOnlyTheAllowedFields()
+    {
+        var scope = Guid.NewGuid();
+        PolicyInvalidMetricScope.Value = scope;
+        var (listener, reasons) = ListenPolicyInvalidReasonsScoped(scope);
+        using var listenerScope = listener;
+        var logger = new CapturingLogger<PolicyVersionValidator>();
+        var sut = new PolicyVersionValidator(
+            new RuleBodySchemaValidator(),
+            new PredicateCompiler(new RuleBodySchemaValidator(), new ThrowingTimeProvider()),
+            logger);
+
+        var act = () => sut.TryPrepareForEvaluation(Snapshot("Existence", ValidExistenceBody), subjectId: null, out _);
+
+        act.Should().NotThrow().Subject.Should().BeFalse();
+        reasons().Should().Equal(OntologyWriterFailureReason.InternalError);
+        var errorEntry = logger.Entries.Should().ContainSingle().Subject;
+        errorEntry.Field("Reason").Should().Be(OntologyWriterFailureReason.InternalError);
+        errorEntry.Fields.Keys.Should().BeEquivalentTo(new[] { "PolicyVersionId", "PolicyCode", "Reason", "{OriginalFormat}" });
+        errorEntry.Message.Should().NotContain(ThrowingTimeProvider.Marker, "the exception's own message is never logged");
+    }
+
+    private sealed class ThrowingTimeProvider : TimeProvider
+    {
+        public const string Marker = "SECRET-EXCEPTION-TEXT";
+
+        public override DateTimeOffset GetUtcNow() => throw new TimeProviderFailureException(Marker);
+    }
+
+    private sealed class TimeProviderFailureException(string message) : Exception(message);
 
     [Theory]
     [InlineData("Threshold", null, null, OntologyWriterFailureReason.RuleTypeUnsupported)]

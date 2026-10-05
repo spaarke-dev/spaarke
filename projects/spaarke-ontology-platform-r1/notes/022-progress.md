@@ -1,17 +1,60 @@
 # Task 022 — Rule-body validation gate: record
 
-> **Date**: 2026-10-04 · **Status**: rework round 2 complete, awaiting re-review · **Rigor**: FULL
+> **Date**: 2026-10-05 · **Status**: rework round 3 complete, awaiting the main session's full-suite run · **Rigor**: FULL
 > **Current API**: `PolicyVersionValidator.ValidateForSave(ruleType, ruleBody, messageTemplate)` (pure, save-time) and
 > `PolicyVersionValidator.TryPrepareForEvaluation(PolicyVersionSnapshot, Guid? subjectId, out CompiledPredicate?)`
-> (the fail-closed evaluation-time gate and the ONLY sanctioned path to a compiled predicate).
+> (the fail-closed evaluation-time gate and the ONLY sanctioned path to a compiled predicate — see round 3 L1 for
+> exactly what the architecture test enforces).
+
+## Rework round 3 (2026-10-05) — third independent review PASS-WITH-FINDINGS; every finding fixed
+
+The review found no fail-open and verified every round-2 disposition. Every finding below is FIXED.
+
+**How each fix was proven.** I reverted fixes and checked that the pinning tests fail. There were three Signals
+runs, kept separate so each failure is attributable:
+
+- **Run A** reverted M1 (the `InvalidOperationException` catches in both classes, made unreachable) and L2 (the
+  `then` check skipped, and the schema's `then` reopened to `type: object`). It also injected an M2 template leak
+  into the log, and two M3 metric faults: template_malformed metered wrong, and the catch-all reporting
+  `compile_refused`. Result: 274 → 19 failures, all of them M1/M2/M3/L2 tests.
+- **Run B** reverted L3 (raw-text emission, ordinal-string pins). Result: 6 failures.
+- **Run C** reverted L5 (more than one pin always ambiguous). Result: 7 failures.
+
+The architecture guard was checked twice. With its three new detectors disabled, all 4 control-fixture rows
+failed. With a forged predicate, a `with`-copy and an expression tree over `Compile` injected into
+`SignalWriter`, the main fact failed and named all three. The originals were restored after every run.
+
+| # | Finding | Disposition | Pinned by |
+|---|---|---|---|
+| M1 | An unpaired UTF-16 surrogate escape in a property name threw `InvalidOperationException` out of `RuleBodySchemaValidator.Validate` and `Compile`, and was metered `internal_error` | **FIXED.** The throw actually comes from the strict parse itself: `AllowDuplicateProperties=false` unescapes every name. It can also come from the name walk. `RuleBodySchemaValidator` now catches `InvalidOperationException` beside `JsonException` and returns "not valid JSON", with a fixed message (no exception text). `PredicateCompiler.ParseBounded` does the same. `CompileParsed` wraps the compile body so that a surrogate in a VALUE, reachable through `CompileSchemaValidated`, is also a `PredicateCompilationException`. The "never throws for Existence" doc now lists this case and is true | Shared theory rows `RuleBodySchemaValidatorTests.PathologicalBodies` (duplicate key, `1e999999`, two surrogate-name rows, one surrogate-value row), run by `Validate_WithPathologicalBody_IsRefused_NeverThrows` and by `ValidateForSave_PathologicalBody_IsRefused_NeverThrows_ReasonSchemaInvalid`. Also `Validate_WithUnpairedSurrogateInPropertyName_IsRefusedAsInvalidJson` (×2), `TryPrepareForEvaluation_UnpairedSurrogateInPropertyName_RecordsSchemaInvalid_NotInternalError`, `Compile_UnpairedSurrogateEscape_*` (×2) and `CompileSchemaValidated_UnpairedSurrogateEscape_*` (×2) |
+| M2 | The no-leak test used a null template, so a template leak could not fail it | **FIXED.** It is now a theory with a distinctive non-null body and template (`SECRET-BODY…`, `SECRET-TEMPLATE…`). There are three rows: a body refusal (`schema_invalid`) and two TEMPLATE refusals (`template_malformed`, `template_token_outside_read_set`). The exact message, the exact field-key set and the reason are all asserted | `TryPrepareForEvaluation_Refusal_LogsExactlyTheAllowedStructuredFields_NoBodyOrTemplateLeak` (×3) |
+| M3 | The template-failure test asserted only the log, and `internal_error` was never metered in a test | **FIXED.** The template test now also asserts the metric reason `template_malformed`. After M1, no known authored input reaches `internal_error`. It is forced through a seam that already existed: `PredicateCompiler`'s injected `TimeProvider`, here throwing an exception type nothing in the validator names. **No production seam was added.** The test asserts metric `internal_error`, the log reason, the exact keys, and that the exception text is not logged | `TryPrepareForEvaluation_TemplateFailure_AlsoLogsAndMeters`, `TryPrepareForEvaluation_UnexpectedExceptionInsideValidation_RecordsInternalError_LogsOnlyTheAllowedFields` |
+| L1 | The IL scan did not cover forging, `with`-copying, or expression trees | **FIXED (coordinator decision).** `PredicateCompilerCallerGuardTests` now also flags `ldtoken` of `Compile*` (expression trees), `newobj` of `CompiledPredicate`'s constructor, and calls to its `<Clone>$` (`with`). The last two are allowed only in `PredicateCompiler` and the record itself. A permanent negative-control fixture, `PredicateCompilerGuardControlFixtures` (direct call, delegate, expression tree, forge, `with`), and a control theory prove each detector fires. The "ONLY path" doc (`PolicyVersionValidator` remarks, with a pointer from `PredicateCompiler.Compile`) now states exactly what is enforced. **Not enforced:** reflection, `dynamic`, and other assemblies | `OnlyTheSanctionedPathProducesACompiledPredicate`, `EveryDetectorFiresOnItsControlFixture` (×5), `PolicyVersionValidatorNeverCallsTheSchemaEvaluatingCompile` |
+| L2 | An open `then` object let messageTemplate lookalikes through | **FIXED (coordinator decision): `then` is refused outright** ("`/then: 'then' is reserved; no task defines it yet…`"). This runs in `RuleBodySchemaValidator` before schema evaluation. The schema marks `then` as `not: {}` with a RESERVED description. **Grep first**: nothing needs `then`. The only `src/server` hits are this schema and the unrelated `Models/Ai/node-routing-config.schema.json`. The seeded Path B body (notes/004 and `tests/fixtures/signals/pathb-existence.rulebody.json`) has no `then`. The only uses were two test fixture bodies carrying `"then": {}` (removed) and the F8 tests (still pass: the `messageTemplate` walk runs first) | `Validate_WithThenProperty_IsRefusedAsReserved` (×3, including a `msgTemplate` lookalike), `ValidateForSave_ThenProperty_IsRefusedAsReserved_ReasonSchemaInvalid` |
+| L3 | Numbers were emitted with their raw JSON spelling, and pins compared as strings | **FIXED.** `FormatScalar` emits `decimal.ToString(CultureInfo.InvariantCulture)`, so `1e2` becomes `100` and `1E-3` becomes `0.001`. Pins compare by value: numbers as boxed `decimal` (1 == 1.0 == 1e0), strings ordinally. That is **conservative and documented**: Dataverse string `eq` is case- and accent-insensitive, so `"Fee"` and `"fee"` are refused as ambiguous rather than guessed equal. `SignalWriteRequest.FactValues` doc is softened: for a string pin, the pinned literal is what was tested, and the stored spelling may differ | `Compile_Number_IsEmittedAsACanonicalInvariantDecimal` (×4), the `1`/`1.0` and `100`/`1e2` rows of the two same-value theories, `Compile_TwoExistsClausesPinningStringsDifferingOnlyInCase_IsAmbiguous` |
+| L4 | "Defined whatever the operator" is false for `<>` on a `when` field | **FIXED (doc).** The `TemplateEligibleFields` doc, the `Classify` comment and the `FactValues` doc now say: one row, so at most one value, but possibly NULL (Dataverse `ne` includes nulls). `RenderSentence` refuses a null fact, so it surfaces as a refused write. Eligibility is unchanged; the main session flags it for task 031 | — (doc) |
+| L5 | No positive case for two clauses pinning the same value | **FIXED** | `Compile_TwoExistsClausesPinningTheSameFieldToTheSameValue_IsTemplateEligible` (×4), `ValidateForSave_TemplateReferencingFieldPinnedToTheSameValueByTwoClauses_IsAccepted` (×3). Run C shows these fail when ">1 pin is always ambiguous" |
+| L6 | `PolicyVersionInvalid` doc said six sub-reasons | **FIXED.** It now names all seven | — (doc) |
+| L7 | The round-2 mutation summary over-claimed | **FIXED.** See the corrected paragraph under "Rework round 2" below | — |
 
 ## Rework round 2 (2026-10-04) — second independent review FAIL; disposition of every finding
 
-Every finding is FIXED. Each fix has a test that was **verified to fail with the fix reverted**: all fixes were
-mutated back out together, and the Signals-filtered run went from 243/243 to 47 failures, every one of them a
-test named below (F5 and F12 renderer rows, F1, F2, F3, F7, F8, F9, F13). The architecture guard was mutated
-separately: a rogue `Compile` call was injected into `SignalWriter` and the validator was switched back to
-`Compile`, and both facts failed with the expected messages. The originals were then restored.
+Every finding is FIXED. **What the round-2 mutation run actually did (corrected in round 3, finding L7):** one
+combined Signals run with nine edits.
+
+- **Eight edits removed round-2 code**: the F1 `Guid.Empty` check; the F2 length checks in the validator and the
+  schema validator; the F3 pin rule (unpinned treated as eligible, and conflicting pins treated as eligible);
+  the F7 schema `when` reference and the compiler's decimal bound; the F8 `messageTemplate` walk; the F9
+  `ResolveSchema` ordering; the F12 full-width braces; and the F13 `NumberStyles.None`.
+- **The ninth disabled the renderer's `HasMalformedPlaceholder` call.** That is **round-1** code, not a round-2
+  fix. F5 was test-only.
+
+Result: 243 → 47 failures, all in tests named below. The `RenderSentence_MalformedPlaceholder_Throws` rows
+failed **only because of that ninth edit**. They show the F5 test detects a missing renderer check; they do not
+show a round-2 code fix. Of the F12 rows, only the full-width ones depend on round-2 code. The lone-ASCII-brace
+rows were already refused by round 1. The architecture guard was mutated separately: a rogue `Compile` call was
+injected into `SignalWriter`, and the validator was switched back to `Compile`. Both facts failed with the
+expected messages. The originals were then restored.
 
 | # | Finding | Disposition | Pinned by |
 |---|---|---|---|
@@ -71,14 +114,17 @@ authoring is resolved by that decision. No BFF write path for `sprk_policyversio
   throws. It is for any BFF write path that comes to exist (ADR-002: one owner per invariant). It returns
   `PolicyVersionValidationResult(IsValid, Errors, Reason)`, with field-level errors and one bounded reason.
 - **`TryPrepareForEvaluation(PolicyVersionSnapshot, Guid? subjectId, out CompiledPredicate?)`** is the
-  evaluation-time gate and the only sanctioned way to get a `CompiledPredicate` (the arch test enforces this). On
+  evaluation-time gate and the only sanctioned way to get a `CompiledPredicate`. The arch test enforces this
+  for calls, delegates, expression trees, construction and `with`-copies. It does not cover reflection,
+  `dynamic` or other assemblies (round 3, L1). On
   refusal it logs `OntologyWriterEvents.PolicyVersionInvalid` (EventId 50301) at Error, carrying only the policy
   version id, the policy code and the reason. It records `ontology.policy.invalid{reason}`, returns `false` and
   sets `compiled = null`. It never throws for the content. It throws only for caller bugs: a null snapshot, or
   `subjectId == Guid.Empty` (F1).
 - **Check order** (`ValidateInternal`) is: rule type (exact name, or digits-only option value) →
   **length cap** (`rule_body_too_large`) → schema, evaluated **once** (`schema_invalid`, which includes
-  malformed/duplicate-key JSON, an out-of-range number and a body-embedded `messageTemplate`) →
+  malformed/duplicate-key JSON, unreadable text such as an unpaired surrogate escape, an out-of-range number, a
+  body-embedded `messageTemplate` and the reserved `then`) →
   `PredicateCompiler.CompileSchemaValidated` (`compile_refused`) → malformed placeholder (`template_malformed`)
   → every token in `TemplateEligibleFields` (`template_token_outside_read_set`). A final catch-all gives
   `internal_error`.
@@ -88,8 +134,9 @@ authoring is resolved by that decision. No BFF write path for `sprk_policyversio
   `TemplateEligibleFields`, `AmbiguousTemplateFields` and `UnpinnedTemplateFields` (see F3 for the definition).
 - **Shared with the renderer**: `SignalWriter.ExtractTemplateTokens` and `SignalWriter.HasMalformedPlaceholder`.
   There is one token grammar, used by the validator (which refuses) and by `RenderSentence` (which throws).
-- **Schema** (`Schemas/existence-rule.schema.json`): `when` and clause filters share `$defs/filterConditions` (F7),
-  and `then` documents the `messageTemplate` refusal (F8).
+- **Schema** (`Schemas/existence-rule.schema.json`): `when` and clause filters share `$defs/filterConditions` (F7).
+  `then` is RESERVED and refused (`not: {}`, round 3 L2).
+- **FetchXML numbers** are emitted as canonical invariant decimals (round 3 L3).
 - **Wiring**: `SignalsModule` registers `PolicyVersionValidator` as a singleton (unchanged in round 2).
 
 ## Acceptance criteria — evidence (current test names, `tests/unit/domain/Signals/`)
@@ -112,7 +159,7 @@ authoring is resolved by that decision. No BFF write path for `sprk_policyversio
 7. **Evaluator seam: invalid → no predicate, failure recorded with the policy version id, others continue.**
    `TryPrepareForEvaluation_InvalidBody_ReturnsFalse_OutputsNull_NeverThrows`,
    `TryPrepareForEvaluation_InvalidBody_CompiledOutParamIsNull`,
-   `TryPrepareForEvaluation_InvalidBody_LogsExactlyTheAllowedStructuredFields_NoBodyOrTemplateLeak`,
+   `TryPrepareForEvaluation_Refusal_LogsExactlyTheAllowedStructuredFields_NoBodyOrTemplateLeak` (×3),
    `TryPrepareForEvaluation_InvalidBody_RecordsExactReasonTagOnTheMetric`,
    `TryPrepareForEvaluation_ThresholdRuleType_ReturnsFalse_NeverThrows`. This task builds the seam; task 031
    builds the evaluator that calls it.
@@ -128,7 +175,8 @@ it (ADR-002), and no BFF write path exists to intercept it.
 
 **Mitigation (the owner's resolution)**: such a row is never load-bearing. The evaluator (task 031) can obtain a
 predicate only through `PolicyVersionValidator.TryPrepareForEvaluation`. That is enforced by
-`PredicateCompilerCallerGuardTests`, not left to review. An invalid row therefore produces no Signal, and it is
+`PredicateCompilerCallerGuardTests` for calls, delegates, expression trees, construction and `with`-copies.
+Reflection, `dynamic` and other assemblies remain a review concern. An invalid row therefore produces no Signal, and it is
 not silent: it logs EventId 50301 with the policy version id and policy code, and increments
 `ontology.policy.invalid{reason}`, within one evaluation cycle.
 
@@ -142,7 +190,9 @@ There is no new endpoint, package, DI registration or Meter, and no AI-internal 
 implicated). It is synchronous with no queue or schedule, so ADR-052 does not apply. Round 2 adds no new public
 type. It adds an `internal` method (`CompileSchemaValidated`), one reason constant (`RuleBodyTooLarge`), two
 public constants and a message helper on `RuleBodySchemaValidator` (`MaxRuleBodyLength`,
-`ForbiddenMessageTemplateProperty`, `RuleBodyTooLongMessage`), and a test-only arch file.
+`ForbiddenMessageTemplateProperty`, `RuleBodyTooLongMessage`), and a test-only arch file. Round 3 adds one
+public constant (`RuleBodySchemaValidator.ReservedThenProperty`, so the refusal and its tests share one name) and
+private helpers only.
 
 **Component justification for round 2's new surface (CLAUDE.md §11)**:
 - `CompileSchemaValidated`. **Existing**: `Compile`. **Extension**: not possible without the duplicate
@@ -164,20 +214,23 @@ public constants and a message helper on `RuleBodySchemaValidator` (`MaxRuleBody
 - **F7**: `when` references `$defs/filterConditions`, not literally `$defs/filter`, to keep `"when": {}` legal
   (see the F7 row).
 
-## Verification (round 2)
+## Verification (round 3)
 
-- `dotnet build src/server/api/Sprk.Bff.Api/`: **0 warnings, 0 errors**.
+- `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental`: **0 warnings, 0 errors**.
 - `dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj --filter "FullyQualifiedName~Signals"`:
-  **243/243 passed, three consecutive runs**. This task's four files account for 213 of them:
-  `PolicyVersionValidatorTests` 66, `PredicateCompilerTests` 64, `RuleBodySchemaValidatorTests` 45,
-  `SignalWriterTests` 38. The filter also matches 30 tests in other `*Signal*` classes.
+  **274/274 passed, three consecutive runs**. This task's four files account for 244 of them:
+  `PolicyVersionValidatorTests` 77, `PredicateCompilerTests` 76, `RuleBodySchemaValidatorTests` 53,
+  `SignalWriterTests` 38. The filter also matches 30 tests in other `*Signal*` classes. (Round 2 was 243 total.)
 - `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --filter "FullyQualifiedName~PredicateCompilerCallerGuardTests"`:
-  **2/2 passed**. The arch project builds.
-- Fix-reverted mutation runs (see the top of this file): every negative test fails without its fix.
-- **Full BFF unit suite**: not run here, per instruction. The main session runs it on a quiet machine.
-- **Publish size**: not measured. There is no package or `.csproj` change, and round 2 is plain C# logic, a JSON
-  schema edit and doc comments. The first pass measured +0.036 MB against fresh master (POML `<publish-size>`).
-- **CVE scan**: not re-run. No package was added.
+  **7/7 passed**: the main fact, the F2 fact, and 5 control-fixture rows.
+- Fix-reverted mutation runs (see "Rework round 3"): every negative test fails without its fix.
+- **A verification hazard caught along the way:** the originals were restored with `Copy-Item`, which keeps the
+  scratch copy's OLD timestamp. Incremental MSBuild therefore kept the last mutated DLL, and one arch run
+  briefly saw an injected probe that was no longer in source. Every restored file was touched and the BFF
+  rebuilt with `--no-incremental`, and all numbers above come from that clean build. The mutation runs
+  themselves were valid: each mutation wrote a fresh timestamp and forced a real compile.
+- **Not run here, per instruction**: the full BFF unit suite, publish size, CVE scan and conflict-check. The
+  main session runs those next. There is no package or `.csproj` change.
 
 ## Files changed (task 022, all rounds)
 
@@ -190,4 +243,5 @@ public constants and a message helper on `RuleBodySchemaValidator` (`MaxRuleBody
 - `src/server/api/Sprk.Bff.Api/Telemetry/OntologyWriterTelemetry.cs`
 - `src/server/api/Sprk.Bff.Api/Infrastructure/DI/SignalsModule.cs`
 - `tests/unit/domain/Signals/{PolicyVersionValidatorTests,PredicateCompilerTests,RuleBodySchemaValidatorTests,SignalWriterTests}.cs`
-- `tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs` (new in round 2)
+- `tests/Spaarke.ArchTests/PredicateCompilerCallerGuardTests.cs` (new in round 2; round 3 added the L1 detectors
+  and the `PredicateCompilerGuardControlFixtures` negative controls)

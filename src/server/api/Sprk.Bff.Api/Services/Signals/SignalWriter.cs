@@ -52,9 +52,13 @@ public sealed record SignalEvidenceRef(string Kind, string Ref, string Tier, dou
 /// (task 031) puts here for a template token</b> — every token is in
 /// <see cref="CompiledPredicate.TemplateEligibleFields"/> (enforced at validation, task 022 rework round 2,
 /// finding F3), and its value is: for a field read by the subject's own <c>when</c> filter, the firing
-/// subject's own value of that field; for a field read by an <c>exists</c> clause, <b>the clause's pinned
-/// literal</b> (the one value the clause's <c>eq</c> / single-element <c>in</c> condition fixes it to — every
-/// matching related row carries exactly that value, so it is the read value). Never a value from a
+/// subject's own value of that field (which may be null, e.g. under a <c>&lt;&gt;</c> filter — a null fact is
+/// refused at render, round 3 finding L4); for a field read by an <c>exists</c> clause, <b>the clause's pinned
+/// literal</b> (the one value the clause's <c>eq</c> / single-element <c>in</c> condition fixes it to). For a
+/// number, boolean or id pin every matching related row carries exactly that value. <b>For a string pin, only
+/// up to collation</b> (round 3 finding L3): Dataverse string <c>eq</c> is case- and accent-insensitive, so a
+/// matching row may store "FEE" where the clause pinned "Fee" — the pinned literal is what the predicate
+/// TESTED, and is the value to render; the row's stored spelling may differ. Never a value from a
 /// <c>notExists</c> clause, and never a value picked from one of several matching related rows.</param>
 /// <param name="EvidenceRefs">Optional typed evidence refs — becomes <c>sprk_evidencerefs</c> (JSON array,
 /// <c>[]</c> when omitted).</param>
