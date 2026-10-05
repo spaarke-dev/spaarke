@@ -3,7 +3,7 @@
   <metadata>
     <title>SECURITY: /api/communications/send attaches any document and links any record without checking the caller — authorize both per item, and fix the outbound archive writing a document id into sprk_graphitemid</title>
     <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
-    <status>not-started</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization change on a live BFF route (`.cs`), plus a data-correctness fix and tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -114,6 +114,20 @@
     <file>src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
     <file>projects/spaarkeai-word-add-in-r1/notes/097-communications-send-authorization.md</file>
   </outputs>
+
+  <notes>
+    2026-10-04: BLOCKED on escalation trigger 3 before any code edit. `/conflict-check` found that
+    unified-access-control-r2 task 161 (#1100), commits 7f9159027 and 0f8cc61ea, merged and pushed to
+    origin/integ/uac-r2-batch4 but not on master, already authorizes /send and /send-bulk. It checks Read on
+    every attachment, AppendTo on every association, sends one 403 code for unknown and denied ids, fails
+    closed, and checks the bulk request once. It reuses existing evaluators through
+    CommunicationRecordAuthorizationFilter. UAC task 146 also edits ArchiveOutboundAttachmentsAsync but does
+    not fix the archive bug. Archive bug confirmed at CommunicationService.cs:2330/2342. The fix should use
+    the SOURCE document's own drive and item ids, not ArchiveContainerId. Recommendation: do not deploy the
+    Word Email tab until UAC-r2 is on master; re-scope 097 to the archive fix (after UAC lands) and the live
+    check. All acceptance criteria are OPEN. Details:
+    notes/097-communications-send-authorization.md.
+  </notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
