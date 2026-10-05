@@ -733,6 +733,13 @@ Write-Done "snapshot written and read back: $SnapshotPath"
 
 Write-Step "Write"
 $written = 0
+foreach ($p in $publishes) {
+    # A publish-only table: its XML must still be what the scan read, or the publish would ship a change nobody
+    # reviewed. Checked before the first write, so a refusal here leaves everything untouched.
+    if ([string](Get-ConfigNow $p.ConfigId).controldescriptionxml -cne $p.Xml) {
+        Stop-Refused "CONFIG_CHANGED: $($p.Table) grid configuration ($($p.ConfigId)) changed since the scan; nothing was written."
+    }
+}
 foreach ($e in $edits) {
     if ([string](Get-ConfigNow $e.ConfigId).controldescriptionxml -cne $e.Before) {
         Stop-Refused "CONFIG_CHANGED: $($e.Table) grid configuration ($($e.ConfigId)) changed since the scan; $written configuration(s) were already written — restore them with -RestoreFrom '$SnapshotPath' if needed."
@@ -740,12 +747,6 @@ foreach ($e in $edits) {
     Invoke-Dv -Endpoint "customcontroldefaultconfigs($($e.ConfigId))" -Method PATCH -Body @{ controldescriptionxml = $e.After } | Out-Null
     $written++
     Write-Done "$($e.Table) grid configuration ($($e.ConfigId)) updated"
-}
-foreach ($p in $publishes) {
-    # A publish-only table: its XML must still be what the scan read (a later change would be published unseen).
-    if ([string](Get-ConfigNow $p.ConfigId).controldescriptionxml -cne $p.Xml) {
-        Stop-Refused "CONFIG_CHANGED: $($p.Table) grid configuration ($($p.ConfigId)) changed since the scan; $written configuration(s) were already written — restore them with -RestoreFrom '$SnapshotPath' if needed."
-    }
 }
 if ($addToMaster) {
     Invoke-Dv -Endpoint 'AddSolutionComponent' -Method POST -Body @{ ComponentId = $addToMaster; ComponentType = 66; SolutionUniqueName = $MasterSolution; AddRequiredComponents = $false } | Out-Null
