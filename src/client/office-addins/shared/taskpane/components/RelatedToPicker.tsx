@@ -1,21 +1,11 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Card,
-  Dropdown,
-  Input,
-  Label,
-  Option,
-  Spinner,
-  Text,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Button, Card, Input, Spinner, Text, mergeClasses } from '@fluentui/react-components';
 import { CheckmarkRegular, SearchRegular, AddRegular, DismissRegular, InfoRegular } from '@fluentui/react-icons';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 import type { RelatedCandidate } from '../services/communicationSuggestionsService';
-import type { MatterTypeChoice } from '../services/matterTypeLookupService';
+import type { CreateRecordFormData, ReferenceListState } from '../hooks/useCreateRecordFormData';
+import type { ContactOption } from './views/CreateTodoView';
+import { CreateRecordForm, type CreateRecordInput } from './CreateRecordForm';
 
 /**
  * RelatedToPicker — the add-in's "Related to" selector, modeled on the email-intelligence
@@ -34,6 +24,9 @@ import type { MatterTypeChoice } from '../services/matterTypeLookupService';
  *     query and results are component state, so they are still in hand — no new request).
  *   - "+ New" shows ONLY the create form (and the pills); `onCreatingChange` tells the host so it can hide the
  *     rest of its form until the record exists (or the create is cancelled).
+ * Round 5 item 3 (task 100): the create form is `CreateRecordForm` — per type, the fields the owner listed
+ * (Matter: Name, Description, Matter Type, Practice Area, Assigned To Internal; Project: Name, Project Type,
+ * Description, Assigned To Internal; Invoice: Name, Description, Assigned To), created by the BFF quick-create.
  *   - Focus follows the user's action (ADR-021): into the name box on "+ New" / Cancel, onto the selected
  *     record on select / create, back into the lookup box on ×.
  * Single-select chips (gray except selected=blue, default Matter).
@@ -122,11 +115,15 @@ const useStyles = makeStyles({
   },
   ctrlBtn: { flexShrink: 0 },
   emptyNote: { color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} 0` },
-  matterTypeField: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
-  matterTypeErrorRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
+  errorRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   fieldError: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
   fieldWarning: { color: tokens.colorPaletteDarkOrangeForeground1, fontSize: tokens.fontSizeBase200 },
 });
+
+/** A list that has not been provided: not loading, no error, no rows (the form then says none are available). */
+const EMPTY_LIST: ReferenceListState = { options: [], loading: false, error: null, retry: () => undefined };
+
+const NO_CONTACTS = async (): Promise<ContactOption[]> => [];
 
 export interface RelatedToPickerProps {
   /** The currently selected Related-to record (null = none selected yet). */
@@ -138,32 +135,23 @@ export interface RelatedToPickerProps {
   /** "Look up another record" search — scoped to the selected chip type. */
   onSearch: (query: string, type: EntityType) => Promise<EntitySearchResult[]>;
   /**
-   * Create a new record of the given type + name (BFF-backed). For Matter, also carries the chosen
-   * Matter Type id (task 038 — required in this UI, always sent). Resolves to the created record
-   * (auto-selected as the Related-to) plus any non-fatal server warnings, or null on failure. Absent →
-   * no "New" button.
+   * Create a new record of the given type from the "+ New" form's values (BFF-backed; task 100). Resolves to the
+   * created record (auto-selected as the Related-to) plus any non-fatal server warnings. THROWS with a readable
+   * message on failure (task 053). Absent → no "New" button.
    */
-  onCreateRecord?: (type: EntityType, name: string, matterTypeId?: string) => Promise<CreateRecordResult | null>;
+  onCreateRecord?: (type: EntityType, input: CreateRecordInput) => Promise<CreateRecordResult | null>;
   /** Types offered as chips. */
   allowedTypes: EntityType[];
   /** Default selected type. */
   defaultType?: EntityType;
   /**
-   * Active Matter Type reference options for the required field shown when creating a Matter (task
-   * 038). Empty while loading, or if the reference list failed to load / has no active rows — either
-   * way the Matter create form stays blocked (the type is required, never optional in this UI).
+   * The "+ New" form's data (task 100): the matter-type, practice-area and project-type lists (each with its
+   * loading / failed-with-Retry state) and the Assigned To prefill. Absent → empty lists and no prefill (a Matter's
+   * required fields then stay unsatisfiable and the form says no values are available).
    */
-  matterTypeOptions?: MatterTypeChoice[];
-  /** Whether `matterTypeOptions` is still loading (disables the dropdown, shows a loading placeholder). */
-  matterTypesLoading?: boolean;
-  /**
-   * A readable message when the matter-type list failed to load — distinct from "loaded, zero active
-   * rows" (coordinator fix, 2026-09-13). Renders a non-blocking notice with a Retry action; the field
-   * stays required (and Create stays disabled) either way.
-   */
-  matterTypesError?: string | null;
-  /** Re-fetches the matter-type list (the Retry action). Absent → no Retry button is rendered. */
-  onRetryMatterTypes?: () => void;
+  createForm?: CreateRecordFormData;
+  /** Contact search for the form's Assigned To field (the pane's one contact search). Absent → no results. */
+  onSearchContacts?: (query: string) => Promise<ContactOption[]>;
   /**
    * Task 099: reports whether the "+ New" create form is open. The host hides the sections that only make sense
    * once a record exists (document name, profile, Save) while it is. Called with `false` on unmount.
@@ -200,10 +188,8 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   onCreateRecord,
   allowedTypes,
   defaultType = 'Matter',
-  matterTypeOptions = [],
-  matterTypesLoading = false,
-  matterTypesError = null,
-  onRetryMatterTypes,
+  createForm,
+  onSearchContacts = NO_CONTACTS,
   onCreatingChange,
   disabled = false,
 }) => {
@@ -214,17 +200,13 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const [searchResults, setSearchResults] = useState<EntitySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [newName, setNewName] = useState('');
-  const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  // A non-blocking server notice about the record just created (task 038: never swallowed). Outlives the form: it
+  // shows under the selected record once the picker collapses.
   const [createWarning, setCreateWarning] = useState<string | null>(null);
   // Task 053: a failed "Look up another record" search, distinct from a genuine zero-result search —
   // set from the Error `onSearch` (SaveFlow's `relatedSearch`) now throws instead of silently resolving
   // `[]`. Cleared at the start of every new search attempt and on a type-chip change.
   const [searchError, setSearchError] = useState<string | null>(null);
-  // Matter Type (task 038) — required only when creating a Matter; owner decision 2026-09-11.
-  const [selectedMatterTypeId, setSelectedMatterTypeId] = useState('');
-  const [matterTypeError, setMatterTypeError] = useState<string | null>(null);
 
   // Task 099: focus follows the user's action. The flag is set by the picker's own handlers (never by a
   // selection the host restores), and consumed by the first render in which the target control exists.
@@ -277,64 +259,35 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     setSearchResults([]);
     setSearchError(null);
     setShowCreate(false);
-    setNewName('');
-    setCreateError(null);
     setCreateWarning(null);
-    setSelectedMatterTypeId('');
-    setMatterTypeError(null);
   };
 
-  const handleCreate = async () => {
+  // Task 100: the form validates and builds the input; this creates, selects and closes. A failure THROWS back into
+  // the form, which shows the server's own message (task 053).
+  const handleCreate = async (input: CreateRecordInput) => {
     if (!onCreateRecord) return;
-    const n = newName.trim();
-    if (n.length === 0) return;
-
-    // Matter Type is required for a Matter — the create action is blocked until one is chosen
-    // (owner decision 2026-09-11; the server never rejects a missing one, but this UI always sends
-    // it). The error uses role="alert" below, so it is announced (NFR-11) the moment it renders.
-    if (selectedType === 'Matter' && !selectedMatterTypeId) {
-      setMatterTypeError('Choose a Matter Type before creating a Matter.');
-      return;
-    }
-
-    setCreating(true);
-    setCreateError(null);
     setCreateWarning(null);
-    try {
-      const result = await onCreateRecord(
-        selectedType,
-        n,
-        selectedType === 'Matter' ? selectedMatterTypeId : undefined
-      );
-      if (result) {
-        focusAfterRef.current = 'selected';
-        onChange(result.record);
-        setShowCreate(false);
-        setNewName('');
-        setSelectedMatterTypeId('');
-        setMatterTypeError(null);
-        // Non-blocking — the record is created and selected regardless (task 038: never swallow a
-        // server warning, e.g. an unresolvable matterTypeId).
-        if (result.warnings && result.warnings.length > 0) {
-          setCreateWarning(result.warnings.join(' '));
-        }
-      } else {
-        // Defensive only: `onCreateRecord` implementations THROW on failure (task 053) rather than
-        // resolving null, so this branch is not reached by the shipped `SaveFlow.createRelatedRecord` —
-        // kept for any other caller of this prop that still follows the older null-on-failure contract.
-        setCreateError(`Couldn't create the ${selectedType}.`);
-      }
-    } catch (err) {
-      // Task 053: surface the SERVER's own message (thrown by `onCreateRecord`, e.g. task 031's
-      // `owner_unresolved` 403 `detail`) instead of this generic fallback — the fallback now applies
-      // only when something threw a non-Error value.
-      setCreateError(err instanceof Error ? err.message : `Couldn't create the ${selectedType}.`);
-    } finally {
-      setCreating(false);
+    const result = await onCreateRecord(selectedType, input);
+    if (!result) {
+      // Defensive only: `onCreateRecord` implementations THROW on failure (task 053) rather than resolving null —
+      // kept for any caller of this prop that still follows the older null-on-failure contract.
+      throw new Error(`Couldn't create the ${selectedType}.`);
+    }
+    focusAfterRef.current = 'selected';
+    onChange(result.record);
+    setShowCreate(false);
+    // Non-blocking — the record is created and selected regardless (task 038: never swallow a server warning, e.g. an
+    // unresolvable matter type or practice area).
+    if (result.warnings && result.warnings.length > 0) {
+      setCreateWarning(result.warnings.join(' '));
     }
   };
 
-  const selectedMatterTypeName = matterTypeOptions.find(mt => mt.id === selectedMatterTypeId)?.name;
+  const cancelCreate = () => {
+    focusAfterRef.current = 'input';
+    setShowCreate(false);
+    setCreateWarning(null);
+  };
 
   const runSearch = async () => {
     const q = query.trim();
@@ -487,7 +440,6 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             onClick={() => {
               focusAfterRef.current = 'input';
               setShowCreate(true);
-              setCreateError(null);
               setCreateWarning(null);
             }}
             disabled={disabled}
@@ -497,54 +449,40 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         )}
       </div>
 
-      {/* Lookup row. Clicking "New" turns this SAME row into the create form:
-          the input becomes the new-record name, the search icon becomes Create + Cancel. */}
-      <div className={styles.searchRow}>
-        <Input
-          ref={el => {
+      {showCreate ? (
+        // Task 100: the "+ New" form — the fields the owner listed for this type (CreateRecordForm). Keyed by type so
+        // a type switch never carries one type's values into another's form.
+        <CreateRecordForm
+          key={selectedType}
+          type={selectedType}
+          matterTypes={createForm?.matterTypes ?? EMPTY_LIST}
+          practiceAreas={createForm?.practiceAreas ?? EMPTY_LIST}
+          projectTypes={createForm?.projectTypes ?? EMPTY_LIST}
+          defaultAssignee={createForm?.defaultAssignee ?? null}
+          onSearchContacts={onSearchContacts}
+          onSubmit={handleCreate}
+          onCancel={cancelCreate}
+          disabled={disabled}
+          nameInputRef={el => {
             inputRef.current = el;
           }}
-          value={showCreate ? newName : query}
-          onChange={(_, d) => (showCreate ? setNewName(d.value) : setQuery(d.value))}
-          onKeyDown={e => {
-            if (e.key === 'Enter') void (showCreate ? handleCreate() : runSearch());
-          }}
-          placeholder={showCreate ? `New ${selectedType} name` : `Look up related ${selectedType}...`}
-          disabled={disabled || (showCreate && creating)}
-          style={{ flexGrow: 1 }}
-          aria-label={showCreate ? `New ${selectedType} name` : `Search ${selectedType} records`}
         />
-        {showCreate ? (
-          <>
-            <Button
-              appearance="primary"
-              onClick={() => void handleCreate()}
-              disabled={
-                disabled ||
-                creating ||
-                newName.trim().length === 0 ||
-                (selectedType === 'Matter' && !selectedMatterTypeId)
-              }
-            >
-              {creating ? <Spinner size="tiny" /> : 'Create'}
-            </Button>
-            <Button
-              appearance="subtle"
-              onClick={() => {
-                focusAfterRef.current = 'input';
-                setShowCreate(false);
-                setNewName('');
-                setCreateError(null);
-                setCreateWarning(null);
-                setSelectedMatterTypeId('');
-                setMatterTypeError(null);
-              }}
-              disabled={creating}
-            >
-              Cancel
-            </Button>
-          </>
-        ) : (
+      ) : (
+        <div className={styles.searchRow}>
+          <Input
+            ref={el => {
+              inputRef.current = el;
+            }}
+            value={query}
+            onChange={(_, d) => setQuery(d.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') void runSearch();
+            }}
+            placeholder={`Look up related ${selectedType}...`}
+            disabled={disabled}
+            style={{ flexGrow: 1 }}
+            aria-label={`Search ${selectedType} records`}
+          />
           <Button
             appearance="subtle"
             icon={searching ? <Spinner size="tiny" /> : <SearchRegular />}
@@ -553,70 +491,9 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             aria-label="Search"
             title="Search"
           />
-        )}
-      </div>
-
-      {/* Matter Type — required only for a new Matter (task 038; owner decision 2026-09-11). A small,
-          load-once reference list (see matterTypeLookupService.ts); the Create button above stays
-          disabled until one is chosen. */}
-      {showCreate && selectedType === 'Matter' && (
-        <div className={styles.matterTypeField}>
-          <Label htmlFor="new-matter-type" required>
-            Matter Type
-          </Label>
-          <Dropdown
-            id="new-matter-type"
-            placeholder={matterTypesLoading ? 'Loading matter types…' : 'Select a matter type'}
-            value={selectedMatterTypeName ?? ''}
-            selectedOptions={selectedMatterTypeId ? [selectedMatterTypeId] : []}
-            onOptionSelect={(_, data) => {
-              setSelectedMatterTypeId(data.optionValue ?? '');
-              setMatterTypeError(null);
-            }}
-            disabled={disabled || creating || matterTypesLoading || !!matterTypesError}
-            aria-label="Matter Type"
-            aria-required="true"
-            aria-invalid={!!matterTypeError || !!matterTypesError}
-          >
-            {matterTypeOptions.map(mt => (
-              <Option key={mt.id} value={mt.id} text={mt.name}>
-                {mt.name}
-              </Option>
-            ))}
-          </Dropdown>
-          {/* A failed load and "zero active rows, loaded fine" are different states (coordinator fix,
-              2026-09-13): only the genuine empty-table case gets the quiet note; a failure gets its
-              own message + Retry below, and the two never show at once. */}
-          {!matterTypesLoading && !matterTypesError && matterTypeOptions.length === 0 && (
-            <Text size={200} className={styles.emptyNote}>
-              No matter types are available right now.
-            </Text>
-          )}
-          {!matterTypesLoading && matterTypesError && (
-            <div className={styles.matterTypeErrorRow}>
-              <Text size={200} className={styles.fieldError} role="alert">
-                {matterTypesError}
-              </Text>
-              {onRetryMatterTypes && (
-                <Button appearance="outline" size="small" onClick={() => onRetryMatterTypes()}>
-                  Retry
-                </Button>
-              )}
-            </div>
-          )}
-          {matterTypeError && (
-            <Text size={200} className={styles.fieldError} role="alert">
-              {matterTypeError}
-            </Text>
-          )}
         </div>
       )}
 
-      {createError && (
-        <Text size={200} className={styles.emptyNote} role="alert">
-          {createError}
-        </Text>
-      )}
       {createWarning && (
         <Text size={200} className={styles.fieldWarning} role="status">
           {createWarning}
@@ -624,11 +501,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
       )}
 
       {/* Task 053: a failed search rendered identically to "nothing matched" — now shown distinctly,
-          with a Retry that re-runs the same query. Reuses the Matter Type load-failure's own
-          message+Retry pattern (styles.matterTypeErrorRow / styles.fieldError) rather than inventing a
-          second one. */}
+          with a Retry that re-runs the same query (the same message+Retry pattern the create form's
+          reference lists use). */}
       {!showCreate && searchError && (
-        <div className={styles.matterTypeErrorRow}>
+        <div className={styles.errorRow}>
           <Text size={200} className={styles.fieldError} role="alert">
             {searchError}
           </Text>

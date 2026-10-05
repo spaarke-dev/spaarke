@@ -55,6 +55,30 @@ public sealed record RecordCreationRequest
     public Guid? MatterTypeId { get; init; }
 
     /// <summary>
+    /// The <c>sprk_practicearea_ref</c> id (Matter only; task 100). Same posture as <see cref="MatterTypeId"/>: set
+    /// once verified to exist; a missing, empty or unknown id is never a rejection (an unknown one warns).
+    /// </summary>
+    public Guid? PracticeAreaId { get; init; }
+
+    /// <summary>
+    /// The <c>sprk_projecttype_ref</c> id (Project only; task 100). Optional; set once verified to exist, an unknown
+    /// id warns and is dropped.
+    /// </summary>
+    public Guid? ProjectTypeId { get; init; }
+
+    /// <summary>
+    /// The contact to write into <c>sprk_assignedtointernal</c> (task 100). When supplied it wins over a
+    /// field-mapping rule and over the maker default; when absent or empty the existing default applies
+    /// (a mapped value is kept, else the maker's linked contact — unified-access-control-r2 task 152).
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Written as given, without a read: the CALLER's Read right on the contact MUST already have been established
+    /// upstream — <c>QuickCreateSourceAccessFilter</c> does that for the quick-create route. A new caller of this
+    /// service must do the same, or it can attach any contact id to a record the caller's team owns.
+    /// </remarks>
+    public Guid? AssignedToContactId { get; init; }
+
+    /// <summary>
     /// Optional record-context entity logical name (e.g. <c>sprk_project</c>) — the Field Mapping Framework source.
     /// </summary>
     /// <remarks>
@@ -124,13 +148,16 @@ public sealed record RecordCreationResult
 /// <para><b>Matter pipeline</b> (mirrors <c>matterService.createMatter</c>, except that the number comes from the
 /// platform, not the client):</para>
 /// <list type="number">
-///   <item><description>Name / description; the <c>sprk_mattertype</c> lookup when the supplied type resolves (one
-///   existence read — an unknown type is dropped with a warning, never rejected).</description></item>
+///   <item><description>Name / description; the <c>sprk_mattertype</c> and <c>sprk_practicearea</c> lookups when the
+///   supplied ids resolve (one existence read each — an unknown id is dropped with a warning, never rejected; task 100
+///   added the practice area).</description></item>
 ///   <item><description>BU defaults from the OWNER's business unit — <c>sprk_searchindexname</c> (INV-5 guarded) and
 ///   the <c>sprk_ai_search_index</c> lookup — mirroring <c>EntityCreationService.applyUserBuDefaults</c>.
 ///   <c>sprk_containerid</c> is deliberately NOT written (unified-access-control-r2 task 076, W1).</description></item>
 ///   <item><description>Field Mapping Framework — one profile read, one source read, rules applied by
 ///   <see cref="CreateTimeFieldMapping"/>; a missing profile is a silent no-op.</description></item>
+///   <item><description>Assigned To Internal — the contact the request names, else a mapped value, else the maker's
+///   linked contact (task 152; task 100 added the request's contact).</description></item>
 ///   <item><description>Owner — <c>ownerid</c> = the caller's business-unit DEFAULT OWNER TEAM (task 080, invariant
 ///   I-6); refused when the caller or the team is unresolved.</description></item>
 /// </list>
@@ -160,6 +187,20 @@ public sealed class RecordCreationService
     internal const string MatterTypeAttribute = "sprk_mattertype";
     internal const string MatterTypeEntity = "sprk_mattertype_ref";
     internal const string MatterTypeIdAttribute = "sprk_mattertype_refid";
+
+    // Task 100 (owner UAT round 5 item 3) — live metadata, spaarkedev1 2026-10-05: sprk_matter.sprk_practicearea →
+    // sprk_practicearea_ref; sprk_project.sprk_projecttype_ref → sprk_projecttype_ref (the lookup column carries the
+    // table's name).
+    internal const string MatterPracticeAreaAttribute = "sprk_practicearea";
+    internal const string PracticeAreaEntity = "sprk_practicearea_ref";
+    internal const string PracticeAreaIdAttribute = "sprk_practicearea_refid";
+    internal const string ProjectTypeAttribute = "sprk_projecttype_ref";
+    internal const string ProjectTypeEntity = "sprk_projecttype_ref";
+    internal const string ProjectTypeIdAttribute = "sprk_projecttype_refid";
+
+    internal const string ContactEntity = "contact";
+    internal const string ContactNameAttribute = "fullname";
+    internal const string ContactEmailAttribute = "emailaddress1";
 
     // Project (task 031). sprk_projectnumber is the sprk_project PRIMARY NAME attribute and is NEVER written on this
     // path — the platform's autonumber assigns it (PRJ-{SEQNUM:6}, task 076, interim). It is named here so it can be
@@ -248,12 +289,28 @@ public sealed class RecordCreationService
     /// business-unit team; under task 142 this column also issues the Assigned-To share.
     /// </summary>
     /// <remarks>
-    /// A value a field-mapping rule already wrote is kept (the column stays editable; a supplied value is never
-    /// overwritten). The maker's contact comes only from task 141's link (<c>PersonIdentity.ContactId</c>) — never an
-    /// email match. No link → the column stays blank and <c>assigned_internal_unset</c> is logged; the create proceeds.
+    /// <para>Precedence (task 100, owner decision B — Assigned To is on the pane's form, prefilled, optional):</para>
+    /// <list type="number">
+    ///   <item><description>the contact the REQUEST names — the user's explicit choice on the form, so it wins over a
+    ///   mapping rule and the default. Its Read right was authorized upstream (see
+    ///   <see cref="RecordCreationRequest.AssignedToContactId"/>);</description></item>
+    ///   <item><description>a value a field-mapping rule already wrote is kept (a supplied value is never overwritten
+    ///   by the default);</description></item>
+    ///   <item><description>the maker's linked contact (<see cref="ResolveMakerContactIdAsync"/>) — the server's
+    ///   default, which the pane's prefill shows (<see cref="ResolveDefaultAssigneeAsync"/>).</description></item>
+    /// </list>
+    /// <para>The maker's contact comes only from task 141's link (<c>PersonIdentity.ContactId</c>) — never an email
+    /// match. No link → the column stays blank and <c>assigned_internal_unset</c> is logged; the create proceeds.</para>
     /// </remarks>
-    private async Task ApplyMakerAssignedInternalAsync(Entity entity, Guid makerSystemUserId, CancellationToken ct)
+    private async Task ApplyAssignedInternalAsync(
+        Entity entity, Guid? requestedContactId, Guid makerSystemUserId, CancellationToken ct)
     {
+        if (requestedContactId is { } requested && requested != Guid.Empty)
+        {
+            entity[AssignedToInternalAttribute] = new EntityReference(ContactEntity, requested);
+            return;
+        }
+
         if (entity.Attributes.TryGetValue(AssignedToInternalAttribute, out var existing)
             && existing is EntityReference supplied
             && supplied.Id != Guid.Empty)
@@ -261,10 +318,30 @@ public sealed class RecordCreationService
             return;
         }
 
-        Guid? contactId = null;
+        if (await ResolveMakerContactIdAsync(makerSystemUserId, ct).ConfigureAwait(false) is { } makerContact)
+        {
+            entity[AssignedToInternalAttribute] = new EntityReference(ContactEntity, makerContact);
+            return;
+        }
+
+        _logger.LogWarning(
+            "assigned_internal_unset: entity={Entity} maker={MakerId} reason={Reason} — the maker has no linked contact, so "
+            + "{Column} is left blank (never an email match); the record is still owned by the business-unit team",
+            entity.LogicalName, makerSystemUserId, "maker_has_no_linked_contact", AssignedToInternalAttribute);
+    }
+
+    /// <summary>
+    /// The maker's linked contact id (task 141's link), or <see langword="null"/> when there is none or it could not
+    /// be resolved. The ONE place the default assignee is decided — both the create
+    /// (<see cref="ApplyAssignedInternalAsync"/>) and the pane's prefill (<see cref="ResolveDefaultAssigneeAsync"/>)
+    /// read it, so the prefill can never name someone the server would not.
+    /// </summary>
+    private async Task<Guid?> ResolveMakerContactIdAsync(Guid makerSystemUserId, CancellationToken ct)
+    {
         try
         {
-            contactId = (await _identity.ResolveAsync(makerSystemUserId, ct).ConfigureAwait(false)).ContactId;
+            var contactId = (await _identity.ResolveAsync(makerSystemUserId, ct).ConfigureAwait(false)).ContactId;
+            return contactId is { } id && id != Guid.Empty ? id : null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -273,18 +350,64 @@ public sealed class RecordCreationService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "[RECORD-CREATE] The maker's linked contact could not be resolved for {MakerId}", makerSystemUserId);
+            return null;
         }
+    }
 
-        if (contactId is { } makerContact && makerContact != Guid.Empty)
+    /// <summary>
+    /// The contact the pane's "+ New" form prefills in Assigned To (task 100, owner decision B): the caller's own
+    /// linked contact with its display name, or <see langword="null"/> when the caller is unresolved, has no linked
+    /// contact, or the contact could not be read. For a Matter or Project it is exactly the contact the create assigns
+    /// when the request names none; an Invoice has no server default, so there the pane sends it explicitly.
+    /// </summary>
+    /// <param name="callerSystemUserId">The caller's resolved <c>systemuserid</c> (never from the client).</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// The contact row is read app-only. That discloses nothing: it is the caller's OWN identity link, resolved from
+    /// their own <c>systemuserid</c>; the route takes no id. Never throws for a Dataverse fault — no prefill is the
+    /// worst case, and the user can still pick someone.
+    /// </remarks>
+    public async Task<QuickCreateContactOption?> ResolveDefaultAssigneeAsync(Guid callerSystemUserId, CancellationToken ct)
+    {
+        if (callerSystemUserId == Guid.Empty
+            || await ResolveMakerContactIdAsync(callerSystemUserId, ct).ConfigureAwait(false) is not { } contactId)
         {
-            entity[AssignedToInternalAttribute] = new EntityReference("contact", makerContact);
-            return;
+            return null;
         }
 
-        _logger.LogWarning(
-            "assigned_internal_unset: entity={Entity} maker={MakerId} reason={Reason} — the maker has no linked contact, so "
-            + "{Column} is left blank (never an email match); the record is still owned by the business-unit team",
-            entity.LogicalName, makerSystemUserId, "maker_has_no_linked_contact", AssignedToInternalAttribute);
+        Entity? contact;
+        try
+        {
+            contact = await _entities
+                .RetrieveAsync(ContactEntity, contactId, [ContactNameAttribute, ContactEmailAttribute], ct)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "[RECORD-CREATE] The default assignee contact {ContactId} could not be read; no prefill.", contactId);
+            return null;
+        }
+
+        var name = contact?.GetAttributeValue<string>(ContactNameAttribute)?.Trim();
+        var email = contact?.GetAttributeValue<string>(ContactEmailAttribute)?.Trim();
+        if (string.IsNullOrEmpty(email))
+        {
+            email = null;
+        }
+
+        // A contact with neither a name nor an email gives the user nothing to recognise — no prefill.
+        var display = string.IsNullOrEmpty(name) ? email : name;
+        if (display is null)
+        {
+            return null;
+        }
+
+        return new QuickCreateContactOption { Id = contactId, Name = display, Email = email };
     }
 
     /// <summary>
@@ -465,7 +588,7 @@ public sealed class RecordCreationService
         var typeWarningAdded = false;
         if (request.MatterTypeId is { } requestedTypeId && requestedTypeId != Guid.Empty)
         {
-            if (await CheckMatterTypeAsync(requestedTypeId, ct).ConfigureAwait(false) is { } typeWarning)
+            if (await CheckReferenceAsync(MatterType, requestedTypeId, ct).ConfigureAwait(false) is { } typeWarning)
             {
                 warnings.Add(typeWarning);
                 typeWarningAdded = true;
@@ -476,6 +599,10 @@ public sealed class RecordCreationService
                 entity[MatterTypeAttribute] = requestedType;
             }
         }
+
+        // Task 100: Practice Area — required on the pane's form (owner decision B), but on the server the same
+        // "never a rejection" posture as the matter type: verified to exist, else dropped with a warning.
+        await ApplyReferenceAsync(entity, PracticeArea, request.PracticeAreaId, warnings, ct).ConfigureAwait(false);
 
         await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "matter", warnings, ct).ConfigureAwait(false);
 
@@ -496,8 +623,9 @@ public sealed class RecordCreationService
             warnings.Add("No matter type was supplied. Open the matter and set its type.");
         }
 
-        // Owner A7 (task 152): the matter is FOR its maker — after field mapping, so a mapped value is kept.
-        await ApplyMakerAssignedInternalAsync(entity, ownerId, ct).ConfigureAwait(false);
+        // Owner A7 (task 152): the matter is FOR its maker — after field mapping, so a mapped value is kept — unless
+        // the request names the assignee (task 100), which wins.
+        await ApplyAssignedInternalAsync(entity, request.AssignedToContactId, ownerId, ct).ConfigureAwait(false);
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing (task 030 step 4).
         // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
@@ -529,8 +657,9 @@ public sealed class RecordCreationService
     }
 
     /// <summary>
-    /// The Project path (task 031, FR-13). Deliberately NOT a copy of Matter: there is no type lookup, and
-    /// <c>sprk_projectnumber</c> is never written.
+    /// The Project path (task 031, FR-13). Deliberately NOT a copy of Matter: its optional type is
+    /// <c>sprk_projecttype_ref</c> (task 100), there is no "no type supplied" warning, and <c>sprk_projectnumber</c> is
+    /// never written.
     /// </summary>
     /// <remarks>
     /// <para><b><c>sprk_projectnumber</c> is the <c>sprk_project</c> PRIMARY NAME attribute</b>, and this path writes
@@ -577,6 +706,9 @@ public sealed class RecordCreationService
             entity[ProjectDescriptionAttribute] = request.Description.Trim();
         }
 
+        // Task 100: Project Type (optional) — verified to exist, else dropped with a warning; never a rejection.
+        await ApplyReferenceAsync(entity, ProjectType, request.ProjectTypeId, warnings, ct).ConfigureAwait(false);
+
         await ApplyBusinessUnitDefaultsAsync(entity, ownerId, "project", warnings, ct).ConfigureAwait(false);
 
         if (!string.IsNullOrWhiteSpace(request.SourceEntityLogicalName)
@@ -590,8 +722,9 @@ public sealed class RecordCreationService
             KeepRequestedNameIfMappingBlankedIt(entity, ProjectNameAttribute, name, "project", warnings);
         }
 
-        // Owner A7 (task 152): the project is FOR its maker — after field mapping, so a mapped value is kept.
-        await ApplyMakerAssignedInternalAsync(entity, ownerId, ct).ConfigureAwait(false);
+        // Owner A7 (task 152): the project is FOR its maker — after field mapping, so a mapped value is kept — unless
+        // the request names the assignee (task 100), which wins.
+        await ApplyAssignedInternalAsync(entity, request.AssignedToContactId, ownerId, ct).ConfigureAwait(false);
 
         // Set LAST, after mapping, so nothing can overwrite it — owner attribution is load-bearing.
         // Task 080: the owner is the caller's business-unit default owner TEAM, not the caller.
@@ -623,22 +756,62 @@ public sealed class RecordCreationService
     }
 
     /// <summary>
-    /// The one existence read for a supplied matter type (owner decision 2026-09-11, "do not reject"; project CLAUDE.md
-    /// Decisions). Returns <see langword="null"/> when the type exists — the lookup is then set. Otherwise returns the
-    /// warning to report, and the matter is created WITHOUT the lookup:
+    /// A reference lookup the create form supplies by id: where it is written, the table it points at, and the words
+    /// its warnings use. <paramref name="Label"/> names the selection ("matter type"), <paramref name="Noun"/> the
+    /// missing value ("type"), <paramref name="EntityLabel"/> the record being created ("matter").
+    /// </summary>
+    private sealed record ReferenceLookup(
+        string Attribute, string TargetEntity, string TargetIdAttribute, string Label, string Noun, string EntityLabel);
+
+    private static readonly ReferenceLookup MatterType =
+        new(MatterTypeAttribute, MatterTypeEntity, MatterTypeIdAttribute, "matter type", "type", "matter");
+
+    private static readonly ReferenceLookup PracticeArea =
+        new(MatterPracticeAreaAttribute, PracticeAreaEntity, PracticeAreaIdAttribute, "practice area", "practice area", "matter");
+
+    private static readonly ReferenceLookup ProjectType =
+        new(ProjectTypeAttribute, ProjectTypeEntity, ProjectTypeIdAttribute, "project type", "project type", "project");
+
+    /// <summary>
+    /// Sets <paramref name="lookup"/> to <paramref name="requestedId"/> once it is verified to exist. A missing or
+    /// <see cref="Guid.Empty"/> id is a silent no-op; an unknown or unverifiable one is dropped with the warning from
+    /// <see cref="CheckReferenceAsync"/>. Never a rejection (task 100, same posture as the matter type).
+    /// </summary>
+    private async Task ApplyReferenceAsync(
+        Entity entity, ReferenceLookup lookup, Guid? requestedId, List<string> warnings, CancellationToken ct)
+    {
+        if (requestedId is not { } id || id == Guid.Empty)
+        {
+            return;
+        }
+
+        if (await CheckReferenceAsync(lookup, id, ct).ConfigureAwait(false) is { } warning)
+        {
+            warnings.Add(warning);
+            return;
+        }
+
+        entity[lookup.Attribute] = new EntityReference(lookup.TargetEntity, id);
+    }
+
+    /// <summary>
+    /// The one existence read for a supplied reference id — the matter type (owner decision 2026-09-11, "do not
+    /// reject"; project CLAUDE.md Decisions), and since task 100 the practice area and project type. Returns
+    /// <see langword="null"/> when the row exists — the lookup is then set. Otherwise returns the warning to report,
+    /// and the record is created WITHOUT the lookup:
     /// <list type="bullet">
     ///   <item><description>not found → "…was not found…";</description></item>
     ///   <item><description>the read itself failed (any other Dataverse fault) → a distinct "…could not be checked…".</description></item>
     /// </list>
-    /// Neither is ever a 400 or a 500: the type is optional, and a lookup that is not verified to exist would, if it
-    /// dangled, fault the whole create.
+    /// Neither is ever a 400 or a 500: the value is optional to the server, and a lookup that is not verified to exist
+    /// would, if it dangled, fault the whole create.
     /// </summary>
-    private async Task<string?> CheckMatterTypeAsync(Guid matterTypeId, CancellationToken ct)
+    private async Task<string?> CheckReferenceAsync(ReferenceLookup lookup, Guid id, CancellationToken ct)
     {
         try
         {
             await _entities
-                .RetrieveAsync(MatterTypeEntity, matterTypeId, [MatterTypeIdAttribute], ct)
+                .RetrieveAsync(lookup.TargetEntity, id, [lookup.TargetIdAttribute], ct)
                 .ConfigureAwait(false);
             return null;
         }
@@ -649,19 +822,19 @@ public sealed class RecordCreationService
         catch (Exception ex) when (RecordContainerResolver.IsRecordNotFound(ex))
         {
             _logger.LogWarning(
-                "[RECORD-CREATE] Matter type {MatterTypeId} does not exist; creating the matter without a type.",
-                matterTypeId);
-            return "The selected matter type was not found, so the matter was created without a type. Open the "
-                   + "matter and set its type.";
+                "[RECORD-CREATE] {Reference} {ReferenceId} does not exist; creating the {EntityLabel} without it.",
+                lookup.Label, id, lookup.EntityLabel);
+            return $"The selected {lookup.Label} was not found, so the {lookup.EntityLabel} was created without a "
+                   + $"{lookup.Noun}. Open the {lookup.EntityLabel} and set its {lookup.Noun}.";
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[RECORD-CREATE] Matter type {MatterTypeId} could not be checked; creating the matter without a type "
+                "[RECORD-CREATE] {Reference} {ReferenceId} could not be checked; creating the {EntityLabel} without it "
                 + "rather than risk a dangling lookup failing the create.",
-                matterTypeId);
-            return "The selected matter type could not be checked just now, so the matter was created without a type. "
-                   + "Open the matter and set its type.";
+                lookup.Label, id, lookup.EntityLabel);
+            return $"The selected {lookup.Label} could not be checked just now, so the {lookup.EntityLabel} was created "
+                   + $"without a {lookup.Noun}. Open the {lookup.EntityLabel} and set its {lookup.Noun}.";
         }
     }
 

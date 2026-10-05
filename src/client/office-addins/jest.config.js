@@ -64,6 +64,9 @@ module.exports = {
     '^@spaarke/ui-components/guid$': '<rootDir>/../shared/Spaarke.UI.Components/src/utils/guid.ts',
     '^@spaarke/ui-components/send-email-pane$':
       '<rootDir>/../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx',
+    // Task 100: the "+ New" form's Assigned To picker — the REAL shared `LookupField`, same exact alias as webpack.
+    '^@spaarke/ui-components/lookup-field$':
+      '<rootDir>/../shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx',
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy',
   },
   // Task 096: shared sources aliased above live outside this package and have no node_modules of their own in

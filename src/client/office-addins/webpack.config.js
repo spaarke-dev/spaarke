@@ -237,6 +237,13 @@ module.exports = async (env, options) => {
           __dirname,
           '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'
         ),
+        // Task 100 (owner decision C, ADR-012 amended 2026-10-05): the "+ New" form's Assigned To picker is the
+        // shared host-agnostic `LookupField` (`onSearch` injected; imports Fluent, react-icons, LookupTypes and the
+        // shared thin scrollbar — no Xrm). Exact ($) match to the component FILE, never the barrel.
+        '@spaarke/ui-components/lookup-field$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx'
+        ),
       },
     },
     module: {

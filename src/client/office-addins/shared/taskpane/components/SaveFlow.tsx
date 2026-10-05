@@ -42,11 +42,13 @@ import type { DocumentIdentityState } from '../services/documentIdentityService'
 import { useAnnounce } from '../hooks/useAnnounce';
 import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
 import {
-  fetchMatterTypes,
-  clearMatterTypesCache,
-  warningsIndicateMatterTypeNotFound,
-  type MatterTypeChoice,
-} from '../services/matterTypeLookupService';
+  clearReferenceListCache,
+  warningsIndicateReferenceNotFound,
+  type ReferenceListName,
+} from '../services/referenceListService';
+import { useCreateRecordFormData } from '../hooks/useCreateRecordFormData';
+import type { CreateRecordInput } from './CreateRecordForm';
+import type { ContactOption } from './views/CreateTodoView';
 import { openFileUrl, openDesktopUrl, openRecord } from '../services/openRecordLauncher';
 // Task 099 (ADR-012/ADR-044, amended 2026-10-05): the ONE shared `cleanGuid`, by exact-path alias — not the barrel.
 import { cleanGuid } from '@spaarke/ui-components/guid';
@@ -104,19 +106,6 @@ const DEMO_RELATED_CANDIDATES: RelatedCandidate[] = [
     displayInfo: 'PROJ-2025-014',
     confidence: 0.88,
   },
-];
-
-/**
- * Demo Matter Type options for the browser test harness ONLY — mirrors the real
- * `GET /api/office/search/matter-types` five-row dev list (task 038) so the required-field UX is
- * iterable without the BFF.
- */
-const DEMO_MATTER_TYPES: MatterTypeChoice[] = [
-  { id: '6cedd99b-30da-f011-8406-7ced8d1dc988', name: 'Commercial', code: 'CMRCL' },
-  { id: 'cdbf53b0-30da-f011-8406-7ced8d1dc988', name: 'Employment', code: 'EMPL' },
-  { id: '11aed095-30da-f011-8406-7ced8d1dc988', name: 'Litigation', code: 'LITG' },
-  { id: '46c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Patent', code: 'PAT' },
-  { id: '60c35aa2-30da-f011-8406-7ced8d1dc988', name: 'Trademark', code: 'TMRK' },
 ];
 
 /**
@@ -508,6 +497,12 @@ export interface SaveFlowProps {
   onSaved?: (entity: EntitySearchResult) => void;
   /** Callback when Quick Create is triggered */
   onQuickCreate?: (entityType: EntityType, searchQuery: string) => void;
+  /**
+   * Task 100: contact search for the "+ New" form's Assigned To field — the pane's ONE contact search
+   * (`App.handleSearchContacts`, shared with the To Do and Email tabs). Absent → the field finds no one (the prefill
+   * still shows).
+   */
+  onSearchContacts?: (query: string) => Promise<ContactOption[]>;
   // Task 088 (UAT-1): `onViewDocument` (a callback taking the stored file's Graph webUrl) is REMOVED. View
   // Document now opens the Spaarke document RECORD through `openRecordLauncher` — no path in this pane
   // opens the Word-for-the-web file URL any more.
@@ -578,6 +573,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     apiBaseUrl = '',
     onComplete,
     onSaved,
+    onSearchContacts,
     showDocumentInfo = true,
     className,
   } = props;
@@ -785,57 +781,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [relatedCandidates, setRelatedCandidates] = useState<RelatedCandidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
 
-  // Matter Type list for the required field on Matter quick-create (task 038). A small reference list
-  // (5 rows in dev) loaded once on mount, host-neutral (NFR-10: no hostType check), never gated on a
-  // keystroke like the /search/entities typeahead.
-  //
-  // A failed load and "the table has zero active rows" are different states (coordinator fix,
-  // 2026-09-13): fetchMatterTypes THROWS on failure, so a transient BFF/network fault surfaces as
-  // `matterTypesError` — a readable, announced (NFR-11), non-blocking message with a single
-  // user-initiated Retry — rather than silently making Matter quick-create permanently unsatisfiable
-  // for the rest of the session. Project/Invoice quick-create never reads this state at all.
-  const [matterTypes, setMatterTypes] = useState<MatterTypeChoice[]>([]);
-  const [matterTypesLoading, setMatterTypesLoading] = useState(false);
-  const [matterTypesError, setMatterTypesError] = useState<string | null>(null);
-  const matterTypesMountedRef = useRef(true);
-  useEffect(
-    () => () => {
-      matterTypesMountedRef.current = false;
-    },
-    []
-  );
-
-  const loadMatterTypes = useCallback(async () => {
-    if (isBrowserTestMode()) {
-      setMatterTypes(DEMO_MATTER_TYPES);
-      setMatterTypesError(null);
-      return;
-    }
-    if (!apiBaseUrl || !getAccessToken) return;
-    setMatterTypesLoading(true);
-    setMatterTypesError(null);
-    try {
-      const token = await getAccessToken();
-      const types = await fetchMatterTypes(apiBaseUrl, token, getAccessToken);
-      if (!matterTypesMountedRef.current) return;
-      setMatterTypes(types);
-    } catch {
-      if (!matterTypesMountedRef.current) return;
-      const message = "Couldn't load matter types. Try again, or search for an existing record instead.";
-      setMatterTypesError(message);
-      // NFR-11: the failure is announced — this is the one state change here a screen-reader user
-      // could otherwise miss entirely (the field just stays a disabled, empty-looking dropdown).
-      announce(message, 'assertive');
-    } finally {
-      if (matterTypesMountedRef.current) setMatterTypesLoading(false);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- apiBaseUrl/getAccessToken are stable for the pane's lifetime; announce is stable per useAnnounce
-  }, [apiBaseUrl, getAccessToken]);
-
-  useEffect(() => {
-    void loadMatterTypes();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetched once per mount; loadMatterTypes is re-invoked explicitly by the Retry action, not by a dependency change
-  }, []);
+  // The "+ New" form's data (task 100; matter types since task 038): the matter-type, practice-area and project-type
+  // reference lists and the Assigned To prefill. Loaded LAZILY, the first time the form opens (`relatedCreating`),
+  // then kept — host-neutral (NFR-10: no hostType check). A failed list load is a readable, announced (NFR-11),
+  // non-blocking message with Retry, never a required field that blocks silently (task 038's coordinator fix).
+  const createFormData = useCreateRecordFormData({
+    ...(apiBaseUrl ? { apiBaseUrl } : {}),
+    getAccessToken,
+    enabled: relatedCreating,
+    demo: isBrowserTestMode(),
+    announce,
+  });
 
   // ── FR-11 save mode (task 024) ──────────────────────────────────────────────────────────────────
   // The user's EXPLICIT choice; null = the identity's default (a new version when resolved). A new identity
@@ -1362,8 +1318,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   // message (via `describeFetchFailure` — the same ProblemDetails-parsing path `errorMessages.ts` already
   // uses for the top-level save/collision flows); `RelatedToPicker`'s `handleCreate` catches it and shows
   // the real message instead of a generic "Couldn't create the {type}."
+  //
+  // Task 100 (owner UAT round 5 item 3): the body carries the "+ New" form's fields — description; matterTypeId +
+  // practiceAreaId (Matter); projectTypeId (Project); assignedToContactId (all three; the server requires the caller
+  // to hold Read on it). Every GUID is canonicalized with the shared `cleanGuid` (ADR-044); a field the form left
+  // empty is omitted, which for Assigned To means "the server's default".
   const createRelatedRecord = useCallback(
-    async (type: EntityType, name: string, matterTypeId?: string): Promise<CreateRecordResult> => {
+    async (type: EntityType, input: CreateRecordInput): Promise<CreateRecordResult> => {
+      const { name } = input;
       // Test harness: return a mock created record so the flow is iterable without the BFF.
       if (isBrowserTestMode()) {
         await new Promise(resolve => setTimeout(resolve, 400));
@@ -1384,7 +1346,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       let res: Response;
       try {
         const token = await getAccessToken();
-        const body = type === 'Matter' && matterTypeId ? { name, matterTypeId: cleanGuid(matterTypeId) } : { name };
+        const body = {
+          name,
+          ...(input.description ? { description: input.description } : {}),
+          ...(input.matterTypeId ? { matterTypeId: cleanGuid(input.matterTypeId) } : {}),
+          ...(input.practiceAreaId ? { practiceAreaId: cleanGuid(input.practiceAreaId) } : {}),
+          ...(input.projectTypeId ? { projectTypeId: cleanGuid(input.projectTypeId) } : {}),
+          ...(input.assignedToContactId ? { assignedToContactId: cleanGuid(input.assignedToContactId) } : {}),
+        };
         res = await authenticatedJsonFetch(
           `${apiBaseUrl}/api/office/quickcreate/${type.toLowerCase()}`,
           { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) },
@@ -1407,11 +1376,16 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         name: string;
         warnings?: string[];
       };
-      // The chosen matterTypeId didn't resolve (renamed/removed on the server since this pane's
-      // cache was populated) — clear the cache so the NEXT fetch (a later create, or the pane's next
-      // open) picks up the current reference table rather than serving the same stale entry again.
-      if (type === 'Matter' && warningsIndicateMatterTypeNotFound(data.warnings)) {
-        clearMatterTypesCache();
+      // A chosen reference row didn't resolve (renamed/removed on the server since this pane's cache was populated) —
+      // clear THAT list's cache so the next fetch (a later create, or the pane's next open) reads the current table
+      // rather than serving the same stale entry again.
+      const sentLists: ReferenceListName[] = [
+        ...(input.matterTypeId ? (['matter-types'] as const) : []),
+        ...(input.practiceAreaId ? (['practice-areas'] as const) : []),
+        ...(input.projectTypeId ? (['project-types'] as const) : []),
+      ];
+      for (const list of sentLists) {
+        if (warningsIndicateReferenceNotFound(list, data.warnings)) clearReferenceListCache(list);
       }
       return {
         record: { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name },
@@ -1758,10 +1732,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
               // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
               allowedTypes={['Matter', 'Project', 'Invoice']}
               defaultType="Matter"
-              matterTypeOptions={matterTypes}
-              matterTypesLoading={matterTypesLoading}
-              matterTypesError={matterTypesError}
-              onRetryMatterTypes={loadMatterTypes}
+              createForm={createFormData}
+              {...(onSearchContacts ? { onSearchContacts } : {})}
               onCreatingChange={setRelatedCreating}
               disabled={isSaving}
             />

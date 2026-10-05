@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 5 (3) — richer "+ New" create forms: Matter (Name, Description, Matter Type, Practice Area, Assigned To Internal), Project (Name, Project Type, Description, Assigned To Internal), Invoice (Name, Description, Assigned To), created through the BFF quick-create</title>
     <phase>6 UAT round 5 (2026-10-05)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Extends a BFF write path (`.cs`: quick-create request + record creation, reference lists) and the pane's create form (`.tsx`), with tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -126,4 +126,15 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
   </execution>
+
+  <notes>
+    Completed 2026-10-05 (record: notes/100-create-record-fields.md). Live schema verified first; no escalation
+    (Invoice "Assigned To" = sprk_assignedto1; sprk_assignedtointernal → contact on matter + project). BFF: request
+    fields practiceAreaId / projectTypeId / assignedToContactId (+ invoice description); /search/matter-types generalized
+    to ONE route /search/{list} (closed table); new GET /quickcreate/defaults (the prefill = the server's own default);
+    Read gate on the posted contact in QuickCreateSourceAccessFilter, one constant 403 body. Pane: CreateRecordForm with
+    the shared LookupField by exact alias. Gates: build 0/0, ArchTests 349/349, jest 77/1075, lint 0, tsc 0 production,
+    publish +15,634 B (212 = 212 files), CVE none. Live acceptance (create one of each from the pane, see values in
+    Spaarke) OPEN — needs a deploy.
+  </notes>
 </task>

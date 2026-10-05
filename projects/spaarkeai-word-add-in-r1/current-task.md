@@ -7,6 +7,15 @@
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
+> **2026-10-05: task 100 ✅ DONE in the working tree — UNCOMMITTED** (sub-agent run; the main session commits).
+> Record: `notes/100-create-record-fields.md`. Schema verified live (invoice Assigned To = `sprk_assignedto1`; no
+> escalation). BFF: `practiceAreaId`/`projectTypeId`/`assignedToContactId` + invoice description; `/search/{list}`
+> (generalized matter-types route); `GET /quickcreate/defaults`; Read gate on the posted contact. Pane:
+> `CreateRecordForm` + shared `LookupField` (`@spaarke/ui-components/lookup-field` alias), `useCreateRecordFormData`,
+> `referenceListService.ts` (replaces `matterTypeLookupService.ts`). Gates green (build 0/0, ArchTests 349, jest
+> 77/1075, lint 0, tsc 0 prod, publish +15,634 B). NEXT: commit; deploy BFF + add-in; live checks (§11 of the note).
+> `scripts/check-task-status-drift.ps1` parses only 5 index rows here (pre-existing format mismatch; 099 shows the same).
+
 | Field | Value |
 |---|---|
 | **Task** | **Round 4 merged** — PR #1292 `293fcd4c8` (095 + 096 held off + switch + review fixes, `notes/042-uat-round4-2026-10-04.md` §5). Add-in site redeploys from the master push |
