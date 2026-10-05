@@ -1455,3 +1455,358 @@ post-deploy probes, the next real H8 run) and f1's §11.16 (i)/(k). ~~One H8 beh
 customer-provisioning-orchestration-r1~~ — **corrected by owner round 41 item 1: it was this task's scope (round 35 gave
 task 165 the H8 change) and deferring it contradicted the "scope discovered is added to this task" constraint and round
 15. It is FIXED in §13.1.**
+
+## 13. Follow-up round f2-v1 — owner round 41 items 1-5 (the verification of `task/uac-r2-165-f2`) (2026-10-05)
+
+### 13.0 How the round reached the branch
+
+- Branch **`task/uac-r2-165-f2-v1`** from `task/uac-r2-165-f2` @ `a05e4de96` (the name was free). No push, PR or merge.
+- No `NOTE-FROM-MAIN.md`. Binding inputs: owner/main-session rounds 1-43 read from `work/unified-access-control-r2` —
+  **round 41** is the main session's decision on this task's f2 verification (items 1-5 below); the verifier's 14 items
+  map onto it (1, 2, 11, 12 → round 41 item 1; 3, 13 → item 5 first bullet; 4, 14 → item 5 second bullet; 5 → item 5
+  third bullet; 6 → item 5 fourth bullet; 7-10 verified, nothing to do).
+- `.claude/**`: no edit needed (no `.claude` file names H8's resume, the dashboard aggregate, the secret-name module or
+  the creation guard).
+- 167 still not landed on this branch: amendment 3 — no waiver / ledger / GovernedFiles edits; no route added, renamed or
+  deleted this round (§13.10).
+
+### 13.1 Round 41 item 1 — H8's replication-pending path stamps or removes; it is not handed to another project (verifier 1, 2, 11, 12)
+
+**The defect, re-traced from code (worse than reported).** `MarkWaitingOnGateAsync` wrote `InterStepState.SpeContainerId`
+(H7's hand-off) for a container that was still UNBOUND, and a later entry ran `HandleAsync` from the top, where step (6)
+called `ProvisionAsync` unconditionally. The reconciler dispatches every incomplete H8 whose dependencies are done
+(`DagAdvancer.ComputeReadyHandlers`); the dispatcher drops a repeat of the same deterministic MessageId only while its
+processed marker lives (`DispatchIdempotencyService.ProcessedMarkerTtl` = 24h) — so after the replication wait H8 runs
+again and created a second container type and root container (a container type cannot be deleted and is capped per
+tenant), leaving the first root container orphaned unbound. H7 depended only on H6, so it could run during the wait and
+write the unbound id into `sprk_SharePointEmbeddedContainerId`. The same orphaning followed ANY post-creation
+quarantine (verification, bind, KV write) that an operator cleared and resumed.
+
+**The fix (L2, this task's — round 35 gave task 165 the H8 change; round 41 confirmed it):**
+
+| Where | Change |
+|---|---|
+| `H8SpeContainerTypeHandler` (5a) | `InterStepState.SpeContainerId` is withdrawn at the start of every incomplete entry, before any write — no persisted state of an incomplete H8 hands a container to H7 (a run left by the pre-round-41 path loses its unbound hand-off). |
+| (5c) `ReadRecordedCreation` | What this run's H8 already created: `InterStepState.ContainerTypeId` (H8 is its only writer) + the root container named by the `h8-t6-verified` gate's evidence. A recorded root container → NO `ProvisionAsync`, resume at (7) with it; only a type recorded → `ProvisionAsync` with `ExistingContainerTypeId` (a root container in that type only); a root container recorded without a type → QuarantineRequired `spe-creation-record-inconsistent`, nothing created. The pre-round-41 pending path wrote exactly these fields, so its runs resume too. |
+| (6b) `RecordCreationAsync` | The creation is persisted IMMEDIATELY after `ProvisionAsync`, before verification — and a provisioner failure that already created the type records the type. On a concurrent write the record is merged over the current document (H8-owned fields only; 5 attempts; never over another creation's record). If it cannot be persisted → QuarantineRequired `spe-creation-record-not-persisted`, the diagnostic naming both ids (bind with `-Bind` or remove), and nothing further happens. |
+| (7b) `MarkWaitingOnGateAsync` | No longer writes `SpeContainerId`; the record keeps the ids. |
+| (7c) bind failure | A bind that REMOVED the container keeps the type on record and drops the container (so a resume never verifies a deleted container — a 404 reads as the replication wait — and creates only a new root container in the same type). A bind that could not remove keeps the container on record (the resume re-verifies and re-binds it). |
+| (9) `MarkCompleteAsync` | The ONLY writer of a container into `SpeContainerId` — after the bind and the KV write (an ArchTest pins it). |
+| `GraphContainerTypeProvisioner` | `ProvisionAsync` = cert + client, then `internal CreateAsync(graph, request)`: skips the container-type POST when `ExistingContainerTypeId` is set (the 409-tolerant registration is repeated); a Failure reports `CreatedContainerTypeId`. |
+| `DagAdvancer` | **`H7 ← {H6, H8}`** — H7 writes H8's container, so it waits for H8's completion. H9 and the other branches still advance during the wait. |
+| `H7DataverseEnvVarValuesHandler` | Refuses (`MissingUpstreamState`, Resumable) a `SpeContainerId` from a run where H8 has not completed — the handler's own fail-closed check behind the DAG edge. |
+
+So on every path the root container is stamped and read back before anything durable consumes it (KV write, H7
+hand-off, `CompletedPhase`), or removed. While the run waits out the replication window the container exists unbound
+INSIDE an incomplete H8 that names it in the run and will bind or remove it. Recorded for that project in
+`projects/customer-provisioning-orchestration-r1/notes/uac-r2-165-h8-container-stamp.md` (rewritten: "Observed, not
+changed" → "FIXED").
+
+**Docs corrected (verifier item 2):** note D19 (§12.15, the false claim marked and corrected), §12.16, the onboarding
+guide (`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`: H8 row, the DAG — `H8 → H7`, the binding paragraph now explains the record
+and the resume, "only a bound container is handed to H7" is now true), the topology doc (the creation bullet names the
+H8 wait).
+
+### 13.2 Round 41 item 2 — unbound containers leave every dashboard view (D18 reversed)
+
+`SpeDashboardSyncService.AttributeContainer`: an unbound or malformed container is **Excluded** — counted in no view, the
+platform operator's `unattributedContainerCount` / storage included. "Unattributed" now means only a container bound to a
+unit of THIS environment under which no config of its type sits (this customer's own). Docs: the class comments, the
+`DashboardMetrics` field docs, `DashboardEndpoints.ProjectToReachableConfigs`' remarks, the topology doc. The alarm for
+unbound containers is the backfill's `-Verify` (it lists every one to the operator who runs it) and the pre-deploy /
+onboarding gate. No client reads the field (grep `unattributed` in `src/solutions/SpeAdminApp`: none).
+
+### 13.3 Round 41 item 3 — the three dev test containers are bound to the root unit
+
+Decided: `b!DcvT…`, `b!rAta…`, `b!c8YR…` → `06fbf21c…` ("Spaarke"), with `-Bind`, as a manual live step (binding is
+reversible — the backfill's revert manifest — deleting is not). Gate §13.9 (a) step 3 carries the exact command.
+
+### 13.4 Round 41 item 4 — dev config `68f9a952` ("Spaarke SPE Model 1 Owner", stored `"null"`)
+
+**Read-only investigation (2026-10-05):**
+
+| Question | Evidence | Answer |
+|---|---|---|
+| Is the config used only by the control plane? | `Grep sprk_specontainertypeconfig` over `src/server/services` (L2): **no match**. L2's H8 takes its owning app from H3's `InterStepState.BffAppRegId` and its cert from the customer vault — never a config row. The row's `createdby` / `modifiedby` = `# mi-bff-api-dev` (created 2026-10-03 16:06 through the BFF, i.e. `POST /api/spe/configs` from the SPE admin app). Its readers are the BFF's SPE admin plane (`SpeAdminGraphService.ResolveConfigAsync`, the dashboard job), the backfill and the secret-name scripts. | **No** — it is a BFF SPE-admin config for container type `fb3817a8…` ("Spaarke Model 1", owned by app `Spaarke SPE Model 1 Owner` `bfac7f6e…`). It is made conforming anyway (round 41). |
+| Is the owning app's secret anywhere? | `az ad app show --id bfac7f6e…`: **no password credentials, no certificates**. Vault names (no values read): `spaarke-spekvcert` (the BFF's) and `sprk-prod-kv` hold only `spe-owning-app-secret` (config `c3a25b9a…`'s app `170c98e1…`). | **No** — no secret exists to store; one must be minted. |
+
+**Delivered:** `scripts/Repair-SpeConfigSecretName.ps1` (dry run / `-Apply` / `-Verify`; never deletes the config, never
+overwrites a stored secret, never prints a value). `-Apply`: the value comes from a vault already holding `-SecretName`
+(all holders must agree — so a repeat run mints nothing), else `-MintClientSecret` (Graph `addPassword` on the owning app —
+an Entra write, existing credentials kept, keyId printed) or `-SourceKeyVaultName`/`-SourceSecretName`; it is stored where
+missing (Key Vault REST, so the value is never on a command line), then the config is PATCHed with If-Match on its ETag.
+`-Verify` exits 0 only when the config names the secret, every vault holds the same value, and that value authenticates
+as the owning app (a client-credentials token request). Run read-only on dev: the dry run prints the plan (STORE in both
+vaults, PATCH `'null'` → `spe-owning-app-model1-owner`); `-Verify` exits **1** (config names `'null'`, both vaults lack the
+secret); a non-conforming or trailing-newline `-SecretName` exits **2** before anything is read. The manual gate is
+§13.9 (b).
+
+**Scope discovered and added (round 15):** the PowerShell allow-list was spelled inside `Test-SpeConfigSecretNames.ps1`
+only, and the container-binding backfill read a config's secret from the vault WITHOUT judging its name (it would have
+sent, say, the Redis connection string to the token endpoint as a client secret for whatever app a config named). Now:
+ONE PowerShell copy of the rule, `scripts/common/SpeConfigSecretNamePolicy.ps1` (`$SpeConfigSecretNamePrefix`,
+`Test-SpeConfigSecretNameAllowed`, `\z`-anchored), dot-sourced by `Test-SpeConfigSecretNames.ps1`,
+`Repair-SpeConfigSecretName.ps1` and the backfill, which now refuses a non-conforming name BEFORE `az keyvault secret show`
+(SKIPPED-CONFIG "the vault was NOT read" — run read-only on dev: `68f9a952…` now reports exactly that). An ArchTest pins
+the module equal to the C# rule, every vault-reading script to it, and the backfill's judge-before-read order.
+
+### 13.5 Round 41 item 5 — the verifier's LOW items
+
+**(a) The platform-operator `TotalCount` guard (verifier 3, 13).** Root cause of the green seed V14: the containers
+collection reports no total — `SpeAdminGraphService.SearchContainersAsync` returns `TotalCount: null` by design — so no
+request through the host could ever observe the guard at `SearchContainersEndpoints.cs:133`. Fixed by structure, not by a
+host test that cannot bite: the rule is ONE method, `SpeAdminContainerTrim.ReportableGraphTotal` (platform operator ∧
+nothing removed ∧ no further page), used by BOTH searches (the item search's copy is gone); the container endpoint's
+response is built by `internal SearchContainersEndpoints.BuildResponse(page, trim)`, which a test drives with a page that
+DOES carry a total. Seeds: the rule's three clauses each RED (B1-B3; B1 = V14 in the shared rule, also reddening the item
+search's host test), and V14 at the container call site (B4: forward `page.TotalCount` raw) RED.
+
+**(b) The creation guard's holes (verifier 4, 14).** `SpeAdminContainerBindingGuardTests` now follows every route to the
+containers collection, failing closed on what it cannot judge:
+- **C# (all of `src/`):** every `.FileStorage` member access must chain straight into `.Containers` / `.ContainerTypes` /
+  `.ContainerTypeRegistrations` / `.DeletedContainers` (a held FileStorage builder is refused); `FileStorage.Containers`
+  not indexed must chain straight into `.GetAsync(` / `.PostAsync(` (optionally via `.WithUrl(…)`) — a collection builder
+  held in a variable, passed along, or anything else is refused; `ContainersRequestBuilder` named anywhere is refused; the
+  collection URL spelled in a string, in a method that POSTs (`PostAsync`, `HttpMethod.Post`, `Method.POST`), is a create.
+  Every create must bind in its method (or be the verified deferred binder). Seeded snippets (each flagged): unbound,
+  **held collection (the verifier's H2)**, held FileStorage, passed along, constructed, raw HTTP, Kiota; passing: bound,
+  bound via `WithUrl`, the read forms, a namespace-only reference.
+- **PowerShell (`scripts/` and any `.ps1` under `src/`):** the Graph SDK cmdlet `New-Mg[Beta]StorageFileStorageContainer`
+  is a create anywhere; in a script that names the collection (the URL, or a `…/containers` string in a script that
+  mentions fileStorage), every POST — `-Method Post`, a splat's `Method = 'Post'`, `az rest --method post`, `curl -X
+  POST`, a helper's positional `'Post'`, `[…]::Post` — is a create unless its URI is provably another endpoint (a literal,
+  or a variable every assignment of which is a literal); **a URI held in a variable (the verifier's H1)** that resolves to
+  the collection, a variable it cannot resolve, a splat or a function's result counts as a create. Seeded snippets (each
+  flagged): unbound, no module, **URI in a variable (H1)**, URI built from a base, splatted, URI from a function, `az
+  rest`, the SDK cmdlet; passing: bound, the existing token / Dataverse / item-URL POSTs, a GET of the collection.
+- **No binder outside C# / PowerShell:** a TypeScript / JavaScript / Python / shell file under `src/`, or a shell / Python /
+  JavaScript / pipeline-YAML / cmd file under `scripts/`, that names the collection fails the build.
+- Real-file seeds (A4-A8): the verifier's exact H1 as a new script, H2 as a new `.cs` under `src/`, a `.ts` under `src/`, a
+  YAML under `scripts/`, the SDK cmdlet — all RED.
+
+**(c) The allow-list anchor (verifier 5).** `SpeConfigSecretNamePolicy.Allowed` ends at `\z` (and the PowerShell module).
+Tests: the domain rule refuses `"spe-owning-app-secret\n"` and `"…\r\n"`; `POST /api/spe/configs` with
+`"spe-owning-app-acme\n"` answers 400 with the rule's code and creates nothing (the endpoint's own format check,
+`^[a-zA-Z0-9-]{1,127}$`, is left as it is: the policy runs right after it on every POST/PUT and refuses the same names
+with the rule's machine code — tightening it too would change no outcome, so it could not be proven); the ArchTest pins
+`'}\z'` in the module. Seeds B5 (C# `$`) and A1 (PowerShell `$`) RED; the repair script refuses a trailing-newline name
+(exit 2, run on dev).
+
+**(d) The H5/H8 root-business-unit read (verifier 6).** Settled from code as far as code can settle it, and put in live
+gate (d). `DataverseWebApiRootBusinessUnitReader` uses `DefaultAzureCredential(TenantId)` against `{env}/.default` —
+the credential, tenant and audience of H5's WhoAmI probe, which is H5's completion gate (`H5DataverseEnvCreationHandler`
+completes only on `Reachable`); H8 is dispatched only after H5 completed, and H10 later WRITES app users with the same
+credential. The comments that say the "MI-Dataverse App User (H10)" does not exist yet concern the identity H10 REGISTERS
+(`InterStepState.MiClientId`); the project's own comments disagree on whether that is L2's identity, and if it were, H5's
+gate and H10's writes could not work either. So H8 is no worse placed than H5 and H10, and a 401/403 surfaces as Resumable
+`spe-root-business-unit-unresolved` naming the status — never a silent stall. What a WhoAmI 200 does not prove is a
+security role that reads `businessunit` — gate (d) checks it on the first real run. Recorded in the reader's header and
+the customer-provisioning note.
+
+### 13.6 Placement (CLAUDE.md §10) and new surface (CLAUDE.md §11)
+
+**Placement:** in the BFF on existing surfaces (`SpeAdminTenantScope`'s trim record, the search endpoints, the dashboard
+job and projection, `SpeConfigSecretNamePolicy`); in L2 on H8's existing handler and provisioner seam, the existing DAG
+map and H7's existing guard block; in `scripts/` for the operator paths. No new endpoint, filter, policy, DI registration
+(BFF or L2), option, package, Dataverse column, job or plugin (ADR-002). No AI type touched (ADR-013).
+
+| New | Existing (grep evidence) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `SpeContainerTypeProvisionRequest.ExistingContainerTypeId`; `…Outcome.Failure.CreatedContainerTypeId` | the provisioner seam (`ISpeContainerTypeProvisioner`), ONE implementation + the tests' fake | members of the existing records | a resume after a failed bind / a mid-creation failure makes a second, undeletable container type (L12, L13, L6, L7) |
+| `GraphContainerTypeProvisioner.CreateAsync` (internal) | `ProvisionAsync` (cert + Graph in one method) | split of the same method, the `BindNewContainerAsync` precedent | the existing-type path and the failure report unprovable without live Graph |
+| H8 `ReadRecordedCreation` / `RecordCreationAsync`; codes `CreationRecordInconsistent` / `CreationRecordNotPersisted`; three evidence-status constants | `MarkWaitingOnGateAsync` (wrote the ids but nobody read them back); `SpeContainerTypeRejectionCodes` | handler-private steps over fields H8 already owns; no new `InterStepState` key (design.md §6.2 locks keys) | the verifier's item 1: every re-entry re-creates, the first container orphaned unbound (L1, L2, L5, L8-L11) |
+| DAG edge `H7 ← H8`; H7's H8-completed check | `DagAdvancer.HandlerDependencies`; H7's upstream guards | one dependency; one guard in the existing block | H7 writes an unbound container into `sprk_SharePointEmbeddedContainerId` (L14, L15) |
+| `SpeAdminContainerTrim.ReportableGraphTotal` | two inline copies (item and container search) | one method on the existing trim record; the copies removed | the container-search guard unprovable (V14); two copies drift (B1-B3) |
+| `SearchContainersEndpoints.BuildResponse` (internal) | the inline response construction | extraction | V14 stays unobservable (B4) |
+| `scripts/common/SpeConfigSecretNamePolicy.ps1` | the rule inside `Test-SpeConfigSecretNames.ps1` (moved here) | ONE module for three scripts, the `SpeContainerBinding.ps1` precedent | the backfill reads any secret a config names; a third spelling drifts (A1-A3) |
+| `scripts/Repair-SpeConfigSecretName.ps1` | `Test-SpeConfigSecretNames.ps1` is read-only by name and contract (the onboarding gate relies on it); the backfill is about containers | a writer cannot live in the read-only check | round 41 item 4's script; dev config `68f9a952` stays refused, its containers unlisted, the binding gate's `-Verify` stuck at 1 |
+
+**Complexity (§11.5):** `H8SpeContainerTypeHandler` grew by its own record-and-resume steps (one responsibility: drive
+H8's creation to a bound, persisted container exactly once); `GraphContainerTypeProvisioner` was split, not grown.
+
+### 13.7 Tests added / changed this round — one-line justifications (test-scope criterion)
+
+All L2 tests are this project's pure handler tests with hand-written fakes / a fake Graph transport; BFF host tests go
+through the real host. No `Mock<HttpMessageHandler>`, no DI-registration test, no constructor null-check test (ADR-038).
+
+- `H8SpeContainerTypeHandlerTests` **AC30-AC40** (11): wait then resume — ONE creation, the same container verified, bound
+  and handed off (the verifier's missing "pending followed by resume" test); a resume during the wait creates nothing;
+  the record precedes verification (order `provision, write, verify`) so a quarantined verify resumes with the same
+  container; a bind that removed the container resumes with a new root container in the SAME type; a provisioner failure
+  after the type records the type; a pre-round-41 run resumes with its container (AC35, quarantined path) and loses its
+  unbound hand-off even when the entry stops early (AC40); an inconsistent record is quarantined; the record survives a
+  concurrent write; it never overwrites another creation's record (AC39); an unrecordable creation is quarantined naming
+  both ids. **AC22** now asserts `SpeContainerId` is null during the wait and the record names the container.
+- `GraphContainerTypeProvisionerBindTests` (+2): an existing type is reused (no container-type POST; the container POST
+  carries it); a failure after the type reports it.
+- `DagAdvancerTests` (+2): after H6, H7 waits for H8; after H6 and H8, H7 is ready.
+- `H7DataverseEnvVarValuesHandlerTests` (+1, fixture: `BuildRun` records H8's completion): a container id from a run where
+  H8 has not completed is never written.
+- `ContainerBindingRuleTests` (domain): unbound / malformed → Excluded (renamed, was Unattributed); the shared Graph-total
+  rule's clauses; the container-search response builder with a page that carries a total.
+- `SpeAdminDashboardScopeTests`: the refresh counts no unbound container — a `c-rootless` container (bound to the root,
+  no config of its type there) is the remaining unattributed one.
+- `SpeConfigSecretNamePolicyTests` (+2 rows), `SpeAdminConfigSecretNameTests` (+1 row): the trailing-newline names.
+- `SpeAdminContainerBindingGuardTests` (ArchTests): the C# and PowerShell analysers rewritten (§13.5 b) with seeded
+  snippets; `NoOtherSourceUnderSrc_AddressesTheContainersCollection`, `NoOtherScriptType_AddressesTheContainersCollection`
+  (new); `TheDeferredBinderIsReal` extended (read record → create → record → verify → bind → KV → complete;
+  `SpeContainerId` given a container only in `MarkCompleteAsync`); `TheSecretNameVerifyScript_AgreesWithTheBff` now pins the
+  module, the `\z` anchor, every vault-reading script and the backfill's judge-before-read order.
+
+### 13.8 Seeding proofs (on the final code; `scratchpad/f2v1/seed.py` + `seed_ps.py`, session scratchpad)
+
+Each seed: ONE exact single-occurrence replacement (anchor counts checked = 1) or ONE added file, the named classes run
+(L2: H8 / DAG / H7 / provisioner; BFF: every `Auth.SpeAdmin` / `Domain.SpeAdmin` / `SearchItemsTests` class; ArchTests:
+`SpeAdminContainerBindingGuardTests`), the source restored from a byte copy, MD5-checked and touched (added files
+deleted). `git status` was clean afterwards. **All 30 in the table RED in their final form, plus P1 below; none failed
+to compile in its final form.** Three first forms were reworked and are recorded honestly: **L9** (`return` inside the merge loop) did not
+compile (CS0162) → re-seeded as **L9b**, RED; **L4** (withdrawal removed at (5c)) stayed GREEN because every write of
+that entry already cleared the field — the withdrawal was MOVED to (5a), before any write, AC35/AC40 now pin it, and
+**L4b** is RED; **A2** (`$false -and` in the backfill's judge) stayed GREEN because the ArchTest only looked for the call
+text — the test now pins the exact "if not allowed, throw" shape, A2 and **A2b** (warn instead of throw) are RED.
+
+| # | Seed | RED tests |
+|---|---|---|
+| L1 | H8 re-entry ignores a recorded root container (re-creates) | `H8SpeContainerTypeHandlerTests.AC30_…`, `AC31_…`, `AC32_…`, `AC35_…` |
+| L2 | the creation is not recorded before verification | `AC32_…`, `AC33_…`, `AC37_…`, `AC38_…`, `AC39_…` |
+| L3 | the replication wait hands the UNBOUND container to H7 again | `AC22_…`, `AC30_…`, `AC31_…`; ArchTest `The L2 H8 root container is bound by the handler after verification, before the KV write and the H7 handoff` |
+| L4b | an incomplete entry keeps a pre-round-41 unbound hand-off | `AC35_…`, `AC40_AnUnboundHandOff_IsWithdrawn_EvenWhenTheEntryStopsBeforeReadingItsRecord` |
+| L5 | a bind that removed the container keeps it on record | `AC33_…` |
+| L6 | a provisioner failure's created type is not recorded | `AC34_…` |
+| L7 | the handler never passes the recorded type to the provisioner | `AC33_…`, `AC34_…` |
+| L8 | an inconsistent record is not refused | `AC36_…` |
+| L9b | a concurrent write loses the record (retries the stale document) | `AC37_…` |
+| L10 | the merge overwrites another creation's record | `AC39_…` |
+| L11 | an unrecordable creation proceeds as if recorded | `AC38_…` |
+| L12 | the provisioner ignores `ExistingContainerTypeId` | `GraphContainerTypeProvisionerBindTests.AnExistingContainerType_IsReused_OnlyARootContainerIsCreatedInIt` |
+| L13 | the provisioner's failure does not report the type it created | `…AFailureAfterTheTypeWasCreated_ReportsTheType_SoTheHandlerRecordsIt` |
+| L14 | the DAG lets H7 run before H8 | `DagAdvancerTests.ComputeReadyHandlers_AfterH6_H7WaitsForH8_WhichHandsOffOnlyABoundContainer` |
+| L15 | H7 consumes a container id from a run where H8 has not completed | `H7DataverseEnvVarValuesHandlerTests.ASpeContainerIdWrittenBeforeH8Completed_IsNeverConsumed_NoWriterCall` |
+| B1 | the shared Graph-total rule forwards despite a further page (the verifier's **V14**) | `SpeAdminPerContainerScopeTests.SearchItems_ForARootAdmin_ReportsGraphsTotal_OnlyWhenThereIsNoFurtherPage(moreResults: True…)`, `ContainerBindingRuleTests.GraphsSearchTotal_…`, `…TheContainerSearch_ReportsGraphsTotal_OnlyThroughTheSharedRule` |
+| B2 | the rule forwards to any admin | `ContainerBindingRuleTests.GraphsSearchTotal_…`, `…TheContainerSearch_…` |
+| B3 | the rule forwards for a trimmed page | `SpeAdminPerContainerScopeTests.SearchItems_AHitThatNamesNoContainer_IsDropped_EvenForARootAdmin`, `ContainerBindingRuleTests.GraphsSearchTotal_…`, `…TheContainerSearch_…` |
+| B4 | the container search forwards Graph's total unguarded (**V14 at the call site**) | `ContainerBindingRuleTests.TheContainerSearch_ReportsGraphsTotal_OnlyThroughTheSharedRule` |
+| B5 | the C# allow-list ends at `$` again | `SpeConfigSecretNamePolicyTests.ANameOutsideTheRule_IsRefused(name: "spe-owning-app-secret\n")`, `SpeAdminConfigSecretNameTests.Post_WithASecretNameOutsideThePrefix_Is400_…(name: "spe-owning-app-acme\n")` (the `\r\n` row stays green under `$` by nature — `$` only forgives a final `\n`) |
+| B6 | unbound containers counted in the operator's aggregate again | `SpeAdminDashboardScopeTests.Refresh_ForAPlatformOperator_CountsEveryContainerOnce_AndNoUnboundOrForeignContainer`, `…Refresh_WhenAContainersBindingCannotBeRead_…`, `ContainerBindingRuleTests.UnboundAndMalformedContainers_AreCountedNowhere_NotEvenInTheOperatorsAggregate` |
+| A1 | the PowerShell allow-list ends at `$` again | `The PowerShell secret-name rule is ONE module that agrees with the BFF, and every script that judges a name uses it` |
+| A2 | the backfill's judge weakened (`$false -and …`) | same |
+| A2b | the backfill warns instead of refusing | same |
+| A3 | the repair script spells its own prefix | same |
+| A4 | **the verifier's H1** as a new script (`$uri = "…/fileStorage/containers"; Invoke-RestMethod -Uri $uri -Method Post`) | `Every SPE container a script creates is bound to its business unit, or removed` |
+| A5 | **the verifier's H2** as a new `.cs` under `src/` (`var containers = graph.Storage.FileStorage.Containers; await containers.PostAsync(…)`) | `Every SPE container created anywhere in src/ is bound to its business unit` |
+| A6 | a TypeScript file under `src/` posting to the collection | `No other source under src/ addresses the SPE containers collection` |
+| A7 | a pipeline YAML under `scripts/` posting to the collection | `No other script type under scripts/ addresses the SPE containers collection` |
+| A8 | a script creating through `New-MgStorageFileStorageContainer` | `Every SPE container a script creates is bound to its business unit, or removed` |
+
+The analysers' own seeded-snippet tests (`TheCreationAnalyser_…`, `TheScriptCreationAnalyser_…`) hold 7 C# and 8 PowerShell
+flagged shapes plus the passing forms (§13.5 b), so a regression in an analyser reddens too.
+
+**PowerShell, behaviourally** (`seed_ps.py`; no pwsh runs in CI): **P1** the module's `\z` reverted to `$` — the repair
+script, given `"spe-owning-app-x\n"` as `-SecretName` on dev (read-only), proceeds to its dry run (exit 0); unseeded it
+refuses before anything is read (exit 2). RED.
+
+### 13.9 Manual gates (main session; dev; live writes only with the owner's approval) — the CURRENT list
+
+From the repo root, `az login` as an operator who can read Dataverse and the vaults:
+
+- **(b) first — Config secret-name repair (round 41 item 4; dev config `68f9a952…`).** Never delete the config.
+  1. `pwsh -File scripts/Repair-SpeConfigSecretName.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ConfigId 68f9a952-44bf-f111-a05b-3833c5e9614d -SecretName spe-owning-app-model1-owner -KeyVaultName spaarke-spekvcert,sprk-prod-kv` (dry run — expect: STORE in both vaults, PATCH `'null'` → `spe-owning-app-model1-owner`);
+  2. `… -MintClientSecret -Apply` (adds a client secret to app `bfac7f6e…` "Spaarke SPE Model 1 Owner" — it has none — an Entra write; record the printed keyId);
+  3. `… -Verify` → **exit 0**; then `pwsh -File scripts/Test-SpeConfigSecretNames.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify` → **exit 0**.
+  Undo, if ever needed: remove the credential by its keyId (`az ad app credential delete --id bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e --key-id <keyId>`) and the two secrets.
+- **(a) Container binding gate — BLOCKS deploying this branch's BFF to an environment.**
+  1. `pwsh -File scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName sprk-prod-kv` (dry run; after (b) it also lists config `68f9a952…`'s containers);
+  2. `… -Apply -MaxWritesPerRun 1` (sample), then `… -Apply` (stamps `Spaarke Inc` → Spaarke Demo, `Spaarke Dev Container 2` → Spaarke, and whatever (b) made listable);
+  3. **decided (round 41 item 3) — the three underivable dev test containers are bound to the root unit "Spaarke":**
+     `pwsh -File scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName sprk-prod-kv -Bind 'b!DcvTfUkibESq94RyGJFs-UhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy=06fbf21c-1872-f011-b4cb-7c1e52671ad0','b!rAta3Ht_zEKl6AqiQObblUhqWZU646tBrEagKKMKiOcv-7Yo7739SKCuM2H-RPAy=06fbf21c-1872-f011-b4cb-7c1e52671ad0','b!c8YRuu4xIUeN9wgIynL2y0PsOov3osVDvGM3TRxZDy7RXoLluiTER4gojqVY3YZ6=06fbf21c-1872-f011-b4cb-7c1e52671ad0' -Apply` (nothing is deleted);
+  4. `… -Verify` → **exit 0**;
+  5. undo: `… -RevertManifest <manifest.csv> -Apply`.
+  The same gate in every further environment, and before onboarding an environment onto a type another already uses.
+- **(c) Probes after deploy** — as §12.9 (c), plus: `GET $BFF/api/spe/dashboard/metrics` as a root admin →
+  `unattributedContainerCount` counts no unbound container (after (a) there are none; before (a) the five unbound dev
+  containers are NOT in it).
+- **(d) The next real L2 provisioning run** — (1) H8 completes WITHOUT `spe-root-business-unit-unresolved` (if it fails
+  there, the run's error names the HTTP status — then L2's identity lacks a role that reads `businessunit` in the new
+  environment; round 41 item 5); (2) the T6 gate evidence carries `owningBusinessUnitId` = the environment's root unit and
+  `GET …/containers/{root}?$select=customProperties` shows the stamp; (3) if the run hits the replication wait: the run is
+  `WaitingOnGate` with `interStepState.containerTypeId` set, the `h8-t6-verified` gate Pending naming the root container,
+  `interStepState.speContainerId` EMPTY and H7 not dispatched; after the wait exactly ONE container type owned by the customer's
+  BFF app exists (`GET /storage/fileStorage/containerTypes` with a DELEGATED SharePoint Embedded admin token — app-only
+  answers 403) and ONE root container in it, and only then is `speContainerId` set and H7 dispatched.
+- Still open from f1: §11.16 (i) deleted-container binding read, (k) dashboard per-config fields.
+
+### 13.10 Route authorization ledger input (task 167; still not landed — amendment 3, no waiver edits)
+
+No route was added, renamed or deleted this round. `POST /api/spe/search/containers` keeps its mechanism (filter + trim);
+its Graph total now goes through `SpeAdminContainerTrim.ReportableGraphTotal` — deny-side proof
+`Sprk.Bff.Api.Tests.Domain.SpeAdmin.ContainerBindingRuleTests.TheContainerSearch_ReportsGraphsTotal_OnlyThroughTheSharedRule`.
+
+### 13.11 Suites (once, at the end, after every seed was restored)
+
+Run 2026-10-05 03:31-04:00 on `20792c2bc` (every later commit touches only this note, the POML and the onboarding
+guide's diagram), sequentially, each suite in full, on a machine other sessions were also using.
+
+| Suite | Result |
+|---|---|
+| affected, during development (`Auth.SpeAdmin`, `Domain.SpeAdmin`, `SearchItemsTests`; ArchTests `SpeAdminContainerBindingGuardTests`; L2 H8 / DAG / H7 / provisioner) | green before seeding: 575 / 0 (BFF classes), 13 / 0 (guard), 41 / 0 (H8) |
+| full BFF unit suite `tests/unit/Sprk.Bff.Api.Tests` | **14,733 passed / 0 failed / 54 skipped (14,787)** — 19 m 25 s. No contention failure. (+5 vs f2's 14,782 total.) |
+| NetArchTest `tests/Spaarke.ArchTests` | **362 passed / 0 failed / 0 skipped** (f2: 360; +2 = the two binder-less-language guards) |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | **104 passed / 0 failed / 0 skipped** |
+| `tests/integration/Spe.Integration.Tests` (full) | **403 passed / 0 failed / 25 skipped (428)** |
+| L2 `src/server/services/Sprk.Provisioning.ControlPlane.Tests` (full) | **1,599 passed / 0 failed / 1 skipped (1,600)** (f2: 1,583 / 1,584; +16 = AC30-AC40, 2 DAG, 1 H7, 2 provisioner) |
+
+Code review / adr-check at this round's close (FULL rigor, self-review against the changed files): ADR-001 (no new
+route) ✓ · ADR-002 (no plugin) ✓ · ADR-003 (fail closed: an incomplete H8 hands nothing to H7; an unrecordable or
+inconsistent creation is quarantined, never re-created; H7 refuses an unbound container; an unbound container counts in no
+view; the backfill refuses a non-conforming name before the vault; the guard refuses what it cannot judge) ✓ · ADR-004
+(H8 stays idempotent per its key; a re-entry resumes instead of re-creating) ✓ · ADR-007 (Graph types stay in the
+provisioner / `SpeAdminGraphService`) ✓ · ADR-008 (no new filter; the total rule is a list projection, the list
+precedent) ✓ · ADR-010 (no new registration) ✓ · ADR-019 (no new HTTP code) ✓ · ADR-038 (no banned pattern; L2 over
+fakes and a hand-written transport; BFF through the host; the response builder and the trim rule are pure) ✓. No §6.5
+path needed.
+
+### 13.12 Publish size and CVE (CLAUDE.md §10, hazards 1-4)
+
+Each side exported with `git archive` into a SHORT path, `dotnet restore` + `dotnet publish -c Release --no-restore`
+exactly as `scripts/Deploy-BffApi.ps1`, zipped with PowerShell **`Compress-Archive`** (Optimal) over the publish folder,
+PDBs included:
+
+| Side | Commit | Path | Zip | Files | MSB3030 |
+|---|---|---|---|---|---|
+| fresh `origin/master` (fetched 2026-10-05) | `293fcd4c8` | `C:\wt165vm` | **45.65 MB** (47,864,338 B) | 212 | 0 |
+| task base (`task/uac-r2-165-f2`) | `a05e4de96` | `C:\wt165vp` | **45.70 MB** (47,919,795 B) | 212 | 0 |
+| this branch | `20792c2bc` (src = the final commit's) | `C:\wt165vb` | **45.70 MB** (47,919,718 B) | 212 | 0 |
+
+This round's own contribution (branch − base): **−77 B (0.00 MB)**. Branch vs fresh master: **+0.05 MB** (+55,380 B);
+`293fcd4c8` is NOT an ancestor of this branch, so that figure also carries master's own drift since the work branch's
+base. Ceiling 60 MB. Equal file counts, no MSB3030 — all three publishes complete. The three export directories were
+removed afterwards. `dotnet list … package --vulnerable --include-transitive` (BFF): **no vulnerable packages**; no
+`.csproj` / `.props` changed this round (BFF or L2).
+
+**Conflict check:** `git merge-tree` of this branch into `work/unified-access-control-r2` @ `83460442d` — clean. Open PRs
+(24) touching a changed path: #1286 (`scripts/README.md`, another section) — line-disjoint.
+
+### 13.13 Decisions (this round)
+
+- **D25 — H8's creation record is H8's own existing state** (`InterStepState.ContainerTypeId` + the T6 gate naming the root
+  container), not a new `interStepState` key (design.md §6.2 locks the keys) and NOT the H7 hand-off. The pre-round-41
+  pending path wrote exactly these fields, so its runs resume without a shim.
+- **D26 — the record is persisted immediately after creation**, before verification: only then can no failure, wait,
+  crash or lost write make a re-entry create again. A creation that cannot be recorded is quarantined with both ids.
+- **D27 — H7 depends on H8 in the DAG** (and checks H8's completion itself): H7 writes H8's container, which H8 hands off
+  only once bound. During the replication wait H7, H10 and what follows wait; H9 and the other branches advance.
+- **D28 — unbound containers are in no dashboard view** (round 41 item 2; reverses D18). "Unattributed" = bound to this
+  environment's unit with no config of its type above it.
+- **D29 — the Graph-total rule is ONE method** used by both searches, and the container search's response builder is
+  proven directly — a host test cannot bite while the containers collection reports no total.
+- **D30 — the creation guard fails closed on what it cannot judge** (a held builder, an unresolvable POST URI in a script
+  that names the collection), and no binder-less language may name the collection at all.
+- **D31 — the PowerShell secret-name rule is ONE module**, and every script that reads a config's secret judges the name
+  first (the backfill did not).
+- **D32 — the endpoint's format check keeps `$`**: the policy (`\z`) runs right after it and decides; tightening the format
+  check too would change no outcome and so could not be proven.
+
+### 13.14 Not closed
+
+Only the manual live gates of §13.9 (live writes: the config repair with a minted credential, the backfill `-Apply` /
+`-Bind`; the post-deploy probes; the next real L2 run) and f1's §11.16 (i)/(k). Nothing is deferred to another project.

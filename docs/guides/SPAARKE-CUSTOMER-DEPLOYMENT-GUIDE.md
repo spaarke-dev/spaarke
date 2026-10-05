@@ -404,9 +404,8 @@ H0 --> H1 --> H2a --> { H2b (indexes), H4 (KV), H5 (dv-env) }   # 3-way parallel
                                                     H5 (dv-env) -+   # H8 also needs H5: it binds the root container
                                                                      # to the environment's root business unit (task 165)
 
-H5 --> H6 (solutions) --> H7 --> H10 (needs H6) --> H11
-                            ^
-                  H8 (SPE) -+   # H7 also needs H8: it writes H8's root container, handed off only once BOUND (task 165, round 41)
+# H7 also needs H8 (task 165, round 41): H7 writes H8's root container, which H8 hands off only once BOUND.
+H5 --> H6 (solutions) --> H7 (+ H8) --> H10 (needs H6) --> H11
                                     |
                                     v
                               { H12a (AI seed), H12b (config seed) }   # parallel
