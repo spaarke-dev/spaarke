@@ -740,6 +740,17 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Tests and seeds: issuer deleted, take-over clears both, backfill.
 3. **The two unpinned guards get tests that bite:** V6, R2-ended in `Effective()`; and V11, the `Unknown()` guard for an unplanned issuer row.
 
+## Round 51 (2026-10-05). BINDING. Main-session decision under round 15. Task 147, from its re-verification (`task/uac-r2-147-r1c-v1`, ready to merge).
+
+1. **Descendants released on a move out: ratified as implemented (option a).**
+   - A descendant leaves isolation only under the re-filed row's own F3 act: Full Access on the record it left, or the row's creator.
+   - A row that was never isolated releases nothing.
+   - This is round 24 item 2 ("never release without an F3 holder's act") applied to a re-file. The re-filed row's F3 holder acts for its subtree, as the unsecuring F3 holder does for a root's children (148).
+   - **Rejected:**
+     - (b) a per-descendant check: a descendant's isolation is inherited, not its own;
+     - (c) never release: that strands a re-filed subtree.
+2. **The side pane's partial-save rollback is fixed at integration.** When the filing saves and the other fields fail, rollback reverts only the fields that failed, never the persisted filing. Test it.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
