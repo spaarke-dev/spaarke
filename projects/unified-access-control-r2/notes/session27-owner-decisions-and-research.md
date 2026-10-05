@@ -601,6 +601,15 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - The waiver text and the pinned control must agree: a test fails when they differ.
 2. **The time-bound observation is closed too:** `MemoizedHealthCheck`'s shared evaluation gets an upper time bound, a registration `Timeout`, or both. A hung evaluation ends as a cached fault for no longer than the memo window (round 34 item 7), never as a permanently stuck state. Tested with the fake `TimeProvider`.
 
+## Round 44 (2026-10-05). BINDING. Main-session decision under round 15. Task 168, from its re-verification.
+
+1. **The grid script requires SpaarkeGridCustomizer v1.1.1 (option a).** Round 38's "the grid configuration script is unchanged" means the CONFIGURATION it writes is unchanged.
+   - Raising `$MinCustomizerVersion` to 1.1.1 is required: with v1.1.0, `-Verify` would pass while the pair and the intermediate lookups stay editable (ADR-003, fail closed).
+   - **Integration work (with the 168 merge):**
+     - A lock-step test pins `$MinCustomizerVersion` to the PCF manifest version.
+     - A C# lock-step test ties `config/regarding-filing-columns.json` `rootColumns` to `CoreAncestorResolver.CoreAncestorLookups`.
+     - The picker derives `$RequiredPairColumns` from the shared list without the hard-coded exclusion, or fails with a clear message naming the column a table lacks.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
