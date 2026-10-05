@@ -269,8 +269,10 @@ THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-fi
         Pending manual gates G147-1 to G147-4 are in note section 8.</live>
       <claude-edits>none</claude-edits>
     </run>
-    <run date="2026-10-04" branch="task/uac-r2-147-r1" base="1a39f7bdd" outcome="completed">
-      <summary>Owner round 28 implemented in full (E1 = A1, E2 = BFF-backed commands under a secure parent + the L4 recent pass
+    <run date="2026-10-04" branch="task/uac-r2-147-r1" base="1a39f7bdd" outcome="interrupted">
+      <summary>INTERRUPTED by a machine restart before its final checks; the work was saved on wip/uac-r2-147-r1-restart and
+        finished by the r1c run below (which found and fixed a seed left in place and three defects in it). As recorded at the
+        stop: owner round 28 implemented in full (E1 = A1, E2 = BFF-backed commands under a secure parent + the L4 recent pass
         every 2 minutes with writes on); verifier items 1-23 closed or recorded as manual live gates. Rebased onto the batch-4
         integration base (merges 70db1efb1 and e96112845). Full record: notes/task-147-client-child-writers.md (r1).</summary>
       <done>
@@ -341,9 +343,99 @@ THE SIBLING PROJECT. field-mapping-server-write-path-r1 (worktree `spaarke-wt-fi
           background work, no AI capability). No new DI registration or interface (static endpoint class over existing
           services). Publish size: skipped per the brief.</placement>
       </justification-new-surface>
-      <tests>TESTS_PLACEHOLDER</tests>
+      <tests>Not run to completion: the restart stopped this run before its final suites. See the r1c run.</tests>
       <live>READ-ONLY only (GETs): form/subgrid inventory, quick-create flags, RetrieveEntityRibbon, the deploy script's dry
         run. Pending manual gates G147-2 to G147-6 (G147-5 HARD pre-deploy) in note section 8; G147-1 withdrawn.</live>
+      <claude-edits>none</claude-edits>
+    </run>
+    <run date="2026-10-04" branch="task/uac-r2-147-r1c" base="0ab6411e1" outcome="completed">
+      <summary>Finished the round the restart stopped (from wip/uac-r2-147-r1-restart), implemented owner/main-session round 28
+        in full, round 34 item 6 and round 36, and closed verifier items 1-25. Merged integ/uac-r2-batch4 (tasks 159-164) per the
+        main session's binding note: 159's deletion of PUT /api/v1/events/{id} stands; the event's ONE re-file route is
+        PATCH /api/v1/events/{id}/filing in 159's family, filing only, with the child pass. Full record:
+        notes/task-147-client-child-writers.md (r1c).</summary>
+      <done>
+        <item>Item 1: the WIP read file by file; a seed left in place (UpdateAsync's server-owned-column refusal) restored;
+          the filing routes' DI parameters made [FromServices] (11 host tests were red); the CreateTodoWizard broadcast kept
+          in the call path; the RegardingResolver new-host rule tightened; the E2 inventory widened to every main form.</item>
+        <item>Round 28 E1: ten create tables on POST /api/v1/child-records/{table} (+ sprk_kpiassessment, sprk_billingevent);
+          every census writer switched; refusals show the ProblemDetails message; PCFs RegardingResolver 1.6.0 and
+          CommunicationConnections 1.7.0 in all four places, npm run build:prod, bundles copied; task 152 "Created By" via
+          RecordCreatorPerson. E2: secure-record ribbon commands on every ownership-child subgrid (28, live inventory), the
+          "+ Add KPI" guard, dry run / -Apply / -Verify script; the L4 job every 2 minutes with writes on, carry-forward and
+          the r1c catch-up after every start.</item>
+        <item>Round 34 item 6: CreateEventWizard binds sprk_RelatedEvent; the BFF create refuses sprk_Event@odata.bind (400).</item>
+        <item>Round 36: PATCH /api/v1/events/{id}/filing (shape filter, then 159's RecordRouteAccessAuthorizationFilter
+          "write", then the ONE re-file core: AppendTo, 146's F3, owner assigned; 156's re-stamp); communications: the same
+          rule in 161's family (CommunicationRecordRoute.Refile). SecureChildReconciler.AfterRefileAsync is the ONE
+          after-re-file step of every re-file writer: the row's mirror, then 148's pass over everything filed under it when
+          it moved under, out of or between secure records (a release only when the row itself left isolation). Clients
+          send only the filing to those routes (the seam splits a mixed update, filing first; the side pane; Connections).</item>
+        <item>Verifier items 3-25: memo taxonomy and container links on the integration base; the 409; AC1/R1 new host; L4
+          retries; seed survival; docs; note; E1 framing; backfill owner (G147-3, analysis); merge hazard; ACs; publish size
+          and CVE measured (tests element).</item>
+      </done>
+      <justification-new-surface>
+        <item name="SecureChildReconciler.AfterRefileAsync, ReconcileBelowAsync, MirrorIsolatedDescendantsAsync, IsSecureTeamOwnedAsync / IsSecureOwnerTeamAsync pass-throughs">
+          <existing>SecureChildReconciler's Pass (task 148) walks a ROOT's descendants; SecureChildShareSynchronizer.AfterRefileAsync
+            (r1c) mirrors ONE row; grep "child pass" after a re-file: none.</existing>
+          <extension>Yes: the existing Pass anchored on the re-filed child row (one flag skips the root-only cascade step), per
+            row SyncChildAsync for the mirror; the reconciler already composes the synchronizer, so the after-re-file step moved
+            up one level rather than adding a second walker.</extension>
+          <cost-of-doing-nothing>a re-filed event's to-dos stay readable by the business unit under the secure record it moved
+            into until the sweep, and stay isolated for good under the ordinary record it moved out to.</cost-of-doing-nothing>
+        </item>
+        <item name="PATCH /api/v1/events/{id}/filing filing-only (ValidateFilingRequestAsync, RefileEventAsync) + ChildRecordEndpoints.IsFilingColumn / FilingShapeProblem / NotFilingCode">
+          <existing>159 deleted PUT /api/v1/events/{id}; 159's RecordRouteAccessAuthorizationFilter and its shape-filter pattern.</existing>
+          <extension>One route added to 159's family (round 36: "add the route there if the family lacks it; never a second
+            one"); the general PUT is not restored.</extension>
+          <cost-of-doing-nothing>an event has no browser re-file at all, or a general update comes back ungated.</cost-of-doing-nothing>
+        </item>
+        <item name="CommunicationRecordRoute.Refile (+ RefileDenyCode)">
+          <existing>161's MessageDeactivate write check.</existing>
+          <extension>One enum value reusing the message-write check; its own deny code.</extension>
+          <cost-of-doing-nothing>the communication filing route is gated only inside the handler, outside 161's family contract.</cost-of-doing-nothing>
+        </item>
+        <item name="SecureChildShareSynchronizer.AfterRefileAsync + IsSecureTeamOwnedAsync (r1c)">
+          <existing>SyncChildAsync, RemoveMirrorAsync (148).</existing>
+          <extension>Composes the two existing steps; replaces the route-local copy.</extension>
+          <cost-of-doing-nothing>a move out by the documents route or the chat tool left the old record's sharees on the row for good.</cost-of-doing-nothing>
+        </item>
+        <item name="catch-up in SecureChildReconciliationJob (two fields, one enum value)">
+          <existing>the recent pass and the sweep cursor.</existing>
+          <extension>The same reconcile over the same root list, once per instance.</extension>
+          <cost-of-doing-nothing>a restart drops every carried record and row; a refused re-own older than the lookback is never retried.</cost-of-doing-nothing>
+        </item>
+        <item name="sprk_kpiassessment, sprk_billingevent in CreateTables / StampedChildTables / the schema script; ribbon guard for + Add KPI">
+          <existing>the codified role set holds both (G146-1); the r1 ribbon set.</existing>
+          <extension>Entries in existing lists; the same ribbon pattern.</extension>
+          <cost-of-doing-nothing>the live inventory's KPI and billing-event subgrids create user-owned children under a secure record.</cost-of-doing-nothing>
+        </item>
+        <item name="client isFilingKey / splitFilingPayload / FILING_ONLY_REFILE_TABLES; OWNERSHIP_CHILD_TABLES; Connections regardingNavPropFor">
+          <existing>withBffChildWrites (r1).</existing>
+          <extension>Exports on the one seam.</extension>
+          <cost-of-doing-nothing>an event or communication update with any other field is refused 400 by the filing route; a host
+            control re-files an ownership child as the user.</cost-of-doing-nothing>
+        </item>
+        <placement>BFF (CLAUDE.md §10; bff-extensions.md): the invariant owner's write path, app-identity writes after
+          as-caller checks, request-scoped; no new DI registration, interface, package, job or column; no AI capability
+          consumed (the chat handler calling the reconciler is AI to CRUD, the permitted direction). Publish size and CVE in
+          the tests element.</placement>
+      </justification-new-surface>
+      <tests>Final suites run once on the merged branch: BFF unit 16,461 (16,406 passed, 54 skipped, 1 failed: a 146 test whose
+        "table without the creator column" example, sprk_memo, gained the column in 147 r1; the case now uses sprk_agreement and its
+        class re-ran 101/101); NetArchTest 608/608; Sprk.Bff.Api.IntegrationTests 87/87; Spe.Integration.Tests 398 (373 passed,
+        25 skipped, 0 failed). Affected BFF classes during the round 539/539. Client: ui-components 3,559 (21 failed under load:
+        13 pre-existing in 8 suites, identical on the integration base, #1290; 8 contention, re-run alone 114/114); communication
+        components touched suites 75/75; RegardingResolver 122/122 and CommunicationConnections 43/43, both npm run build:prod and
+        bundles copied; EventDetailSidePane vite build and ui-components tsc green. Seeds: 34 r1c seeds plus 15 round-36 server
+        seeds, 5 round-36 client seeds and P3, every one bites (note section 7). Publish size (fresh short-path worktrees,
+        Compress-Archive Optimal, PDBs included): master c2ef1857b 45.66 MB / 212 files; integration tip 63556192c 35.52 MB
+        (37,243,155 B) / 190 files; branch e19a5f4ab 35.55 MB (37,279,975 B) / 190 files: +0.04 MB against the base it merges into
+        (the -10.11 MB against master is task 162's QuestPDF removal). CVE scan: no vulnerable packages.</tests>
+      <live>READ-ONLY only (GETs): form/subgrid inventory, KPI and billing-event metadata, RegardingResolver hosts, the two
+        unresolvable communications of the stamp dry run, the ribbon deploy script's dry run. Pending manual gates G147-2 to
+        G147-6 (G147-5 HARD pre-deploy) in note section 8.</live>
       <claude-edits>none</claude-edits>
     </run>
   </execution>

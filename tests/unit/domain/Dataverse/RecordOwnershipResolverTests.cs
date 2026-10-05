@@ -1764,16 +1764,19 @@ public class RecordOwnershipResolverTests
         var kept = RecordOwnerResolution.Unchanged("E1") with { CreatedByPerson = CallerUserId };
         var document = new Entity("sprk_document");
         var unfiledMessage = new Entity("sprk_communication");
-        var memo = new Entity("sprk_memo"); // a child table the BFF never creates app-only: it carries no column
+        // A child table the BFF never creates app-only, so it carries no column. (Task 147 r1 moved sprk_memo — this test's
+        // example until then — onto the app-only G5 create, with the column: RecordCreatorPerson.StampedChildTables.)
+        var agreement = new Entity("sprk_agreement");
 
         owned.ApplyTo(document);
         kept.ApplyTo(unfiledMessage);
-        owned.ApplyTo(memo);
+        owned.ApplyTo(agreement);
 
+        RecordCreatorPerson.StampedChildTables.Should().NotContain("sprk_agreement", "this case needs a table without the column");
         document.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(CallerUserId);
         unfiledMessage.GetAttributeValue<EntityReference>(RecordCreatorPerson.Column).Id.Should().Be(CallerUserId,
             "who asked is a fact about the create, whoever owns the row");
-        memo.Attributes.Should().NotContainKey(RecordCreatorPerson.Column, "Dataverse refuses a create naming a missing column");
+        agreement.Attributes.Should().NotContainKey(RecordCreatorPerson.Column, "Dataverse refuses a create naming a missing column");
     }
 
     [Fact]
