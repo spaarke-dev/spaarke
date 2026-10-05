@@ -350,7 +350,7 @@ function buildSearchDataParams(criteria: PersistedCriteria): string {
  */
 function launchSemanticSearch(criteria: PersistedCriteria): void {
   // Shared cross-frame walker (task 081 / C-8).
-  const nav = getXrm()?.Navigation;
+  const nav = getXrm('navigation')?.Navigation;
   if (!nav?.navigateTo) {
     console.warn(
       '[SemanticSearchCriteriaTool] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Search launch is a no-op.',

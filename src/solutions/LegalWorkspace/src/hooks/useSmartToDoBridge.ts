@@ -185,7 +185,7 @@ export function useSmartToDoBridge(
     try {
       // Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm();
+      const xrm: any = getXrm('navigation');
       if (xrm?.Navigation?.navigateTo) {
         // Param name kept as `eventId` for SmartTodo Code Page compatibility;
         // the value carried is a `sprk_todoid` GUID post R3 FR-29.

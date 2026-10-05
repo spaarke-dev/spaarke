@@ -115,7 +115,7 @@ function _tryGetCurrentUserId(): string | null {
   // Shared cross-frame walker (task 081 / C-8) — was a per-frame loop.
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm();
+    const xrm: any = getXrm('utility');
     if (xrm?.Utility?.getGlobalContext) {
       const ctx = xrm.Utility.getGlobalContext();
       const userId = ctx?.userSettings?.userId;

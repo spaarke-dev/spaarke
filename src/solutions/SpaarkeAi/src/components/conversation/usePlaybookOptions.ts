@@ -138,7 +138,7 @@ export function usePlaybookOptions(deps: PlaybookOptionsDeps): PlaybookOptionsHa
   const handleOpenLibraryModal = React.useCallback((sessionAttachmentIds: string[]): void => {
     // Shared cross-frame walker (task 081 / C-8).
     const nav: { navigateTo?: (...args: unknown[]) => Promise<unknown> } | null =
-      (getXrm()?.Navigation as { navigateTo?: (...args: unknown[]) => Promise<unknown> } | undefined) ?? null;
+      (getXrm('navigation')?.Navigation as { navigateTo?: (...args: unknown[]) => Promise<unknown> } | undefined) ?? null;
 
     if (!nav?.navigateTo) {
       console.warn(

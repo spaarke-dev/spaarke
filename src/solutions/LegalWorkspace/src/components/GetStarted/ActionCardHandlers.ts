@@ -88,7 +88,7 @@ async function openPlaybookIntent(
     const bffParam = bffBaseUrl ? `&bffBaseUrl=${encodeURIComponent(bffBaseUrl)}` : "";
     const data = `intent=${intent}${bffParam}`;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (getXrm() as any)?.Navigation?.navigateTo(
+    await (getXrm('navigation') as any)?.Navigation?.navigateTo(
       { pageType: "webresource", webresourceName: "sprk_playbooklibrary", data },
       { target: 2, width: { value: 60, unit: "%" }, height: { value: 70, unit: "%" }, title: "Playbook Library" }
     );

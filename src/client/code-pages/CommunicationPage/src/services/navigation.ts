@@ -12,7 +12,7 @@ export function buildNavCallbacks(): ICommunicationNavCallbacks {
     // On successful send: open the created/updated sprk_communication record.
     onSent: (communicationId: string) => {
       // Shared cross-frame walker (task 081 / C-8).
-      const xrm = getXrm();
+      const xrm = getXrm('openForm');
       if (xrm?.Navigation?.openForm) {
         xrm.Navigation.openForm({ entityName: 'sprk_communication', entityId: communicationId });
       } else {

@@ -43,7 +43,7 @@ const LOG_PREFIX = "[nextStepLauncher]";
 export function getClientUrl(): string | null {
     try {
         const url: string | undefined =
-            getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+            getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
         if (url) {
             return url.endsWith("/") ? url.slice(0, -1) : url;
         }

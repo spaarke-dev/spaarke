@@ -64,7 +64,7 @@ function parseDataParams(): DataParams {
 
   // Try Xrm context first (Dataverse runtime).
   // Shared cross-frame walker (task 081 / C-8); `any` view because XrmContext.Page lacks `data`.
-  const xrm: any = getXrm();
+  const xrm: any = getXrm('page');
   if (xrm?.Page?.data) {
     try {
       dataString = xrm.Page.data || "";

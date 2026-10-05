@@ -135,7 +135,7 @@ function fallbackToDatasetColumn(col: GridColumnDef): IDatasetColumn {
 function getOrgUrl(): string | null {
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     return url || null;
   } catch {

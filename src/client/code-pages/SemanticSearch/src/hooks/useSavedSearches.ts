@@ -66,7 +66,7 @@ function getCurrentUserId(): string | null {
     // Shared cross-frame walker (task 081 / C-8). `any` view: typed
     // GlobalContext does not declare getUserId().
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = getXrm() as any;
+    const xrm = getXrm('utility') as any;
     if (xrm?.Utility?.getGlobalContext) {
       // getUserId() returns GUID with braces: "{GUID}"
       return xrm.Utility.getGlobalContext().getUserId().replace(/[{}]/g, '');

@@ -65,7 +65,7 @@ export function resolveDataverseUrl(): string {
     // Shared cross-frame walker (task 081 / C-8).
     try {
         const clientUrl: string | undefined =
-            getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+            getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
         if (clientUrl) {
             // Strip trailing slash
             return clientUrl.endsWith("/") ? clientUrl.slice(0, -1) : clientUrl;

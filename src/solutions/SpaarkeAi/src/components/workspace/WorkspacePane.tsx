@@ -456,7 +456,7 @@ export function WorkspacePane(): React.JSX.Element {
   const resolveAnalysisSpeContainerId = React.useCallback(async (): Promise<string> => {
     // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm();
+    const xrm: any = getXrm(['webApi', 'utility']);
     if (!xrm?.WebApi?.retrieveRecord) throw new Error("Xrm.WebApi not available");
     const userId: string = cleanGuid(xrm.Utility.getGlobalContext().userSettings.userId);
     const user = await xrm.WebApi.retrieveRecord("systemuser", userId, "?$select=_businessunitid_value");

@@ -40,7 +40,7 @@ export function openEntityRecord(recordId: string, domain: SearchDomain): void {
 
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm() as unknown as typeof Xrm | undefined;
+    const xrm = getXrm('navigation') as unknown as typeof Xrm | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('[EntityRecordDialog] Xrm.Navigation not available — cannot open record dialog.');
       return;

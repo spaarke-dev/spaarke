@@ -168,7 +168,7 @@ export function useDailyDigestAutoPopup(
         // Resolve Xrm from parent frames (PCF runs in iframe).
         // Shared cross-frame walker (task 081 / C-8).
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any = getXrm();
+        const xrm: any = getXrm('navigation');
 
         if (!xrm?.Navigation?.navigateTo) {
           console.warn(

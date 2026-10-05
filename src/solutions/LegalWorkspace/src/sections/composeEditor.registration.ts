@@ -170,7 +170,7 @@ const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl })
       // The SpaarkeAi/LegalWorkspace code page runs in an iframe where Xrm lives on the PARENT/TOP
       // window, not the iframe's own globalThis. Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm();
+      const xrm: any = getXrm(['webApi', 'utility']);
       const rawUserId: string | undefined = xrm?.Utility?.getGlobalContext?.().userSettings?.userId;
       const webApi = xrm?.WebApi;
       if (!rawUserId || !webApi) return { outcome: "unavailable" }; // no Dataverse host / not ready

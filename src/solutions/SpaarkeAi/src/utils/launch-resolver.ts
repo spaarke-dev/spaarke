@@ -328,7 +328,7 @@ export function openSpaarkeAi(
 ): void {
   // Shared cross-frame walker (task 081 / C-8).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm();
+  const xrm: any = getXrm('navigation');
   if (!xrm) {
     // Deep-link / non-Xrm context — the page is opened directly via URL, not
     // through Xrm.Navigation. No action needed here.
@@ -400,7 +400,7 @@ export function openSpaarkeAiCompose(
 ): void {
   // Shared cross-frame walker (task 081 / C-8).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm();
+  const xrm: any = getXrm('navigation');
   if (!xrm) {
     console.warn(
       "[launch-resolver] Xrm global not available. SpaarkeAi Compose must be opened via direct URL.",

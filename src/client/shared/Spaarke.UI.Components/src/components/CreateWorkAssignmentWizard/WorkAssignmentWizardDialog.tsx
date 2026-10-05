@@ -654,7 +654,7 @@ const WorkAssignmentWizardDialog: React.FC<IWorkAssignmentWizardDialogProps> = (
 async function resolveCurrentUserEmail(dataService: IDataService): Promise<string | null> {
   try {
     // Get current user ID via the shared cross-frame walker (task 081 / C-8).
-    const userId = cleanGuid(getXrm()?.Utility?.getGlobalContext?.()?.userSettings?.userId);
+    const userId = cleanGuid(getXrm('utility')?.Utility?.getGlobalContext?.()?.userSettings?.userId);
     if (!userId) return null;
 
     const result = await dataService.retrieveRecord('systemuser', userId, '?$select=internalemailaddress');

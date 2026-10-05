@@ -70,7 +70,7 @@ export interface LaunchCreateOptions {
  * `xrmContext.ts:306`).
  */
 function resolveHostNavigateTo(): XrmNavigateTo | null {
-  const nav = getXrm()?.Navigation;
+  const nav = getXrm('navigation')?.Navigation;
   if (nav && typeof nav.navigateTo === 'function') {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return nav.navigateTo.bind(nav) as any as XrmNavigateTo;

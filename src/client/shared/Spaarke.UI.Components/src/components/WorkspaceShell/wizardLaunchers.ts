@@ -72,7 +72,7 @@ import { getXrm } from '../../utils/xrmContext';
  * name from `@spaarke/ui-components`.
  */
 export function resolveXrmNavigation(): any | null {
-  const nav: any = getXrm()?.Navigation;
+  const nav: any = getXrm('navigation')?.Navigation;
   return nav?.navigateTo ? nav : null;
 }
 

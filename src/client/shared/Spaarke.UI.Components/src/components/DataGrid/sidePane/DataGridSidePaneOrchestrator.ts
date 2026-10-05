@@ -114,7 +114,7 @@ export class DataGridSidePaneOrchestrator {
    */
   async registerPane(spec: SidePaneSpec): Promise<void> {
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const xrm: any = getXrm();
+    const xrm: any = getXrm('sidePanes');
     if (!xrm?.App?.sidePanes) return;
 
     this.registeredPanes.set(spec.paneId, spec);
@@ -169,7 +169,7 @@ export class DataGridSidePaneOrchestrator {
    */
   closePane(paneId: string): void {
     /* eslint-disable @typescript-eslint/no-explicit-any */
-    const xrm: any = getXrm();
+    const xrm: any = getXrm('sidePanes');
     try {
       xrm?.App?.sidePanes?.getPane?.(paneId)?.close?.();
     } catch {

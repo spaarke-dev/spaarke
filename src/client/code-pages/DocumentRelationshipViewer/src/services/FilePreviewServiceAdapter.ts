@@ -45,7 +45,7 @@ export function createFilePreviewServices(apiBaseUrl: string): IFilePreviewServi
     navigateToEntity: (params: { action: string; entityName: string; entityId: string; openInNewWindow?: boolean }) => {
       try {
         // Shared cross-frame walker (task 081 / C-8).
-        const xrm = getXrm();
+        const xrm = getXrm('openForm');
         if (xrm?.Navigation?.openForm) {
           xrm.Navigation.openForm({
             entityName: params.entityName,
@@ -67,7 +67,7 @@ export function createFilePreviewServices(apiBaseUrl: string): IFilePreviewServi
     copyDocumentLink: async (documentId: string): Promise<boolean> => {
       try {
         // Shared cross-frame walker (task 081 / C-8).
-        const xrm = getXrm();
+        const xrm = getXrm('clientUrl');
         const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
         const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${documentId}&pagetype=entityrecord`;
         await navigator.clipboard.writeText(url);

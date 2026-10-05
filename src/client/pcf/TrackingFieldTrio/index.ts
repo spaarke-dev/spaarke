@@ -600,7 +600,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
    * 80%) so it covers the Manage Access footprint. */
   private openContactRecord = (contactId: string): void => {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('navigation');
     const wasGrantOpen = this.isGrantModalOpen;
     const restore = (): void => {
       if (wasGrantOpen && !this.isGrantModalOpen) {
@@ -638,7 +638,7 @@ export class TrackingFieldTrio implements ComponentFramework.StandardControl<IIn
     // Shared cross-frame walker (task 081 / C-8). `any` view: typed XrmContext
     // does not declare Page.data.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = getXrm() as any;
+    const xrm = getXrm('page') as any;
     try {
       const v = xrm?.Page?.data?.entity?.getPrimaryAttributeValue?.();
       return typeof v === 'string' && v.length > 0 ? v : undefined;

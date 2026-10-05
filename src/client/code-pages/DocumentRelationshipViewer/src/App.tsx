@@ -414,7 +414,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const handleOpenRecord = useCallback(() => {
     if (!previewDocumentId) return;
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('openForm');
     if (xrm?.Navigation?.openForm) {
       xrm.Navigation.openForm({
         entityName: 'sprk_document',
@@ -482,7 +482,7 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
   const handleCopyLink = useCallback(() => {
     if (!previewDocumentId) return;
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
     const url = `${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`;
     void navigator.clipboard.writeText(url);

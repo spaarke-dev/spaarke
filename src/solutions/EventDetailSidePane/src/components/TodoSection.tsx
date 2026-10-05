@@ -44,7 +44,7 @@ import {
 } from "@fluentui/react-icons";
 import { CollapsibleSection } from "./CollapsibleSection";
 import { useRelatedRecord } from "../hooks/useRelatedRecord";
-import { getSidePaneXrm } from "../utils/xrmAccess";
+import { getXrmWithWebApiAndUtility } from "../utils/xrmAccess";
 import type { ILookupValue } from "../types/FormConfig";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -214,7 +214,7 @@ export const TodoSection: React.FC<TodoSectionProps> = ({
   const handleAssignedToLookup = React.useCallback(async () => {
     if (!todo.recordId) return;
 
-    const xrm = getSidePaneXrm();
+    const xrm = getXrmWithWebApiAndUtility();
     if (!xrm?.Utility?.lookupObjects) return;
 
     try {

@@ -197,7 +197,7 @@ export function createDailyBriefingRegistration(
         // Shared cross-frame walker (task 081 / C-8). Call `navigateTo` AS A
         // METHOD on `Navigation` (the R7 W12 rule): the former code detached it
         // into a local and called it unbound, losing `this`.
-        const nav = getXrm()?.Navigation as
+        const nav = getXrm('navigation')?.Navigation as
           | { navigateTo?: (page: object, options?: object) => Promise<unknown> }
           | undefined;
         if (typeof nav?.navigateTo !== 'function') {

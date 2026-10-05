@@ -68,7 +68,7 @@ import { getXrm } from '../../utils/xrmContext';
 function getDataverseClientUrl(): string {
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const clientUrl: string | undefined = getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+    const clientUrl: string | undefined = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     if (clientUrl) return clientUrl.replace(/\/+$/, '');
   } catch {
     // Cross-origin or missing Xrm — fall through.

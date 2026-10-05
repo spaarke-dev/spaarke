@@ -400,7 +400,9 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   const resolveXrm = ():
     | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
     | undefined =>
-    getXrm() as { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } } | undefined;
+    getXrm('navigation') as
+      | { Navigation?: { navigateTo?: (page: object, options?: object) => Promise<unknown> } }
+      | undefined;
 
   const openRecordViaXrm = (entityType: string, entityId: string): void => {
     if (!entityType || !entityId) return;

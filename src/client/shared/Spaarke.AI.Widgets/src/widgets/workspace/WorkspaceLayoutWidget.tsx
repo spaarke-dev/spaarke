@@ -185,7 +185,7 @@ function getWebApiSafe(): any | null {
 }
 
 function getUserIdSafe(): string {
-  const xrm = getXrm();
+  const xrm = getXrm('utility');
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext() as any;
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';

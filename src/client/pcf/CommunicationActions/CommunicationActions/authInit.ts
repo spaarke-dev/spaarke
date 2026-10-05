@@ -34,7 +34,7 @@ export async function initializeAuth(
 export function resolveDataverseUrl(): string {
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     const url = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.();
     if (typeof url === 'string' && url.length > 0) return url;
   } catch {

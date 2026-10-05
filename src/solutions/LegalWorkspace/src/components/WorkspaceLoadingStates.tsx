@@ -228,7 +228,7 @@ export const PersonalizeBanner: React.FC = React.memo(() => {
     try {
       // Shared cross-frame walker (task 081 / C-8).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm();
+      const xrm: any = getXrm('navigation');
       if (!xrm?.Navigation?.navigateTo) return;
 
       xrm.Navigation.navigateTo(

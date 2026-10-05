@@ -3,7 +3,7 @@
  * Utility functions for the FilePreviewDialog toolbar actions.
  */
 
-import { getHostXrm } from '../../services/xrmProvider';
+import { getXrm } from '@spaarke/ui-components';
 
 /**
  * Copy a shareable document link to the clipboard.
@@ -11,8 +11,7 @@ import { getHostXrm } from '../../services/xrmProvider';
  */
 export async function copyDocumentLink(documentId: string): Promise<boolean> {
   try {
-    const xrm = getHostXrm();
-    const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? '';
+    const clientUrl = getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl() ?? '';
     const link = clientUrl
       ? `${clientUrl}/main.aspx?etn=sprk_document&id=${encodeURIComponent(documentId)}&pagetype=entityrecord`
       : documentId;
@@ -47,7 +46,7 @@ export async function setWorkspaceFlag(
   flag: boolean,
 ): Promise<boolean> {
   try {
-    const xrm = getHostXrm();
+    const xrm = getXrm();
     if (!xrm?.WebApi?.updateRecord) {
       console.warn('[filePreviewService] Xrm.WebApi not available');
       return false;

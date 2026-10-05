@@ -189,9 +189,9 @@ export const DocumentCard: React.FC<IDocumentCardProps> = React.memo(
     // ----- Tool: Find Similar -----
     const handleFindSimilar = React.useCallback(async () => {
       try {
-        // Shared cross-frame walker (task 081 / C-8).
+        // Shared cross-frame walker (task 081 / C-8), nearest frame with a client URL.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any = getXrm();
+        const xrm: any = getXrm("clientUrl");
         const clientUrl =
           xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? "";
         const tenantId = getTenantId();

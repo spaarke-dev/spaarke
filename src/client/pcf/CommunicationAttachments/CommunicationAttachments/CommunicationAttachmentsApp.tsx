@@ -122,7 +122,7 @@ function resolveCommunicationId(context: ComponentFramework.Context<IInputs>): s
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
     if (typeof id === 'string' && id.length > 0) return cleanGuid(id);

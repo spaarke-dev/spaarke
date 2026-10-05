@@ -239,7 +239,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // the P7 visual review. See notes/task-091-completion.md.
   const handleOpenAllUpdates = React.useCallback(() => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[WorkspaceGrid] Xrm.Navigation.navigateTo is not available");
       return;
@@ -293,7 +293,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenWizard = React.useCallback(async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       await xrm.Navigation.navigateTo(
@@ -321,7 +321,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleOpenProjectWizard = React.useCallback(async () => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       await xrm.Navigation.navigateTo(
@@ -353,7 +353,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
       // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm() as any)?.Navigation?.navigateTo(
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_summarizefileswizard", data },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Summarize Files" }
       );
@@ -373,7 +373,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
       // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm() as any)?.Navigation?.navigateTo(
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_findsimilar", data },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Find Similar Documents" }
       );
@@ -392,7 +392,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
       // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm() as any)?.Navigation?.navigateTo(
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createeventwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New Event" }
       );
@@ -411,7 +411,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
       // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm() as any)?.Navigation?.navigateTo(
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createtodowizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create New To Do" }
       );
@@ -430,7 +430,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       // Shared cross-frame walker (task 081 / C-8) — was a window.Xrm-only read,
       // which no-op'd when LegalWorkspace is embedded (SpaarkeAi).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (getXrm() as any)?.Navigation?.navigateTo(
+      await (getXrm('navigation') as any)?.Navigation?.navigateTo(
         { pageType: "webresource", webresourceName: "sprk_createworkassignmentwizard", data: `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}` },
         { target: 2, width: OOB_MODAL_SIZES.wizard.width, height: OOB_MODAL_SIZES.wizard.height, title: "Create Work Assignment" }
       );
@@ -513,7 +513,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // the P7 visual review. See notes/task-091-completion.md.
   const handleOpenDocumentsDialog = React.useCallback((viewId?: string) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[WorkspaceGrid] Xrm.Navigation.navigateTo is not available");
       return;
@@ -527,7 +527,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // Open DocumentUploadWizard Code Page dialog (Integration Pattern C — frame-walking)
   const handleAddDocument = React.useCallback(async () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[WorkspaceGrid] Xrm.Navigation not available");
       return;
@@ -601,7 +601,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     async (webResourceName: string, data?: string, options?: DialogOptions) => {
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+        const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
         if (!xrm?.Navigation?.navigateTo) return;
 
         const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
@@ -672,7 +672,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
 
   const handleNavigate = React.useCallback((target: NavigateTarget) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
 
     if (target.type === "view" && target.viewId && xrm?.Navigation?.navigateTo) {
       // NOTE (task 091): mapped onto `record` (85%x85%) — nearest named OOB
@@ -817,7 +817,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     if (!activeLayout) return;
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       const mode = activeLayout.isSystem ? "saveAs" : "edit";
@@ -855,7 +855,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   const handleCreateLayout = React.useCallback(() => {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm(); // Shared cross-frame walker (task 081 / C-8).
+      const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
       if (!xrm?.Navigation?.navigateTo) return;
 
       xrm.Navigation.navigateTo(

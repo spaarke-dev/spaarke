@@ -3,28 +3,16 @@
  * (Custom Page).
  *
  * Web resources run inside an iframe within the Dataverse shell. The Xrm
- * global is not directly available — the shared cross-frame walker
- * (`getXrm` in @spaarke/ui-components) finds it on a parent or top window.
+ * global is not directly available — callers resolve it with the shared
+ * `getXrm` from @spaarke/ui-components (task 081 / C-8: the former
+ * `getHostXrm` wrapper here, and its same-named twin in the other Code Page,
+ * were removed so each call site states the Xrm capability it needs).
  *
  * Per ADR-026: standalone HTML web resources use this pattern instead of
  * the PCF context.webAPI mechanism.
  */
 
-import { cleanGuid, getXrm as getSharedXrm } from '@spaarke/ui-components';
-
-/**
- * Locate the Xrm global (current window → parent → top).
- * Returns null if Xrm is not available (e.g., local dev server).
- *
- * Thin wrapper kept for this package's importers; delegates to the shared
- * cross-frame walker (task 081 / C-8). It no longer writes `window.Xrm`.
- * Named `getHostXrm` (was `getXrm`) so no second export shares the shared
- * walker's name.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function getHostXrm(): any | null {
-  return getSharedXrm() ?? null;
-}
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 /**
  * Get the Xrm.WebApi reference for CRUD operations.
@@ -32,7 +20,7 @@ export function getHostXrm(): any | null {
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function getWebApi(): any | null {
-  return getHostXrm()?.WebApi ?? null;
+  return getXrm()?.WebApi ?? null;
 }
 
 /**
@@ -40,7 +28,8 @@ export function getWebApi(): any | null {
  * Equivalent to PCF's context.userSettings.userId.
  */
 export function getUserId(): string {
-  const xrm = getHostXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('utility') ?? getXrm();
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     // getUserId() returns GUID with braces: {xxxxxxxx-xxxx-...}

@@ -34,7 +34,7 @@ import { getXrm } from "@spaarke/ui-components/utils/xrmContext";
 function getClientUrl(): string {
     // Shared cross-frame walker (task 081 / C-8).
     try {
-        const url = getXrm()?.Utility?.getGlobalContext?.()?.getClientUrl?.();
+        const url = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.();
         if (url) return url;
     } catch { /* getGlobalContext() unavailable */ }
     return "";

@@ -192,7 +192,7 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
 
           // Shared cross-frame walker (task 081 / C-8). This used to read only
           // this frame's global, which worked only because xrmProvider wrote window.Xrm.
-          const xrm = getXrm();
+          const xrm = getXrm('openForm');
           if (xrm?.Navigation?.openForm) {
             // Defensive — page-nav fallback only.
             void xrm.Navigation.openForm({

@@ -261,7 +261,7 @@ function getHostRecordId(): string | undefined {
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
     if (typeof id === 'string' && id.length > 0) {
@@ -278,7 +278,7 @@ async function refreshForm(): Promise<void> {
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('page') as any;
   try {
     const data = xrm?.Page?.data;
     const refresh = data?.refresh;
@@ -302,7 +302,7 @@ async function handleRefreshInternal(): Promise<void> {
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('page') as any;
   try {
     const data = xrm?.Page?.data;
     const save = data?.entity?.save;
@@ -670,7 +670,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
       // invoked inside the async closure below, where the typeof guard's
       // narrowing of `xrm.Utility.lookupObjects` does not carry over.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm = getXrm() as any;
+      const xrm = getXrm('lookupObjects') as any;
       if (typeof xrm?.Utility?.lookupObjects !== 'function') {
         setError('The record picker is unavailable in this host.');
         return;
@@ -715,7 +715,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     // Shared cross-frame walker (task 081 / C-8).
     // `any` view: typed XrmContext does not declare the members used below.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = getXrm() as any;
+    const xrm = getXrm('openForm') as any;
     const onLaunchError = (err: unknown) => console.warn('[CommunicationConnections] create-type launch failed:', err);
     try {
       if (typeof xrm?.Navigation?.openForm === 'function') {

@@ -5,7 +5,8 @@
  * done through Xrm.WebApi alone (statecode/statuscode changes are silently
  * ignored by Xrm.WebApi.updateRecord in some Dataverse environments).
  *
- * For basic Xrm access (getXrm, getWebApi) use ../services/xrmProvider.ts.
+ * For basic Xrm access use `getXrm` from @spaarke/ui-components (or getWebApi
+ * in ../services/xrmProvider.ts).
  */
 
 import { cleanGuid, getXrm } from '@spaarke/ui-components';
@@ -17,19 +18,16 @@ import { cleanGuid, getXrm } from '@spaarke/ui-components';
  * Used for direct REST API calls that bypass Xrm.WebApi.
  */
 export function getClientUrl(): string | null {
-  // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as any;
-  if (!xrm) return null;
-
-  // Try Xrm.Utility.getGlobalContext().getClientUrl()
+  // Shared cross-frame walker (task 081 / C-8) with the 'clientUrl' capability
+  // checked PER FRAME: the nearest frame whose Xrm returns a client URL wins,
+  // so a frame with WebApi but no usable Utility is skipped (the behaviour of
+  // the former local fallback walk, which task 081 round 2 had dropped).
   try {
-    const ctx = xrm.Utility?.getGlobalContext?.();
-    const url = ctx?.getClientUrl?.();
-    if (url) return url;
+    const url = getXrm('clientUrl')?.Utility?.getGlobalContext().getClientUrl();
+    return url || null;
   } catch {
-    /* unavailable */
+    return null;
   }
-  return null;
 }
 
 /**

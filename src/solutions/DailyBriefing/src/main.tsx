@@ -86,7 +86,7 @@ function Root() {
   const handleBrowsePlaybooks = React.useCallback(() => {
     // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm() ?? null;
+    const xrm: any = getXrm('navigation') ?? null;
     const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
       xrm?.Navigation?.navigateTo;
     if (typeof navigateTo !== "function") {

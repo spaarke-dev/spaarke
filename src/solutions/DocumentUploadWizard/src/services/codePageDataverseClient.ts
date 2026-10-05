@@ -87,8 +87,10 @@ class XrmDataverseClient implements IDataverseClient {
  * a Dataverse dialog iframe.
  */
 function resolveXrmWebApi(): XrmWebApi {
-    // Shared cross-frame walker (task 081 / C-8).
-    const webApi = getXrm()?.WebApi;
+    // Shared cross-frame walker (task 081 / C-8) with the createRecord check
+    // applied PER FRAME (as the former local walk did).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const webApi = getXrm((x: any) => typeof x.WebApi?.createRecord === "function")?.WebApi;
     if (webApi?.createRecord) {
         return webApi as unknown as XrmWebApi;
     }

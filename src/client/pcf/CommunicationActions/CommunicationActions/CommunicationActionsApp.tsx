@@ -206,7 +206,7 @@ function getHostRecordId(): string | undefined {
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('page') as any;
   try {
     const id = xrm?.Page?.data?.entity?.getId?.();
     if (typeof id === 'string' && id.length > 0) return cleanGuid(id);
@@ -220,7 +220,7 @@ async function refreshHostForm(): Promise<void> {
   // Shared cross-frame walker (task 081 / C-8).
   // `any` view: typed XrmContext does not declare the members used below.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('page') as any;
   try {
     const refresh = xrm?.Page?.data?.refresh;
     if (typeof refresh === 'function') {
@@ -400,7 +400,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // linked in the body. Runs the OOB Xrm.Utility.lookupObjects picker for the chosen type.
   const handleLookupRecord = React.useCallback(async (entityType: string): Promise<IPickedRecord | null> => {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('lookupObjects');
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({
       entityTypes: [entityType],
@@ -425,7 +425,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   const handleLookupRecipients = React.useCallback(
     async (_field: 'to' | 'cc' | 'bcc'): Promise<IRecipient[] | null> => {
       // Shared cross-frame walker (task 081 / C-8).
-      const xrm = getXrm();
+      const xrm = getXrm('lookupObjects');
       if (!xrm?.Utility?.lookupObjects) return null;
       const results = await xrm.Utility.lookupObjects({
         entityTypes: ['contact', 'systemuser'],
@@ -465,7 +465,7 @@ export const CommunicationActionsApp: React.FC<ICommunicationActionsAppProps> = 
   // the communication when the email is SENT (the send payload carries `associations`).
   const handleAddRelationship = React.useCallback(async (): Promise<IPickedRecord | null> => {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('lookupObjects');
     if (!xrm?.Utility?.lookupObjects) return null;
     const results = await xrm.Utility.lookupObjects({ entityTypes: REGARDING_ENTITY_TYPES, allowMultiSelect: false });
     const picked = results?.[0];

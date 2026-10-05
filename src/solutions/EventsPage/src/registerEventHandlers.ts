@@ -18,8 +18,7 @@
  * **Origin**: lifted from legacy App.tsx `executeBulkStatusUpdate` + `executeBulkArchive`
  */
 
-import { registerCommandHandler, cleanGuid } from '@spaarke/ui-components';
-import { getSidePanesXrm } from './xrmHelpers';
+import { registerCommandHandler, cleanGuid, getXrm } from '@spaarke/ui-components';
 import { EVENT_ENTITY_NAME } from './config';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +60,11 @@ async function executeBulkStatusUpdate(
   statusLabel: string,
   additionalFields?: Record<string, unknown>
 ): Promise<boolean> {
-  const xrm = getSidePanesXrm();
+  // The nearest frame whose Xrm has App.sidePanes (the EventsPage host frame);
+  // task 081: the shared walker with the 'sidePanes' capability replaces the
+  // former xrmHelpers.getSidePanesXrm copy of the walk.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('sidePanes');
   if (!xrm?.WebApi) return false;
 
   const updateData: Record<string, unknown> = { sprk_eventstatus: newStatus };
@@ -94,7 +97,8 @@ async function executeBulkStatusUpdate(
  * before deactivation).
  */
 async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<boolean> {
-  const xrm = getSidePanesXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('sidePanes');
   if (!xrm?.WebApi) return false;
 
   const cleanIds = eventIds.map(id => cleanGuid(id));

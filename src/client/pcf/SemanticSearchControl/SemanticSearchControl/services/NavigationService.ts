@@ -337,7 +337,7 @@ export class NavigationService {
    */
   async openAddDocument(scopeId: string | null, entityType: string | null, onDialogClosed?: () => void): Promise<void> {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm() as unknown as Xrm.XrmStatic | undefined;
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService.openAddDocument: Xrm.Navigation not available');
       return;
@@ -470,7 +470,7 @@ export class NavigationService {
     );
 
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm() as unknown as Xrm.XrmStatic | undefined;
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn(
         'NavigationService.openSemanticSearchPage: Xrm.Navigation not available — falling back to window.open'
@@ -519,7 +519,7 @@ export class NavigationService {
     customPageName: string = 'sprk_semanticsearchpage'
   ): Promise<void> {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm() as unknown as Xrm.XrmStatic | undefined;
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService.viewAllResults: Xrm.Navigation not available');
       return;
@@ -553,7 +553,7 @@ export class NavigationService {
     modalOptions?: ModalOptions
   ): Promise<void> {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm() as unknown as Xrm.XrmStatic | undefined;
+    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService: Xrm.Navigation not available, falling back to URL navigation');
       this.fallbackNavigate(entityName, recordId, target);
@@ -662,7 +662,7 @@ export class NavigationService {
    */
   private getClientUrl(): string {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm() as unknown as Xrm.XrmStatic | undefined;
+    const xrm = getXrm('clientUrl') as unknown as Xrm.XrmStatic | undefined;
     if (xrm?.Utility?.getGlobalContext) {
       return xrm.Utility.getGlobalContext().getClientUrl();
     }

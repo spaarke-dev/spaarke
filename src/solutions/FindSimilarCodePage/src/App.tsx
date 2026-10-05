@@ -244,9 +244,9 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
   // Xrm Lookup dialog for selecting a Document record
   const handleOpenLookup = React.useCallback(async () => {
     try {
-      // Shared cross-frame walker (task 081 / C-8).
+      // Shared cross-frame walker (task 081 / C-8), nearest frame with lookupObjects.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm();
+      const xrm: any = getXrm("lookupObjects");
       if (!xrm?.Utility?.lookupObjects) {
         setError("Xrm lookup is not available in this context");
         return;
@@ -365,9 +365,9 @@ export function FindSimilarApp(props: IFindSimilarAppProps) {
       }
 
       // Open DocumentRelationshipViewer with the documentId
-      // Shared cross-frame walker (task 081 / C-8).
+      // Shared cross-frame walker (task 081 / C-8), nearest frame that can navigateTo.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const xrm: any = getXrm();
+      const xrm: any = getXrm("navigation");
       if (xrm?.Navigation?.navigateTo) {
         // Resolve theme for viewer
         const themeParam =

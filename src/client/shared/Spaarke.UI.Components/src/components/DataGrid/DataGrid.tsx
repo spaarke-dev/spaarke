@@ -1142,9 +1142,10 @@ export const DataGrid: React.FC<DataGridProps> = props => {
    */
   const defaultRecordOpen = React.useCallback(
     (recordId: string, _record: Record<string, unknown>, ctx: DataGridHostContext) => {
-      // Shared cross-frame walker (task 081 / C-8) — was a parent-first
-      // `parent ?? window` read with no top fallback.
-      const xrm = getXrm();
+      // Shared cross-frame walker (task 081 / C-8), nearest frame that can
+      // navigateTo — was a parent-first `parent ?? window` read with no top
+      // fallback (see `getXrm` for the window-first order rule).
+      const xrm = getXrm('navigation');
       if (!ctx.entityName || !recordId) return;
       if (!xrm?.Navigation?.navigateTo) {
         // eslint-disable-next-line no-console

@@ -374,7 +374,7 @@ export function buildRecordUrl(entityLogicalName: string, recordId: string): str
 
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const globalCtx = getXrm()?.Utility?.getGlobalContext?.();
+    const globalCtx = getXrm('clientUrl')?.Utility?.getGlobalContext?.();
     const clientUrl: string = globalCtx?.getClientUrl?.() ?? '';
 
     if (clientUrl) {

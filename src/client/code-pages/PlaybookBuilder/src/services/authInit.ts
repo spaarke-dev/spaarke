@@ -72,7 +72,7 @@ export function stopTokenRefresh(): void {
 export function getClientUrl(): string | null {
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     if (xrm?.Utility?.getGlobalContext) {
       const clientUrl = xrm.Utility.getGlobalContext().getClientUrl();
       if (clientUrl) return clientUrl;

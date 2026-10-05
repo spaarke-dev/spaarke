@@ -5,7 +5,7 @@
  * via the shared cross-frame walker in @spaarke/ui-components.
  */
 
-import { getXrm as getSharedXrm } from '@spaarke/ui-components';
+import { getXrm } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -63,15 +63,15 @@ export interface IXrmContext {
 }
 
 /**
- * Get the Xrm object (WebApi + Utility) for this side pane.
- * Thin wrapper kept for this package's importers; the frame walk itself is
- * the shared cross-frame walker (task 081 / C-8). Named `getSidePaneXrm`
- * (was `getXrm`) so no second export shares the shared walker's name.
+ * The nearest Xrm that has BOTH `WebApi` and `Utility`, typed as this side
+ * pane's {@link IXrmContext}; null when no frame has both.
+ *
+ * The frame walk is the shared `getXrm` (task 081 / C-8) with the requirement
+ * checked PER FRAME, so a child frame whose Xrm has only `WebApi` is skipped
+ * in favour of an outer frame that has both. (Named for its contract; was
+ * `getXrm`, then `getSidePaneXrm`.)
  */
-export function getSidePaneXrm(): IXrmContext | null {
-  const xrm: any = getSharedXrm();
-  if (xrm?.WebApi && xrm?.Utility) {
-    return xrm as IXrmContext;
-  }
-  return null;
+export function getXrmWithWebApiAndUtility(): IXrmContext | null {
+  const xrm: any = getXrm(['webApi', x => !!x.Utility]);
+  return xrm ? (xrm as IXrmContext) : null;
 }

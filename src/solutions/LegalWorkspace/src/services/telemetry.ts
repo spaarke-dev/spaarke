@@ -143,7 +143,7 @@ function getClientUrl(): string | null {
   if (typeof window === "undefined") return null;
   // Shared cross-frame walker (task 081 / C-8).
   try {
-    const ctx = getXrm()?.Utility?.getGlobalContext?.();
+    const ctx = getXrm('clientUrl')?.Utility?.getGlobalContext?.();
     if (ctx?.getClientUrl) return ctx.getClientUrl();
   } catch { /* getGlobalContext() unavailable */ }
   return null;

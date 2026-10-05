@@ -178,7 +178,7 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 
 **Reference implementation** (SpaarkeAi via `WorkspaceLayoutWidget`):
 
-- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` `getWebApiSafe()` / `getUserIdSafe()` — resolve Xrm through the shared cross-frame `getXrm()` from `@spaarke/ui-components` (`utils/xrmContext.ts`: window → window.parent → window.top, first frame whose `Xrm.WebApi` is present, each frame guarded separately). Since spaarke-ontology-platform-r1 task 081 (C-8) there is no inline walker here any more, and the widget does **not** write `window.Xrm`.
+- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/WorkspaceLayoutWidget.tsx` `getWebApiSafe()` / `getUserIdSafe()` — resolve Xrm through the shared cross-frame `getXrm()` from `@spaarke/ui-components` (`utils/xrmContext.ts`: window first, then each ancestor frame up to 10 levels, then window.top; the nearest frame whose Xrm has the capability the caller asks for — `WebApi` by default — wins, and each frame is guarded separately). Since spaarke-ontology-platform-r1 task 081 (C-8) there is no inline walker here any more, and the widget does **not** write `window.Xrm`.
 - The component body — `webApi` and `userId` resolved once with `useMemo`.
 - The `if (!webApi)` branch — dev fallback: when Xrm is unavailable (e.g. Vite `npm run dev`), render an empty-state message instead of crashing inside LegalWorkspaceApp.
 - The renderer mount — `webApi={webApi}` / `userId={userId}` passed through to the embedded workspace renderer.
@@ -186,6 +186,8 @@ LegalWorkspace ships its OWN `runtimeConfig` singleton (`src/solutions/LegalWork
 ### 5.1a MUST NOT: The host MUST NOT publish Xrm onto `window.Xrm`, and embedded code MUST NOT rely on it
 
 **Rationale**: an earlier version of `WorkspaceLayoutWidget` (and LegalWorkspace's own standalone `xrmProvider`) copied the parent/top frame's Xrm onto `window.Xrm` as a side effect. Code inside LegalWorkspace that read `window.Xrm` only (the Summarize Files and Playbook Library launchers in `Shell/WorkspaceGrid.tsx`, `GetStarted/ActionCardHandlers.ts`, `sections/todo.registration.ts`) worked only because of that write, and silently did nothing whenever the write had not happened. Every Xrm read in LegalWorkspace now goes through `getXrm()`, which finds Xrm on the parent/top frame directly; no global write is needed or allowed.
+
+**Child frames MUST use `getXrm()`, not `parent.Xrm`.** Any code running in a child frame of the host — the embedded LegalWorkspace, a code page or web resource it opens in an iframe, a dialog's content frame — MUST resolve Xrm with `getXrm()` from `@spaarke/ui-components`, passing the capability it actually uses (`getXrm('navigation')` before `Xrm.Navigation.navigateTo`, `getXrm('clientUrl')` before `getClientUrl()`, `getXrm('page')` before `Xrm.Page`, …). It MUST NOT read `window.Xrm`, `window.parent.Xrm` or `window.top.Xrm` directly: with no global write, `window.Xrm` is `undefined` in the child frame, and `parent.Xrm` is wrong whenever the frame is nested more than one level deep (Teams-style hosts, side panes) or the parent's Xrm lacks the needed capability.
 
 **Verification**: in SpaarkeAi, open an embedded LegalWorkspace tab and launch Summarize Files and Playbook Library from it. Both dialogs MUST open. `window.Xrm` in the SpaarkeAi frame MUST still be `undefined` afterwards (DevTools console, top-level frame selector set to the SpaarkeAi iframe).
 

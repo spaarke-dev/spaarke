@@ -183,23 +183,20 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * @deprecated Use {@link getXrm} from `../../utils/xrmContext` directly.
- * Kept as a thin alias (NOT a second frame-walk implementation — task 081 /
- * C-8 converged the six duplicate walkers onto `xrmContext.ts:306`) only
- * because `Spaarke.Communication.Components` (`EmailConnectionsReview.tsx`,
- * `FieldUpdateReconcileTab.tsx`, `TaskReconcileTab.tsx`) imports this exact
- * name from `@spaarke/ui-components`. New code should import `getXrm`.
+ * The host Xrm for the OOB lookup dialog: the nearest frame whose Xrm has
+ * `Utility.lookupObjects`, via the shared `getXrm('lookupObjects')` (task 081
+ * / C-8 — one frame walk; this module no longer has its own). A distinct
+ * contract from plain `getXrm()` (which needs only `WebApi`), hence a
+ * distinct name. Imported by `EmailConnectionsReview.tsx`,
+ * `FieldUpdateReconcileTab.tsx` and `TaskReconcileTab.tsx`.
  *
- * Note the acceptance check is NARROWED, not widened: the previous local
- * walker accepted the first frame whose `.Xrm` was merely truthy, whereas
- * `getXrm` also requires `.Xrm.WebApi` before accepting a frame (a frame
- * with an `Xrm` that lacks `WebApi` is now skipped). On a real Dataverse
- * host `WebApi` and `Utility` are always present together, so this picker's
- * `Utility.lookupObjects` use and the three external `getXrmForPicker()`
- * call sites resolve the same object as before; only an `Xrm` stub without
- * `WebApi` (e.g. a test double) now resolves to `undefined`.
+ * Before task 081 this was a `window ?? parent ?? top` read accepting the
+ * first truthy `Xrm` (and throwing on a cross-origin parent); it now checks
+ * `lookupObjects` per frame and skips cross-origin frames.
  */
-export const getXrmForPicker: () => XrmContext | undefined = getXrm;
+export function getXrmForPicker(): XrmContext | undefined {
+  return getXrm('lookupObjects');
+}
 
 // ---------------------------------------------------------------------------
 // Component
@@ -239,7 +236,7 @@ export const PolymorphicPicker: React.FC<PolymorphicPickerProps> = ({
       setError(null);
       setIsLookingUp(true);
       try {
-        const xrm = getXrm();
+        const xrm = getXrm('lookupObjects');
         if (!xrm?.Utility?.lookupObjects) {
           const msg = 'Xrm.Utility.lookupObjects is not available.';
           setError(msg);

@@ -100,17 +100,11 @@ export const DEFAULT_ACTION_META: Record<string, DefaultActionMeta> = {
 // Internal helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Xrm resolution uses the shared cross-frame `getXrm()` walker
- * (`utils/xrmContext.ts` — task 081 / C-8 converged this file's former local
- * parent-chain walk onto it). The handlers below consume only the tiny
- * `Navigation.openForm` / `Navigation.openAlertDialog` / `WebApi.deleteRecord`
- * slice and pivot through an `any` view at each call site.
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getXrmAny(): any {
-  return getXrm() ?? null;
-}
+// Xrm resolution uses the shared cross-frame `getXrm()` walker
+// (`utils/xrmContext.ts` — task 081 / C-8 converged this file's former local
+// parent-chain walk onto it), with the capability each handler needs. The
+// handlers consume only the tiny `Navigation.openForm` /
+// `Navigation.openAlertDialog` / `WebApi.deleteRecord` slice through an `any` view.
 
 /** Trigger a browser download from a `Blob`. SSR-safe (no-op if `document` is unavailable). */
 function downloadBlob(blob: Blob, filename: string): void {
@@ -142,7 +136,8 @@ function downloadBlob(blob: Blob, filename: string): void {
  * entity by reading `ctx.entityName` instead of the hard-coded `EVENT_ENTITY_NAME`.
  */
 export const defaultCreateFormHandler: DefaultHandler = async ctx => {
-  const xrm = getXrmAny();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm((x: any) => typeof x.Navigation?.openForm === 'function');
   if (!xrm?.Navigation?.openForm) {
     // eslint-disable-next-line no-console
     console.warn('[CommandBar] Xrm.Navigation.openForm not available. Cannot open new form.');
@@ -180,7 +175,8 @@ export const defaultCreateFormHandler: DefaultHandler = async ctx => {
  */
 export const defaultDeleteSelectedHandler: DefaultHandler = async ctx => {
   if (ctx.selectedIds.length === 0) return;
-  const xrm = getXrmAny();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm((x: any) => typeof x.WebApi?.deleteRecord === 'function');
   if (!xrm?.WebApi?.deleteRecord) {
     // eslint-disable-next-line no-console
     console.warn('[CommandBar] Xrm.WebApi.deleteRecord not available. Cannot delete.');

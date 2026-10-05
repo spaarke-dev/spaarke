@@ -96,7 +96,7 @@ export const SubRowLink: React.FC<SubRowLinkProps> = ({ item }) => {
     // Resolve Xrm via the shared cross-frame walker (task 081 / C-8). Guard
     // against missing Xrm in test or standalone environments.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm();
+    const xrm: any = getXrm('navigation');
 
     if (!xrm?.Navigation?.navigateTo) return;
 

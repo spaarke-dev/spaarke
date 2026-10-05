@@ -34,10 +34,10 @@ const params = dataEnvelope ? new URLSearchParams(decodeURIComponent(dataEnvelop
 /* eslint-disable @typescript-eslint/no-explicit-any */
 if (!params.get('documentId')) {
   try {
-    // Shared cross-frame walker (task 081 / C-8). On a form-embedded web
-    // resource the frame carrying Xrm.WebApi is the form window, which is
-    // also the one carrying Xrm.Page. `any` view: typed XrmPageLike lacks `data`.
-    const xrm = getXrm() as any;
+    // Shared cross-frame walker (task 081 / C-8) with the 'page' capability:
+    // the nearest frame carrying Xrm.Page (the form window for a
+    // form-embedded web resource). `any` view: typed XrmPageLike lacks `data`.
+    const xrm = getXrm('page') as any;
     if (xrm) {
       const formContext = xrm.Page;
       const entityId = cleanGuid(formContext?.data?.entity?.getId?.());

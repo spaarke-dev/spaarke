@@ -308,7 +308,7 @@ function resolveClientUrlSafe(): string {
   try {
     // Shared cross-frame walker (task 081 / C-8) — was a single-frame
     // `globalThis.Xrm` read, which missed Xrm when hosted in an iframe.
-    const ctx = getXrm()?.Utility?.getGlobalContext?.();
+    const ctx = getXrm('clientUrl')?.Utility?.getGlobalContext?.();
     const url = ctx?.getClientUrl?.();
     return typeof url === 'string' ? url : '';
   } catch {

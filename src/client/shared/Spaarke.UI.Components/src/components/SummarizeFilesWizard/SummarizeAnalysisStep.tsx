@@ -64,7 +64,7 @@ async function getBusinessUnitContainerId(dataService: IDataService): Promise<st
   // equivalent of the older `Xrm.Utility.getUserId()` this comment used to
   // describe as unavailable via `IDataService`; both resolve the signed-in
   // user's id, and `getGlobalContext` is on the shared `XrmUtility` contract.
-  const userId = cleanGuid(getXrm()?.Utility?.getGlobalContext?.()?.userSettings?.userId ?? '');
+  const userId = cleanGuid(getXrm('utility')?.Utility?.getGlobalContext?.()?.userSettings?.userId ?? '');
 
   if (!userId) {
     throw new Error(`${LOG_PREFIX} Cannot determine current user — Xrm.Utility.getGlobalContext() is unavailable.`);

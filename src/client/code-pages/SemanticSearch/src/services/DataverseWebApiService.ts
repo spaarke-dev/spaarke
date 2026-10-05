@@ -59,7 +59,7 @@ interface OptionMetadata {
 export function getOrgUrl(): string {
   try {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     if (xrm?.Utility?.getGlobalContext) {
       return xrm.Utility.getGlobalContext().getClientUrl();
     }

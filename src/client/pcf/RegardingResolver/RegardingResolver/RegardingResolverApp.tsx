@@ -527,7 +527,7 @@ async function autoRefreshForm(formType: number): Promise<void> {
   if (formType === 1) return;
 
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   if (!xrm) {
     console.warn('[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).');
     return;
@@ -570,7 +570,7 @@ async function autoRefreshForm(formType: number): Promise<void> {
  */
 function getFormType(): number {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const ui = (xrm?.Page as any)?.ui;
@@ -599,7 +599,7 @@ function getFormType(): number {
  */
 async function handleRefreshInternal(): Promise<void> {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (xrm?.Page as any)?.data;
@@ -710,7 +710,7 @@ async function resolveClickTarget(
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
 function getHostRecordId(): string | undefined {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const data = (xrm?.Page as any)?.data?.entity;
@@ -743,7 +743,7 @@ function detectPrePopulatedParent(
   catalog: readonly ITodoRegardingTargetCatalogEntry[]
 ): { entityType: string; recordId: string; recordName: string; lookupAttribute: string } | null {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') {
@@ -789,7 +789,7 @@ function detectPrePopulatedParent(
  */
 function setFormLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') return false;
@@ -810,7 +810,7 @@ function setFormLookupValue(fieldName: string, entityType: string, id: string, n
 
 function setFormTextValue(fieldName: string, value: string | null): boolean {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm() as unknown as HostXrm | undefined;
+  const xrm = getXrm('page') as unknown as HostXrm | undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
   if (!page || typeof page.getAttribute !== 'function') return false;
@@ -1610,7 +1610,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         }
 
         // Shared cross-frame walker (task 081 / C-8).
-        const xrm = getXrm() as unknown as HostXrm | undefined;
+        const xrm = getXrm('navigation') as unknown as HostXrm | undefined;
         if (typeof xrm?.Navigation?.navigateTo !== 'function') {
           // Xrm unavailable — test harness, canvas app, or missing SDK. Warn
           // (developer-visible), do not throw (host-safe).

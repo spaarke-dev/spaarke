@@ -222,7 +222,7 @@ async function fetchDocuments(): Promise<IDocument[]> {
 function openRecord(documentId: string): void {
   // Shared cross-frame walker (task 081 / C-8).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm();
+  const xrm: any = getXrm('openForm');
   xrm?.Navigation?.openForm?.({ entityName: "sprk_document", entityId: documentId });
 }
 

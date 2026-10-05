@@ -109,12 +109,13 @@ interface XrmHandle {
 }
 
 export function resolveXrm(): XrmHandle | null {
-    // Shared cross-frame walker (task 081 / C-8); this only feature-checks its result.
-    const xrm: any = getXrm();
-    if (xrm?.WebApi?.retrieveMultipleRecords && xrm?.Utility?.lookupObjects) {
-        return xrm as XrmHandle;
-    }
-    return null;
+    // Shared cross-frame walker (task 081 / C-8) with this step's feature check
+    // applied PER FRAME (as the former local walk did): the nearest frame whose
+    // Xrm has both WebApi.retrieveMultipleRecords and Utility.lookupObjects.
+    const xrm: any = getXrm(
+        (x: any) => typeof x.WebApi?.retrieveMultipleRecords === "function" && typeof x.Utility?.lookupObjects === "function"
+    );
+    return xrm ? (xrm as XrmHandle) : null;
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
