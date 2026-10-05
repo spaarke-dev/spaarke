@@ -868,6 +868,19 @@ The owner, verbatim: "it is important that we address issues that impact the qua
      - `QuarantineClearedSince`'s time clause.
 4. **Known limit** (class d, no fix): the creation guard does not see a `System.Net.WebClient` upload written by deliberately unusual script code.
 
+## Round 58 (2026-10-05). BINDING. Main-session decisions under owner round 56. Task 158, from its final re-verification of `task/uac-r2-158-r1c-v2`.
+
+1. **A No Access entry added LATER also ends the walled person's direct shares on secure records filed under that parent (option a; class a, security).**
+   - Task 143's `NoAccessShareEnforcer` already removes the person's share on the walled record and syncs its children.
+   - It now also reaches secure work assignments and projects filed under that record, using the ONE existing parent walk (`SecureRootInheritance.ReadSecureParentsAsync`) and the existing revoke.
+   - It never strands the last reader (S5). Failures report as children-incomplete.
+   - Round 39 item 2 says every share honours every secure parent's list, and a share-time check alone would leave a wall that does not wall. No new mechanism.
+2. **Fixed in 158's final round** (class a and b):
+   - **(a) The failed-revoke regression from round 47 item 2.** If the revoke after the `Declined` marker fails or is not confirmed, the marker is reverted, in the same request (`finally`). A share the operator did not actually remove is never marked declined, and the parent's unshare still ends it.
+   - **(a) Step 4.5's by-parent ledger read** counts only rows still in force. It excludes Revoked and ended rows in the query, so a large provenance history cannot wedge the unsecure. Truncation of rows still in force still fails closed.
+   - **(b) The already-ordinary-path 500 copy** no longer says "Calling again completes it" where a repeat call cannot. State what the operator must do instead.
+3. **Known limit** (class f): the Revoked filter in `EndWhatAParentPassedOnAsync` (seed Z28) is equivalent by construction. No test is added.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
