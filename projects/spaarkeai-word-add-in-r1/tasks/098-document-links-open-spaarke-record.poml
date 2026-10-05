@@ -3,7 +3,7 @@
   <metadata>
     <title>Document links in email open the Spaarke record: the shared composer's "Link" inserts the record link, and the share-link route refuses SPE files with a typed code instead of relaying Graph's error</title>
     <phase>6 UAT round 5 (2026-10-05)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies a BFF route (`.cs`) and a shared-library compose handler (`.ts`) used by several surfaces, with tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -93,6 +93,7 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+  <notes>MAIN SESSION 2026-10-05: the route refusal was REVERTED (it failed 6 UAC-r2 tests in tests/integration/auth/UnifiedAccessControl, which this project may not edit). Shipped: the composer's record link (the owner's decision in full). Route retirement handed to UAC-r2 with notes/098-share-link-route-refusal.patch. Criterion 3 (typed refusal) is therefore NOT met here by design.</notes>
 
   <outputs>
     <file>projects/spaarkeai-word-add-in-r1/notes/098-document-links-record.md</file>
