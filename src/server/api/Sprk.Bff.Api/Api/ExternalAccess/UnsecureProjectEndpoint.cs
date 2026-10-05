@@ -127,7 +127,8 @@ public static class UnsecureProjectEndpoint
             .WithDescription(
                 "Reassigns ownership off the Secure Record business unit's named owner team, re-owns the record's " +
                 "existing related records out of isolation and removes their mirrored shares, revokes the record's " +
-                "explicit shares and clears sprk_issecure. Accepts recordType + recordId " +
+                "explicit shares, ends what it had passed on to the secure work assignments and projects filed under it " +
+                "(they stay secure) and clears sprk_issecure. Accepts recordType + recordId " +
                 "(project | matter | workassignment) or the legacy projectId. Idempotent: a record that is " +
                 "already not secure returns 200 having changed nothing about the record itself (related records an " +
                 "earlier unsecure left isolated are completed).")

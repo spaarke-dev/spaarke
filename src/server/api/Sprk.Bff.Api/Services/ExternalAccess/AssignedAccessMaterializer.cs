@@ -139,7 +139,9 @@ public sealed record AssignedAccessListEntry(
 /// (A3 = prompt: <see cref="AssignedAccessState.PendingConfirmation"/>); an auto grant that existed before the record
 /// became secure is kept (A3). Limited: contact grants are written (A8).</item>
 /// <item>No Access: a denied contact or organization gets nothing (the core's FR-23 check); a walled internal user on a
-/// secure record gets no share (task 143's guard, reused). An unreadable list or flag set writes nothing.</item>
+/// secure record gets no share (task 143's guard, reused) — on a work assignment or project filed under secure records,
+/// walled by the record's own list or any secure parent's (task 158 r1c-v2, round 39 item 2). An unreadable list or flag
+/// set writes nothing.</item>
 /// <item>Never lower: an existing grant that CONFERS access today (not merely statecode 0 — an expired row confers
 /// nothing) at Collaborate or above, or a share already carrying Collaborate's rights, is left untouched
 /// (<see cref="AssignedAccessState.CoveredByExisting"/>) — not raised, not renewed. A lower conferring one is raised; the

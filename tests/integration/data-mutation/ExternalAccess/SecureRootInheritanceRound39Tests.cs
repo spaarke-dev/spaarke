@@ -647,6 +647,29 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
     }
 
     /// <summary>
+    /// Round 31 item 1 through the same entry point: the caller provisioning a work assignment filed under a secure matter is
+    /// on the MATTER's list — refused before any write, the message naming the matter's list (never an entry).
+    /// </summary>
+    [Fact]
+    public async Task ProvisioningAFiledRecord_WhenTheCallerIsOnTheSecureMattersNoAccessList_IsRefusedNamingThatList()
+    {
+        var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter);
+        _fixture.SeedWorkAssignment(workAssignment, isSecure: true);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", new EntityReference("sprk_matter", matter));
+        _fixture.NoAccessList.DenySystemUserOnRecord(Creator, matter);
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(ProvisionRoute,
+            new { recordType = "workassignment", recordId = workAssignment });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var problem = await JsonOf(response);
+        problem.GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        problem.GetProperty("detail").GetString().Should().Contain("the No Access list of the secure matter it is filed under");
+        _fixture.OwningTeamOf(workAssignment).Should().BeNull("nothing was changed");
+    }
+
+    /// <summary>
     /// Task 142's suggestion on a filed secure work assignment honours the secure matter's list too: an assignee on it is
     /// never suggested (Skipped, no-access).
     /// </summary>
@@ -913,6 +936,35 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
 
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mask(RecordShareLevels.ViewOnlyRights));
         Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).Reason.Should().Be(AssignedAccessReason.KeptModified);
+    }
+
+    /// <summary>
+    /// X16: in one pass, the colleague's share from the matter is KEPT as the work assignment's last reader (S5 — its row
+    /// stays live), and the project the work assignment was re-filed under raises the colleague. The raise starts from what
+    /// the colleague held before ANY rule's share — nothing — because the kept share is still the matter's (its row is live,
+    /// never read as ended in that pass): so when both sources end, nothing of the rules' is left beyond what S5 keeps.
+    /// </summary>
+    [Fact]
+    public async Task AShareKeptAsTheLastReader_IsNeverTheLevelAnotherParentsRaiseStartsFrom()
+    {
+        var (matter, project, workAssignment) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        SecureMatter(_fixture, matter, null, Colleague);
+        SecuredWorkAssignment(workAssignment, matter);
+        (await _job.RunAsync()).Success.Should().BeTrue();
+        _fixture.RemoveShare(workAssignment, DataversePrincipalRef.User(Creator)); // the colleague is its last reader
+        SecureProject(_fixture, project);
+        var readAndDelete = Mask(RecordShareLevels.ViewOnlyRights) | 65536;
+        _fixture.SeedShare(project, DataversePrincipalRef.User(Colleague), RecordShareLevels.RightsCsvForMask(readAndDelete));
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null);
+        AlsoFiledUnderProject(workAssignment, project);
+        _fixture.RemoveShare(matter, DataversePrincipalRef.User(Colleague)); // the matter's unshare, outside the BFF
+
+        await _job.RunAsync();
+
+        ProvenanceFrom(workAssignment, "sprk_matter", matter, Colleague).Reason.Should().Be(AssignedAccessReason.KeptLastReader);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror | readAndDelete, "raised by the project");
+        ProvenanceFrom(workAssignment, "sprk_project", project, Colleague).Reason.Should().BeNull(
+            "raised from nothing: the kept share is still the matter's, never a level someone gave directly");
     }
 
     // ══ The post-write check: a share decided on a read that changed before it landed ═══════════════════════════════════

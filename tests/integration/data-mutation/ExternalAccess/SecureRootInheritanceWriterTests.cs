@@ -312,7 +312,8 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
-        result.ErrorMessage.Should().Contain("NOT created");
+        result.ErrorMessage.Should().Contain("NOT created")
+            .And.Contain("the No Access list of the secure matter it would be filed under", "whose list refused (r1c-v2)");
         _writes.Should().BeEmpty();
     }
 
@@ -898,6 +899,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         result.Succeeded.Should().BeFalse();
         result.Failure!.Code.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
         result.Failure.Kind.Should().Be(RecordCreationFailureKind.SecureFilingRefused);
+        result.Failure.Detail.Should().Contain("the No Access list of the secure matter it would be filed under");
         _officeCreates.Should().BeEmpty();
     }
 
@@ -1057,6 +1059,7 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
 
         result.Success.Should().BeFalse();
         result.ErrorCode.Should().Be(ProvisionProjectEndpoint.ReasonCreatorNoAccess);
+        result.ErrorMessage.Should().Contain("the No Access list of the secure matter it would be filed under");
         _writes.Should().BeEmpty("the caller's PATCH is never sent");
         _fixture.SharesOn(workAssignment).Should().BeEmpty();
     }

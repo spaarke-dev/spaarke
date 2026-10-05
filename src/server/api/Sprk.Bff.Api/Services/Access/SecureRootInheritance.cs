@@ -1917,7 +1917,8 @@ public sealed class SecureRootInheritance
                 kept++;
             }
 
-            if (ended.Removed && ended.StillCarried != 0 && !giveBack.Contains((logical, root.RootId, principal)))
+            // One row per (record, parent, principal), and every row here is from ONE parent: no entry repeats.
+            if (ended.Removed && ended.StillCarried != 0)
                 giveBack.Add((logical, root.RootId, principal));
         }
 
