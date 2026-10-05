@@ -1127,15 +1127,19 @@ public sealed class SecureRootInheritance
                 declinedRows.Add(row.Id); // Declined whether or not the ledger write lands: never re-added by this pass (fail closed)
             try
             {
-                await _ledger.UpdateLedgerAsync(row.Id, marker, ct).ConfigureAwait(false);
-                row.StateValue = (int)marker.State;
-                row.Reason = marker.Reason;
+                await UpdateDecidedRowAsync(row, marker, ct).ConfigureAwait(false);
                 _logger.LogInformation(
                     walled
                         ? "[SECURE-INHERIT] {Principal}'s inherited share on {Table} {RecordId} was removed while they are on its No " +
                           "Access list (task 143's enforcer): it is passed on again once the wall is lifted."
                         : "[SECURE-INHERIT] {Principal}'s inherited share on {Table} {RecordId} was removed or narrowed outside the " +
                           "BFF: recorded Declined — it is not given again while the parent share persists.", principal, logical, recordId);
+            }
+            catch (LedgerRowChangedException)
+            {
+                // Round 47 item 2: the row changed after this pass read it (an operator's marker, another pass). Nothing is
+                // recorded over it. The next pass decides on the row as it is now.
+                notDone.Add($"{principal}'s inherited share record changed while it was being decided; it is decided on the next pass");
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -1223,6 +1227,14 @@ public sealed class SecureRootInheritance
                 if (wrote.Count > 0)
                     await RecheckWrittenSharesAsync(logical, recordId, rootType, wrote, from, notDone, ct).ConfigureAwait(false);
             }
+            catch (LedgerRowChangedException changed)
+            {
+                // Round 47 item 2: a row changed between this pass's read and its write. It is not written over.
+                _logger.LogInformation(
+                    "[SECURE-INHERIT] {Table} {RecordId}: inherited share record {RowId} changed while it was being recorded; " +
+                    "the next pass decides on it.", logical, recordId, changed.RowId);
+                notDone.Add("an inherited share record changed while it was being recorded; it is decided on the next pass");
+            }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
                 _logger.LogError(ex,
@@ -1306,7 +1318,15 @@ public sealed class SecureRootInheritance
 
             try
             {
-                await _ledger.UpdateLedgerAsync(mine.Id, write, ct).ConfigureAwait(false);
+                // Round 47 item 2: If-Match from the read this decision was made on. A row that changed meanwhile (an
+                // operator's Declined marker landing between this pass's read and this write) is not written over, and
+                // the share is NOT given.
+                if (!await _ledger.UpdateLedgerIfUnchangedAsync(mine, write, ct).ConfigureAwait(false))
+                {
+                    notDone.Add($"{intent.Principal}'s share from {parent.Table} {parent.Id:D} was not given: its record changed " +
+                                "while it was being decided; it is decided on the next pass");
+                    return false;
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -1315,10 +1335,6 @@ public sealed class SecureRootInheritance
                 notDone.Add($"where {intent.Principal}'s share would come from could not be recorded, so it was not given");
                 return false;
             }
-
-            mine.StateValue = (int)write.State;
-            mine.Reason = write.Reason;
-            mine.GrantedLevel = write.GrantedLevel;
         }
 
         return true;
@@ -1391,10 +1407,7 @@ public sealed class SecureRootInheritance
             return;
         }
 
-        await _ledger.UpdateLedgerAsync(mine.Id, write, ct).ConfigureAwait(false);
-        mine.StateValue = (int)write.State;
-        mine.GrantedLevel = write.GrantedLevel;
-        mine.Reason = write.Reason;
+        await UpdateDecidedRowAsync(mine, write, ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -1479,11 +1492,8 @@ public sealed class SecureRootInheritance
         var write = new AssignedAccessLedgerWrite(AssignedAccessState.Shared, PriorReason(outcome.MaskBefore), GrantedLevel: outcome.MaskAfter);
         if (row is not null)
         {
-            await _ledger.UpdateLedgerAsync(row.Id, write, ct).ConfigureAwait(false);
-            row.StateValue = (int)write.State;
-            row.Reason = write.Reason;
-            row.GrantedLevel = write.GrantedLevel;
-            return row;
+            // Round 47 item 2: reopened only if the row is still the ended one this pass read.
+            return await _ledger.UpdateLedgerIfUnchangedAsync(row, write, ct).ConfigureAwait(false) ? row : null;
         }
 
         var created = await _ledger.CreateInheritedLedgerAsync(rootType, recordId, parent.Table, parent.Id, outcome.Principal, write, ct)
@@ -1506,9 +1516,8 @@ public sealed class SecureRootInheritance
     private async Task ConfirmAsync(AssignedAccessLedgerRow row, CancellationToken ct)
     {
         var confirmed = PriorReason(PriorMaskOf(row.Reason));
-        await _ledger.UpdateLedgerAsync(row.Id,
+        await UpdateDecidedRowAsync(row,
             new AssignedAccessLedgerWrite(AssignedAccessState.Shared, confirmed, GrantedLevel: row.GrantedLevel), ct).ConfigureAwait(false);
-        row.Reason = confirmed;
     }
 
     /// <summary>What ending one inherited share did.</summary>
@@ -1624,10 +1633,9 @@ public sealed class SecureRootInheritance
                 // tries again, removing it once someone else can open the record.
                 if (row.Reason != AssignedAccessReason.KeptLastReader)
                 {
-                    await _ledger.UpdateLedgerAsync(row.Id,
+                    await UpdateDecidedRowAsync(row,
                         new AssignedAccessLedgerWrite(AssignedAccessState.Shared, AssignedAccessReason.KeptLastReader, GrantedLevel: written),
                         ct).ConfigureAwait(false);
-                    row.Reason = AssignedAccessReason.KeptLastReader;
                 }
 
                 _logger.LogWarning(
@@ -1646,7 +1654,7 @@ public sealed class SecureRootInheritance
             var uncovered = assigned.Where(r => r.State == AssignedAccessState.CoveredByExisting).ToList();
             foreach (var covering in uncovered)
             {
-                await _ledger.UpdateLedgerAsync(covering.Id,
+                await UpdateDecidedRowAsync(covering,
                     new AssignedAccessLedgerWrite(AssignedAccessState.Skipped, AssignedAccessReason.CoveringShareEnded,
                         SystemUserId: principal.Id), ct).ConfigureAwait(false);
             }
@@ -1695,6 +1703,15 @@ public sealed class SecureRootInheritance
             return cascade.IsComplete
                 ? new EndOutcome(true, true, null, StillCarried: carried)
                 : new EndOutcome(false, true, $"its own related records were not all brought into line ({cascade.Status})", StillCarried: carried);
+        }
+        catch (LedgerRowChangedException changed)
+        {
+            // Round 47 item 2: a record this decision was made on changed between the read and the write (an operator's
+            // marker, another pass's end, a task 142 write). Nothing is written over it. The next pass decides on it as it is.
+            _logger.LogInformation(
+                "[SECURE-INHERIT] Ending {Principal}'s inherited share on {Table} {RecordId}: record {RowId} changed while it " +
+                "was being decided; the next pass decides on it.", principal, logical, recordId, changed.RowId);
+            return new EndOutcome(false, false, "its share record changed while it was being decided; it is decided on the next pass");
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1746,7 +1763,27 @@ public sealed class SecureRootInheritance
     }
 
     private Task EndRowAsync(AssignedAccessLedgerRow row, string reason, CancellationToken ct) =>
-        _ledger.UpdateLedgerAsync(row.Id, new AssignedAccessLedgerWrite(AssignedAccessState.Revoked, reason), ct);
+        UpdateDecidedRowAsync(row, new AssignedAccessLedgerWrite(AssignedAccessState.Revoked, reason), ct);
+
+    /// <summary>
+    /// Batch-4 integration (round 47 item 2): every ledger update an inheritance pass makes is conditional on the row still
+    /// holding what the pass decided on (<see cref="AssignedAccessStore.UpdateLedgerIfUnchangedAsync"/>, which sends
+    /// <c>If-Match</c> through task 140's client support, re-reads on a mismatch, and writes only when the facts are
+    /// unchanged). Throws <see cref="LedgerRowChangedException"/> when the row changed. Each pass step reports it as
+    /// "decided on the next pass", never as a write.
+    /// </summary>
+    private async Task UpdateDecidedRowAsync(AssignedAccessLedgerRow row, AssignedAccessLedgerWrite write, CancellationToken ct)
+    {
+        if (!await _ledger.UpdateLedgerIfUnchangedAsync(row, write, ct).ConfigureAwait(false))
+            throw new LedgerRowChangedException(row.Id);
+    }
+
+    /// <summary>A ledger row changed between the read a pass decided on and its write; nothing was written (round 47 item 2).</summary>
+    private sealed class LedgerRowChangedException(Guid rowId)
+        : Exception($"Ledger row {rowId:D} changed since it was read; nothing was written.")
+    {
+        public Guid RowId { get; } = rowId;
+    }
 
     /// <summary>A Shared row recorded ahead of its share and not confirmed yet (<see cref="AssignedAccessReason.SharePending"/>).</summary>
     private static bool IsPending(AssignedAccessLedgerRow row) =>
@@ -2009,8 +2046,21 @@ public sealed class SecureRootInheritance
         {
             var rows = await _ledger.ReadInheritedLedgerAsync(RootTypeOf(logical), recordId, ct).ConfigureAwait(false);
             var live = rows.Where(r => r.State != AssignedAccessState.Revoked).ToList();
+            var end = new AssignedAccessLedgerWrite(AssignedAccessState.Revoked, AssignedAccessReason.RecordUnsecured);
             foreach (var row in live)
-                await EndRowAsync(row, AssignedAccessReason.RecordUnsecured, ct).ConfigureAwait(false);
+            {
+                if (await _ledger.UpdateLedgerIfUnchangedAsync(row, end, ct).ConfigureAwait(false))
+                    continue;
+
+                // Round 47 item 2: the row changed since it was read. The unsecure ends EVERY live row whatever its state,
+                // so the decision is made again on the row as it is now: still live, so it is ended at its new version.
+                var now = await _ledger.ReadLedgerRowAsync(row.Id, ct).ConfigureAwait(false);
+                if (now is not null && now.State != AssignedAccessState.Revoked
+                    && !await _ledger.UpdateLedgerIfUnchangedAsync(now, end, ct).ConfigureAwait(false))
+                {
+                    return "the record of where its shares came from changed while it was being updated; the same call completes it";
+                }
+            }
 
             if (live.Count > 0)
             {

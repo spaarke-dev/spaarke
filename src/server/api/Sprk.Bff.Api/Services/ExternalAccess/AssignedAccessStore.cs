@@ -281,6 +281,15 @@ public sealed class AssignedAccessLedgerRow
     [JsonPropertyName("sprk_grantedexpiry")]
     public DateOnly? GrantedExpiry { get; set; }
 
+    /// <summary>
+    /// Batch-4 integration (round 47 item 2): the row's version as it was read. This is <c>@odata.etag</c>, which the Web API
+    /// returns on every row whatever the <c>$select</c>. The inheritance pass's updates send it back as <c>If-Match</c>
+    /// (<see cref="AssignedAccessStore.UpdateLedgerIfUnchangedAsync"/>). It is <c>null</c> on a row this process built or
+    /// has already written, because that row's version is no longer the one that was read.
+    /// </summary>
+    [JsonPropertyName("@odata.etag")]
+    public string? ETag { get; set; }
+
     /// <summary>The state; an unknown or missing value reads as <see cref="AssignedAccessState.Skipped"/> — re-evaluated, never trusted.</summary>
     [JsonIgnore]
     public AssignedAccessState State =>
@@ -476,6 +485,116 @@ public class AssignedAccessStore
     /// <summary>Updates a ledger row. Exceptions propagate.</summary>
     internal virtual Task UpdateLedgerAsync(Guid rowId, AssignedAccessLedgerWrite write, CancellationToken ct)
         => _dataverse.UpdateAsync(EntitySet, rowId, BuildUpdatePayload(write), ct);
+
+    /// <summary>
+    /// Batch-4 integration (round 47 item 2, which closes E-158-v1-2). Updates <paramref name="row"/> ONLY IF the row still
+    /// holds what the caller decided on. The write sends <c>If-Match</c> with the version the row was read at
+    /// (<see cref="AssignedAccessLedgerRow.ETag"/>). It goes through task 140's
+    /// <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>, the one conditional-write mechanism.
+    /// <para>The row is READ AGAIN and decided again on a mismatch (412). The same happens when the row has no version to
+    /// send, because this process built it or has already written it. If the row's state, reason, level and subject still
+    /// match what <paramref name="row"/> holds in memory, the caller's decision still applies to what is stored. The write is
+    /// then sent once more at the fresh version. If they differ (an operator's Declined marker, another pass's end, or a
+    /// task 142 write), nothing is written and the method answers <c>false</c>. The caller decided on a row that has
+    /// changed, so the next pass decides on the row as it is now. The write is never sent blind.</para>
+    /// <para>On success, the write's values are applied to <paramref name="row"/> and its version is cleared, so a later
+    /// write in the same pass re-reads the row first. A row that no longer exists, or that is deactivated, answers
+    /// <c>false</c>. Any other fault propagates.</para>
+    /// </summary>
+    internal async Task<bool> UpdateLedgerIfUnchangedAsync(
+        AssignedAccessLedgerRow row, AssignedAccessLedgerWrite write, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        ArgumentNullException.ThrowIfNull(write);
+
+        if (!string.IsNullOrWhiteSpace(row.ETag)
+            && await TryUpdateLedgerIfMatchAsync(row.Id, write, row.ETag, ct).ConfigureAwait(false))
+        {
+            ApplyWritten(row, write);
+            return true;
+        }
+
+        var fresh = await ReadLedgerRowAsync(row.Id, ct).ConfigureAwait(false);
+        if (fresh is null || string.IsNullOrWhiteSpace(fresh.ETag) || !SameDecisionFacts(fresh, row))
+        {
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] Ledger row {RowId} changed since it was read ({Then} -> {Now}); not written. The next pass " +
+                "decides on it as it is.", row.Id, Describe(row), fresh is null ? "gone" : Describe(fresh));
+            return false;
+        }
+
+        if (!await TryUpdateLedgerIfMatchAsync(row.Id, write, fresh.ETag, ct).ConfigureAwait(false))
+        {
+            _logger.LogInformation(
+                "[ASSIGNED-ACCESS] Ledger row {RowId} changed again while it was being written; not written. The next pass " +
+                "decides on it.", row.Id);
+            return false;
+        }
+
+        ApplyWritten(row, write);
+        return true;
+    }
+
+    /// <summary>
+    /// One conditional PATCH (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>). Answers <c>true</c> when it landed and
+    /// <c>false</c> when the row changed since <paramref name="etag"/> (412) or no longer exists (404). Any other fault
+    /// propagates.
+    /// </summary>
+    internal virtual async Task<bool> TryUpdateLedgerIfMatchAsync(
+        Guid rowId, AssignedAccessLedgerWrite write, string etag, CancellationToken ct)
+    {
+        try
+        {
+            await _dataverse.UpdateIfMatchAsync(EntitySet, rowId, BuildUpdatePayload(write), etag, ct).ConfigureAwait(false);
+            return true;
+        }
+        catch (System.Data.DBConcurrencyException)
+        {
+            return false;
+        }
+        catch (KeyNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>One live ledger row as it is now (with its version), or <c>null</c> when it is gone or deactivated. Exceptions propagate.</summary>
+    internal virtual async Task<AssignedAccessLedgerRow?> ReadLedgerRowAsync(Guid rowId, CancellationToken ct)
+    {
+        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+            EntitySet,
+            filter: $"sprk_assignedaccessid eq {rowId:D} and statecode eq 0",
+            select: InheritedLedgerSelect,
+            top: 1,
+            cancellationToken: ct).ConfigureAwait(false);
+        return rows.FirstOrDefault(r => r.Id == rowId);
+    }
+
+    /// <summary>Whether a row read now still holds what a decision was made on: the values a ledger write sets, and its subject.</summary>
+    internal static bool SameDecisionFacts(AssignedAccessLedgerRow now, AssignedAccessLedgerRow decidedOn) =>
+        now.StateValue == decidedOn.StateValue
+        && string.Equals(now.Reason, decidedOn.Reason, StringComparison.Ordinal)
+        && now.GrantedLevel == decidedOn.GrantedLevel
+        && now.GrantedExpiry == decidedOn.GrantedExpiry
+        && now.GrantId == decidedOn.GrantId
+        && now.SystemUserId == decidedOn.SystemUserId
+        && now.SubjectTeamId == decidedOn.SubjectTeamId
+        && string.Equals(now.SourceField?.Trim(), decidedOn.SourceField?.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What a landed write leaves on the row, exactly as <see cref="BuildUpdatePayload"/> sets it. The version that was read is used up.</summary>
+    private static void ApplyWritten(AssignedAccessLedgerRow row, AssignedAccessLedgerWrite write)
+    {
+        row.StateValue = (int)write.State;
+        row.Reason = write.Reason is null ? null : Truncate(write.Reason, 100);
+        if (write.GrantId is { } grantId && grantId != Guid.Empty) row.GrantId = grantId;
+        if (write.SystemUserId is { } userId && userId != Guid.Empty) row.SystemUserId = userId;
+        if (write.GrantedLevel is { } level) row.GrantedLevel = level;
+        if (write.GrantedExpiry is { } expiry) row.GrantedExpiry = expiry;
+        row.ETag = null;
+    }
+
+    private static string Describe(AssignedAccessLedgerRow row) =>
+        string.Create(CultureInfo.InvariantCulture, $"{row.State}/{row.Reason}/{row.GrantedLevel}");
 
     // ── Inherited shares (task 158 r1, owner round 30 — the provenance of a share passed on to a filed secure root) ─────
 

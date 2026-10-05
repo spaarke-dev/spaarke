@@ -198,6 +198,68 @@ public class AssignedAccessStoreODataTests
         AssignedAccessStore.InheritedSourceOf(row.SourceField).Should().Be(("sprk_matter", Matter));
     }
 
+    // ── Batch-4 integration, 158 × 140 (round 47 item 2): the conditional update, over the client's If-Match seam ────
+
+    private static readonly AssignedAccessLedgerWrite Confirm =
+        new(AssignedAccessState.Shared, Reason: null, GrantedLevel: 23);
+
+    /// <summary>
+    /// The store sends the version the row was READ at as <c>If-Match</c> (task 140's <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>).
+    /// When an operator's Declined marker lands first, that send is refused (412). The row is read again, and because it no
+    /// longer holds what the decision was made on, nothing is written over the marker.
+    /// </summary>
+    [Fact]
+    public async Task AConditionalUpdate_SendsTheVersionItWasReadAt_AndNeverWritesOverARowThatChangedMeanwhile()
+    {
+        var stored = Row(workAssignment: Filed, source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Shared,
+            user: User, level: 23, reason: AssignedAccessReason.SharePending);
+        _table.Add(stored);
+        var read = (await _store.ReadInheritedLedgerAsync(ExternalGrantRootType.WorkAssignment, Filed, CancellationToken.None)).Single();
+        read.ETag.Should().NotBeNullOrWhiteSpace("the Web API returns @odata.etag on every row, whatever the $select");
+        _table.BeforeConditionalUpdate = id => _table.Touch(id, ("sprk_state", (int)AssignedAccessState.Declined),
+            ("sprk_reason", AssignedAccessReason.RemovedOutOfBand));
+
+        var written = await _store.UpdateLedgerIfUnchangedAsync(read, Confirm, CancellationToken.None);
+
+        written.Should().BeFalse();
+        _table.ConditionalUpdates.Should().ContainSingle().Which.Should().Be((read.Id, read.ETag!),
+            "one send, with the version read; the re-read finds the row changed, so nothing is sent again");
+        stored["sprk_state"].Should().Be((int)AssignedAccessState.Declined, "the operator's marker stands");
+        stored["sprk_reason"].Should().Be(AssignedAccessReason.RemovedOutOfBand);
+        _table.Updates.Should().BeEmpty("no unconditional write is ever made");
+    }
+
+    /// <summary>
+    /// A row whose version moved on while its facts stayed the same (a write that set the same values): the decision still
+    /// stands, so the write is sent once more at the fresh version and lands. The row in memory then holds what was written,
+    /// and its spent version is cleared.
+    /// </summary>
+    [Fact]
+    public async Task AConditionalUpdate_WhenOnlyTheVersionMoved_IsSentAgainAtTheFreshVersion()
+    {
+        var stored = Row(workAssignment: Filed, source: Inherited("sprk_matter", Matter), state: AssignedAccessState.Shared,
+            user: User, level: 23, reason: AssignedAccessReason.SharePending);
+        _table.Add(stored);
+        var read = (await _store.ReadInheritedLedgerAsync(ExternalGrantRootType.WorkAssignment, Filed, CancellationToken.None)).Single();
+        var once = false;
+        _table.BeforeConditionalUpdate = id =>
+        {
+            if (once)
+                return;
+            once = true;
+            _table.Touch(id); // same facts, new version
+        };
+
+        var written = await _store.UpdateLedgerIfUnchangedAsync(read, Confirm, CancellationToken.None);
+
+        written.Should().BeTrue();
+        _table.ConditionalUpdates.Should().HaveCount(2);
+        _table.ConditionalUpdates[1].ETag.Should().NotBe(_table.ConditionalUpdates[0].ETag, "the second send carries the fresh version");
+        stored["sprk_reason"].Should().BeNull("confirmed");
+        read.Reason.Should().BeNull("the row in memory holds what was written");
+        read.ETag.Should().BeNull("its version is spent: a later write in the same pass reads it again first");
+    }
+
     // ── The table ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Dictionary<string, object?> Row(
@@ -244,10 +306,56 @@ public class AssignedAccessStoreODataTests
 
         public List<(Guid Id, string Payload)> Updates { get; } = new();
 
+        /// <summary>Every conditional update sent: (row id, the version sent as <c>If-Match</c>).</summary>
+        public List<(Guid Id, string ETag)> ConditionalUpdates { get; } = new();
+
+        /// <summary>Runs before a conditional update is evaluated: a write landing between the store's read and its write.</summary>
+        public Action<Guid>? BeforeConditionalUpdate { get; set; }
+
+        private long _version;
+
+        private string NextVersion() => $"W/\"{++_version}\"";
+
+        /// <summary>Another writer's change to a row (no values: the same facts at a new version).</summary>
+        public void Touch(Guid id, params (string Column, object? Value)[] values)
+        {
+            var row = _rows.Single(r => (Guid)r["sprk_assignedaccessid"]! == id);
+            foreach (var (column, value) in values)
+                row[column] = value;
+            row["@odata.etag"] = NextVersion();
+        }
+
+        /// <summary>
+        /// The production contract of <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>. With no version, nothing is
+        /// sent. A version other than the row's is refused with 412, and a missing row with 404. Nothing is written on either.
+        /// </summary>
+        public override Task UpdateIfMatchAsync(string entitySetName, Guid id, object entity, string etag,
+            CancellationToken cancellationToken = default)
+        {
+            entitySetName.Should().Be(Set);
+            if (string.IsNullOrWhiteSpace(etag))
+                throw new ArgumentException("A conditional update needs the row's ETag as it was read; nothing was sent.", nameof(etag));
+
+            ConditionalUpdates.Add((id, etag));
+            BeforeConditionalUpdate?.Invoke(id);
+            var row = _rows.SingleOrDefault(r => (Guid)r["sprk_assignedaccessid"]! == id)
+                ?? throw new KeyNotFoundException($"{Set}({id}) was not found; nothing was created.");
+            if (!string.Equals(row["@odata.etag"] as string, etag, StringComparison.Ordinal))
+                throw new System.Data.DBConcurrencyException($"{Set}({id}) changed since it was read; the update was not applied.");
+
+            Apply(row, (IDictionary<string, object?>)entity);
+            row["@odata.etag"] = NextVersion();
+            return Task.CompletedTask;
+        }
+
         /// <summary>The next create answers 412 without a row behind it (a refusal that is not the alternate key).</summary>
         public bool RefuseNextCreate { get; set; }
 
-        public void Add(Dictionary<string, object?> row) => _rows.Add(row);
+        public void Add(Dictionary<string, object?> row)
+        {
+            row["@odata.etag"] = NextVersion();
+            _rows.Add(row);
+        }
 
         public override Task<List<T>> QueryAsync<T>(string entitySetName, string? filter = null, string? select = null,
             int? top = null, int? skip = null, CancellationToken cancellationToken = default)
@@ -257,7 +365,8 @@ public class AssignedAccessStoreODataTests
             var columns = select?.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             var rows = _rows.Where(predicate)
                 .Take(top ?? int.MaxValue)
-                .Select(r => columns is null ? r : columns.ToDictionary(c => c, c => r.TryGetValue(c, out var v) ? v : null))
+                .Select(r => columns is null ? r : columns.Append("@odata.etag").Distinct()
+                    .ToDictionary(c => c, c => r.TryGetValue(c, out var v) ? v : null))
                 .ToList();
             return Task.FromResult(JsonSerializer.Deserialize<List<T>>(JsonSerializer.Serialize(rows))!);
         }
@@ -278,6 +387,7 @@ public class AssignedAccessStoreODataTests
             if (_rows.Any(r => string.Equals(r["sprk_ledgerkey"] as string, row["sprk_ledgerkey"] as string, StringComparison.OrdinalIgnoreCase)))
                 throw new HttpRequestException("Duplicate alternate key sprk_AssignedAccessLedgerKey.", null, HttpStatusCode.PreconditionFailed);
 
+            row["@odata.etag"] = NextVersion();
             _rows.Add(row);
             return Task.FromResult((Guid)row["sprk_assignedaccessid"]!);
         }
@@ -286,7 +396,9 @@ public class AssignedAccessStoreODataTests
         {
             entitySetName.Should().Be(Set);
             Updates.Add((id, JsonSerializer.Serialize(entity)));
-            Apply(_rows.Single(r => (Guid)r["sprk_assignedaccessid"]! == id), (IDictionary<string, object?>)entity);
+            var row = _rows.Single(r => (Guid)r["sprk_assignedaccessid"]! == id);
+            Apply(row, (IDictionary<string, object?>)entity);
+            row["@odata.etag"] = NextVersion();
             return Task.CompletedTask;
         }
 

@@ -83,7 +83,11 @@ internal static class AssignedAccessTestDoubles
             var row = NewRow(type, rootId, field, subject);
             Apply(row, new AssignedAccessLedgerWrite(state, reason, grantId, systemUserId, level, expiry));
             lock (_gate)
+            {
+                Bump(row);
                 Ledger.Add(row);
+            }
+
             return row;
         }
 
@@ -112,6 +116,7 @@ internal static class AssignedAccessTestDoubles
 
                 var row = NewRow(rootType, rootId, sourceField, subject);
                 Apply(row, write);
+                Bump(row);
                 Ledger.Add(row);
                 Writes.Add(("create", key, write.State));
                 return Task.FromResult(row.Id);
@@ -133,11 +138,82 @@ internal static class AssignedAccessTestDoubles
             {
                 var row = Ledger.Single(r => r.Id == rowId);
                 Apply(row, write);
+                Bump(row);
                 Writes.Add(("update", row.LedgerKey!, write.State));
             }
 
             return Task.CompletedTask;
         }
+
+        // ── Batch-4 integration (round 47 item 2): the conditional update the inheritance pass sends ──────────────────
+
+        /// <summary>
+        /// Runs just before a conditional (If-Match) update is evaluated, with the row id. This is a write landing between
+        /// a pass's read and its write, such as an operator's Declined marker or another pass's end.
+        /// </summary>
+        public Action<Guid>? BeforeConditionalUpdate { get; set; }
+
+        /// <summary>The conditional updates refused because the row's version had moved on (the 412s): (row id, version sent).</summary>
+        public List<(Guid RowId, string ETag)> PreconditionFailures { get; } = new();
+
+        /// <summary>
+        /// The production contract of <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>, behind the store's seam. A
+        /// version other than the row's is refused (412) and nothing is written. A row that is gone is refused (404).
+        /// </summary>
+        internal override Task<bool> TryUpdateLedgerIfMatchAsync(
+            Guid rowId, AssignedAccessLedgerWrite write, string etag, CancellationToken ct)
+        {
+            if (string.IsNullOrWhiteSpace(etag))
+                throw new ArgumentException("A conditional update needs the row's ETag as it was read; nothing was sent.", nameof(etag));
+
+            BeforeConditionalUpdate?.Invoke(rowId);
+            if (FailLedgerWrites || FailLedgerUpdates)
+                throw new HttpRequestException("Simulated ledger write failure.");
+
+            lock (_gate)
+            {
+                var row = Ledger.SingleOrDefault(r => r.Id == rowId);
+                if (row is null)
+                    return Task.FromResult(false);
+                if (!string.Equals(row.ETag, etag, StringComparison.Ordinal))
+                {
+                    PreconditionFailures.Add((rowId, etag));
+                    return Task.FromResult(false);
+                }
+
+                Apply(row, write);
+                Bump(row);
+                Writes.Add(("update", row.LedgerKey!, write.State));
+                return Task.FromResult(true);
+            }
+        }
+
+        internal override Task<AssignedAccessLedgerRow?> ReadLedgerRowAsync(Guid rowId, CancellationToken ct)
+        {
+            if (FailLedgerRead)
+                throw new HttpRequestException("Simulated ledger read failure.");
+            lock (_gate)
+                return Task.FromResult(Ledger.Where(r => r.Id == rowId).Select(Clone).FirstOrDefault());
+        }
+
+        /// <summary>
+        /// Writes <paramref name="write"/> to a row as another writer would (an operator's marker, another pass), with no
+        /// fault and no hook, moving its version on. Used by the race tests.
+        /// </summary>
+        public void WriteConcurrently(Guid rowId, AssignedAccessLedgerWrite write)
+        {
+            lock (_gate)
+            {
+                var row = Ledger.Single(r => r.Id == rowId);
+                Apply(row, write);
+                Bump(row);
+            }
+        }
+
+        private long _version;
+
+        /// <summary>Moves a row's version on (<c>@odata.etag</c>, <c>W/"versionnumber"</c>), as every Dataverse write does.</summary>
+        private void Bump(AssignedAccessLedgerRow row) => row.ETag = $"W/\"{++_version}\"";
 
         // ── Task 158 r1 (owner round 30): the inherited-share provenance rows, in the same in-memory ledger ──────────────
 
@@ -222,6 +298,7 @@ internal static class AssignedAccessTestDoubles
                     SubjectTeamId = principal.Kind == DataversePrincipalKind.Team ? principal.Id : null,
                 };
                 Apply(row, write with { SystemUserId = null });
+                Bump(row);
                 Ledger.Add(row);
                 Writes.Add(("create", key, write.State));
                 return Task.FromResult<Guid?>(row.Id);
@@ -249,7 +326,11 @@ internal static class AssignedAccessTestDoubles
             };
             Apply(row, write with { SystemUserId = null });
             lock (_gate)
+            {
+                Bump(row);
                 Ledger.Add(row);
+            }
+
             return row;
         }
 
