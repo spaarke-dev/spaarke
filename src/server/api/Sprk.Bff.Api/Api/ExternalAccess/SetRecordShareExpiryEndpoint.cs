@@ -30,6 +30,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// 2026-09-11, "Renew them too"). Revoked (inactive) rows are untouched, and standing-grant access has no
 /// row at all, so it is out of scope by design (owner 2026-09-10, design note §12.1).</para>
 ///
+/// <para><b>Contact-issued shares are taken over</b> (task 140; session 27 round 34 item 3): a share a contact issued
+/// from the external SPA gets the date AND, in the same transaction, its contact issuer cleared and
+/// <c>sprk_grantedby</c> set to the caller — so the contact can neither re-lengthen (own re-grant) nor revoke the
+/// operator's deliberate time bound. Every other share gets the expiry and nothing else.</para>
+///
 /// <para><b>Authorization</b> is the group-level <see cref="DelegationRuleFilter"/>: Write on THIS record,
 /// evaluated as the caller (OBO), before the handler runs. The filter and the handler resolve the target
 /// through the same <see cref="ResolveRoot"/>, and this request has no legacy <c>projectId</c>, so the
@@ -209,10 +214,34 @@ public static class SetRecordShareExpiryEndpoint
             return TypedResults.Ok(new SetRecordShareExpiryResponse(UpdatedCount: 0, ExpiresDate: expiry));
         }
 
+        // ── Take-over of contact-issued shares (task 140; session 27 round 34 item 3) ──
+        // A Write holder setting the record's date is an INTERNAL decision on every share, contact-issued ones included.
+        // Left stamped with its contact issuer, such a share could be re-lengthened by that contact's own re-grant (up to
+        // its cap) or revoked by it — overriding the operator's deliberate time bound, the harm managed_elsewhere exists to
+        // prevent. So each one is taken over in the SAME transaction: the contact issuer is cleared and sprk_grantedby is
+        // the caller (when the caller's systemuser resolves; an audit field never blocks the write — the core's rule).
+        // Session 27 round 50 item 2: "contact-issued" includes a share whose issuing contact was DELETED (its recorded
+        // provenance survives, the lookup does not), and the take-over clears that provenance in the same write.
+        var contactIssued = shares.Count(s => s.IsContactIssued);
+        Guid? takeOverBy = null;
+        if (contactIssued > 0
+            && Guid.TryParse(
+                await GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync(dataverseClient, callerOid, logger, ct),
+                out var callerSystemUserId))
+        {
+            takeOverBy = callerSystemUserId;
+        }
+
         // ── Write: ONE all-or-nothing transaction (task 096) ──────────────────
         var storedValue = ExternalGrantLifecycle.ToSdkDateOnly(expiry);
         var updates = shares
-            .Select(s => (s.Id, new Dictionary<string, object> { ["sprk_expiresdate"] = storedValue }))
+            .Select(s =>
+            {
+                var fields = new Dictionary<string, object> { ["sprk_expiresdate"] = storedValue };
+                if (s.IsContactIssued)
+                    ExternalGrantLifecycle.AddInternalTakeOverFields(fields, takeOverBy);
+                return (s.Id, fields);
+            })
             .ToList();
 
         try
@@ -231,6 +260,14 @@ public static class SetRecordShareExpiryEndpoint
                 WriteFailedReasonCode,
                 $"The expiry could not be confirmed as applied. The change is all-or-nothing: either every share on " +
                 $"this record now ends on {expiry:yyyy-MM-dd} or none does. Reload to see which, then retry if needed.");
+        }
+
+        if (contactIssued > 0)
+        {
+            logger.LogInformation(
+                "[SHARE-EXPIRY] {Count} contact-issued share(s) of {RootType} {RootId} were taken over by the caller " +
+                "(systemuser {SystemUserId}): their contact issuer is cleared, so the contact can no longer change or " +
+                "revoke them.", contactIssued, root.Type, root.Id, takeOverBy?.ToString() ?? "(unresolved)");
         }
 
         logger.LogInformation(

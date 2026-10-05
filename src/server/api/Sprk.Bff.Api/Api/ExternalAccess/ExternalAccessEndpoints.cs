@@ -98,6 +98,12 @@ public static class ExternalAccessEndpoints
         // registered predicate (app-only, no OBO, no Graph pointers). Additive — handlers + the group
         // filter above are untouched.
         externalGroup.MapExternalModuleDataEndpoints();
+
+        // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
+        // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.
+        // On THIS group because a contact can authenticate nowhere else (ADR-028 A3: one ExternalCollaboration group);
+        // every route carries ContactGrantorAuthorizationFilter, which refuses a systemuser (Manage Access is theirs).
+        externalGroup.MapContactGrantEndpoints();
     }
 
     // =========================================================================

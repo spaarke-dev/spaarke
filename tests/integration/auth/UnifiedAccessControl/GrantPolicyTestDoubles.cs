@@ -92,15 +92,109 @@ internal static class GrantPolicyTestDoubles
             return Task.FromResult(result);
         }
 
+        /// <summary>
+        /// Task 140: a contact's raw <c>sprk_contactorganization</c> rows, projected through the PRODUCTION
+        /// <see cref="ExternalParticipationService.ProjectOrganizationMemberships"/> (today's UTC date, as the production read
+        /// uses) — so an inactive or date-ended membership is judged by the real rule, not by the double.
+        /// </summary>
+        public ConcurrentDictionary<Guid, ContactOrgRow[]> MembershipRows { get; } = new();
+
+        /// <summary>Task 140: contacts whose membership read faults (one subject, not every read).</summary>
+        public ConcurrentDictionary<Guid, bool> UnreadableMembershipContacts { get; } = new();
+
+        /// <summary>Task 140: contacts whose membership read THROWS.</summary>
+        public ConcurrentDictionary<Guid, bool> ThrowingMembershipContacts { get; } = new();
+
+        /// <summary>Task 140 r-final: every contact whose membership read ran, in order.</summary>
+        public ConcurrentQueue<Guid> MembershipReads { get; } = new();
+
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
             Guid contactId, CancellationToken ct = default)
         {
-            if (MembershipsUnreadable)
+            MembershipReads.Enqueue(contactId);
+            if (MembershipsUnreadable || UnreadableMembershipContacts.ContainsKey(contactId))
                 return Task.FromResult(ActiveOrgMemberships.Failed);
+
+            if (ThrowingMembershipContacts.ContainsKey(contactId))
+                throw new HttpRequestException("Simulated membership read failure.");
+
+            if (MembershipRows.TryGetValue(contactId, out var rows))
+                return Task.FromResult(ProjectOrganizationMemberships(rows, DateOnly.FromDateTime(DateTime.UtcNow)));
 
             var orgs = ContactOrganizations.TryGetValue(contactId, out var ids) ? ids : Array.Empty<Guid>();
             return Task.FromResult(new ActiveOrgMemberships(orgs, orgs, Unreadable: false));
         }
+
+        /// <summary>
+        /// Task 140 r2: the contacts the colleague-by-email read sees — id → (email, statecode), e.g. the test's identity
+        /// store. A contact not answered here has no expanded contact on its junction rows (names nobody).
+        /// </summary>
+        public Func<Guid, (string? Email, int StateCode)?>? ContactDirectory { get; set; }
+
+        /// <summary>Task 140 r2: the colleague-by-email read THROWS (the production fault shape of a failed page).</summary>
+        public bool ColleagueByEmailFaults { get; set; }
+
+        /// <summary>Task 140 r2: every colleague-by-email read — the organizations it named and the email.</summary>
+        public ConcurrentBag<(Guid[] Organizations, string Email)> ColleagueByEmailReads { get; } = new();
+
+        /// <summary>
+        /// Task 140 r2: the junction rows a colleague-by-email chunk returns, as Dataverse would for the production
+        /// <c>$filter</c>'s ORGANIZATION and junction-state clauses — every active membership row of the named organizations,
+        /// built from <see cref="MembershipRows"/> / <see cref="ContactOrganizations"/>, each with its contact expanded from
+        /// <see cref="ContactDirectory"/>. The contact's email and state are deliberately NOT filtered here: the PRODUCTION
+        /// projection (<see cref="ExternalParticipationService.ProjectColleaguesByEmail"/>) must decide them, so a test
+        /// proves the code — not the double — keeps an outsider or an inactive contact out.
+        /// </summary>
+        internal override Task<IReadOnlyList<ColleagueMembershipRow>> ReadColleagueMembershipRowsAsync(
+            IReadOnlyCollection<Guid> organizationIds, string email, CancellationToken ct)
+        {
+            ColleagueByEmailReads.Add((organizationIds.ToArray(), email));
+            if (ColleagueByEmailFaults)
+                throw new HttpRequestException("Simulated colleague-by-email read failure.");
+
+            var rows = new List<ColleagueMembershipRow>();
+            foreach (var contactId in ContactOrganizations.Keys.Union(MembershipRows.Keys).Distinct())
+            {
+                var memberships = MembershipRows.TryGetValue(contactId, out var seeded)
+                    ? seeded
+                    : ContactOrganizations[contactId].Select(org => new ContactOrgRow
+                    {
+                        OrganizationId = org,
+                        StateCode = 0,
+                        Organization = new OrganizationStateRow { StateCode = 0 },
+                    }).ToArray();
+
+                var contact = ContactDirectory?.Invoke(contactId) is { } info
+                    ? new ColleagueContactRow { Email = info.Email, StateCode = info.StateCode }
+                    : null;
+
+                rows.AddRange(memberships
+                    .Where(m => m.OrganizationId is { } org && organizationIds.Contains(org) && IsActiveState(m.StateCode))
+                    .Select(m => new ColleagueMembershipRow
+                    {
+                        ContactId = contactId,
+                        OrganizationId = m.OrganizationId,
+                        StartDate = m.StartDate,
+                        EndDate = m.EndDate,
+                        StateCode = m.StateCode,
+                        Organization = m.Organization,
+                        Contact = contact,
+                    }));
+            }
+
+            return Task.FromResult<IReadOnlyList<ColleagueMembershipRow>>(rows);
+        }
+
+        /// <summary>
+        /// Task 140: a contact's grant set, for the real CIAM composition. Only a SEEDED contact is answered here; any
+        /// other falls through to the production read, exactly as before this seam existed.
+        /// </summary>
+        public ConcurrentDictionary<Guid, ExternalGrantSet> GrantSets { get; } = new();
+
+        public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
+            => GrantSets.TryGetValue(contactId, out var set)
+                ? Task.FromResult(set)
+                : base.GetGrantSetAsync(contactId, ct);
 
         /// <summary>Task 143: the table each record belongs to (unlisted = <c>sprk_project</c>), for the reverse reads.</summary>
         public ConcurrentDictionary<Guid, string> RecordTables { get; } = new();

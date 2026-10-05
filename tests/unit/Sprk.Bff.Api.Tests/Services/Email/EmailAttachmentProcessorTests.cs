@@ -94,6 +94,9 @@ public class EmailAttachmentProcessorTests
         return new EmailAttachmentProcessor(
             speFileStore,
             Mock.Of<IDocumentDataverseService>(),
+            // Task 146 (integ): the processor owns its document rows through the ONE resolver; the filter under test
+            // runs before any create, so a module-boundary double is enough (batch-4 integration of master #1287).
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Options.Create(options),
             NullLogger<EmailAttachmentProcessor>.Instance);
     }

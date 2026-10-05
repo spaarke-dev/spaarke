@@ -153,6 +153,18 @@ public sealed class CallerPrincipal
     private static readonly IReadOnlyDictionary<Guid, AccessRights> EmptyRights =
         new Dictionary<Guid, AccessRights>();
 
+    /// <summary>
+    /// The root entity types (LOGICAL names, e.g. <c>sprk_project</c>) on which an UNDATED access term ran for this
+    /// caller — standing-grant membership or organization expansion (<see cref="AccessibleRecordSetSources"/>), which
+    /// confer access with no expiry date (unified-access-control-r2 task 140). Empty when every right the caller holds
+    /// comes from dated grant rows — always so for a CIAM contact, whose composition has no derived-member terms (owner
+    /// A2). Provenance, not authorization: it tells the contact-side grant route whether a grantor's level may rest on
+    /// something with no date, which decides whether their own grant's expiry caps the one they issue (owner G2 (i)).
+    /// </summary>
+    public IReadOnlySet<string> UndatedAccessTermEntityTypes { get; init; } = EmptyEntityTypes;
+
+    private static readonly IReadOnlySet<string> EmptyEntityTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
     private IReadOnlySet<Guid>? _matterIds;
     private IReadOnlySet<Guid>? _workAssignmentIds;
 
@@ -250,6 +262,28 @@ public sealed class CallerPrincipal
     /// </summary>
     public AccessRights GetWorkAssignmentRights(Guid workAssignmentId) =>
         WorkAssignmentAccess.TryGetValue(workAssignmentId, out var rights) ? rights : AccessRights.None;
+
+    /// <summary>
+    /// The effective <see cref="AccessRights"/> on a grant root of any type (unified-access-control-r2 task 140) — the
+    /// one dispatch over <see cref="GetEffectiveRights"/>, <see cref="GetMatterRights"/> and
+    /// <see cref="GetWorkAssignmentRights"/>. Fail-closed: a root the caller cannot reach is <see cref="AccessRights.None"/>,
+    /// so "out of scope" and "insufficient rights" are one answer.
+    /// </summary>
+    internal AccessRights RightsOn(ExternalGrantRootType rootType, Guid rootId) => rootType switch
+    {
+        ExternalGrantRootType.Project => GetEffectiveRights(rootId),
+        ExternalGrantRootType.Matter => GetMatterRights(rootId),
+        ExternalGrantRootType.WorkAssignment => GetWorkAssignmentRights(rootId),
+        _ => AccessRights.None,
+    };
+
+    /// <summary>
+    /// Whether the caller is a CONTACT principal (unified-access-control-r2 task 140): a CIAM contact, or a workforce
+    /// caller that resolved to a contact only. The principal KIND decides — a workforce SYSTEMUSER carries
+    /// <see cref="SystemUserId"/> and is never a contact principal, even when it also carries a linked contact id (task
+    /// 141's user↔contact link). Not a plane test: both planes produce contact principals (ADR-028 A3).
+    /// </summary>
+    public bool IsContactPrincipal => SystemUserId is null && ContactId != Guid.Empty;
 }
 
 /// <summary>
@@ -642,6 +676,12 @@ public sealed class WorkforcePrincipalStrategy : ICallerPrincipalStrategy
             ProjectAccess = projectAccess,
             MatterAccess = matterAccess,
             WorkAssignmentAccess = workAssignmentAccess,
+            // Task 140: where an UNDATED term (standing-grant membership, organization expansion) ran — the contact-side
+            // grant route caps an issued grant's expiry at the grantor's own only when their level rests on a dated grant.
+            UndatedAccessTermEntityTypes = new[] { accessibleProjects, accessibleMatters, accessibleWorkAssignments }
+                .Where(set => set.Sources.StandingGrantMembership || set.Sources.OrgExpansionMembership)
+                .Select(set => set.EntityType)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase),
         });
     }
 }

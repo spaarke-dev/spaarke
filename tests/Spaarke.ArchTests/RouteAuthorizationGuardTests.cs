@@ -314,6 +314,18 @@ public class RouteAuthorizationGuardTests
             + "doc-in-project before any SPE read, then streams app-only. The decision is in the handler by "
             + "design, because a contact is not a security principal and the access must be COMPUTED."),
 
+        // ---- Contact-side Grant Access: added 2026-10-04 by unified-access-control-r2 task 140 (#1063) ----
+        //
+        // The first routes that let a NON-Dataverse principal mint access. RouteLevelGate: every route carries
+        // AddContactGrantorAuthorizationFilter (contact principal only; Collaborate or Full Access on the record from the
+        // evaluator's post-veto rights; to grant, an active organization), and each handler re-runs the same checks.
+        new GovernedFile("Api/ExternalAccess/ContactGrantEndpoints.cs", Scope.RouteLevelGate,
+            "/api/v1/external/contact-grants (POST grant, GET list, POST revoke) — a Collaborate/Full Access contact grants "
+            + "colleagues of its own organization at or below its own level, lists and revokes the grants it issued. Each "
+            + "route carries AddContactGrantorAuthorizationFilter; a systemuser is refused (Manage Access is theirs). Writes go "
+            + "through the ONE grant core (task 139's ceiling, task 138's policy, the No Access check) in its contact-issuer "
+            + "mode."),
+
         new GovernedFile("Api/ExternalAccess/ExternalModuleDataEndpoints.cs", Scope.HandlerAuthorized,
             "Scoped Dataverse reads for the contact plane. Authorization is the Tier2ScopeFilterInjector "
             + "rewriting the caller's FetchXML against their accessible-record set — a query-shaping "
@@ -992,7 +1004,17 @@ public class RouteAuthorizationGuardTests
     //            communications families gained (PATCH /api/v1/events/{id}/filing — round 36, after task 159 deleted
     //            the general PUT — and PATCH /api/communications/{id}/filing) live in existing files and call the same
     //            handler, so the census cannot see them.
-    private const int ExpectedEndpointFileCount = 118;
+    //
+    // 118 -> 119 (2026-10-05, sweep integration of unified-access-control-r2 task 140; written as 122 -> 123 on the task
+    // branch, before 160, 163, 164 and 147 landed here):
+    //
+    //   140  +1  Api/ExternalAccess/ContactGrantEndpoints.cs ADDED — POST/GET /api/v1/external/contact-grants and
+    //            POST /api/v1/external/contact-grants/revoke: a Collaborate/Full Access CONTACT grants colleagues of its
+    //            own organization, lists and revokes what it issued. Unlike 143/142 these are on the COLLABORATION group
+    //            (a contact can authenticate nowhere else) and they WRITE access, so the file IS governed:
+    //            RouteLevelGate, every route carrying AddContactGrantorAuthorizationFilter. Pinned by
+    //            tests/integration/auth/UnifiedAccessControl/ContactGrantAuthorizationTests.cs (handlers + host routes).
+    private const int ExpectedEndpointFileCount = 119;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

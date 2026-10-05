@@ -66,6 +66,9 @@ public class ProjectClosureCascadeTests
         "_sprk_contact_value", "_sprk_organization_value", "_sprk_project_value",
         "_sprk_matter_value", "_sprk_workassignment_value", "_sprk_invoice_value",
         "_sprk_grantedby_value", "_sprk_recordtype_value",
+        // Task 140's issuer columns (the contact lookup and its text provenance), kept in step with
+        // RecordShareExpiryTests' copy of the same live set so a closure path that ever selects them is not a false 400.
+        "_sprk_grantedbycontact_value", "sprk_grantedbycontactid",
         "createdon", "modifiedon", "ownerid"
     };
 

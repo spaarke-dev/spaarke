@@ -20,8 +20,9 @@ import {
   MessageBarTitle,
 } from '@fluentui/react-components';
 import { PersonAdd20Regular, CheckmarkCircle20Regular, Dismiss20Regular } from '@fluentui/react-icons';
-import { inviteUser, type InviteUserResponse } from '../auth/bff-client';
+import { grantAccessAsContact, problemMessage, type ContactGrantResponse } from '../auth/bff-client';
 import { AccessLevel } from '../types';
+import { canInvite, grantableLevels } from '../hooks/useAccessLevel';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 design tokens — no hard-coded colors, ADR-021)
@@ -33,13 +34,6 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     gap: tokens.spacingVerticalL,
     paddingBottom: tokens.spacingVerticalM,
-  },
-  fieldRow: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalM,
-    '& > *': {
-      flex: '1 1 0',
-    },
   },
   successContent: {
     display: 'flex',
@@ -58,33 +52,12 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  successDetails: {
+  notices: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalS,
     width: '100%',
-  },
-  detailRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: tokens.spacingVerticalXS,
-    paddingBottom: tokens.spacingVerticalXS,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-  },
-  detailLabel: {
-    color: tokens.colorNeutralForeground2,
-  },
-  detailValue: {
-    color: tokens.colorNeutralForeground1,
-    fontWeight: '600',
-  },
-  invitationCode: {
-    color: tokens.colorBrandForeground1,
-    fontFamily: 'monospace',
-    fontSize: tokens.fontSizeBase300,
+    textAlign: 'left',
   },
 });
 
@@ -100,7 +73,7 @@ function validateEmail(value: string): string | null {
   return null;
 }
 
-function accessLevelLabel(level: AccessLevel): string {
+export function accessLevelLabel(level: AccessLevel | number | null | undefined): string {
   switch (level) {
     case AccessLevel.ViewOnly:
       return 'View Only';
@@ -118,25 +91,23 @@ function accessLevelLabel(level: AccessLevel): string {
 // ---------------------------------------------------------------------------
 
 interface InviteUserDialogProps {
-  /** The Secure Project record ID the invitation is for */
+  /** The record the grant is for — 'project' (the one detail page with a Contacts tab), 'matter' or 'workassignment'. */
+  recordType?: string;
+  /** The record id */
   projectId: string;
-  /** The current user's access level — dialog is only usable for FullAccess users */
+  /** The current user's access level on the record — the dialog is usable for Collaborate and Full Access. */
   accessLevel: AccessLevel;
   /** Whether the dialog is open */
   isOpen: boolean;
-  /** Callback invoked when the dialog is dismissed (cancel or after successful invite) */
+  /** Callback invoked when the dialog is dismissed (cancel or after a successful grant) */
   onClose: () => void;
+  /** Called after a grant was written, so the caller can refresh its list of issued grants. */
+  onGranted?: (result: ContactGrantResponse) => void;
 }
-
-// ---------------------------------------------------------------------------
-// Form state
-// ---------------------------------------------------------------------------
 
 interface FormState {
   email: string;
   selectedAccessLevel: AccessLevel;
-  firstName: string;
-  lastName: string;
 }
 
 type DialogView = 'form' | 'success' | 'error';
@@ -146,74 +117,57 @@ type DialogView = 'form' | 'success' | 'error';
 // ---------------------------------------------------------------------------
 
 /**
- * InviteUserDialog — allows Full Access external users to invite new external
- * users to the current Secure Project.
+ * InviteUserDialog — contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q1 / Q2).
  *
- * Features:
- * - Email input with format validation
- * - Access level dropdown (View Only, Collaborate, Full Access)
- * - Optional first/last name fields
- * - Calls POST /api/v1/external-access/invite via bff-client.inviteUser()
- * - Success view shows invitation details (invitation code, expiry)
- * - Error view shows error message with retry option
+ * A contact holding Collaborate or Full Access gives a colleague OF THEIR OWN ORGANIZATION access to this record:
+ * - the colleague is named by email and must already be an active contact of the caller's organization in the system
+ *   (a person who is not yet one is refused by the server, with its message shown verbatim);
+ * - only levels at or below the caller's own are offered (the server caps anyway, and says so — "narrowed");
+ * - the grant lasts 90 days, never beyond the caller's own grant (the server says when it shortened it).
  *
- * Visibility: Only rendered/accessible for AccessLevel.FullAccess users (ADR-003).
+ * Posts to POST /api/v1/external/contact-grants via bff-client.grantAccessAsContact(). There is no organization-wide
+ * option, by rule. Visibility: Collaborate and Full Access only — the server is the security boundary (ADR-008).
  *
  * Styled exclusively with Fluent UI v9 design tokens (ADR-021).
  */
-export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, accessLevel, isOpen, onClose }) => {
+export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({
+  recordType = 'project',
+  projectId,
+  accessLevel,
+  isOpen,
+  onClose,
+  onGranted,
+}) => {
   const styles = useStyles();
+  const levels = grantableLevels(accessLevel);
 
-  // Guard: this dialog must never be usable by non-FullAccess users
-  if (accessLevel !== AccessLevel.FullAccess) {
-    return null;
-  }
-
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const [form, setForm] = React.useState<FormState>({
-    email: '',
-    selectedAccessLevel: AccessLevel.ViewOnly,
-    firstName: '',
-    lastName: '',
-  });
-
-  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [form, setForm] = React.useState<FormState>({ email: '', selectedAccessLevel: AccessLevel.ViewOnly });
   const [emailError, setEmailError] = React.useState<string | null>(null);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [isSubmitting, setIsSubmitting] = React.useState(false);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
   const [view, setView] = React.useState<DialogView>('form');
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const [successData, setSuccessData] = React.useState<InviteUserResponse | null>(null);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
+  const [result, setResult] = React.useState<ContactGrantResponse | null>(null);
   const [errorMessage, setErrorMessage] = React.useState<string | null>(null);
 
-  // Reset form state when dialog opens
-  // eslint-disable-next-line react-hooks/rules-of-hooks
+  // Reset form state when the dialog opens
   React.useEffect(() => {
     if (isOpen) {
-      setForm({
-        email: '',
-        selectedAccessLevel: AccessLevel.ViewOnly,
-        firstName: '',
-        lastName: '',
-      });
+      setForm({ email: '', selectedAccessLevel: AccessLevel.ViewOnly });
       setEmailError(null);
       setIsSubmitting(false);
       setView('form');
-      setSuccessData(null);
+      setResult(null);
       setErrorMessage(null);
     }
   }, [isOpen]);
 
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
+  // Guard: never usable by a caller who may not grant (View Only, or no access)
+  if (!canInvite(accessLevel)) {
+    return null;
+  }
 
   function handleEmailChange(e: React.ChangeEvent<HTMLInputElement>): void {
     const value = e.target.value;
     setForm(prev => ({ ...prev, email: value }));
-    // Clear validation error as user types
     if (emailError) {
       setEmailError(validateEmail(value));
     }
@@ -223,16 +177,7 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
     setForm(prev => ({ ...prev, selectedAccessLevel: Number(e.target.value) as AccessLevel }));
   }
 
-  function handleFirstNameChange(e: React.ChangeEvent<HTMLInputElement>): void {
-    setForm(prev => ({ ...prev, firstName: e.target.value }));
-  }
-
-  function handleLastNameChange(e: React.ChangeEvent<HTMLInputElement>): void {
-    setForm(prev => ({ ...prev, lastName: e.target.value }));
-  }
-
   async function handleSubmit(): Promise<void> {
-    // Validate email before submission
     const emailValidationError = validateEmail(form.email);
     if (emailValidationError) {
       setEmailError(emailValidationError);
@@ -243,37 +188,22 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
     setErrorMessage(null);
 
     try {
-      const response = await inviteUser({
-        email: form.email.trim(),
-        projectId,
+      const response = await grantAccessAsContact({
+        recordType,
+        recordId: projectId,
+        granteeEmail: form.email.trim(),
         accessLevel: form.selectedAccessLevel,
-        firstName: form.firstName.trim() || undefined,
-        lastName: form.lastName.trim() || undefined,
       });
-
-      setSuccessData(response);
+      setResult(response);
       setView('success');
+      onGranted?.(response);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'An unexpected error occurred. Please try again.';
-      setErrorMessage(message);
+      setErrorMessage(problemMessage(err, 'An unexpected error occurred. Nothing was granted; please try again.'));
       setView('error');
     } finally {
       setIsSubmitting(false);
     }
   }
-
-  function handleRetry(): void {
-    setView('form');
-    setErrorMessage(null);
-  }
-
-  function handleClose(): void {
-    onClose();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Render helpers
-  // ---------------------------------------------------------------------------
 
   function renderFormView(): React.ReactNode {
     return (
@@ -281,12 +211,12 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
         <DialogContent>
           <div className={styles.dialogContent}>
             <Text>
-              Invite an external user to collaborate on this project. They will receive an email with a link to accept
-              the invitation and set up their account.
+              Give a colleague from your organization access to this project. You can give them up to your own level of
+              access ({accessLevelLabel(accessLevel)}). Their access lasts 90 days, and never longer than yours.
             </Text>
 
             <Field
-              label="Email address"
+              label="Colleague's email address"
               required
               validationState={emailError ? 'error' : 'none'}
               validationMessage={emailError ?? undefined}
@@ -301,53 +231,37 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
               />
             </Field>
 
-            <div className={styles.fieldRow}>
-              <Field label="First name">
-                <Input
-                  placeholder="Jane"
-                  value={form.firstName}
-                  onChange={handleFirstNameChange}
-                  disabled={isSubmitting}
-                />
-              </Field>
-              <Field label="Last name">
-                <Input
-                  placeholder="Smith"
-                  value={form.lastName}
-                  onChange={handleLastNameChange}
-                  disabled={isSubmitting}
-                />
-              </Field>
-            </div>
-
             <Field label="Access level" required>
               <Select
                 value={String(form.selectedAccessLevel)}
                 onChange={handleAccessLevelChange}
                 disabled={isSubmitting}
+                aria-label="Access level"
               >
-                <option value={String(AccessLevel.ViewOnly)}>View Only</option>
-                <option value={String(AccessLevel.Collaborate)}>Collaborate</option>
-                <option value={String(AccessLevel.FullAccess)}>Full Access</option>
+                {levels.map(level => (
+                  <option key={level} value={String(level)}>
+                    {accessLevelLabel(level)}
+                  </option>
+                ))}
               </Select>
             </Field>
           </div>
         </DialogContent>
 
         <DialogActions>
+          <DialogTrigger disableButtonEnhancement>
+            <Button appearance="secondary" onClick={onClose} disabled={isSubmitting}>
+              Cancel
+            </Button>
+          </DialogTrigger>
           <Button
             appearance="primary"
             icon={isSubmitting ? <Spinner size="tiny" /> : <PersonAdd20Regular />}
             onClick={handleSubmit}
             disabled={isSubmitting}
           >
-            {isSubmitting ? 'Sending invitation...' : 'Send invitation'}
+            {isSubmitting ? 'Granting access...' : 'Grant access'}
           </Button>
-          <DialogTrigger disableButtonEnhancement>
-            <Button appearance="secondary" onClick={handleClose} disabled={isSubmitting}>
-              Cancel
-            </Button>
-          </DialogTrigger>
         </DialogActions>
       </>
     );
@@ -363,27 +277,37 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
             </div>
 
             <Text size={500} weight="semibold">
-              Invitation sent
+              Access granted
             </Text>
 
             <Text>
-              An invitation email has been sent to <strong>{form.email}</strong> with{' '}
-              <strong>{accessLevelLabel(form.selectedAccessLevel)}</strong> access.
+              <strong>{form.email}</strong> now has <strong>{accessLevelLabel(result?.grantedAccessLevel)}</strong>{' '}
+              access{result?.expiryDate ? ` until ${result.expiryDate}` : ''}.
             </Text>
 
-            {successData && (
-              <div className={styles.successDetails}>
-                <Text size={300} className={styles.detailValue}>
-                  The user's workspace account is being provisioned and an onboarding email has been sent with sign-in
-                  instructions. No invitation code is required — they can sign in directly once provisioning completes.
-                </Text>
-              </div>
-            )}
+            <div className={styles.notices}>
+              {result?.narrowed && (
+                <MessageBar intent="warning">
+                  <MessageBarBody>
+                    You can give at most your own access ({accessLevelLabel(accessLevel)}), so they were given{' '}
+                    {accessLevelLabel(result.grantedAccessLevel)} instead of{' '}
+                    {accessLevelLabel(form.selectedAccessLevel)}.
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+              {result?.expiryNarrowed && (
+                <MessageBar intent="info">
+                  <MessageBarBody>
+                    Their access ends on {result.expiryDate}, when your own access to this project ends.
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+            </div>
           </div>
         </DialogContent>
 
         <DialogActions>
-          <Button appearance="primary" onClick={handleClose}>
+          <Button appearance="primary" onClick={onClose}>
             Done
           </Button>
         </DialogActions>
@@ -398,43 +322,34 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
           <div className={styles.dialogContent}>
             <MessageBar intent="error">
               <MessageBarBody>
-                <MessageBarTitle>Invitation failed</MessageBarTitle>
-                {errorMessage ?? 'An unexpected error occurred while sending the invitation.'}
+                <MessageBarTitle>Access not granted</MessageBarTitle>
+                {errorMessage}
               </MessageBarBody>
             </MessageBar>
-
-            <Text>
-              The invitation to <strong>{form.email}</strong> could not be sent. Please check the details and try again.
-              If the problem persists, contact your system administrator.
-            </Text>
           </div>
         </DialogContent>
 
         <DialogActions>
-          <Button appearance="primary" onClick={handleRetry}>
-            Try again
-          </Button>
-          <Button appearance="secondary" onClick={handleClose}>
+          <Button appearance="secondary" onClick={onClose}>
             Cancel
+          </Button>
+          <Button appearance="primary" onClick={() => setView('form')}>
+            Try again
           </Button>
         </DialogActions>
       </>
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Render
-  // ---------------------------------------------------------------------------
-
   const dialogTitle =
-    view === 'success' ? 'Invitation sent' : view === 'error' ? 'Invitation failed' : 'Invite external user';
+    view === 'success' ? 'Access granted' : view === 'error' ? 'Access not granted' : 'Grant a colleague access';
 
   return (
     <Dialog
       open={isOpen}
       onOpenChange={(_, data) => {
         if (!data.open && !isSubmitting) {
-          handleClose();
+          onClose();
         }
       }}
     >
@@ -447,7 +362,7 @@ export const InviteUserDialog: React.FC<InviteUserDialogProps> = ({ projectId, a
                   appearance="subtle"
                   aria-label="Close dialog"
                   icon={<Dismiss20Regular />}
-                  onClick={handleClose}
+                  onClick={onClose}
                   disabled={isSubmitting}
                 />
               </DialogTrigger>

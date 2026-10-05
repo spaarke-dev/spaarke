@@ -2651,8 +2651,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// <summary>
     /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
     /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
-    /// the fields supplied are written. <see cref="DBNull.Value"/> is rejected: it cannot be serialized here,
-    /// and failing before anything is sent avoids an "outcome unknown" error for a request that never left.
+    /// the fields supplied are written; <see cref="DBNull.Value"/> CLEARS the column (the attribute is set to null),
+    /// exactly as <c>UpdateAsync</c> treats it (task 140, 2026-10-04 — it used to be rejected).
     ///
     /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
     /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
@@ -2685,18 +2685,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             foreach (var field in fields)
             {
-                if (field.Value is DBNull)
-                {
-                    throw new ArgumentException(
-                        $"The update at index {index} sets '{field.Key}' to DBNull. BulkUpdateAsync cannot clear a " +
-                        "column; use UpdateAsync with DBNull.Value instead.",
-                        nameof(updates));
-                }
+                // UpdateAsync's convention exactly: C# null → SKIP; DBNull.Value → explicit CLEAR (the attribute is
+                // set to null, which the SDK serializes as "clear the column / sever the lookup"). The DBNull itself
+                // is never put into the entity — that was the unserializable shape this builder used to reject.
+                if (field.Value is null)
+                    continue;
 
-                if (field.Value != null)
-                {
-                    entity[field.Key] = field.Value;
-                }
+                entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
             transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });
