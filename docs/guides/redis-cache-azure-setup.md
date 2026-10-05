@@ -409,9 +409,9 @@ sp-spaarke-redis-rotation-{env}          Website Contributor           /subscrip
 
 The workflow [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) invokes [`scripts/Rotate-RedisKey.ps1`](../../scripts/Rotate-RedisKey.ps1) under the per-env OIDC service principal configured in §6.1.
 
-#### How the cron fires
+#### When it runs
 
-Two staggered quarterly crons (06:00 UTC, January / April / July / October): **staging on the 8th, prod on the 15th** (a 7-day soak after staging). Each run:
+**Manual dispatch only.** The two quarterly crons (staging on the 8th, prod on the 15th of January / April / July / October, 06:00 UTC) were removed on 2026-10-05 by owner decision: every scheduled run had failed because no staging or prod cache, service principal or GitHub Environment secrets exist. The workflow header shows the exact `schedule:` block to restore once a key-based staging/prod cache exists. Each run:
 
 1. Selects the matching GitHub Environment (`staging` / `prod`) so OIDC mints a token for the env-specific SP.
 2. Runs `./scripts/Rotate-RedisKey.ps1 -Environment {env} -Force`.

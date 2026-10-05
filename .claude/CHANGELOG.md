@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-05 — Redis key rotation: dev retired, quarterly schedule removed (T242b)
+
+`customer-provisioning-orchestration-r1` T242b (owner decision 2026-10-05).
+
+- **`.claude/skills/ci-cd/SKILL.md`**: the `redis-key-rotation.yml` row now reads "manual only". The workflow's
+  quarterly crons were removed because every scheduled run had failed (no staging/prod cache, service principal
+  or secrets exist), and dev has no key since the dev cache became Azure Managed Redis, Entra only.
+
+---
 ###### 2026-10-04 — PCF deploy procedures verify the REAL build result; `pcf-scripts` exits 0 on a failed build
 
 **What was wrong.** `pcf-scripts build` (and so `npm run build:prod` in every PCF) **exits 0 when the webpack

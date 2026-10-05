@@ -5,9 +5,15 @@
 # FR-08 of spaarke-redis-cache-remediation-r2.
 #
 # Triggers:
-#   - 2 staggered quarterly crons (06:00 UTC, Jan/Apr/Jul/Oct):
-#       * staging  — 8th of the month  (catches breakage first)
-#       * prod     — 15th of the month (7-day soak after staging)
+#   - NO SCHEDULE (removed 2026-10-05, owner decision, T242b). Every scheduled run
+#     failed (2026-07-01/08/15, 2026-10-01): no staging or prod BFF cache, service
+#     principal or GitHub Environment secrets exist, and under ADR-009 (T242) new
+#     Spaarke caches are Azure Managed Redis with no keys. To restore the quarterly
+#     cadence once a key-based staging/prod cache exists, re-add:
+#       schedule:
+#         - cron: '0 6 8 */3 *'   # staging — 8th of Jan/Apr/Jul/Oct
+#         - cron: '0 6 15 */3 *'  # prod — 15th (7-day soak after staging)
+#     The jobs' `if:` conditions still match those two expressions.
 #     DEV RETIRED 2026-10-05 (T242b): the dev cache is Azure Managed Redis with
 #     access keys disabled — the BFF and L2 Worker sign in with their managed
 #     identities, so there is no dev key or Redis-ConnectionString to rotate.
@@ -45,11 +51,7 @@
 name: Redis Key Rotation
 
 on:
-  schedule:
-    # staging — 06:00 UTC on the 8th of Jan, Apr, Jul, Oct
-    - cron: '0 6 8 */3 *'
-    # prod — 06:00 UTC on the 15th of Jan, Apr, Jul, Oct (7d after staging)
-    - cron: '0 6 15 */3 *'
+  # schedule: removed 2026-10-05 — see the header for why and how to restore it.
   workflow_dispatch:
     inputs:
       environment:

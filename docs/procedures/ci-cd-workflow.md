@@ -111,7 +111,6 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │  nightly-health.yml (daily, 06:00 UTC)                                │
 │  client-tests.yml (nightly, 07:00 UTC)                                │
 │  adr-audit.yml / report-workflow-health.yml (weekly, Mon 09:00 UTC)   │
-│  redis-key-rotation.yml (quarterly, staggered per environment)        │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -139,7 +138,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `adr-audit.yml` | Weekly (Mon 09:00 UTC), dispatch | ~5 min | No (advisory; tracking issue) |
 | `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 20-60 min | No (advisory; rolling tracking issue) |
 | `client-tests.yml` | Nightly (07:00 UTC), dispatch | n/a | No (advisory baseline over 40 client packages) |
-| `redis-key-rotation.yml` | 2 staggered quarterly crons (staging/prod), dispatch | n/a | N/A (operational key rotation) |
+| `redis-key-rotation.yml` | Manual dispatch only (schedule removed 2026-10-05) | n/a | N/A (operational key rotation) |
 | `report-workflow-health.yml` | Weekly (Mon 09:00 UTC), dispatch | n/a | No (advisory; tracking issue) |
 | `sdap-ci.yml` (legacy) | Push to `master` / PR (`paths-ignore`: docs/**, **.md, `.claude/**`, …) | n/a | No — superseded by `CI / Router`; pending deletion |
 | `sdap-ci-docs-only.yml` (legacy) | PR touching only `sdap-ci.yml`'s ignored paths | n/a | No — paired no-op fallback for `sdap-ci.yml` |
@@ -169,7 +168,7 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `provisioning-prereqs-validate.yml` | provisioning-prereqs-validate | PR/push/merge_group; advisory | Validates `prereqs.yaml` + `intake.schema.json` shape and parser parity with the `/provision-environment` skill |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time) | Locates the 8 canonical pre-built managed-solution ZIPs, uploads them, and publishes the manifest H6 reads |
 | `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
-| `redis-key-rotation.yml` | Redis Key Rotation | Scheduled (quarterly) / manual | Rotates the Redis access key per environment with safe-window rollback |
+| `redis-key-rotation.yml` | Redis Key Rotation | Manual (schedule removed 2026-10-05) | Rotates the Redis access key of a legacy key-based staging/prod cache with safe-window rollback |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
 | `sdap-ci-docs-only.yml` | SDAP CI - Docs-Only Fallback | Legacy, PR-scoped | No-op success check pairing with `sdap-ci.yml`'s `paths-ignore` gap |
 | `sdap-ci.yml` | SDAP CI | Legacy, no longer required | Original monolithic pipeline (security scan, build/test, eval gate, client/code quality, tenant isolation, integration readiness, Compose fidelity + client gates); superseded by `CI / Router`, pending deletion |
@@ -676,7 +675,7 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
-| `redis-key-rotation.yml` | 2 staggered quarterly crons (8th/15th of Jan/Apr/Jul/Oct, 06:00 UTC) | Redis access-key rotation for legacy key-based caches (staging → prod, 7-day soak). Dev was removed 2026-10-05: its cache is Azure Managed Redis, Entra only, no key | N/A — operational; has automatic rollback on health-check failure |
+| `redis-key-rotation.yml` | None — the quarterly crons were removed 2026-10-05 (owner decision): every scheduled run had failed, because no staging/prod cache, service principal or secrets exist | Redis access-key rotation for legacy key-based caches (staging/prod, manual dispatch). Dev was removed 2026-10-05: its cache is Azure Managed Redis, Entra only, no key | N/A — operational; has automatic rollback on health-check failure |
 
 ### `nightly-health.yml`
 
