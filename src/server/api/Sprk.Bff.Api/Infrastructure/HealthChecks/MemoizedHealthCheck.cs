@@ -151,7 +151,6 @@ internal static class CatalogHealthChecks
         IEnumerable<string> tags)
         where T : class, IHealthCheck
     {
-        ArgumentNullException.ThrowIfNull(builder);
         var state = new MemoizedHealthCheck.State(MemoTtl);
         var allTags = tags.Append(Tag).Distinct(StringComparer.Ordinal).ToArray();
         return builder.Add(new HealthCheckRegistration(
