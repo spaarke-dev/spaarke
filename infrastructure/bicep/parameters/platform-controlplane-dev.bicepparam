@@ -105,6 +105,11 @@ param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:late
 // Exchange permission is the narrowed role 'Spaarke App RBAC Admin' (owner D25).
 param exchangeAdminAppId = '46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7'
 
+// Task 242b (owner D12/D13, 2026-10-04): the dev Azure Managed Redis (parameters/redis-dev.bicepparam,
+// output `redisEndpoint`). Microsoft Entra only -- the Worker signs in with sprk-controlplane-dev-uami,
+// which holds an access-policy assignment on it. Not a secret.
+param redisEndpoint = 'spaarke-bff-redis-dev.westus2.redis.azure.net:10000'
+
 // ============================================================================
 // SPE OWNING APPS (task 245b; task 248 — MI-FIC, owner decision D16)
 // ============================================================================

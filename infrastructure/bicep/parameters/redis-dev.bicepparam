@@ -17,9 +17,8 @@
 
 using '../modules/redis.bicep'
 
-// Canonical per-environment name (ADR-009). The old Azure Cache for Redis of this name stays until task 242b's cut-over
-// finishes (it is a different resource type, Microsoft.Cache/redis). 242b's step-1 preflight confirms Azure accepts the
-// same name for the new cluster while the old cache exists; if it does not, 242b records the name it used here.
+// Canonical per-environment name (ADR-009). Azure accepted it for the new cluster while the old Azure Cache for Redis of
+// the same name (Microsoft.Cache/redis, a different DNS zone) still existed — created 2026-10-04 (task 242b step 2).
 param redisName = 'spaarke-bff-redis-dev'
 
 param skuName = 'Balanced_B0'

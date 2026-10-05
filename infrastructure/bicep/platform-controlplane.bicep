@@ -178,6 +178,10 @@ param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? '
 @description('Client id of the \'Spaarke Exchange Admin\' app registration the Worker signs in as for H14a (task 251, owner D24) -- through its federated identity credential that trusts the control-plane UAMI; no certificate, no secret. Threaded to modules/controlplane-worker-app-service.bicep (IntegrationWiring__ExchangeAdminAppId). Empty: the Worker and its sidecar start, and H14a reports "not configured" on first use -- never a placeholder value. Created by docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (Exchange admin app).')
 param exchangeAdminAppId string = ''
 
+@description('Endpoint (host:port) of the per-environment Azure Managed Redis (spaarke-bff-redis-{env}; modules/redis.bicep output `redisEndpoint`, deployed with parameters/redis-{env}.bicepparam). Threaded to modules/controlplane-worker-app-service.bicep as Redis__Endpoint -- the Worker authenticates with the control-plane UAMI (access keys are disabled, task 242 / owner D12-D13), so that UAMI must be in the cache\'s access-policy list. Required: the Worker refuses to start without it outside Development/Testing.')
+@minLength(1)
+param redisEndpoint string
+
 @description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
 param speContainerTypeOwners array = []
 
@@ -474,6 +478,8 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     sidecarAuthType: sidecarAuthType
     // Task 251: the Exchange admin app the Worker signs in as (H14a / H13 T4).
     exchangeAdminAppId: exchangeAdminAppId
+    // Task 242b: the per-environment Managed Redis the Worker signs in to with its UAMI.
+    redisEndpoint: redisEndpoint
     // Task 245b (G25): L2's own principal (H4 grants it Secrets Officer on each customer vault —
     // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
     controlPlanePrincipalId: uami.outputs.principalId

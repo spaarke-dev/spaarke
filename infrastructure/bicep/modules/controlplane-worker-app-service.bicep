@@ -121,8 +121,9 @@ param adminDataverseEnvironmentUrl string
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
 
-@description('Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name "Redis-ConnectionString" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module\'s platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments.')
-param redisConnectionStringSecretName string = 'Redis-ConnectionString'
+@description('Endpoint (host:port) of the per-environment Azure Managed Redis (spaarke-bff-redis-{env}, modules/redis.bicep output `redisEndpoint`), emitted as Redis__Endpoint. Consumed by DispatchModule (Level-2 dispatch-idempotency IDistributedCache, task 105 / DS-2 §4-L2): with Redis__Endpoint set the Worker authenticates with its user-assigned identity (ManagedIdentity__ClientId) over RESP3 -- the cache has access keys disabled (task 242, owner D12/D13), so there is no connection string and no Key Vault secret. The Worker UAMI must hold an access-policy assignment on the cache (parameters/redis-{env}.bicepparam). Required: outside Development/Testing the Worker refuses to start without it (NFR-05 fail-fast; we do not set ASPNETCORE_ENVIRONMENT=Development to bypass it -- the gate prevents silent same-instance-only duplicate suppression in multi-instance environments). Not a secret.')
+@minLength(1)
+param redisEndpoint string
 
 @description('HTTPS URI of the provisioning-artifacts blob CONTAINER (e.g. https://{account}.blob.core.windows.net/provisioning-artifacts) -- output of modules/controlplane-artifacts-storage.bicep (G-8 Batch 2, audit defect #5). Threaded into the three handler option sections that each REQUIRE it at boot per NFR-05 (G-8 audit defect #7): BicepInfraDeployOptions (H2a), BffDeployOptions (H9), SolutionImportOptions (H6) -- Program.cs binds each via GetSection(nameof(...Options)), so the app-setting keys below carry the literal "...Options" section names. All three Validate() throw on empty, so this param is REQUIRED (no default) -- platform-controlplane.bicep MUST pass the artifacts-storage module\'s container URI output here (wiring owned by G-8 Batch 2). The Worker\'s UAMI reads blobs via DefaultAzureCredential (Storage Blob Data Reader grant -- audit defect #3); no account key or SAS in config.')
 param artifactsStorageContainerUri string
@@ -320,19 +321,16 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
 
         // ---------------------------------------------------------------
         // G-8 Batch 3 (audit defect #6): Level-2 dispatch-idempotency Redis
-        // (DispatchModule.cs:154-199, task 105 / DS-2 §4-L2). The code reads
-        // GetConnectionString("Redis") FIRST, then Redis:ConnectionString --
-        // ConnectionStrings__Redis is used here for exact parity with the
-        // BFF cutover shape (Deploy-RedisCache.ps1 -CutoverBffSettings).
-        // Without this setting the Worker THROWS at composition time under
-        // the App Service default ASPNETCORE_ENVIRONMENT=Production
-        // (deliberate NFR-05 fail-fast; we provide a REAL connection string
-        // rather than bypass the gate with an environment override -- see
-        // the redisConnectionStringSecretName param description).
+        // (DispatchModule, task 105 / DS-2 §4-L2). Task 242b: Azure Managed
+        // Redis, Microsoft Entra only -- the endpoint is a plain setting and
+        // the Worker signs in with its UAMI (ManagedIdentity__ClientId below);
+        // the former ConnectionStrings__Redis Key Vault reference is gone.
+        // Without Redis__Endpoint the Worker THROWS at composition time under
+        // ASPNETCORE_ENVIRONMENT=Production (deliberate NFR-05 fail-fast).
         // ---------------------------------------------------------------
         {
-          name: 'ConnectionStrings__Redis'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${redisConnectionStringSecretName})'
+          name: 'Redis__Endpoint'
+          value: redisEndpoint
         }
 
         // ---------------------------------------------------------------
