@@ -76,7 +76,6 @@ const accepted = () =>
     correlationId: 'corr-1',
   });
 
-const isChecked = (element: HTMLElement): boolean => (element as HTMLInputElement).checked;
 const isDisabled = (element: HTMLElement): boolean => (element as HTMLButtonElement).disabled;
 
 function renderPane(documentIdentity: DocumentIdentityState | undefined) {
@@ -113,7 +112,9 @@ describe('SaveFlow — FR-11 save mode (task 024)', () => {
     saveResponses.push(accepted());
     renderPane(RESOLVED);
 
-    expect(isChecked(screen.getByRole('radio', { name: 'A new version of “Engagement Letter”' }))).toBe(true);
+    // Task 095: no "Save as" radios for a document already in Spaarke — Save just saves a new version.
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Keep as version' })).toBeNull();
     // A version save neither re-files nor renames, so those inputs are not offered.
     expect(screen.queryByTestId('related-to-picker')).toBeNull();
     expect(screen.queryByLabelText('Document name')).toBeNull();
@@ -132,11 +133,11 @@ describe('SaveFlow — FR-11 save mode (task 024)', () => {
     expect(body).not.toHaveProperty('targetEntity');
   });
 
-  it('the explicit "A new document" override forces a create even though the identity is resolved', async () => {
+  it('the "Save as new document" link forces a create even though the identity is resolved', async () => {
     saveResponses.push(accepted());
     renderPane(RESOLVED);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'A new document' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save as new document' }));
     expect(screen.getByTestId('related-to-picker')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
@@ -203,19 +204,38 @@ describe('SaveFlow — FR-11 save mode (task 024)', () => {
     const offer = await screen.findByRole('button', { name: 'Save as new document' });
     fireEvent.click(offer);
 
-    expect(isChecked(screen.getByRole('radio', { name: 'A new document' }))).toBe(true);
+    // Create mode: the plain form is back and "Keep as version" offers the way home.
+    expect(screen.getByTestId('related-to-picker')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Keep as version' })).toBeInTheDocument();
     expect(isDisabled(screen.getByRole('button', { name: 'Save' }))).toBe(false);
     expect(saveCallCount()).toBe(1);
+  });
+
+  it('"Keep as version" returns from create mode to a version save', async () => {
+    saveResponses.push(accepted());
+    renderPane(RESOLVED);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save as new document' }));
+    expect(screen.getByTestId('related-to-picker')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep as version' }));
+
+    expect(screen.queryByTestId('related-to-picker')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Keep as version' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    const [body] = await sentBodies();
+    expect(body!.document.existingDocumentId).toBe(DOCUMENT_ID);
+    expect(body!.document.isNewVersion).toBe(true);
   });
 
   it('announces a mode change through the live region (NFR-11)', async () => {
     renderPane(RESOLVED);
 
-    fireEvent.click(screen.getByRole('radio', { name: 'A new document' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save as new document' }));
 
     await waitFor(() =>
       expect(screen.getByRole('status').textContent).toContain(
-        'Save mode: a new document. The existing document will not be changed.'
+        'Save mode: a new document. Choose where to file it, then select Save.'
       )
     );
   });

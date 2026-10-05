@@ -174,8 +174,21 @@ describe('ActivityNotesSection — FR-18 + FR-19 callback wiring (R4 tasks 046+0
       fireEvent.click(screen.getByRole('menuitem', { name: /^Keep on briefing for 7 more days$/i }));
     });
     expect(callbacks.onKeep).toHaveBeenCalledTimes(1);
-    // ttl flows through from NotificationItem.ttlinseconds = 604800 (fixture).
-    expect(callbacks.onKeep).toHaveBeenCalledWith('n-1', 604800);
+    // ttl is 0, not the old NotificationItem.ttlinseconds=604800 fixture value
+    // (task 092, 2026-10-04). Commit ad53af431 (2026-06-30, "Wave 12 Daily
+    // Briefing widget cutover — /render is sole data source") — 4 days after
+    // this test was written — deliberately drops NarrativeBullet's per-item
+    // sub-list (`items` prop), per ActivityNotesSection.tsx's own two inline
+    // comments at the <NarrativeBullet> call site: "sub-list expansion is
+    // dropped (no appnotification items to expand into per-row sub-list)...
+    // R3 per-item actions optional — not wired post-cutover." `onKeep` is
+    // still wired (callback-propagation contract preserved — see the other
+    // tests in this file), but `NarrativeBullet`'s
+    // `items?.find(...)?.ttlinseconds ?? 0` now has no `items` to look up,
+    // so `onKeep` always reports ttl=0 by current, intentional design. This
+    // is NOT a dead feature to delete — it is live, wired, and exercised
+    // by this very test; the TTL VALUE it carries is what changed.
+    expect(callbacks.onKeep).toHaveBeenCalledWith('n-1', 0);
   });
 
   it('ActivityNotesSection_OnAddToTodo_InvokesUseInlineTodoCreatePath: ADR-024 preserved — onAddToTodo(itemIds[]) flows up', () => {

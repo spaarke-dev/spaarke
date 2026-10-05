@@ -645,6 +645,9 @@ export class OutlookAdapter implements IHostAdapter {
       canOpenBrowserWindow: this.isOpenBrowserWindowSupported(),
       // task 036 / FR-15: Mailbox 1.6 + read mode — see isComposeNewMessageSupported().
       canComposeEmail: this.isComposeNewMessageSupported(),
+      // task 096 (owner 2026-10-04: "Outlook unchanged"): no in-pane Email tab — Send Email keeps opening
+      // Outlook's native compose window (canComposeEmail above).
+      canEmailFromPane: false,
       // task 040 / FR-19: linked-todos (spec.md Assumptions Outlook-only list) — unconditionally
       // true here, matching the pre-existing `hostType === 'outlook'` gate this formalizes
       // (`App.tsx`'s LinkedTodosBanner visibility). The banner itself stays inert without a

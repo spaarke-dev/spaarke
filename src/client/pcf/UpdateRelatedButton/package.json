@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "PCF control that triggers update of related records based on field mappings",
   "scripts": {
+    "prebuild": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build": "pcf-scripts build",
+    "prebuild:prod": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",
@@ -13,7 +15,9 @@
     "start:watch": "pcf-scripts start watch",
     "refreshTypes": "pcf-scripts refreshTypes"
   },
-  "dependencies": {},
+  "dependencies": {
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
+  },
   "devDependencies": {
     "@fluentui/react-components": "9.68.0",
     "@fluentui/react-icons": "^2.0.0",

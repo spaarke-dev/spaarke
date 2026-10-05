@@ -16,7 +16,7 @@
  */
 
 import * as React from 'react';
-import { screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { screen, waitFor, act, fireEvent, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { RichFilePreview, type IRichFilePreviewProps } from '../RichFilePreview';
 import { renderWithProviders } from '../../../__mocks__/pcfMocks';
@@ -235,6 +235,15 @@ describe('RichFilePreview', () => {
       renderWithProviders(<RichFilePreview {...props} />);
       const div = document.createElement('div');
       div.contentEditable = 'true';
+      // jsdom does not implement `HTMLElement.isContentEditable` (it stays
+      // `undefined` even after setting the `contentEditable` IDL property —
+      // verified: jsdom also never reflects it to the `contenteditable`
+      // attribute). The production guard reads `target.isContentEditable`
+      // (RichFilePreview.tsx), which is correct for real browsers but can
+      // never be exercised by this test without setting it directly here.
+      // Task 092, 2026-10-04 — broken since this test's creation (2026-06-04,
+      // commit 01359b36f9), never an app regression.
+      (div as unknown as { isContentEditable: boolean }).isContentEditable = true;
       document.body.appendChild(div);
       div.focus();
       act(() => {
@@ -261,7 +270,15 @@ describe('RichFilePreview', () => {
       const props = defaultProps({ documentType: 'NDA' });
       renderWithProviders(<RichFilePreview {...props} />);
       expect(screen.getByText('Tags')).toBeInTheDocument();
-      expect(screen.getByText('NDA')).toBeInTheDocument();
+      // `documentType` is rendered TWICE by design (task 092, 2026-10-04 —
+      // present since this component's creation, 01359b36f9 2026-06-04, so
+      // this assertion never actually passed): once as the Tags-section chip
+      // (what this test names/intends), once as the Details "Type" row value
+      // (RichFilePreview.tsx renderDetailsSection). A bare `getByText('NDA')`
+      // throws "multiple elements found" — scope to the Tags region, which
+      // has an accessible name via `aria-labelledby` (role="region").
+      const tagsSection = screen.getByRole('region', { name: 'Tags' });
+      expect(within(tagsSection).getByText('NDA')).toBeInTheDocument();
     });
 
     it('renders Details with formatted date + size + created-by', () => {
