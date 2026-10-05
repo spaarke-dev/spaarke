@@ -595,7 +595,12 @@ public sealed class RecordCreationService
                     secured.ReasonCode ?? "sdap.inherit.unexpected_result",
                     "The project is filed under a secure record, so it is created secure and shared to you, and that share could " +
                     "not be made, so the new project was removed again. Nothing was created. " +
-                    (secured.CompletesAutomatically ? "Try again in a few minutes." : $"{secured.Detail}.")));
+                    // Task 158 r1c-v2 (round 47 item 4): one sentence of its own — never provisioning's ProblemDetails text
+                    // appended (it ends in its own period and says "Nothing was changed." beside "Nothing was created.").
+                    (secured.CompletesAutomatically
+                        ? "Try again in a few minutes."
+                        : $"Securing it was refused ({secured.ReasonCode}), and trying again will not change that: an " +
+                          "administrator needs to review your access to the secure record it would be filed under.")));
             }
 
             // Task 158 r1c-v1 (verifier item 7): a self-heal is promised only when the job can deliver it — never after

@@ -135,13 +135,27 @@ public sealed record InheritedShareOutcome(
 
 /// <summary>
 /// One secure parent's mirror as the reverse rule reads it (task 158 r1, owner round 30): <see cref="Mirror"/> when the
-/// parent is isolated; <c>null</c> when it is not (it ends nothing it passed on); <see cref="Unreadable"/> when it could not
-/// be decided — reported by the caller, never read as "not isolated".
+/// parent is isolated; <c>null</c> when it is not; <see cref="Unreadable"/> when it could not be decided — reported by the
+/// caller, never read as "not isolated". Task 158 r1c-v2 (round 39 item 1): a parent that is not isolated is one of two
+/// kinds. <see cref="PassesNothingOn"/> — it reads NOT secure (its flag is false: unsecured) or no longer exists — passes
+/// nothing on any more, so every inherited share it passed on is ended by the reverse rule (unsecuring a parent ends what
+/// it passed on). Otherwise it is flagged secure without being isolated (mid-provisioning, mid-unsecure, or re-owned
+/// outside Spaarke) and ends nothing: its mirror cannot be trusted either way, so what it passed on is held.
 /// </summary>
 public sealed record ParentMirrorAnswer(IReadOnlyDictionary<DataversePrincipalRef, int>? Mirror, bool Unreadable)
 {
-    /// <summary>The parent is not isolated (or does not exist): it ends nothing it passed on.</summary>
+    /// <summary>
+    /// Round 39 item 1: the parent reads NOT secure (unsecured) or does not exist — it passes nothing on, and every live
+    /// inherited share it passed on ends by the reverse rule. Never set for a parent whose flag is EMPTY (owner round 17
+    /// item 3: that is <see cref="Unreadable"/>) or flagged secure.
+    /// </summary>
+    public bool PassesNothingOn { get; init; }
+
+    /// <summary>The parent is flagged secure but not isolated: it ends nothing it passed on (held).</summary>
     public static ParentMirrorAnswer NotIsolated { get; } = new(null, false);
+
+    /// <summary>Round 39 item 1: the parent reads not secure, or is gone — it passes nothing on.</summary>
+    public static ParentMirrorAnswer NotSecure { get; } = new(null, false) { PassesNothingOn = true };
 
     /// <summary>Whether the parent is isolated, or whom it shares, could not be read.</summary>
     public static ParentMirrorAnswer CouldNotRead { get; } = new(null, true);
@@ -270,10 +284,13 @@ public sealed class SecureChildShareSynchronizer
     /// <summary>
     /// Task 158 r1 (owner round 30): ONE parent's mirror — its direct sharees at <see cref="RecordShareLevels.ChildMirrorMask"/>
     /// — when it is ISOLATED (owned by the named Secure Record owner team). <see cref="ParentMirrorAnswer.Mirror"/> is
-    /// <c>null</c> when the parent is not isolated (unsecured, mid-provisioning) or does not exist: such a parent ends
-    /// nothing it passed on (the reverse rule fires only on a secure parent's unshare; an unsecured parent's filed records
-    /// stay as they are — owner round 6 item 4). <see cref="ParentMirrorAnswer.Unreadable"/> when it could not be decided
-    /// (the parent, its shares or the named team could not be read) — never read as "not isolated": the caller reports it.
+    /// <c>null</c> when the parent is not isolated. Task 158 r1c-v2 (round 39 item 1 — interpretation xiii reversed): a
+    /// parent that reads NOT secure (its flag false: unsecured) or does not exist any more PASSES NOTHING ON
+    /// (<see cref="ParentMirrorAnswer.PassesNothingOn"/>): every inherited share it passed on is ended by the reverse rule. A
+    /// parent flagged secure but not isolated (mid-provisioning, mid-unsecure, re-owned outside Spaarke) ends nothing — held.
+    /// <see cref="ParentMirrorAnswer.Unreadable"/> when it could not be decided (the parent, its shares or the named team
+    /// could not be read, or its flag is EMPTY — owner round 17 item 3) — never read as "not isolated" or "not secure": the
+    /// caller reports it.
     /// </summary>
     public async Task<ParentMirrorAnswer> IsolatedParentMirrorAsync(
         string parentTable, Guid parentId, CancellationToken ct)
@@ -289,8 +306,17 @@ public sealed class SecureChildShareSynchronizer
 
             var parent = new RowRef(parentTable.ToLowerInvariant(), parentId);
             var facts = await ReadRootFactsAsync(_dataverse, parent, ct).ConfigureAwait(false);
-            if (facts is null || facts.OwningTeam != secureTeamId)
-                return ParentMirrorAnswer.NotIsolated;
+            if (facts is null)
+                return ParentMirrorAnswer.NotSecure; // gone: it passes nothing on
+            if (facts.OwningTeam != secureTeamId)
+            {
+                return facts.Flag switch
+                {
+                    true => ParentMirrorAnswer.NotIsolated,   // flagged, not isolated: held
+                    false => ParentMirrorAnswer.NotSecure,    // unsecured: it passes nothing on (round 39 item 1)
+                    null => ParentMirrorAnswer.CouldNotRead,  // EMPTY is never "not secure" (owner round 17 item 3)
+                };
+            }
 
             return new ParentMirrorAnswer(
                 Run.DirectMasks(await _recordShare.GetPrincipalAccessOrThrowAsync(parent.Table, parent.Id, ct).ConfigureAwait(false))
@@ -836,12 +862,16 @@ public sealed class SecureChildShareSynchronizer
         query.Criteria.AddCondition(root.Table + "id", ConditionOperator.Equal, root.Id);
         var entity = (await dataverse.RetrieveMultipleAsync(query, ct).ConfigureAwait(false)).Entities.FirstOrDefault();
 
-        // NULL sprk_issecure is "No" (owner decision Q1, 2026-10-01), as in the ownership resolver.
+        // NULL sprk_issecure is "No" (owner decision Q1, 2026-10-01), as in the ownership resolver — for FlaggedSecure. The raw
+        // value is kept too (task 158 r1c-v2): the reverse rule never reads an EMPTY flag as "unsecured" (round 17 item 3).
         return entity is null
             ? null
             : new RootFacts(
                 entity.GetAttributeValue<EntityReference>(OwningTeamColumn)?.Id is { } team && team != Guid.Empty ? team : null,
-                entity.GetAttributeValue<bool?>(IsSecureColumn) == true);
+                entity.GetAttributeValue<bool?>(IsSecureColumn) == true)
+            {
+                Flag = entity.GetAttributeValue<bool?>(IsSecureColumn),
+            };
     }
 
     /// <summary>A row of a known table.</summary>
@@ -854,7 +884,11 @@ public sealed class SecureChildShareSynchronizer
     private sealed record Row(RowRef Ref, Guid? OwningTeam, bool UserOwned, IReadOnlyList<RowRef> Parents);
 
     /// <summary>A root's ownership and flag.</summary>
-    private sealed record RootFacts(Guid? OwningTeam, bool FlaggedSecure);
+    private sealed record RootFacts(Guid? OwningTeam, bool FlaggedSecure)
+    {
+        /// <summary>Task 158 r1c-v2: the flag as read — <c>null</c> when EMPTY (never read as "not secure" by the reverse rule).</summary>
+        public bool? Flag { get; init; }
+    }
 
     /// <summary>A child's secure roots, and why they are not fully known when they are not.</summary>
     private sealed record Lineage(IReadOnlySet<RowRef> SecureRoots, string? Undetermined);

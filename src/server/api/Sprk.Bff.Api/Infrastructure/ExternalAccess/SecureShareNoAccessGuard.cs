@@ -33,12 +33,43 @@ public sealed record SecureShareWallDecision(
     /// <summary>Whether a share write must be refused: walled, or could not tell.</summary>
     public bool RefusesShare => Outcome is SecureShareWallOutcome.Walled or SecureShareWallOutcome.Unverifiable;
 
+    /// <summary>
+    /// Task 158 r1c-v2 (round 39 item 2): the secure matter / project whose No Access list decided an answer of
+    /// <see cref="SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(string, Guid, Guid, SecureWallRecordScope, CancellationToken)"/>
+    /// — <c>null</c> when the record's OWN list decided it (or nothing refused). For the message, which never names an
+    /// entry or its reason.
+    /// </summary>
+    public string? ParentTable { get; init; }
+
+    /// <summary>Task 158 r1c-v2: the id of <see cref="ParentTable"/>'s record (for the log).</summary>
+    public Guid? ParentId { get; init; }
+
     internal static SecureShareWallDecision NotSecure { get; } = new(SecureShareWallOutcome.NotSecure, Array.Empty<Guid>());
 
     internal static SecureShareWallDecision NotWalled { get; } = new(SecureShareWallOutcome.NotWalled, Array.Empty<Guid>());
 
     internal static SecureShareWallDecision Unreadable(string fault) =>
         new(SecureShareWallOutcome.Unverifiable, Array.Empty<Guid>(), fault);
+}
+
+/// <summary>
+/// Task 158 r1c-v2 (round 39 item 2): how <see cref="SecureShareNoAccessGuard.CheckRecordAndSecureParentsAsync(string, Guid, Guid, SecureWallRecordScope, CancellationToken)"/>
+/// asks about the record's OWN list. Every secure parent's list is asked as the secure record it is (its flag already read
+/// by the walk).
+/// </summary>
+public enum SecureWallRecordScope
+{
+    /// <summary>A share on an existing record (<c>/share-user</c>): the record's own flag decides whether its list applies (Q4).</summary>
+    AsFlagged,
+
+    /// <summary>The record is being made secure (provisioning, its colleagues, a re-file under a secure record): its list applies whatever its flag reads.</summary>
+    BeingSecured,
+
+    /// <summary>
+    /// The record does not exist yet (a create under a secure parent): its list is every entry naming an organization the
+    /// create payload references — the overload taking the prospective organizations.
+    /// </summary>
+    Prospective,
 }
 
 /// <summary>
@@ -95,18 +126,91 @@ public sealed class SecureShareNoAccessGuard
     private readonly ExternalParticipationService _participations;
     private readonly INoAccessListReader _noAccessList;
     private readonly IContactIdentityStore _identityStore;
+    private readonly Spaarke.Dataverse.IGenericEntityService _dataverse;
     private readonly ILogger<SecureShareNoAccessGuard> _logger;
 
+    /// <param name="dataverse">Task 158 r1c-v2 (round 39 item 2): the app-only reads of what a work assignment or project
+    /// is filed under, for <see cref="CheckRecordAndSecureParentsAsync(string, Guid, Guid, SecureWallRecordScope, CancellationToken)"/>
+    /// — through <see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.ReadSecureParentsAsync"/>, the ONE parent
+    /// walk (never a second copy). Registered unconditionally (GraphModule), so the guard gains no asymmetric dependency.</param>
     public SecureShareNoAccessGuard(
         ExternalParticipationService participations,
         INoAccessListReader noAccessList,
         IContactIdentityStore identityStore,
+        Spaarke.Dataverse.IGenericEntityService dataverse,
         ILogger<SecureShareNoAccessGuard> logger)
     {
         _participations = participations;
         _noAccessList = noAccessList;
         _identityStore = identityStore;
+        _dataverse = dataverse;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// unified-access-control-r2 task 158 r1c-v2 — owner round 31 item 1 and main-session round 39 item 2: THE ONE entry
+    /// point for a No Access decision that must honour BOTH a record's own list AND the list of every secure matter or
+    /// project it is filed under. A work assignment or project filed under a secure record is secure itself (owner round 6),
+    /// so a person walled off its secure parent is walled off it too: the person a record is secured for (its creator —
+    /// round 31 item 1), a person given a DIRECT share on it (<c>/share-user</c>), and a colleague named when it is provisioned
+    /// (<c>/provision-project</c>) — round 39 item 2. The parents are the record's CURRENT filing, read through
+    /// <see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance.ReadSecureParentsAsync"/> (the one parent walk). A table
+    /// that files under nothing (a matter) has no parents: the answer is the record's own list alone.
+    /// </summary>
+    /// <remarks>Fails closed (ADR-003): a filing that cannot be read, or a parent whose flag cannot be read (or reads EMPTY —
+    /// owner round 17 item 3), answers <see cref="SecureShareWallOutcome.Unverifiable"/>; a <see cref="SecureShareWallOutcome.Walled"/>
+    /// answer on ANY list wins over an unverifiable one (it is final). <see cref="SecureShareWallDecision.ParentTable"/> names
+    /// the parent whose list decided it.</remarks>
+    public async Task<SecureShareWallDecision> CheckRecordAndSecureParentsAsync(
+        string entityLogicalName, Guid recordId, Guid systemUserId, SecureWallRecordScope scope, CancellationToken ct)
+    {
+        // The walk never throws a read fault: an unreadable filing or parent comes back as SecureParentsAnswer.Unverifiable,
+        // which refuses below.
+        var parents = await Sprk.Bff.Api.Services.Access.SecureRootInheritance
+            .ReadSecureParentsAsync(_dataverse, _logger, entityLogicalName, recordId, ct).ConfigureAwait(false);
+
+        return await CheckRecordAndSecureParentsAsync(entityLogicalName, recordId, systemUserId, scope, parents, ct)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The same decision over a filing the CALLER supplies — the filing as a write will leave it (a re-file's pre-check, a
+    /// create's plan: both decided before anything is written). <paramref name="parents"/> comes from the one parent walk
+    /// (<see cref="Sprk.Bff.Api.Services.Access.SecureRootInheritance"/>); this method asks every list it names.
+    /// </summary>
+    /// <param name="prospectiveOrganizations">With <see cref="SecureWallRecordScope.Prospective"/>: the organizations the create
+    /// payload references (the record has no id yet; <paramref name="recordId"/> is the id it will be created with).</param>
+    public async Task<SecureShareWallDecision> CheckRecordAndSecureParentsAsync(
+        string entityLogicalName, Guid recordId, Guid systemUserId, SecureWallRecordScope scope,
+        Sprk.Bff.Api.Services.Access.SecureParentsAnswer parents, CancellationToken ct,
+        IReadOnlyCollection<Guid>? prospectiveOrganizations = null)
+    {
+        ArgumentNullException.ThrowIfNull(parents);
+        var own = scope switch
+        {
+            SecureWallRecordScope.AsFlagged => await CheckAsync(entityLogicalName, recordId, systemUserId, ct).ConfigureAwait(false),
+            SecureWallRecordScope.BeingSecured =>
+                await CheckForSecuringAsync(entityLogicalName, recordId, systemUserId, ct).ConfigureAwait(false),
+            SecureWallRecordScope.Prospective => await CheckProspectiveAsync(entityLogicalName, recordId,
+                prospectiveOrganizations ?? throw new ArgumentNullException(nameof(prospectiveOrganizations)), systemUserId, ct)
+                .ConfigureAwait(false),
+            _ => throw new ArgumentOutOfRangeException(nameof(scope), scope, null),
+        };
+
+        var decisions = new List<SecureShareWallDecision> { own };
+        if (!parents.IsKnown)
+            decisions.Add(SecureShareWallDecision.Unreadable(parents.Unverifiable!));
+
+        foreach (var parent in parents.SecureParents)
+        {
+            // The walk read the parent as secure; it is asked about as the secure record it is (never flag-dependent).
+            var decision = await CheckForSecuringAsync(parent.Table, parent.Id, systemUserId, ct).ConfigureAwait(false);
+            decisions.Add(decision with { ParentTable = parent.Table, ParentId = parent.Id });
+        }
+
+        return decisions.FirstOrDefault(d => d.Outcome == SecureShareWallOutcome.Walled)
+               ?? decisions.FirstOrDefault(d => d.Outcome == SecureShareWallOutcome.Unverifiable)
+               ?? own;
     }
 
     /// <summary>

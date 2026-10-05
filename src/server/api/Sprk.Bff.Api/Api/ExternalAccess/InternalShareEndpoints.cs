@@ -325,15 +325,25 @@ public static class InternalShareEndpoints
         // subject forms (the user, a contact that represents them, an organization that contact belongs to) and any
         // object form (this record, or an organization it references). An unanswerable check refuses too (ADR-003).
         // A non-secure record is not the wall's (Q4): the check answers NotSecure and the share proceeds as before.
-        var wall = await noAccessGuard.CheckAsync(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, ct);
+        //
+        // Task 158 r1c-v2 (main-session round 39 item 2): a work assignment or project filed under a SECURE matter or project
+        // is secure itself (owner round 6), so a DIRECT share on it honours the No Access list of every secure record it is
+        // filed under as well as its own — the guard's ONE entry point (never a second copy of the parent walk). The same
+        // codes; the message says whose list, never which entry. A filing or parent that cannot be read refuses (ADR-003).
+        var wall = await noAccessGuard.CheckRecordAndSecureParentsAsync(
+            ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, SecureWallRecordScope.AsFlagged, ct);
+        var wallList = wall.ParentTable is { } wallParent
+            ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(wallParent)} this record is filed under"
+            : "the No Access list for this record";
         if (wall.Outcome == SecureShareWallOutcome.Walled)
         {
             logger.LogWarning(
-                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: on its No Access list " +
-                "(entries {EntryIds}) (caller {CallerOid}).",
-                root.Type, root.Id, systemUserId, string.Join(",", wall.EntryIds), callerOid);
+                "[USER-SHARE] Refused to share secure {RootType} {RootId} with {SystemUserId}: on the No Access list of " +
+                "{Where} (entries {EntryIds}) (caller {CallerOid}).",
+                root.Type, root.Id, systemUserId,
+                wall.ParentTable is { } p ? $"{p}:{wall.ParentId:D}" : "the record itself", string.Join(",", wall.EntryIds), callerOid);
             return Refused(httpContext, StatusCodes.Status403Forbidden, NotSharedTitle, SubjectNoAccessReasonCode,
-                "This person is on the No Access list for this record, so it was not shared with them.");
+                $"This person is on {wallList}, so it was not shared with them.");
         }
 
         if (wall.Outcome == SecureShareWallOutcome.Unverifiable)
@@ -344,8 +354,7 @@ public static class InternalShareEndpoints
                 root.Type, root.Id, systemUserId, wall.Fault, callerOid);
             return Refused(httpContext, StatusCodes.Status500InternalServerError, NotSharedTitle,
                 NoAccessUnverifiableReasonCode,
-                "Whether this person is on the No Access list for this record could not be checked, so it was not " +
-                "shared with them. Try again.");
+                $"Whether this person is on {wallList} could not be checked, so it was not shared with them. Try again.");
         }
 
         // ── You may grant only what you hold (owner decision 2026-09-16) ──────
@@ -600,6 +609,16 @@ public static class InternalShareEndpoints
             return lastReader;
         }
 
+        // Task 142: an operator removal of an Assigned-To auto share STICKS (owner round 2 item 5) — the ledger rows naming
+        // this user on this record become Declined, so no trigger shares again while the assignment persists; the same marker
+        // records the removal of a share a secure parent passed on (task 158, owner round 30). Ledger-only and never thrown.
+        // Task 158 r1c-v2 (main-session round 47 item 2, E-158-v1-2): written BEFORE the revoke — write-ahead, as the
+        // inherited-share provenance is — so a pass that reads the ledger after this point never mistakes the removal it is
+        // about to see for a share to give again. A revoke that is then not confirmed is answered as such (the operator retries;
+        // the marker already states the intent). The rest of that race — a pass that read the row BEFORE this marker writing
+        // over it — is closed at integration by If-Match on every pass's ledger update (round 47 item 2, task 140's support).
+        await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
+
         var entitySet = ExternalGrantRoot.BindFor(root.Type).EntitySet;
         int? remaining = null;
         Exception? failure = null;
@@ -632,11 +651,6 @@ public static class InternalShareEndpoints
         logger.LogInformation(
             "[USER-SHARE] Caller {CallerOid} removed {SystemUserId}'s share on {RootType} {RootId} (it held mask {Previous}).",
             callerOid, systemUserId, root.Type, root.Id, current);
-
-        // Task 142: an operator removal of an Assigned-To auto share STICKS (owner round 2 item 5) — the ledger rows naming
-        // this user on this record become Declined, so no trigger shares again while the assignment persists. Ledger-only
-        // and never thrown: the removal above stands.
-        await assignedAccess.MarkShareRemovedAsync(root.Type, root.Id, systemUserId, CancellationToken.None);
 
         // ── Task 149: the root share is confirmed gone; now remove the user from its secure children ──
         return await ChildrenIncompleteAfterUnshareAsync(

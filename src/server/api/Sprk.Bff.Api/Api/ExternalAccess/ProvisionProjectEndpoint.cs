@@ -824,7 +824,7 @@ public static class ProvisionProjectEndpoint
             // Before the share (and before the flag write below), whoever ResolveResumeCreatorAsync named (createdby or
             // sprk_createdbyperson), asked about the record AS a secure record whatever its flag reads. Nothing is written
             // for a walled or unverifiable person; the record stays as the earlier run left it.
-            var resumeWall = await CheckCreatorWallsAsync(noAccessGuard, relatedRoots, root, recordId, person.CreatorId, ct);
+            var resumeWall = await CheckCreatorWallsAsync(noAccessGuard, root, recordId, person.CreatorId, ct);
             if (resumeWall.RefusesShare)
             {
                 var walled = resumeWall.Outcome == SecureShareWallOutcome.Walled;
@@ -1392,7 +1392,7 @@ public static class ProvisionProjectEndpoint
         // moved, unlinked or shared. It never depends on the flag: on the inherited path the record is still unflagged
         // here, and the record is asked about AS the secure record it is becoming (CheckForSecuringAsync). The message
         // names no entry and no reason (the refusal contract).
-        var wall = await CheckCreatorWallsAsync(noAccessGuard, relatedRoots, root, recordId, creatorId, ct);
+        var wall = await CheckCreatorWallsAsync(noAccessGuard, root, recordId, creatorId, ct);
         if (wall.RefusesShare)
         {
             var walled = wall.Outcome == SecureShareWallOutcome.Walled;
@@ -2630,11 +2630,15 @@ public static class ProvisionProjectEndpoint
             return (0, skipped);
 
         // ── Owner N6 (task 143): a walled colleague is SKIPPED with a per-person warning; the others are shared ──
-        // Asked before any colleague share is written. An unanswerable check skips that colleague too (ADR-003).
+        // Asked before any colleague share is written. An unanswerable check skips that colleague too (ADR-003). Task 158
+        // r1c-v2 (round 39 item 2): on a work assignment or project filed under secure records, the colleague honours every
+        // secure parent's No Access list too — the guard's ONE entry point, the record asked about as the secure record it
+        // is becoming.
         var allowed = new List<Guid>(colleagues.Count);
         foreach (var principalId in colleagues)
         {
-            var wall = await noAccessGuard.CheckAsync(root.LogicalName, recordId, principalId, ct);
+            var wall = await noAccessGuard.CheckRecordAndSecureParentsAsync(
+                root.LogicalName, recordId, principalId, SecureWallRecordScope.BeingSecured, ct);
             if (!wall.RefusesShare)
             {
                 allowed.Add(principalId);
@@ -2644,14 +2648,18 @@ public static class ProvisionProjectEndpoint
             var walled = wall.Outcome == SecureShareWallOutcome.Walled;
             logger.LogWarning(
                 "[PROVISION] Not sharing {RecordType} {RecordId} with named principal {PrincipalId}: {State} the No Access " +
-                "list ({Detail}). TraceId={TraceId}",
+                "list of {Where} ({Detail}). TraceId={TraceId}",
                 root.WireToken, recordId, principalId, walled ? "on" : "not provably off",
+                wall.ParentTable is { } parentTable ? $"{parentTable}:{wall.ParentId:D}" : $"{root.LogicalName}:{recordId:D}",
                 walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
+            var list = wall.ParentTable is { } walledParent
+                ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(walledParent)} this record is filed under"
+                : "the No Access list for this record";
             skipped.Add(walled
                 ? new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccess,
-                    "This person is on the No Access list for this record, so it was not shared with them.")
+                    $"This person is on {list}, so it was not shared with them.")
                 : new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccessUnverifiable,
-                    "Whether this person is on the No Access list for this record could not be checked, so it was not " +
+                    $"Whether this person is on {list} could not be checked, so it was not " +
                     "shared with them. Add them through Manage Access once it can be checked."));
         }
 
@@ -2932,36 +2940,20 @@ public static class ProvisionProjectEndpoint
     /// </summary>
     internal static async Task<CreatorWallDecision> CheckCreatorWallsAsync(
         SecureShareNoAccessGuard noAccessGuard,
-        SecureRootInheritance relatedRoots,
         SecureRecordRoot root,
         Guid recordId,
         Guid creatorId,
         CancellationToken ct)
     {
-        var decisions = new List<CreatorWallDecision>();
-        var own = await noAccessGuard.CheckForSecuringAsync(root.LogicalName, recordId, creatorId, ct);
-        decisions.Add(new CreatorWallDecision(own.Outcome, $"{root.LogicalName}:{recordId:D}", null, own.EntryIds, own.Fault));
-
-        if (SecureRootInheritance.Inherits(root.LogicalName))
-        {
-            var parents = await relatedRoots.FindSecureParentsAsync(root.LogicalName, recordId, ct);
-            if (!parents.IsKnown)
-            {
-                decisions.Add(new CreatorWallDecision(SecureShareWallOutcome.Unverifiable, "a record it is filed under", null,
-                    Array.Empty<Guid>(), parents.Unverifiable));
-            }
-
-            foreach (var parent in parents.SecureParents)
-            {
-                var decision = await noAccessGuard.CheckForSecuringAsync(parent.Table, parent.Id, creatorId, ct);
-                decisions.Add(new CreatorWallDecision(decision.Outcome, $"{parent.Table}:{parent.Id:D}", parent.Table,
-                    decision.EntryIds, decision.Fault));
-            }
-        }
-
-        return decisions.FirstOrDefault(d => d.Outcome == SecureShareWallOutcome.Walled)
-               ?? decisions.FirstOrDefault(d => d.Outcome == SecureShareWallOutcome.Unverifiable)
-               ?? new CreatorWallDecision(SecureShareWallOutcome.NotWalled, "every list", null, Array.Empty<Guid>(), null);
+        // Task 158 r1c-v2 (round 39 item 2): the guard's ONE entry point for "the record's list AND every secure parent's" —
+        // the record asked about as the secure record it is becoming; never a second copy of the parent walk here.
+        var decision = await noAccessGuard.CheckRecordAndSecureParentsAsync(
+            root.LogicalName, recordId, creatorId, SecureWallRecordScope.BeingSecured, ct);
+        return new CreatorWallDecision(
+            decision.RefusesShare ? decision.Outcome : SecureShareWallOutcome.NotWalled,
+            decision.ParentTable is { } parentTable ? $"{parentTable}:{decision.ParentId:D}"
+                : decision.RefusesShare ? $"{root.LogicalName}:{recordId:D}" : "every list",
+            decision.ParentTable, decision.EntryIds, decision.Fault);
     }
 
     /// <summary>

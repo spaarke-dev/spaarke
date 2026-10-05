@@ -1263,7 +1263,7 @@ public class SecureChildShareMirrorTests
             _identities.AddSystemUser(user, oid: null, email: null);
         return new SecureShareNoAccessGuard(
             new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false)),
-            _denyList, _identities, NullLogger<SecureShareNoAccessGuard>.Instance);
+            _denyList, _identities, AssignedAccessTestDoubles.NoFilingRows(), NullLogger<SecureShareNoAccessGuard>.Instance);
     }
 
     /// <summary>

@@ -215,6 +215,43 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// </summary>
     internal AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore InheritedLedger { get; private set; } = new();
 
+    /// <summary>
+    /// Task 158 r1c-v2 (round 47 item 1): task 142's materializer harness over the SAME ledger — its registry values
+    /// (<c>Store.Assign</c>), contact links (<c>LinkedContact</c>) and record flags (<c>Participations</c>) — whose materializer
+    /// the host's inheritance runs at once when a share it removes ends an Assigned-To row's coverage. Reset per test.
+    /// </summary>
+    internal AccessControl.AssignedAccessTestDoubles.Harness AssignedAccess { get; private set; } = null!;
+
+    /// <summary>
+    /// Task 158 r1c-v2: runs just before a revoke on a record lands (recorded first) — what the ledger says at the moment a
+    /// share is removed (round 47 item 2: the operator's Declined marker is already there). Reset per test.
+    /// </summary>
+    internal Action<Guid, DataversePrincipalRef>? OnRevoke { get; set; }
+
+    /// <summary>Task 158 r1c-v2: runs just before a ModifyAccess on a record lands (recorded first). Reset per test.</summary>
+    internal Action<Guid, DataversePrincipalRef>? OnModify { get; set; }
+
+    /// <summary>
+    /// Task 158 r1c-v2: runs just AFTER a GrantAccess on a record landed — a concurrent change between a pass's share and its
+    /// own checks of it (the parent unsecured or unshared, the provenance row ended). Reset per test.
+    /// </summary>
+    internal Action<Guid, DataversePrincipalRef>? OnGranted { get; set; }
+
+    /// <summary>
+    /// The materializer the host's inheritance holds: the harness's, over this host's share seam (so it reads the shares
+    /// the inheritance writes), this host's real No Access guard, and this host's scopes (round 47 item 1 (3): its
+    /// sharee-only pass reaches this host's inheritance).
+    /// </summary>
+    private Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer AssignedAccessMaterializerIn(
+        IServiceProvider sp, IDataverseRecordShareService shares)
+    {
+        AssignedAccess ??= new AccessControl.AssignedAccessTestDoubles.Harness(InheritedLedger);
+        AssignedAccess.SharesOverride = shares;
+        AssignedAccess.GuardOverride = sp.GetRequiredService<SecureShareNoAccessGuard>();
+        AssignedAccess.Scopes = sp.GetRequiredService<IServiceScopeFactory>();
+        return AssignedAccess.Materializer;
+    }
+
     /// <summary>Task 143 r1: systemusers whose task-141 link read FAILS (the guard then cannot verify them).</summary>
     internal HashSet<Guid> UnreadableLinkUsers { get; } = new();
 
@@ -611,6 +648,10 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             defaultFlags: new RootRecordFlags(IsSecure: true, IsRestricted: false));
         UnreadableLinkUsers.Clear();
         InheritedLedger = new AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore();
+        AssignedAccess = new AccessControl.AssignedAccessTestDoubles.Harness(InheritedLedger);
+        OnRevoke = null;
+        OnModify = null;
+        OnGranted = null;
         Logs.Clear();
         ChildWorld = SecureChildShareWorld.WithoutSecureBusinessUnit();
         _childWorldMirrorsRoots = false;
@@ -673,6 +714,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                 sp.GetRequiredService<SecureChildShareSynchronizer>(),
                 sp.GetRequiredService<SecureShareNoAccessGuard>(),
                 InheritedLedger,
+                AssignedAccessMaterializerIn(sp, recordShare),
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<ILogger<SecureRootInheritance>>()));
 
@@ -739,7 +781,11 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                     : new SystemUserLookup(LookupStatus.Read, new SystemUserIdentityRow(id, null, null, null, null, null)));
             services.RemoveAll<SecureShareNoAccessGuard>();
             services.AddScoped(_ => new SecureShareNoAccessGuard(
-                NoAccessReads, NoAccessList, links.Object, NullLogger<SecureShareNoAccessGuard>.Instance));
+                NoAccessReads, NoAccessList, links.Object,
+                // Task 158 r1c-v2 (round 39 item 2): its filing walk reads what work assignments and projects are filed under
+                // through the same ChildWorld the inheritance reads.
+                SecureChildShareWorld.EntitiesOver(() => ChildWorld).Object,
+                NullLogger<SecureShareNoAccessGuard>.Instance));
 
             // Capture logs in-memory so a test can assert the endpoint actually WROTE its warning.
             services.AddSingleton<ILoggerProvider>(Logs);
@@ -1478,6 +1524,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             // conservative reading for a test that asserts what a share may carry.
             var mask = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
             _fixture._shares.AddOrUpdate((recordId, principal), mask, (_, existing) => existing | mask);
+            _fixture.OnGranted?.Invoke(recordId, principal);
             return Task.CompletedTask;
         }
 
@@ -1494,6 +1541,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
                 return Task.CompletedTask;
 
             _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence()));
+            _fixture.OnRevoke?.Invoke(recordId, principal);
             _fixture._shares.TryRemove((recordId, principal), out _);
             return Task.CompletedTask;
         }
@@ -1522,6 +1570,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
             ThrowIfWriteRefused(recordId, principal);
 
             _fixture.Modifies.Add(new RecordedShare(entitySetName, recordId, principal, accessRightsCsv, _fixture.NextSequence()));
+            _fixture.OnModify?.Invoke(recordId, principal);
             _fixture._shares[(recordId, principal)] = RecordShareLevels.MaskForRightsCsv(accessRightsCsv);
             return Task.CompletedTask;
         }

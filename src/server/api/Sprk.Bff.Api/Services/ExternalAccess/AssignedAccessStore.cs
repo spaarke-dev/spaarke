@@ -165,6 +165,16 @@ public static class AssignedAccessReason
     public const string SharePending = "share-pending";
 
     /// <summary>
+    /// Task 158 r1c-v2 (main-session round 47 item 1 (2), E-158-v1-1): an Assigned-To row that was
+    /// <see cref="AssignedAccessState.CoveredByExisting"/> is <see cref="AssignedAccessState.Skipped"/> with this reason when
+    /// the secure-root inheritance removes the share that covered it (its parent no longer passes it on). A KNOWN cause —
+    /// never <see cref="RemovedOutOfBand"/> → Declined — so the materializer decides the subject afresh at once: on a secure
+    /// record the assignee is suggested (owner A3). Written ahead of the removal; Skipped is re-evaluated every pass, so a
+    /// removal that then fails is recorded covered again.
+    /// </summary>
+    public const string CoveringShareEnded = "covering-share-ended";
+
+    /// <summary>
     /// Task 158 r1: the filed record itself was UNSECURED — every share on it is revoked by the unsecure, so what its parents
     /// had passed on ends with it (a row left Shared would later read as an operator's removal when it is secured again).
     /// </summary>

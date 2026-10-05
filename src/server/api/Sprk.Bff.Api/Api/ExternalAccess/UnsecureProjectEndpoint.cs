@@ -30,7 +30,11 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///      child of an ordinary record, then remove its mirrored shares (task 148) — a pass that does not complete stops
 ///      here: the record's own shares and its flag are left for the next call to finish
 ///   4. Revoke every POA share on the record
+///   4.5 (task 158 r1c-v2, round 39 item 1) For each sharee revoked, end what the record passed on to the secure work
+///      assignments / projects filed under it (round 30's reverse rule: only the unmodified inherited share; direct,
+///      raised, another-parent and last-reader shares kept) — not complete → stop, flag kept, the same call completes it
 ///   5. Clear <c>sprk_issecure</c>
+///   5.5 (round 39 item 1) Give back what the filed records' other secure parents still pass on (reported if not yet)
 ///
 /// ADR-001: Minimal API. ADR-003: fail closed — a step that cannot be verified is treated as failed.
 /// ADR-008: authorization is the route group's delegation filter (FR-07 Write-on-record, as the caller).
@@ -431,6 +435,28 @@ public static class UnsecureProjectEndpoint
             if (!completing.IsComplete)
                 return ChildrenIncomplete(completing, root, recordId, flagStillSet: false, logger, traceId);
 
+            // Task 158 r1c-v2 (round 39 item 1): an ordinary matter or project passes nothing on, so anything it is still on
+            // record as having passed on to a secure record filed under it — a flag cleared outside the BFF, or a pass that wrote
+            // while an earlier unsecure ran — is ended here too, and what the filed records' other secure parents still pass on
+            // is given back. Never anything for a record that never passed anything on.
+            var leftover = await relatedRoots.EndWhatAParentPassedOnAsync(root.LogicalName, recordId, traceId, ct);
+            var (leftoverNotRegiven, _) = leftover.IsComplete
+                ? await relatedRoots.GiveBackAsync(leftover.GiveBack, traceId, ct)
+                : (0, Array.Empty<string>());
+            if (!leftover.IsComplete || leftoverNotRegiven > 0)
+            {
+                logger.LogError(
+                    "[UNSECURE] {RecordType} {RecordId} is not secure, but what it was on record as passing on to the secure records " +
+                    "filed under it was not all ended or given back (notDone={NotDone}, notRegiven={NotRegiven}: {Detail}). " +
+                    "TraceId={TraceId}", root.WireToken, recordId, leftover.NotDone, leftoverNotRegiven, leftover.Detail, traceId);
+                return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                    $"The {root.DisplayLabel.ToLowerInvariant()} is not secure, but the access it had passed on to the secure work " +
+                    "assignments and projects filed under it could not all be removed or given back yet. Calling again completes it.",
+                    traceId,
+                    (ReasonKey, ReasonChildrenIncomplete),
+                    ("filedRecordsNotUpdated", leftover.NotDone + leftoverNotRegiven));
+            }
+
             logger.LogInformation(
                 "[UNSECURE] {RecordType} {RecordId} is already not secure; nothing to do to the record itself " +
                 "(related records re-owned: {Reowned}). TraceId={TraceId}",
@@ -644,6 +670,35 @@ public static class UnsecureProjectEndpoint
         var sweep = await RevokeAllSharesAsync(
             recordShare, root, recordId, logger, traceId, ct);
 
+        // ── Step 4.5 (task 158 r1c-v2, main-session round 39 item 1): unsecuring a parent ends what it passed on ──
+        //
+        // Step 4 revoked every explicit share on this matter or project. For each sharee it revoked, round 30's reverse rule
+        // runs on the secure work assignments and projects filed under it: ENDED is only the unmodified inherited share; KEPT
+        // are a direct share, a raised mask (put back to what it raised), a share another secure parent still justifies and
+        // the record's last reader (S5). The filed records stay SECURE (owner round 6: never auto-unsecure) — but their
+        // sharees' access came only from this record's share, which is gone. The rows come from this record's own provenance,
+        // so a repeat call ends exactly what is left. Not complete → stop BEFORE the flag is cleared: 500 children_incomplete,
+        // the flag kept (it still says "what it passed on may not have ended"; the job reports the records filed under it),
+        // and the same call completes it.
+        var passedOn = await relatedRoots.EndWhatAParentPassedOnAsync(root.LogicalName, recordId, traceId, ct);
+        if (!passedOn.IsComplete)
+        {
+            logger.LogError(
+                "[UNSECURE] {RecordType} {RecordId}: what it passed on to the secure records filed under it was not all ended " +
+                "({NotDone} not done: {Detail}); its flag was NOT cleared. TraceId={TraceId}",
+                root.WireToken, recordId, passedOn.NotDone, passedOn.Detail, traceId);
+            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()}'s ownership was reassigned and its shares were revoked, but the access " +
+                $"it had passed on to the secure work assignments and projects filed under it could not all be removed yet " +
+                $"({passedOn.NotDone} not removed), so it still reads as secure. Calling again completes it.",
+                traceId,
+                (ReasonKey, ReasonChildrenIncomplete),
+                ("filedRecordsNotUpdated", passedOn.NotDone),
+                ("newOwnerSystemUserId", newOwnerId),
+                ("sharesRevoked", sweep.Revoked),
+                ("sweepComplete", sweep.Complete));
+        }
+
         // ── Step 5: Clear the flag ───────────────────────────────────────────
         try
         {
@@ -687,6 +742,31 @@ public static class UnsecureProjectEndpoint
             "[UNSECURE] {RecordType} {RecordId} un-secured: owner={OwnerId}, sharesRevoked={Count}, " +
             "sweepComplete={SweepComplete}. TraceId={TraceId}",
             root.WireToken, recordId, newOwnerId, sweep.Revoked, sweep.Complete, traceId);
+
+        // ── Step 5.5 (round 39 item 1): what the filed records' OTHER secure parents still pass on is given back ──
+        //
+        // A share Step 4.5 removed may be one another secure parent of the filed record passes on at a lower level: that part
+        // is given back now, by the mirror's own pass — after the flag is cleared, because a parent flagged secure but no longer
+        // isolated holds every mirror. One that cannot be given back yet is reported; the secure-root inheritance job gives it
+        // (the record is filed under that other secure parent, so the job reaches it).
+        var (notRegiven, regiveDetails) = await relatedRoots.GiveBackAsync(passedOn.GiveBack, traceId, ct);
+        if (notRegiven > 0)
+        {
+            logger.LogWarning(
+                "[UNSECURE] {RecordType} {RecordId} is un-secured, but on {Count} secure record(s) filed under it what their other " +
+                "secure parents still pass on could not be given back yet: {Detail}. TraceId={TraceId}",
+                root.WireToken, recordId, notRegiven, string.Join("; ", regiveDetails), traceId);
+            return Problem(StatusCodes.Status500InternalServerError, "Internal Server Error",
+                $"The {root.DisplayLabel.ToLowerInvariant()}'s secure designation was removed. On {notRegiven} secure work " +
+                "assignment(s) or project(s) filed under it, the access the other secure records they are filed under still give " +
+                "could not be given back yet; it is given back automatically within a few minutes.",
+                traceId,
+                (ReasonKey, ReasonChildrenIncomplete),
+                ("filedRecordsNotUpdated", notRegiven),
+                ("newOwnerSystemUserId", newOwnerId),
+                ("sharesRevoked", sweep.Revoked),
+                ("sweepComplete", sweep.Complete));
+        }
 
         return TypedResults.Ok(new UnsecureProjectResponse(
             ProjectId: legacyProjectId,

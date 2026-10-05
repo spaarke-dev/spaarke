@@ -93,7 +93,8 @@ public class InternalUserShareTests
 
     public InternalUserShareTests()
     {
-        _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, NullLogger<SecureShareNoAccessGuard>.Instance);
+        _guard = new SecureShareNoAccessGuard(_flags, _denyList, _identity, AssignedAccessTestDoubles.NoFilingRows(),
+            NullLogger<SecureShareNoAccessGuard>.Instance);
 
         _users.SeedPerson(UserId, "Ada Lovelace");
         _users.SeedPerson(OtherUserId, "Brook Okafor");

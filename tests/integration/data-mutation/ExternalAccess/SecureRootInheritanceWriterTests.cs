@@ -800,6 +800,10 @@ public class SecureRootInheritanceWriterTests : TypedToolHandlerTestFixture, ICl
         result.Failure!.Kind.Should().Be(RecordCreationFailureKind.SecureFilingFailed);
         result.Failure.Detail.Should().Contain("removed again").And.NotContain("Try again");
         result.Failure.Code.Should().StartWith("sdap.provision.").And.Contain("no_access");
+        // Task 158 r1c-v2 (round 47 item 4): one sentence of its own — never provisioning's ProblemDetails text appended
+        // (a doubled period, and its "Nothing was changed." beside "Nothing was created.").
+        result.Failure.Detail.Should().NotContain("..").And.NotContain("Nothing was changed")
+            .And.EndWith("an administrator needs to review your access to the secure record it would be filed under.");
     }
 
     /// <summary>G5, Office: the caller lacks AppendTo on the secure matter — refused (403 kind), nothing created.</summary>

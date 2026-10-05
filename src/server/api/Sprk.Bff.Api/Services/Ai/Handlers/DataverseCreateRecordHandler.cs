@@ -635,7 +635,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return Error(tool,
                 $"The record was NOT created: a '{tablename}' filed under a secure record is created secure and shared to you, " +
-                $"and that share could not be made ({secured.ReasonCode}: {secured.Detail}), so the new record was removed again. " +
+                $"and that share could not be made ({secured.ReasonCode}), so the new record was removed again. " +
                 "Nothing was created.",
                 secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }
@@ -650,7 +650,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return Error(tool,
                 $"Record {createdId:D} was created in '{tablename}' as a secure record, but it could not be shared to you and " +
-                $"could not be removed again ({secured.ReasonCode}: {secured.Detail}). " +
+                $"could not be removed again ({secured.ReasonCode}). " +
                 (secured.CompletesAutomatically
                     ? "It is shared to you automatically once that step succeeds (it is retried every few minutes); until then " +
                       "only an administrator can open it."
@@ -665,7 +665,7 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         {
             return Error(tool,
                 $"Record {createdId:D} was created in '{tablename}' as a secure record shared to you, but securing it could not " +
-                $"be finished yet ({secured.ReasonCode}: {secured.Detail}). It is completed automatically within a few minutes; " +
+                $"be finished yet ({secured.ReasonCode}). It is completed automatically within a few minutes; " +
                 "until then only you (and the people already given access) can open it.",
                 secured.ReasonCode ?? ToolErrorCodes.InternalError, startedAt);
         }

@@ -148,9 +148,16 @@ internal static class AssignedAccessTestDoubles
                 return Ledger.Where(r => RootIdOf(r) == rootId && InheritedSourceOf(r.SourceField) is not null).Select(Clone).ToList();
         }
 
+        /// <summary>
+        /// Task 158 r1c-v2: runs at the start of every read of a filed record's inherited rows — a concurrent change landing
+        /// between two of a pass's reads.
+        /// </summary>
+        public Action? BeforeInheritedRead { get; set; }
+
         internal override Task<IReadOnlyList<AssignedAccessLedgerRow>> ReadInheritedLedgerAsync(
             ExternalGrantRootType rootType, Guid rootId, CancellationToken ct)
         {
+            BeforeInheritedRead?.Invoke();
             if (FailLedgerRead)
                 throw new HttpRequestException("Simulated ledger read failure.");
             return Task.FromResult(InheritedRowsOf(rootId));
@@ -165,9 +172,13 @@ internal static class AssignedAccessTestDoubles
             lock (_gate)
             {
                 return Task.FromResult<(IReadOnlyList<AssignedAccessLedgerRow>, bool)>(
-                    (Ledger.Where(r => string.Equals(r.SourceField, source, StringComparison.OrdinalIgnoreCase)).Select(Clone).ToList(), false));
+                    (Ledger.Where(r => string.Equals(r.SourceField, source, StringComparison.OrdinalIgnoreCase)).Select(Clone).ToList(),
+                        InheritedByParentTruncated));
             }
         }
+
+        /// <summary>Task 158 r1c-v2: the by-parent read reports more rows than one pass reads (its <c>Truncated</c>).</summary>
+        public bool InheritedByParentTruncated { get; set; }
 
         /// <summary>
         /// Task 158 r1c-v1: runs just before an inherited-share create lands — a CONCURRENT pass creating the same row in the
@@ -643,12 +654,30 @@ internal static class AssignedAccessTestDoubles
         /// </summary>
         public IAccessibleRecordSetService? NoAccessCheckOverride { get; set; }
 
+        /// <summary>
+        /// Task 158 r1c-v2 (round 39 item 2): what the guard's filing walk reads — by default no row (a record filed under
+        /// nothing, so only its own No Access list applies); a host fixture passes its world.
+        /// </summary>
+        public Spaarke.Dataverse.IGenericEntityService Entities { get; set; } = NoFilingRows();
+
         public SecureShareNoAccessGuard Guard =>
-            new(Participations, DenyList, Identities, NullLogger<SecureShareNoAccessGuard>.Instance);
+            GuardOverride ?? new(Participations, DenyList, Identities, Entities, NullLogger<SecureShareNoAccessGuard>.Instance);
+
+        /// <summary>Task 158 r1c-v2: a host fixture's own guard (its world, its deny list), used instead of <see cref="Guard"/>.</summary>
+        public SecureShareNoAccessGuard? GuardOverride { get; set; }
+
+        /// <summary>Task 158 r1c-v2: a host fixture's own share seam, used instead of <see cref="Shares"/>.</summary>
+        public Sprk.Bff.Api.Services.Access.IDataverseRecordShareService? SharesOverride { get; set; }
+
+        /// <summary>
+        /// Task 158 r1c-v2 (round 47 item 1 (3)): the host's scopes, through which the materializer reaches the secure-root
+        /// inheritance's sharee-only pass after an assignment ended; <c>null</c> (no host) by default.
+        /// </summary>
+        public Microsoft.Extensions.DependencyInjection.IServiceScopeFactory? Scopes { get; set; }
 
         public AssignedAccessMaterializer Materializer => new(
-            Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, Shares,
-            Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger);
+            Store, Grants, Participations, NoAccessCheckOverride ?? AccessibleRecords, Identities, Guard, SharesOverride ?? Shares,
+            Cache.Mock.Object, Standing, Registry, Configuration, Time, Logger, Scopes);
 
         /// <summary>An active, UNLINKED contact (no systemuser represents it).</summary>
         public Guid Contact(Guid? id = null, int stateCode = 0, string? oid = null)
@@ -699,4 +728,17 @@ internal static class AssignedAccessTestDoubles
     /// nothing to mark, so they are no-ops (and never throw).
     /// </summary>
     internal static AssignedAccessMaterializer InertMaterializer() => new Harness().Materializer;
+
+    /// <summary>
+    /// Task 158 r1c-v2 (round 39 item 2): an <see cref="Spaarke.Dataverse.IGenericEntityService"/> that finds no row — the No
+    /// Access guard's filing walk then finds no parent, so only the record's own list applies (tests not about filing).
+    /// </summary>
+    internal static Spaarke.Dataverse.IGenericEntityService NoFilingRows()
+    {
+        var entities = new Moq.Mock<Spaarke.Dataverse.IGenericEntityService>();
+        entities
+            .Setup(e => e.RetrieveMultipleAsync(Moq.It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), Moq.It.IsAny<CancellationToken>()))
+            .Returns(Task.FromResult(new Microsoft.Xrm.Sdk.EntityCollection()));
+        return entities.Object;
+    }
 }

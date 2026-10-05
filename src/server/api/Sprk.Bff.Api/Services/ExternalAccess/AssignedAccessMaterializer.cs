@@ -199,7 +199,13 @@ public sealed class AssignedAccessMaterializer
     private readonly IConfiguration _configuration;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AssignedAccessMaterializer> _logger;
+    private readonly IServiceScopeFactory? _scopes;
 
+    /// <param name="scopes">Task 158 r1c-v2 (main-session round 47 item 1 (3)): reaches the secure-root inheritance's
+    /// sharee-only pass after an assignment ended on a work assignment or project — through a scope, because the inheritance
+    /// depends on this class (round 47 item 1 (2)) and a constructor dependency back would be a cycle. Always provided by the
+    /// host (an unconditional framework service); <c>null</c> only for a materializer built without a host (unit harnesses),
+    /// which then leaves the parents' sharees to the secure-root inheritance job.</param>
     public AssignedAccessMaterializer(
         AssignedAccessStore store,
         DataverseWebApiClient dataverse,
@@ -213,8 +219,10 @@ public sealed class AssignedAccessMaterializer
         IOptions<MembershipOptions> membership,
         IConfiguration configuration,
         TimeProvider timeProvider,
-        ILogger<AssignedAccessMaterializer> logger)
+        ILogger<AssignedAccessMaterializer> logger,
+        IServiceScopeFactory? scopes = null)
     {
+        _scopes = scopes;
         _store = store;
         _dataverse = dataverse;
         _participations = participations;
@@ -497,6 +505,7 @@ public sealed class AssignedAccessMaterializer
         }
 
         // ── Assignments that ended (field cleared or changed — owner answer A4) ────────
+        var assignmentEnded = false;
         foreach (var row in ledger)
         {
             ct.ThrowIfCancellationRequested();
@@ -508,6 +517,7 @@ public sealed class AssignedAccessMaterializer
             if (stillAssignedHere)
                 continue;
 
+            assignmentEnded = true;
             try
             {
                 await EndAssignmentAsync(run, row, subject, desired.ContainsKey(subject), flags.Value, ct).ConfigureAwait(false);
@@ -521,10 +531,44 @@ public sealed class AssignedAccessMaterializer
             }
         }
 
+        // Task 158 r1c-v2 (main-session round 47 item 1 (3), E-158-v1-1's reverse direction): an assignment that ended on a
+        // work assignment or project may have taken away (or recorded as covered) access its secure parents pass on — the
+        // secure-root inheritance's SHAREE-ONLY pass gives the record what its secure parents pass on at once (never a
+        // provisioning; nothing for a record filed under no secure parent), rather than at that job's next run.
+        if (assignmentEnded && SecureRootInheritance.Inherits(run.Logical))
+            await PassParentShareesOnAsync(run, ct).ConfigureAwait(false);
+
         _logger.LogInformation(
             "[ASSIGNED-ACCESS] {Trigger} {Type} {RootId}: {Subjects} assigned subject(s), {Writes} write(s), {Failures} failure(s).",
             request.Trigger, run.Logical, request.RootId, desired.Count, run.Writes, run.Failures.Count);
         return run.ToOutcome(AssignedAccessStatus.Evaluated);
+    }
+
+    /// <summary>
+    /// Round 47 item 1 (3): the secure-root inheritance's sharee-only pass for this record, resolved in its own scope (the
+    /// inheritance depends on this class, so it cannot be a constructor dependency). What it cannot give is the secure-root
+    /// inheritance job's to give (≤ 5 minutes) and is logged — never a failure of THIS rule's run.
+    /// </summary>
+    private async Task PassParentShareesOnAsync(Run run, CancellationToken ct)
+    {
+        if (_scopes is null)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: an assignment ended; no host scope to give its secure parents' sharees now — " +
+                "the secure-root inheritance job gives them.", run.Logical, run.RootId);
+            return;
+        }
+
+        using var scope = _scopes.CreateScope();
+        var pass = await scope.ServiceProvider.GetRequiredService<SecureRootInheritance>()
+            .PassShareesToFiledRecordAsync(run.Logical, run.RootId, $"assigned-access:{run.RootId:N}", ct).ConfigureAwait(false);
+        if (!pass.IsComplete)
+        {
+            _logger.LogWarning(
+                "[ASSIGNED-ACCESS] {Type} {RootId}: an assignment ended, and its secure parents' sharees were not all given to it " +
+                "({Outcome}, {Code}); the secure-root inheritance job completes it.", run.Logical, run.RootId, pass.WireOutcome,
+                pass.ReasonCode);
+        }
     }
 
     /// <summary>The assigned subjects (registry order) and the fields that name each.</summary>
@@ -1004,8 +1048,11 @@ public sealed class AssignedAccessMaterializer
 
         if (flags.IsSecure)
         {
-            // Task 143's ONE write-time check, reused (never a second copy).
-            var wall = await _noAccessGuard.CheckAsync(run.Logical, run.RootId, user, ct).ConfigureAwait(false);
+            // Task 143's ONE write-time check, reused (never a second copy). Task 158 r1c-v2 (round 39 item 2): on a work
+            // assignment or project filed under secure records, the share (or the suggestion of one) honours every secure
+            // parent's No Access list too — the guard's one entry point for the record and its parents.
+            var wall = await _noAccessGuard.CheckRecordAndSecureParentsAsync(
+                run.Logical, run.RootId, user, SecureWallRecordScope.AsFlagged, ct).ConfigureAwait(false);
             if (wall.Outcome == SecureShareWallOutcome.Walled)
             {
                 await skipAsync(restoring ? AssignedAccessReason.RemovedByNoAccess : AssignedAccessReason.NoAccess, user)

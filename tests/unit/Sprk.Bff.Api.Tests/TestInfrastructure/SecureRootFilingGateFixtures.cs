@@ -29,7 +29,7 @@ internal static class SecureRootFilingGateFixtures
 
     private static SecureRootInheritance InheritanceOver(IGenericEntityService entities) =>
         new(entities, null!, null!, null!, null!, null!, null!,
-            new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore(), new ConfigurationBuilder().Build(),
+            new Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.FakeAssignedAccessStore(), null!, new ConfigurationBuilder().Build(),
             NullLogger<SecureRootInheritance>.Instance);
 
     /// <summary>A gate whose inheritance reads <paramref name="entities"/> (provisioning dependencies absent).</summary>

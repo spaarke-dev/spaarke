@@ -546,7 +546,9 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
     /// Unsecuring a filed record revokes every share on it, so what its parent passed on ENDS with it
     /// (<see cref="AssignedAccessReason.RecordUnsecured"/>) — and when it is secured again under its secure parent, the
     /// parent's sharee is passed on again. A row left Shared would read, after the revoke, as an operator's removal
-    /// (Declined) and withhold the sharee for good.
+    /// (Declined) and withhold the sharee for good. (Task 158 r1c-v2: the record is first RE-FILED AWAY from the matter — it
+    /// keeps what the matter passed on, interpretation xiv — so its unsecure is not refused; unsecuring the matter would
+    /// itself end those rows now, round 39 item 1.)
     /// </summary>
     [Fact]
     public async Task UnsecuringAFiledRecord_EndsWhatItsParentPassedOn_SoSecuringItAgainPassesTheShareeOnAgain()
@@ -557,7 +559,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         (await _job.RunAsync()).Success.Should().BeTrue();
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
 
-        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null); // re-filed away: it keeps the share (xiv)
         var unsecured = await UnsecureRouteAsync("workassignment", workAssignment);
 
         unsecured.StatusCode.Should().Be(HttpStatusCode.OK, await unsecured.Content.ReadAsStringAsync());
@@ -566,7 +568,8 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         ended.State.Should().Be(AssignedAccessState.Revoked);
         ended.Reason.Should().Be(AssignedAccessReason.RecordUnsecured);
 
-        SecureMatter(_fixture, matter, null, Colleague); // the matter is secured again and shares the same person
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter",
+            new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", matter)); // filed under the secure matter again
         var run = await _job.RunAsync();
 
         run.Success.Should().BeTrue(run.ErrorMessage);
@@ -584,7 +587,7 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         SecureMatter(_fixture, matter, null, Colleague);
         SecuredWorkAssignment(workAssignment, matter);
         (await _job.RunAsync()).Success.Should().BeTrue();
-        (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
+        World.Set("sprk_workassignment", workAssignment, "sprk_regardingmatter", null); // re-filed away: it keeps the share (xiv)
         _fixture.InheritedLedger.FailLedgerWrites = true;
 
         var response = await UnsecureRouteAsync("workassignment", workAssignment);
@@ -647,25 +650,29 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
     }
 
     /// <summary>
-    /// Owner round 6 item 4 + round 30: a parent that is no longer secure ends nothing it passed on — its filed records stay
-    /// as they are. An unshare of the person on the (now ordinary) matter leaves the secure work assignment's inherited
-    /// share in place, as the job does.
+    /// Task 158 r1c-v2 — main-session round 39 item 1 REVERSES interpretation xiii (this test asserted the opposite before):
+    /// unsecuring a parent ends what it passed on. The matter's unsecure ends the unmodified share it passed on to the secure
+    /// work assignment filed under it — which stays SECURE (never auto-unsecure) — and its row is ended.
     /// </summary>
     [Fact]
-    public async Task UnsharingFromAMatterThatIsNoLongerSecure_EndsNothingItPassedOn()
+    public async Task UnsecuringTheMatter_EndsWhatItPassedOn_AndTheFiledRecordStaysSecure()
     {
         var (matter, workAssignment) = (Guid.NewGuid(), Guid.NewGuid());
         SecureMatter(_fixture, matter);
         SecuredWorkAssignment(workAssignment, matter);
         await ShareAsync("matter", matter, Colleague);
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror);
+
         (await UnsecureRouteAsync("matter", matter)).StatusCode.Should().Be(HttpStatusCode.OK);
 
-        (await UnshareAsync("matter", matter, Colleague)).Should().BeOfType<Ok<UnshareRecordWithUserResponse>>();
-
         _fixture.IsSecureOf(workAssignment).Should().BeTrue("never auto-unsecure");
-        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(Mirror, "an ordinary record's unshare is not a secure parent's");
-        Provenance(workAssignment).Single(r => r.SystemUserId == Colleague).State.Should().Be(AssignedAccessState.Shared);
+        _fixture.OwningTeamOf(workAssignment).Should().Be(SecureTeam);
+        _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "round 39: the access came only from the matter's share");
+        _fixture.ShareMaskOf(workAssignment, Creator).Should().Be(Mask(ProvisionProjectEndpoint.CreatorAccessRights),
+            "the creator's own share is not the matter's to end");
+        var row = Provenance(workAssignment).Single(r => r.SystemUserId == Colleague);
+        row.State.Should().Be(AssignedAccessState.Revoked);
+        row.Reason.Should().Be(AssignedAccessReason.AccessRemoved);
     }
 
     /// <summary>
@@ -1308,11 +1315,16 @@ public class SecureRootInheritanceRound31Tests : IClassFixture<ProvisionProjectT
         var (matter, _, workAssignment) = await ReFiledUnderAProjectSharingLessAsync();
         _fixture.FailShareForPrincipal = Colleague;
 
-        var (status, code, body) = Problem(await UnshareAsync("matter", matter, Colleague));
+        var result = await UnshareAsync("matter", matter, Colleague);
+        var (status, code, body) = Problem(result);
 
         status.Should().Be(500);
         code.Should().Be(InternalShareEndpoints.ChildrenIncompleteReasonCode);
         body.GetProperty("filedRecordsNotUpdated").GetInt32().Should().Be(1);
+        // Task 158 r1c-v2 (the verifier's seed X15): the copy says what happened — access removed, the rest given back later.
+        ((ProblemHttpResult)result).ProblemDetails.Detail.Should()
+            .StartWith("This user's access to the record was removed.")
+            .And.Contain("could not be given back yet; it is given back automatically within a few minutes.");
         _fixture.ShareMaskOf(workAssignment, Colleague).Should().Be(0, "the matter's share was taken back; the project's could not be given");
 
         _fixture.FailShareForPrincipal = null;

@@ -306,6 +306,7 @@ internal sealed class SecureChildShareWorld
         new(new GrantPolicyTestDoubles.FlagStubParticipationService(defaultFlags: RootRecordFlags.None),
             new GrantPolicyTestDoubles.SeamNoAccessListReader(),
             new Sprk.Bff.Api.Tests.AccessControl.IdentityBinding.InMemoryContactIdentityStore(),
+            AssignedAccessTestDoubles.NoFilingRows(),
             NullLogger<SecureShareNoAccessGuard>.Instance);
 
     /// <summary>
