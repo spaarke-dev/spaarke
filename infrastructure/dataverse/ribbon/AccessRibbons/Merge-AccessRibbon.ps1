@@ -32,9 +32,10 @@
 
 .PARAMETER SecureTransitionDeployed
     Task 150 (UX amendment acceptance (b); owner R3b / F7): include "Make Secure". Pass it ONLY when the target
-    environment's BFF carries task 148's provisioning transition (existing children follow the record) AND round 26 item
-    3's file relocation (task 166's DocumentContainerRelocator, wired at integration), which ship in the same release as
-    Make Secure. Without it every sprk.Access.<entity>.MakeSecure.*
+    environment's BFF carries task 148's provisioning transition (existing children follow the record), round 26 item
+    3's file relocation (task 166's DocumentContainerRelocator, wired at integration) AND its scheduled backstop (round 46
+    item 2: task 147's SecureChildReconciliationJob settling pending Make Secure relocations, writes on), which ship in
+    the same release as Make Secure. Without it every sprk.Access.<entity>.MakeSecure.*
     node is removed from the instantiated template, so Make Secure is absent while Update Access and Remove Secure ship.
 
 .EXAMPLE

@@ -28,13 +28,15 @@
         Exit 0 = PASS.
 
     MAKE SECURE IS RELEASE-GATED (acceptance (b); owner R3b / F7). The confirmation the user accepts says the record's
-    related records AND its files follow it, so it ships only where both are deployed, in the same release: task 148's
-    provisioning transition (merged with task 150 in integ/uac-r2-batch4) and round 26 item 3's file relocation (task
-    166's DocumentContainerRelocator, wired into provisioning's Make Secure path when 166 merges). Pass
-    -SecureTransitionDeployed only when the target environment's BFF carries both. Without it Make Secure is withheld
-    (and -Verify FAILS if it is present), while Update Access and Remove Secure ship.
+    related records AND its files follow it, so it ships only where all of this is deployed, in the same release: task
+    148's provisioning transition (merged with task 150 in integ/uac-r2-batch4), round 26 item 3's file relocation (task
+    166's DocumentContainerRelocator, wired into provisioning's Make Secure path when 166 merges), and that relocation's
+    scheduled backstop (round 46 item 2: task 147's SecureChildReconciliationJob, every 2 minutes, also settling the
+    pending Make Secure relocations, registered with its writes on - wired at integration). Pass
+    -SecureTransitionDeployed only when the target environment's BFF carries all three. Without it Make Secure is
+    withheld (and -Verify FAILS if it is present), while Update Access and Remove Secure ship.
 
-    Order (README "Deployment"): the BFF first, then the web resources (sprk_/scripts/access_ribbon.js 1.3.0,
+    Order (README "Deployment"): the BFF first, then the web resources (sprk_/scripts/access_ribbon.js 1.4.0,
     assignedaccess_postsave.js, bff_auth.js), then this script.
 
 .PARAMETER EnvironmentUrl

@@ -21,19 +21,27 @@ Make Secure secures an EXISTING record, so its existing children — and, with r
 it: the confirmation the user accepts (owner round 27) says both happen. Children: task 148's provisioning transition.
 Files: round 26 item 3's ONE relocation service, `DocumentContainerRelocator` — built by task 166, and wired into
 provisioning's Make Secure path by the main session when 166 merges (an integration step; task 150 builds no second
-relocator). **The rule:** Make Secure is imported only into an environment whose BFF carries BOTH — task 148's transition
-and the wired relocation — in the same release: run the generator (and `Set-AccessRibbon.ps1`) with
+relocator). The scheduled backstop for a relocation left pending (`files_incomplete`) is task 147's
+`SecureChildReconciliationJob` (every 2 minutes), which also settles the PENDING Make Secure relocations recorded in the
+relocation ledger through that ONE relocator, capped per run and reported (round 46 item 2; wired at integration once
+147, 150 and 166 are all on the integration branch). **The rule:** Make Secure is imported only into an environment whose
+BFF carries ALL THREE — task 148's transition, the wired relocation, and that backstop (`SecureChildReconciliationJob`
+registered with its writes on) — in the same release: run the generator (and `Set-AccessRibbon.ps1`) with
 `-SecureTransitionDeployed` only there. Elsewhere the Access group ships Update Access and Remove Secure, and `-Verify`
 fails if Make Secure is present. Tasks 148 and 150 are integrated together (`integ/uac-r2-batch4`); the relocation
-arrives with 166's merge, so pass `-SecureTransitionDeployed` only for a BFF built after that wiring. It is a packaging
-rule by design — the ribbon has no reliable runtime signal of the BFF's build, and a missing command is the safe default.
+arrives with 166's merge and the backstop with 147's, so pass `-SecureTransitionDeployed` only for a BFF built after
+that wiring. It is a packaging rule by design — the ribbon has no reliable runtime signal of the BFF's build, and a
+missing command is the safe default.
 
 **Who may use them.** Both commands are enabled only for a caller with Write (the cached can-manage-access verdict — the
 same rule as Update Access). Make Secure needs the record NOT secure — or flagged secure with a transition that did not
-finish (round 40 item 1: no container recorded, or owned by a user; a PROVISIONED record is owned by the Secure Record
-owner team and records its own container, and hides it) — and Remove Secure needs it secure; `sprk_issecure`,
-`sprk_containerid` and `_owninguser_value` are read in ONE `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty)
-flag hides both. A Make Secure failure after the flag write that the server answers as "the same caller may call
+finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team OTHER than the
+Secure Record Owners team; a PROVISIONED record is owned by the Secure Record Owners team and records its own container,
+and hides it) — and Remove Secure needs it secure; `sprk_issecure`, `sprk_containerid` and `_owninguser_value` are read
+in ONE `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty) flag hides both. For a flagged, team-owned record with
+a container the script asks the server which team that is (`can-manage-access?…&includeOwner=true`: the owning team and
+whether it is the Secure Record Owners team, the server's configuration); an answer it cannot get keeps Make Secure
+hidden on that record. A Make Secure failure after the flag write that the server answers as "the same caller may call
 again" (`MAKE_SECURE_RETRY_IN_PLACE`) offers that call in place: a confirm dialog with the server's message, Make
 Secure / Cancel (round 40 item 1). Who may REMOVE the designation is
 the server's decision (owner F3: Full Access holders and the record's creator); a refusal shows the endpoint's
@@ -93,8 +101,9 @@ second run, no command lost. That proves the transformation only — the live me
 Order matters: the BFF route and the web resources must exist before a ribbon that calls them.
 
 1. **BFF** carrying task 142 deployed (after `scripts/Set-AssignedAccessLedgerSchema.ps1 -Apply` / `-Verify`) — and,
-   for Make Secure, tasks 148 + 150 and the Make Secure file relocation (task 166's `DocumentContainerRelocator`, wired
-   at integration) in the same release.
+   for Make Secure, tasks 148 + 150, the Make Secure file relocation (task 166's `DocumentContainerRelocator`, wired
+   at integration) and its scheduled backstop (task 147's `SecureChildReconciliationJob` settling pending Make Secure
+   relocations, registered with its writes on — round 46 item 2) in the same release.
 2. **Web resources** (dataverse-deploy skill), published:
    `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`;
    `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`.
@@ -102,9 +111,11 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    project — Push Updates, Upload Documents, Summarize Files, Find Similar, Playbook Library, Create To Do, Dark Mode;
    matter — Push Updates, Create Project, Create Event, Create To Do, Upload Documents, Summarize Files, Find Similar,
    Playbook Library; work assignment — Create To Do, Dark Mode.
-4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150
-   and the wired relocation for `-SecureTransitionDeployed`, and the web resources must be `access_ribbon.js` 1.3.0 —
-   task 150 round 40: Make Secure offered on an unfinished secure transition, and its in-place retry):
+4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150,
+   the wired relocation and its backstop for `-SecureTransitionDeployed`, and the web resources must be
+   `access_ribbon.js` 1.4.0 — task 150 round 40: Make Secure offered on an unfinished secure transition, and its
+   in-place retry; round 46 item 4: a flagged record owned by a team other than the Secure Record Owners team is
+   unfinished too, which needs the BFF's `can-manage-access` `includeOwner` answer):
    ```powershell
    pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                    # dry run (no Dataverse call)
    pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SolutionName <ribbon solution> `
@@ -117,13 +128,14 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    work-assignment `RibbonDiff.xml`** under `WorkAssignmentRibbons/Entities/sprk_workassignment/` before editing it
    (amendment UX (f) — commit it), merges each entity with `Merge-AccessRibbon.ps1` (its "Commands before / after" check:
    the AFTER list is the BEFORE list plus `sprk.Access.*`), packs, imports with publish, and runs `-Verify` against
-   `before.json`. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition AND
-   the wired file relocation.
+   `before.json`. Omit `-SecureTransitionDeployed` in an environment whose BFF does not carry task 148's transition, the
+   wired file relocation AND its `SecureChildReconciliationJob` backstop with writes on.
    Then on each form (the task 150 POML ui-tests): every command from step 3 still renders and runs; the "Access" flyout
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only
    user, whose direct call to the sync route still gets 403; Make Secure / Remove Secure follow the secure state (Make
-   Secure also on a record flagged secure whose transition did not finish — no container recorded, or user-owned;
-   hidden on a PROVISIONED one: acceptance (e) as amended by round 40).
+   Secure also on a record flagged secure whose transition did not finish — no container recorded, user-owned, or
+   owned by a team other than the Secure Record Owners team; hidden on a PROVISIONED one: acceptance (e) as amended by
+   round 40, and round 46 item 4).
 7. **Form libraries** (task 142's post-save call, separate from the ribbon): on the three main forms, register
    `sprk_/scripts/bff_auth.js` FIRST, then `sprk_/scripts/assignedaccess_postsave.js`, with OnLoad handler
    `Spaarke.AssignedAccess.onLoad` (pass execution context).

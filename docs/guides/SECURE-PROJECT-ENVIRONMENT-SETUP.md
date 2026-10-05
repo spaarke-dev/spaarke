@@ -907,11 +907,16 @@ default team), then step 4's `-Verify` and step 5. The standing assertion fails 
 
 Users secure and unsecure an existing project, matter or work assignment from the main form's **Access** flyout (task
 142's ONE group, ONE ribbon source `infrastructure/dataverse/ribbon/AccessRibbons/`, ONE command script
-`sprk_/scripts/access_ribbon.js` 1.3.0) — never by editing the field, which no form shows and FLS locks.
+`sprk_/scripts/access_ribbon.js` 1.4.0) — never by editing the field, which no form shows and FLS locks.
 
 - **Make Secure** — shown on a record that is NOT secure, and on one flagged secure whose secure transition did not
-  finish (round 40 item 1: no container recorded, or still owned by a user — a PROVISIONED secure record is owned by the
-  Secure Record owner team and records its own container, and hides it), to a caller with Write. It confirms with the
+  finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team OTHER than the
+  Secure Record Owners team — a PROVISIONED secure record is owned by the Secure Record Owners team and records its own
+  container, and hides it), to a caller with Write. Which team is the Secure Record Owners team is the server's
+  configuration, so for a flagged, team-owned record with a container the ribbon asks `can-manage-access` with
+  `includeOwner=true`; an answer it cannot get keeps Make Secure hidden on that record. A record reassigned outside
+  Spaarke to another team, or a legacy one provisioned before task 133's owner move (still user-owned), is finished by
+  the call: its forward path re-owns it to the Secure Record Owners team and keeps its own container. It confirms with the
   owner-authored copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1; the exact
   token — any other value is refused 400, and so is a Make Secure request naming `sharePrincipalIds`): the server holds
   that path to the Write gate (owner R3b) — the creator rule is the wizards' path only — and the access afterwards is
@@ -924,24 +929,37 @@ Users secure and unsecure an existing project, matter or work assignment from th
   and the ribbon shows a per-person warning (never silent, round 33 item 5; a person whose name cannot be read is
   "Someone", round 40 item 3); the caller adds them through Manage Access. The caller keeps access on BOTH paths
   (round 40 item 2): when the call finishes an earlier run that stopped after the owner move, the caller is shared and
-  the creator beside them exactly as on the forward path, and a caller who already holds a higher level (Full Access)
-  keeps it — never narrowed. **A Make Secure that fails after its first write can always be finished from the same
-  command** (round 40 item 1): a failure the server answers as "the same caller may call again" offers that call in place
-  (a confirm dialog with the server's message, Make Secure / Cancel), and the command stays offered on the unfinished
-  record; the per-code closure table is task 150's note §23.2. An administrator who finishes a record through Make
-  Secure is shared to like any caller; the API call without the transition (§7, F8) finishes it without adding them.
-  Task 148's transition carries the existing children; round 26 item 3's relocation moves the files (task 166's
-  `DocumentContainerRelocator`, wired into this path at integration). **Release rule (acceptance (b)): Make Secure is
-  imported only into an environment whose BFF carries task 148's transition AND the wired file relocation, in the same
-  release** — `Set-AccessRibbon.ps1 -SecureTransitionDeployed`; without the switch the group ships without it and
-  `-Verify` fails if it is present.
+  the creator beside them exactly as on the forward path. **The caller's share is floored on their EFFECTIVE rights
+  before the call** (round 46 item 1) — Dataverse's own answer, asked as the caller in the same step as WhoAmI, the
+  answer owner F3 decides Full Access from: a caller who held Full Access (Write and Delete) through a share, through
+  owning the record, or through a security role is shared at **Full Access** and keeps the right to remove the
+  designation; anyone else is shared at **Collaborate**. Never less than Collaborate, never more than Full Access, never
+  Assign. If those rights cannot be read, the call is refused before any change (500
+  `sdap.unsecure.permission_unverifiable`, the same caller may retry). **A Make Secure that fails after its first write
+  can always be finished from the same command** (round 40 item 1): a failure the server answers as "the same caller may
+  call again" offers that call in place (a confirm dialog with the server's message, Make Secure / Cancel), and the
+  command stays offered on the unfinished record; the per-code closure table is task 150's note §23.2. A Make Secure
+  that finishes an earlier run runs the full forward rule set before any write (round 46 item 3): WhoAmI and the
+  effective rights, the caller's No Access check, the creator read, then the caller's proven share, the creator in the
+  colleague step. An administrator who finishes a record through Make Secure is shared to like any caller; the API call
+  without the transition (§7, F8) finishes it without adding them. Task 148's transition carries the existing
+  children; round 26 item 3's relocation moves the files (task 166's `DocumentContainerRelocator`, wired into this path
+  at integration). The scheduled backstop for a file relocation left pending (`files_incomplete`) is task 147's
+  `SecureChildReconciliationJob` (every 2 minutes): each run also settles the PENDING Make Secure relocations recorded
+  in the relocation ledger through the ONE `DocumentContainerRelocator`, capped per run and reported (round 46 item 2;
+  wired at integration once 147, 150 and 166 are all on the integration branch — not 166's migration job, which is
+  registered disabled). **Release rule (acceptance (b)): Make Secure is imported only into an environment whose BFF
+  carries task 148's transition, the wired file relocation AND that backstop — `SecureChildReconciliationJob`
+  registered with its writes on — in the same release** — `Set-AccessRibbon.ps1 -SecureTransitionDeployed`; without
+  the switch the group ships without it and `-Verify` fails if it is present.
 - **Remove Secure** — shown on a secure record, to a caller with Write. It confirms first (round 33 item 2: "Remove the
   secure designation from this {record}?"), then calls `/unsecure-project`; the SERVER decides who may (F3: Full Access
   holders and the creator) and the refusal shows the endpoint's message.
 - Both read `sprk_issecure` — with `sprk_containerid` and `_owninguser_value`, in ONE `Xrm.WebApi.retrieveRecord` —
-  (every user's reader-profile Read, step 3); a failed or masked read hides BOTH.
+  (every user's reader-profile Read, step 3); a failed or masked read hides BOTH. Only a flagged, team-owned record
+  with a container adds the server's owner answer (above).
 
-Order: the BFF (tasks 148 + 150) → web resources (`access_ribbon.js` 1.3.0, `assignedaccess_postsave.js`,
+Order: the BFF (tasks 148 + 150) → web resources (`access_ribbon.js` 1.4.0, `assignedaccess_postsave.js`,
 `bff_auth.js`) → `Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150
 POML ui-tests on the three forms.
 

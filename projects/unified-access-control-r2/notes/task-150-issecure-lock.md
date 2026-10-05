@@ -265,7 +265,7 @@ round 33 item 2's copy.
 | G-8 | a user in each populated BU (root `Spaarke`, `Spaarke Business Unit 1`) reads the true value | escalation trigger 1's live check |
 | G-9 | Unsecure F3 live: a Collaborate-level colleague → 403 `not_permitted`; the creator and a Full Access holder → 200 | through the API until the ribbon ships |
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
-| G-11 | Access ribbon (§21, §22, §23): after G-1 (BFF with 148 + 150 and, for Make Secure, round 26 item 3's relocation wired at integration with its scheduled backstop — §22.4, §23.3) and the web resources (`sprk_/scripts/access_ribbon.js` **1.3.0**, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the amendment ui-tests pass, plus round 40's "Make Secure finishes an unfinished transition" ui-test (§23.1). Omit `-SecureTransitionDeployed` where the BFF lacks task 148's transition or the wired relocation |
+| G-11 | Access ribbon (§21, §22, §23, §24): after G-1 (BFF with 148 + 150 — including round 46's `can-manage-access` `includeOwner` answer — and, for Make Secure, round 26 item 3's relocation wired at integration with its scheduled backstop: 147's `SecureChildReconciliationJob` settling pending Make Secure relocations, writes on — §22.4, §24.2) and the web resources (`sprk_/scripts/access_ribbon.js` **1.4.0**, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the amendment ui-tests pass, plus round 40's "Make Secure finishes an unfinished transition" ui-test (§23.1) and round 46's "Make Secure finishes a secure record not owned by the Secure Record Owners team" ui-test (§24.4 — also the G-11 check of legacy secure records still user-owned, the verifier's item 8). Omit `-SecureTransitionDeployed` where the BFF lacks task 148's transition, the wired relocation or its backstop |
 
 **Merge gates (all hold before task 150 reaches master):**
 1. **F6: MET.** Rows 1-6 closed by owner round 10 item 9 (c1, §15); rows 7-11 closed by owner round 13 item 10
@@ -1109,6 +1109,9 @@ provisioning host, `accessRibbon.secureCommands` — **10 suites, 193/193** (`pr
   that team from the named owner team needs the server's configuration (`SecureRecord:OwnerTeamName`). The only GET the
   ribbon calls, `can-manage-access`, is by design a pure delegation answer (task 139). That shape is closed by the
   in-place retry below and, after it, by an F3 holder's Remove Secure → Make Secure or an administrator's call (§23.2).
+  **Superseded by round 46 item 4 (§24.4):** accepting that shape as a documented edge was rejected; `can-manage-access`
+  now answers, on request, the owning team and whether it is the Secure Record Owners team, and the ribbon offers Make
+  Secure on it (1.4.0).
 - **The in-place retry.** Round 40 named the after-Step-7 codes (`files_incomplete`, `children_incomplete`).
   `MAKE_SECURE_RETRY_IN_PLACE` (ONE frozen constant) holds every Make Secure failure after the flag write that the server
   answers as "the same caller may call again": `secure_flag_not_set`, `shared_container_not_cleared`,
@@ -1178,6 +1181,10 @@ branch: `files_incomplete` has no SCHEDULED backstop (§23.3).
 
 ### 23.3 STOP for the §22.4 integration step — `files_incomplete`'s job backstop is not scheduled (round 40's premise); complete fix
 
+**Decided by round 46 item 2 (§24.2):** the backstop is 147's `SecureChildReconciliationJob`, as proposed below; the
+release gate requires it registered with its writes on; wired at integration once 147, 150 and 166 are all on the
+integration branch.
+
 - **What.** Round 40 names "for files, 166's relocator re-entry" as the scheduled job. On `task/uac-r2-166-f1-v1`
   (`ca8291442`), `DocumentContainerMigrationJob` is registered DISABLED: "Never fires on its own", and it runs only when
   `scripts/Invoke-DocumentContainerMigration.ps1` triggers it, with writes switched on for that run. So after a
@@ -1230,6 +1237,10 @@ branch: `files_incomplete` has no SCHEDULED backstop (§23.3).
   - never beyond Full Access, so no Assign (a secure record leaves the business unit only through unsecure);
   - applied at share-first, the Unverified ensure, Step 5.5 and the resume;
   - the wizards' path is unchanged (exact).
+
+  **Corrected in c-v2 (round 46 item 1, §24.1):** as written here this held only for Full Access held BY A SHARE. A
+  caller who held Delete through ownership or a role — what F3 decides from — ended at Collaborate. `held` now also
+  carries the caller's EFFECTIVE rights before the call, and the Unverified fallback grant is issued at the floor too.
 - **Shared helpers.** `CallerUnresolved` and `CallerWallRefusal` were extracted from the forward path, text unchanged,
   and both paths now use them.
 - **Tests** (`SecureFlagEndpointWriteTests` 82 → 96):
@@ -1267,7 +1278,9 @@ branch: `files_incomplete` has no SCHEDULED backstop (§23.3).
   - Ribbon: `personName("")` makes no read and answers "Someone". A name that cannot be read, or reads back empty or
     blank, is "Someone" (it used to show the id). `describeSkippedPrincipal` never fills a blank name.
   - Wizard: an id the host gave no name or a blank name for, and an empty id, are "Someone" (they used to show the raw
-    id). `describeSkippedPrincipal` and the generic warning guard a blank too.
+    id). `describeSkippedPrincipal` guards a blank too. **Corrected in c-v2 (§24.6):** the generic warning's own blank
+    guard was redundant (it only ever receives a name `skippedPersonName` resolved) and untested; it was removed, and the
+    generic path's "Someone" is pinned through `skippedPersonName`.
   - Item 4 of the brief, the empty-name warning, is this case.
 - **Tests:** ribbon +5 (empty id / blank / null name; the constant; blank in describe); wizard +4. **Seeds:**
   - CR5, unreadable shows the id: 1 fail.
@@ -1377,3 +1390,260 @@ BFF = Y (already declared). Each new member below answers the three questions.
 ADR-002: no plugin. ADR-003: every new refusal comes before any write, and an unknown flag still hides both commands.
 ADR-006: the ribbon stays a thin command script. ADR-028: the token is `BffAuth.authenticatedFetch`'s. ADR-038: no
 `Mock<HttpMessageHandler>`, no DI or constructor tests; every new guard was seeded.
+
+## 24. Integration round c-v2 (2026-10-05, `task/uac-r2-150-integ-c-v2` from `task/uac-r2-150-integ-c-v1` @ `1cecc8e31`) — round 46, the verifier's 17 items
+
+**Binding input:** round 46 (main session under round 15, `work/unified-access-control-r2` @ `71320b657`; re-read at
+`c998979df`, whose newer round 50 is task 140's and changes nothing here): item 1 (the caller's share floored on
+EFFECTIVE rights, option b), item 2 (`files_incomplete`'s backstop is 147's job, wired at integration), item 3 (§23.4
+confirmed), item 4 (the client tells a non-default owner team apart; "documented edge" rejected), item 5 (the resume's
+unverifiable No Access refusal gets a test that bites). No `NOTE-FROM-MAIN.md` existed. No live call of any kind was
+made (Dataverse, Azure, Entra, SPE: none, not even a read).
+
+### 24.1 Round 46 item 1 — the Make Secure caller's share is floored on their EFFECTIVE rights (verifier items 3, 12)
+
+- **What changed.** `ProvisionProjectEndpoint.ReadMakeSecureCallerFloorAsync` asks Dataverse, AS THE CALLER, what rights
+  they hold on the record (`CallerRecordAccessProbe.GetCallerRightsAsync` — `RetrievePrincipalAccess`, the same answer
+  owner F3 decides Full Access from, `SecureDesignationRemoval.cs` `FullAccess = Write | Delete`). It runs in the same
+  pre-write step as WhoAmI: on the forward path right after WhoAmI in `MoveWithCreatorShareAsync`, on a Make Secure resume
+  right after WhoAmI in `ResumeMakeSecureAsync` — before the No Access check, the creator read and every write.
+- **The floor.** `MakeSecureHeldMask(effective)` = the Full Access share bits those rights carry
+  (`RecordShareLevels.Intersect` over the Full Access level: Read, Write, Append, AppendTo, Share, Delete — never Create
+  or Assign). The target is `MakeSecureCallerMask(held)` = `(held & FullAccess) | Collaborate`, with `held` = the
+  pre-call explicit share ∪ the share a later read shows ∪ the effective-rights bits. So:
+  - Full Access held by a share, by OWNING the record, or by a security ROLE → an explicit Full Access share (Delete
+    kept, so F3's right to remove the designation is kept);
+  - anything less → Collaborate (never less: the creator's level);
+  - never Assign, never more than Full Access.
+  It applies at share-first, the Unverified-move ensure, Step 5.5, the resume, **and the Unverified-move fallback grant**
+  (issued without a read when the ensure fails — it used to grant the bare creator level; now the floor, so it cannot
+  narrow a Full Access holder either).
+- **Fail closed (ADR-003).** A probe that throws, or an answer without the Write the route's gate admitted moments earlier
+  (the probe's "could not answer" is `AccessRights.None`, deliberately indistinguishable from "no rights"), refuses before
+  any write: 500, the detail "Which access you hold on this {record} could not be read, so securing it could not make
+  sure you keep that access. Nothing was changed; you may try again."
+- **Interpretation recorded — "the existing unverifiable code".** `sdap.unsecure.permission_unverifiable`
+  (`SecureDesignationRemoval.PermissionUnverifiableReasonCode`): it is the one code that already means "the caller's rights
+  on this secure record could not be read" (F3's `RightsUnreadable` basis), and the floor exists to keep exactly the right
+  F3 decides from them. Every provisioning "unverifiable" code names a different fact — `creator_no_access_unverifiable`
+  the No Access list, `record_creator_unverifiable` the record's creator — so reusing one would mislabel the refusal in the
+  detail, the logs and any client mapping. No new reason code. The wizards' path never reads the floor (pinned below), so
+  the wizard can never receive it; the wizard's EMITTED test comment says so. The ribbon shows the server's detail and
+  does not offer it in place (it is a pre-write refusal; the record is unchanged).
+- **Behaviour change, as round 46 intends.** A record OWNER who runs Make Secure on their own record now ends with Full
+  Access (they held Delete by ownership); an administrator who runs it ends with Full Access (role). The wizards' creator
+  still gets EXACTLY Collaborate (no transition, no floor read).
+- **Tests** (`SecureFlagEndpointWriteTests`):
+  - ownership-held, role-held (forward) and role-held (resume) Full Access → an explicit Full Access share; the creator at
+    Collaborate; exactly two rights probes (the gate, then the floor) — theory ×3;
+  - Collaborate-only (no Delete held, even as owner) → exactly Collaborate, forward and resume — theory ×2;
+  - the floor read fails — the probe throws, or answers without Write — forward and resume: 500
+    `sdap.unsecure.permission_unverifiable`, the detail verbatim, nothing written — theory ×4 (fixture switch
+    `FollowUpRightsProbeAnswersNone`, beside `FullAccessProbeThrows`);
+  - the wizards' path reads no floor: a caller holding Delete and a probe that would throw after the gate → 200, exactly
+    Collaborate, one probe;
+  - the Unverified-move fallback grant carries the floor (two grants for the caller, both Full Access).
+  - The share-held case is the existing `Provision_MakeSecure_ByAFullAccessHolder_KeepsTheirFullAccess` (both paths).
+- **Seeds** (affected filter, 890 tests; each restored from a backup, touched, hash re-checked
+  `c0d4a2a0…`):
+  - SF1, the floor ignores effective rights (`held = 0`): 4 fail.
+  - SF2, a throwing probe read as "no floor": 2 fail.
+  - SF3, an answer without Write accepted: 2 fail.
+  - SF4, the resume reads the floor after the flag write: 2 fail.
+  - SF5, the wizards' path reads the floor too: 4 fail (incl. three existing `SecureNamedOwnerTeam` probe-count pins).
+  - SF6, the fallback grant at the bare creator level: 1 fail.
+- **Docs corrected**: guide §7d.1 (the floor stated precisely: effective rights by share, ownership or role; Full Access
+  or Collaborate; never Assign; the refusal code); §23.4 above (marked corrected); the POML ui-test's expected text.
+
+### 24.2 Round 46 item 2 — `files_incomplete`'s scheduled backstop (verifier item 14; resolves the §23.3 STOP)
+
+- **Decided:** 147's `SecureChildReconciliationJob` (every 2 minutes) is the backstop; each run also settles the PENDING
+  Make Secure relocations recorded in the relocation ledger through the ONE `DocumentContainerRelocator`, capped per run
+  and reported. Not a new job; not 166's `DocumentContainerMigrationJob` (registered disabled). `-SecureTransitionDeployed`
+  is gated on that job being registered with its writes on.
+- **Why it is not built on this branch.** It is wired at integration "after 147, 150 and 166 are all on the integration
+  branch" (round 46). Checked at `integ/uac-r2-batch4` @ `bc6bc6c6d`: `git merge-base --is-ancestor` is false for
+  `task/uac-r2-147-r1c-v1`, `task/uac-r2-166-f1-v2` and `task/uac-r2-140-x1-v1c-v1`. The relocator and the job's
+  relocation ledger exist only on 166's branch; a second relocator is forbidden (round 26 item 3).
+- **The integration step, complete** (with §22.4's wiring, in one change, by the main session):
+  1. §22.4: `DocumentContainerRelocator.RelocateDocumentsAsync` (purpose `MakeSecure`) wired into provisioning's Make
+     Secure path and the already-provisioned re-entry branch, with 500 `sdap.provision.files_incomplete` and its client
+     entries (`MAKE_SECURE_RETRY_IN_PLACE` already carries it — access_ribbon.js needs no second release).
+  2. `SecureChildReconciliationJob`: after its recent-changes pass, settle the ledger's pending `MakeSecure` relocations
+     through that relocator, at most a configured number per run; report `makeSecureRelocations` (pending, settled,
+     failed, roots) in `ResultJson`; a root still owing a step is listed among `incompleteRoots`, and the run is not a
+     success while any is owed (147's rule 4 posture). Its writes follow the job's recent-changes pass: on unless an
+     emergency stop (round 28 E2 posture), so "registered with writes on" is its default.
+  3. Tests: a root left `files_incomplete` is finished by the next run; the per-run cap; a failed relocation is reported
+     and retried next run; a seed that disables the settle call fails them.
+  4. The release gate made mechanical: `Set-AccessRibbon.ps1 -Apply -SecureTransitionDeployed` refuses unless a read-only
+     `GET {BFF}/api/admin/jobs/secure-child-reconciliation/status` answers `Enabled: true` with `CronSchedule
+     "*/2 * * * *"` and its latest run's `ResultJson` shows the Make Secure relocation settle in write mode; an
+     offline-harness test of that check (the lock script's precedent).
+- **Done here (text only, the rule already holds as a packaging rule):** the release rule now names the backstop in the
+  AccessRibbons README (the "release-gated" section and Deployment steps 1, 4–6), `Set-AccessRibbon.ps1` and
+  `Merge-AccessRibbon.ps1` help, guide §7d.1, §9 G-11, and the ribbon script's `MAKE_SECURE_RETRY_IN_PLACE` comment.
+  Parse check 0 errors on both scripts; `Set-AccessRibbon.ps1 -SecureTransitionDeployed` dry run (no Dataverse call)
+  PASSED.
+
+### 24.3 Round 46 item 3 — §23.4 confirmed (the broader reading)
+
+The code already ran the full forward rule set on a Make Secure resume (§23.4); round 46 adds the effective-rights read to
+its first step (§24.1). Docs: the endpoint's class remarks and `ResumeMakeSecureAsync` remarks name the order (WhoAmI and
+effective rights; No Access; creator read; flag; the caller's proven share; the creator in the colleague step); guide
+§7d.1 states it and that an administrator who finishes a record through the ribbon is shared to like any caller; a direct
+API call with no `transition` keeps the creator rule (F8 — pinned since c-v1).
+
+### 24.4 Round 46 item 4 — the client tells a non-default owner team apart (verifier item 8)
+
+- **Server.** `GET can-manage-access?recordType=&recordId=&includeOwner=true` answers, beside the unchanged delegation
+  answer, `owningTeamId` (the owning team; null when a user owns it) and `ownedBySecureOwnerTeam` (true / false; null =
+  could not be told). `RecordAccessGateEndpoint.ReadOwnerAsync`: one app-only read of the record's owner columns; a
+  user owner answers false at once; a team owner is compared with the Secure Record Owners team as
+  `SecureRecordOwnerTeam.IdentifyAsync` names it — steps 1–2 of `ResolveAsync`, extracted so the gate and provisioning
+  use ONE rule (`ResolveAsync` now calls it; behaviour unchanged). An owner read that fails, a row with no owner, or a
+  Secure team that is absent, ambiguous or unreadable → null, logged — never either answer.
+  - **Opt-in, deliberately.** The route is the Manage Access gates' form-load path (`TrackingFieldTrio`, the flyout's own
+    visibility), whose design is one rights probe and no read; only the ribbon's secure-state rule asks for the owner.
+  - It changes nothing about who is admitted: a caller without Write still gets the filter's 403, and no owner read is
+    made (pinned).
+- **Client.** `sprk_access_ribbon.js` **1.4.0**: a flagged record with its container recorded and NO owning user is
+  finished only when the server says the Secure Record Owners team owns it. Another team — a reassignment outside Spaarke
+  — is unfinished: Make Secure ("finish") is offered beside Remove Secure. An answer it cannot get (no token, a non-200,
+  an answer about another record, null, a failure) keeps Make Secure hidden on that record; Remove Secure still follows
+  the flag. The question is asked only when the one `Xrm.WebApi` read leaves it open (flagged + container + no owning
+  user) — never for a non-secure, container-less or user-owned record — and, being part of the secure state, it is
+  forgotten with it before every refresh (asked again after a command).
+- **The retry's server path.** A flagged root with its own container that is user-owned (a legacy record provisioned
+  before task 133's owner move) or owned by an ordinary team in another business unit takes the FORWARD path: its
+  container is classified as its own and kept (no second container, the value not rewritten), the flag is not written
+  again, the record is re-owned to the Secure Record Owners team, the caller and the creator are shared. Pinned for both
+  shapes. (A root owned by ANOTHER team INSIDE the Secure Record business unit — the retired default team before task
+  144's migration — is still refused 409 `owned_by_other_secure_team`, whose detail names the migration script; the ribbon
+  offers Make Secure there too, and the refusal is shown, never silent.)
+- **Tests.** `RecordAccessGateTests` +8: user / Secure team / other team (theory ×3); owner read fails / no owner /
+  Secure team ambiguous → null (theory ×3); not asked → no owner read; no Write → 403 and no owner read. Ribbon jest +13:
+  another team ×3 tables (both commands, one owner request, the exact URL with `includeOwner=true` and the bearer token);
+  the Secure team → hidden; unknown ×4 (null, non-200, another record, a failed request); no token → not asked, hidden;
+  the read decides ×3 (not secure, no container, legacy user-owned) → not asked; after Make Secure asked again.
+  `SecureFlagEndpointWriteTests` +2 (legacy user-owned; other-team-owned).
+- **Seeds.** Server (890-test filter): SG5 any team counted as the Secure team — 1 fail; SG6 an unidentifiable Secure team
+  read as "not it" — 1 fail; SG7 an owner-read failure read as user-owned — 1 fail; SG8 the owner read made without
+  `includeOwner` — 1 fail (SG7 and SG8 were run together, each failing only its own test); SL2 a flagged record with a
+  container treated as provisioned whoever owns it — 36 fail, incl. both new shapes. Ribbon: CR9 the owner answer
+  ignored — 4 fail; CR10 an unknown answer read as unfinished — 5 fail; CR11 the owner asked even when the read decides
+  — 3 fail; CR12 the owner answer cached across a command — 1 fail.
+- **ui-test** (POML): "Make Secure finishes a secure record the Secure Record Owners team does not own (round 46 item 4;
+  the verifier's item 8)" — part of G-11; it is also the G-11 check of acceptance (e) for legacy secure records still
+  user-owned.
+
+### 24.5 Round 46 item 5 — the resume's unverifiable No Access refusal (verifier items 2, 11)
+
+`Provision_MakeSecure_FinishingARecord_WhenTheCallersNoAccessCheckCannotBeRead_IsRefusedBeforeAnyWrite`
+(`NoAccessList.Faults = true`): 500 `creator_no_access_unverifiable`, `AssertResumeWroteNothing`. **Seed SR9** — the
+verifier's own (`if (wall.RefusesShare)` → `if (wall.Outcome == SecureShareWallOutcome.Walled)` in `ResumeMakeSecureAsync`)
+— now fails 1 (it survived all 1772 in c-v1).
+
+### 24.6 Verifier item 6 (LOW) — seeds R2 and R4
+
+- **R2** (the ribbon's `personName` on a whitespace-only id): pinned — a whitespace-only id is "Someone" and no user read
+  is made with it. Seed CR13 (trim removed): 1 fail.
+- **R4** (the wizard's `SKIPPED_PRINCIPAL_GENERIC` blank guard): the verifier is right — it was redundant (its only caller
+  passes a name `skippedPersonName` already resolved) and the note's claim was untested. The guard is removed (one place
+  decides "Someone"), the generic path's "Someone" is pinned (+2: no name, a blank name, for an unknown reason code), and
+  §23.5 is corrected. Seed CW3 (`skippedPersonName` returns the name unresolved): 2 fail.
+
+### 24.7 The verifier's 17 items
+
+| # | Disposition |
+|---|---|
+| 1 | Re-checked on this branch: POML parses (`xml.dom.minidom`, §24.8); no `NOTE-FROM-MAIN.md`; no live write; merge-tree against the current tips in §24.8 |
+| 2, 11 | **Closed** — §24.5 (round 46 item 5) |
+| 3, 12 | **Closed** — §24.1 (round 46 item 1: floored on effective rights; docs corrected) |
+| 4, 5, 7 | Verified by the verifier; re-held (the affected filter 890/890 and the client suites below include every pinned case) |
+| 6 | **Closed** — §24.6 |
+| 8 | **Closed** — §24.4 (round 46 item 4 makes it the intended completion, tested server-side; the G-11 ui-test checks legacy data) |
+| 9 | Superseded by this round's client runs (§24.8) |
+| 10, 13 | **Closed by this round's own runs** (§24.8: the full BFF unit suite, NetArchTest and BOTH integration suites, once, at the end). The verifier's `C:\wvf150` still exists (`git worktree list`: detached at `1cecc8e31`) with its `node_modules` JUNCTION into the r2 worktree; it is outside this agent's worktree, so it is not removed here — main session, in this order: `cmd /c rmdir C:\wvf150\src\client\shared\Spaarke.UI.Components\node_modules` (removes the junction only), then `git -C C:\code_files\spaarke worktree remove --force C:/wvf150`, then `git -C C:\code_files\spaarke worktree prune` |
+| 14 | **Decided and specified** — §24.2 (round 46 item 2): an integration step by the main session after 147, 150 and 166 are on the integration branch; the release gate holds until it lands |
+| 15 | Integration step unchanged (§23.7): 140 is still not on `integ` (§24.2's ancestry check); the resolution and the three commands are recorded |
+| 16 | Live gate G-11 (manual, main session; §9 row updated: access_ribbon.js 1.4.0, round 46's ui-test) |
+| 17 | Live gates G-0 (every environment other than dev) and G-1…G-10 — manual, main session (§9) |
+
+### 24.8 Tests, publish size, CVE, merge (this round)
+
+**Affected first** (filter: `SecureFlag*`, `SecureProjectShareTests`, `ProvisionNoAccessTests`, `ProvisionProject*`,
+`ProvisionResume*`, `ProvisionRecordedContainer*`, `ProvisionAssignCascade*`, `UnsecureProject*`, `RecordContainerResolver*`,
+`OrganizationMembershipReadTests`, `RecordOwnershipResolverTests`, `EmptySecureFlag*`, `SecureNamedOwnerTeam*`,
+`SecureChild*`, `RecordAccessGate*`, `DelegationRule*`, `SecureRecordOwnerTeam*`, `SecureRecordIsolationCensus*`):
+**890/890** before every seed, under none of them after restoring, and again on the committed code after the pre-commit
+hook's `dotnet format` / prettier pass. `SecureFlagEndpointWriteTests` **110** (96 + 14); `RecordAccessGateTests` +8.
+
+**Once at the end** (code-final commit `21be49981`; this box, other agents active):
+- **Full BFF unit suite: 15660 passed, 0 failed, 54 skipped (15714 = c-v1's 15692 + 22)** — one clean run;
+- **Spaarke.ArchTests 600/600**;
+- **Sprk.Bff.Api.IntegrationTests 104/104**;
+- **Spe.Integration.Tests 403 passed, 25 skipped, 0 failed (428)**.
+
+**Client** (`@spaarke/ui-components` in THIS worktree: `npm install --legacy-peer-deps --no-audit --no-fund` for
+`Spaarke.Auth` and `Spaarke.SdapClient` (each then `npm run build`) and for the library; no lockfile changed):
+- jest **10 suites 243/243** (CreateProjectWizard 8 suites, `SummarizeFilesDialog.provisioningHost`,
+  `accessRibbon.secureCommands` 81), before and after the hook's prettier pass;
+- `tsc --noEmit -p tsconfig.json` exit 0; `npm run build` (the package's build, `tsc`) exit 0;
+- eslint on the changed files: 0 errors (the pre-existing unused-`eslint-disable` warning in the ribbon test);
+- `node --check sprk_access_ribbon.js` OK.
+- Seeds, each restored from a backup, touched, hash re-checked (`6d7ab15d…` ribbon, `c2a01134…` wizard): CR9 4, CR10 5,
+  CR11 3, CR12 1, CR13 1, CW3 2 failures.
+
+**Publish size** (CLAUDE.md §10, NFR-01). Each tree extracted fresh with `git archive` into a SHORT path (`C:\w2m`,
+`C:\w2a`, `C:\w2b`; removed afterwards) and published with `dotnet publish -c Release -o <root>\deploy\api-publish` from
+the csproj (framework-dependent linux-x64); each zipped with `Compress-Archive -CompressionLevel Optimal` over
+`api-publish\*`, **PDBs included** (4). No MSB3030 and no error on any side; 212 files each.
+
+| Tree | Commit | Files | Zip |
+|---|---|---|---|
+| `origin/master` | `293fcd4c8` | 212 | **45.65 MB** (47,864,324 B) |
+| this round's base | `1cecc8e31` | 212 | 46.05 MB (48,288,379 B) |
+| this round (code-final) | `21be49981` | 212 | **46.06 MB** (48,298,174 B) |
+
+This round adds **+0.009 MB** (+9,795 B); the integration tree is +0.41 MB over master (batch 4's tasks together). Far
+under the 60 MB ceiling and the +5 MB escalation.
+
+**CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: "no vulnerable packages". This round
+adds no package.
+
+**Hygiene:** POML parses (`xml.dom.minidom`; 12 outcomes, 4 amendments — R3b, UX, R40, R46 — 10 ui-tests).
+`git merge-tree --write-tree` against `integ/uac-r2-batch4` @ `bc6bc6c6d` and `work/unified-access-control-r2` @
+`c998979df` (both newer than the brief's tips): clean. 140, 147 and 166 are not ancestors of `integ`.
+
+### 24.9 Placement and justification (CLAUDE.md §10 / §11)
+
+No new endpoint, service, DI registration, option, job, column, package, reason code or PCF. No `.claude/**` edit needed.
+Hot path: BFF = Y (already declared). bff-extensions.md: modification of existing surface — one existing route gains an
+optional query parameter and two optional response fields; one existing endpoint gains private steps; one existing static
+helper is split, not forked. Each new member answers the three questions.
+
+| New member | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ReadMakeSecureCallerFloorAsync`, `CallerAccessUnverifiable` (private), `MakeSecureHeldMask` (internal static) | `MakeSecureCallerMask` (share-held only), `CallerRecordAccessProbe.GetCallerRightsAsync` (the gate's and F3's read), `RecordShareLevels.Intersect` | One probe call and one pure function over the existing level table, feeding the existing mask; F3's existing code, no new one | A caller who held Delete by ownership or role loses it, and with it F3's right to remove the designation (verifier item 3, round 46 item 1) |
+| `RecordAccessGateQuery.IncludeOwner`, `RecordAccessGateResponse.OwningTeamId` / `OwnedBySecureOwnerTeam`, `RecordAccessGateEndpoint.ReadOwnerAsync` / `OwnerSelect` / `RecordOwnerFacts` / `OwnerRow` | `can-manage-access` (the only GET the ribbon calls); provisioning's own root owner read | Opt-in on the existing route (round 46 names this route); the owner columns provisioning already reads | The ribbon cannot tell the Secure Record Owners team from another team, so a secure record reassigned outside Spaarke stays unfinishable from the command (round 46 item 4: the "documented edge" was rejected) |
+| `SecureRecordOwnerTeam.IdentifyAsync` + `SecureOwnerTeamIdentity` (internal) | `SecureRecordOwnerTeam.ResolveAsync` steps 1–2 | Extracted; `ResolveAsync` calls it — ONE rule for "which team" | A second copy of the BU/team identification would drift from provisioning's (two definitions of the Secure Record Owners team) |
+| Ribbon `queryOwnedBySecureOwnerTeam`, `gateUrl`, `answersFor` | `queryCanManage` | Its request shape and record check, shared | The 1.4.0 rule has no owner answer to read |
+| Fixture switch `FollowUpRightsProbeAnswersNone` | `FullAccessProbeThrows` | The same second-probe hook, answering None | The "answer without Write" refusal is unpinned |
+
+ADR-002: no plugin. ADR-003: every new refusal comes before any write; an owner answer that cannot be had is null and
+offers nothing; a failed rights read refuses rather than flooring at nothing. ADR-006: the ribbon stays a thin command
+script. ADR-008: `can-manage-access` is still decided by the group filter alone; the owner facts decide nothing
+server-side. ADR-028: the ribbon's token is `Spaarke.BffAuth`'s (`getToken`, the established gate-call pattern). ADR-038:
+no `Mock<HttpMessageHandler>` (the gate tests answer `DataverseWebApiClient`'s virtual `QueryAsync` seam), no DI or
+constructor tests; every new guard was seeded.
+
+### 24.10 Open — integration steps and manual gates (main session)
+
+- **§22.4 + §24.2 in one integration change**, once 147, 150 and 166 are all on the integration branch: the relocation
+  wired into Make Secure (`files_incomplete`), the `SecureChildReconciliationJob` settle pass, and the mechanical
+  `-SecureTransitionDeployed` check. Until then the release gate withholds Make Secure.
+- **§23.7** when 140 and 150-integ-c meet: the two external-spa conflicts' resolution, then tsc, lint and vitest.
+- **Live gates** G-0 (every environment other than dev) and G-1…G-11 (G-11 with access_ribbon.js 1.4.0 and round 46's
+  ui-test), §9. No live write was made here.
+- **`C:\wvf150`** (the c-v1 verifier's worktree): remove the junction first, then the worktree (§24.7 item 10).
