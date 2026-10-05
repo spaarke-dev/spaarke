@@ -218,6 +218,12 @@ foreach ($t in $Tables) {
     # The relationship's cascade and navigation property: nothing about the USER may move, share or reparent the record,
     # and a Web API write binds the name the BFF uses.
     $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,ReferencingEntityNavigationPropertyName,CascadeConfiguration,MetadataId"
+    # Relationship metadata is read through a cache: right after the create it can still answer 404 although the
+    # relationship exists (seen on spaarkedev1, 2026-10-05). Poll for up to 2 minutes before reporting it missing.
+    for ($try = 1; -not $rel -and $attrs[$t] -and $try -le 24; $try++) {
+        Start-Sleep -Seconds 5
+        $rel = Try-DvGet "RelationshipDefinitions(SchemaName='$(RelationshipSchemaName $t)')/Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata?`$select=SchemaName,ReferencedEntity,ReferencingEntity,ReferencingAttribute,ReferencingEntityNavigationPropertyName,CascadeConfiguration,MetadataId"
+    }
     if ($rel) {
         $bad = @($ExpectedCascade.Keys | Where-Object { $rel.CascadeConfiguration.$_ -ne $ExpectedCascade[$_] } |
             ForEach-Object { "$_=$($rel.CascadeConfiguration.$_) (expected $($ExpectedCascade[$_]))" })

@@ -151,7 +151,14 @@ foreach ($r in $Relationships) {
     }
     $body.CascadeConfiguration.Delete = $TargetDelete
     Invoke-DvWrite PUT "RelationshipDefinitions($($rel.MetadataId))" $body @{ 'MSCRM.MergeLabels' = 'true' } | Out-Null
-    $after = Read-Relationship $r.SchemaName
+    # Relationship metadata is read through a cache: an immediate read-back can still show the old value even
+    # though the PUT took effect (seen on spaarkedev1, 2026-10-04). Poll for up to 2 minutes before failing.
+    $after = $null
+    for ($try = 1; $try -le 24; $try++) {
+        $after = Read-Relationship $r.SchemaName
+        if ($after.CascadeConfiguration.Delete -eq $TargetDelete) { break }
+        Start-Sleep -Seconds 5
+    }
     if ($after.CascadeConfiguration.Delete -ne $TargetDelete) { throw "$($r.SchemaName) still reads Delete = $($after.CascadeConfiguration.Delete) after the update." }
     $found[$r.SchemaName] = $after
     Report 'DONE' "$($r.SchemaName) Delete = $TargetDelete (read back)"
