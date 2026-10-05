@@ -10,9 +10,9 @@
 | Field | Value |
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
-| **Status** | **SPE Admin is now secret-free** (§0.5) — code + tests green on the branch, **NOT yet merged or deployed**. Container-type create fix PROVEN live (§0.1). Model 1 container type created |
+| **Status** | **SPE Admin is now secret-free** (§0.5) — PR **#1291** (auto-merge). **SPE Admin page DEPLOYED to dev** 2026-10-05 (verified in Dataverse). **BFF NOT deployed — held by operator.** Until it is: dev still runs the OLD secret-based BFF, and creating a NEW config with a blank Key Vault Secret Name returns 400 (edits are fine) |
 | **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX rows, not from memory |
-| **Next Action** | Merge + deploy BFF and SPE Admin code page (§0.5), then the **operator steps** in §0.5: grant the BFF managed identity on the Model 1 registration, grant `SecurityEvents.Read.All` to the BFF MI, clear the `null` from the Model 1 config. Then UAT |
+| **Next Action** | When the operator says so: **deploy the BFF** (`scripts/Deploy-BffApi.ps1`). Then the **operator steps** in §0.5: grant the BFF managed identity on the Model 1 registration, grant `SecurityEvents.Read.All` to the BFF MI, clear the `null` from the Model 1 config. Then UAT |
 | **Blocked?** | Nothing is code-blocked. Two Entra admin actions are the operator's (§0.5) |
 
 ### ✅ Starting a NEW / REMOTE session? Read this
