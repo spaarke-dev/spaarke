@@ -215,4 +215,25 @@ public class SecureChildNewCommandAgreementTests
             StringComparison.Ordinal);
         Assert.DoesNotContain("getAttribute", script, StringComparison.Ordinal);
     }
+
+    /// <summary>
+    /// Task 147 r1c-v1 (verifier item 5): every pac call of the deploy script that reaches an environment names
+    /// <c>-EnvironmentUrl</c> explicitly. Without <c>--environment</c>, pac acts on its ACTIVE auth profile's environment,
+    /// which need not be the one the script's Web API writes (the web resource) and checks went to — the ribbon would land
+    /// in another environment than its script. <c>pac solution pack</c> is local (no environment) and exempt.
+    /// </summary>
+    [Fact]
+    public void TheDeployScriptsPacCalls_ThatReachAnEnvironment_NameEnvironmentUrlExplicitly()
+    {
+        var pacCalls = File.ReadAllLines(DeployFile)
+            .Select(l => l.Trim())
+            .Where(l => l.StartsWith("pac ", StringComparison.Ordinal))
+            .ToList();
+        var local = new[] { "pac solution pack " };
+
+        var reaching = pacCalls.Where(c => !local.Any(p => c.StartsWith(p, StringComparison.Ordinal))).ToList();
+
+        Assert.Contains(reaching, c => c.StartsWith("pac solution import ", StringComparison.Ordinal));
+        Assert.All(reaching, c => Assert.Matches(@"(--environment|-env)\s+\$EnvironmentUrl(\s|$)", c));
+    }
 }

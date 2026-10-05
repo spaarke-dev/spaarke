@@ -42,7 +42,8 @@
          UNPACKED fresh export of the dedicated ribbon solution -SolutionUniqueName, holding the nine served tables ribbon-only,
          exported per .claude/skills/ribbon-edit/SKILL.md - never SpaarkeCore) with
          infrastructure/dataverse/ribbon/SecureChildRibbons/Merge-SecureChildRibbon.ps1.
-      3. Packs (pac solution pack) and imports the solution, then publishes all customizations.
+      3. Packs (pac solution pack) and imports the solution into -EnvironmentUrl (pac solution import --environment), then
+         publishes all customizations.
 
     THE DRY RUN (default; zero writes) reads, per served table:
       - the LIVE Mscrm.AddNewRecordFromSubGridStandard (RetrieveEntityRibbon) and compares it with the template's copy:
@@ -72,8 +73,9 @@
 .NOTES
     Order: the BFF carrying task 147 r1 (POST /api/v1/child-records/sprk_budget) and
     scripts/Set-ChildRecordCreatorPersonSchema.ps1 -Apply (gate G147-5: sprk_budget, sprk_kpiassessment and sprk_billingevent gain sprk_createdbyperson) BEFORE this
-    script's -Apply. Auth: the operator's own az CLI identity (System Administrator). pac CLI authenticated to the same
-    environment for -Apply. No secrets.
+    script's -Apply. Auth: the operator's own az CLI identity (System Administrator). pac CLI with an auth profile that can
+    reach -EnvironmentUrl for -Apply: the import names -EnvironmentUrl explicitly (--environment), never pac's active
+    profile. No secrets.
 #>
 [CmdletBinding()]
 param(
@@ -239,7 +241,10 @@ if ($Apply) {
     $zip = Join-Path ([System.IO.Path]::GetTempPath()) "$SolutionUniqueName.zip"
     pac solution pack --zipfile $zip --folder $ExportDir --packagetype Unmanaged
     if ($LASTEXITCODE -ne 0) { throw 'pac solution pack failed.' }
-    pac solution import --path $zip --publish-changes
+    # The import names its target explicitly (task 147 r1c-v1, verifier item 5): without --environment pac imports into its
+    # ACTIVE auth profile's environment, which need not be -EnvironmentUrl - the web resource above and the import would
+    # then land in two different environments.
+    pac solution import --environment $EnvironmentUrl --path $zip --publish-changes
     if ($LASTEXITCODE -ne 0) { throw 'pac solution import failed.' }
     Invoke-RestMethod -Method Post -Headers $writeHeaders -Uri "$Api/PublishAllXml" -Body '{}' | Out-Null
     Ok 'imported and published - now run -Verify, then check the forms by hand (below)'

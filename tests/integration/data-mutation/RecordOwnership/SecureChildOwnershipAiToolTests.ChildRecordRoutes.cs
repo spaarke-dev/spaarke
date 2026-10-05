@@ -574,7 +574,18 @@ public sealed partial class SecureChildOwnershipAiToolTests
         });
 
         Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
-        _user.Patches.Should().ContainSingle().Which.Path.Should().Be($"sprk_events({Event:D})");
+        var patch = _user.Patches.Should().ContainSingle().Subject;
+        patch.Path.Should().Be($"sprk_events({Event:D})");
+        // Task 147 r1c-v1 (verifier item 1): the body Dataverse receives. The pre-cleared sibling stays a NAVIGATION
+        // PROPERTY's null bind — its logical name (sprk_regardingproject) is not a Web API property, and a body naming it
+        // is refused (0x80060888), which is what broke every resolver selection on a saved host.
+        var body = BodyOf(patch.Body);
+        body.Keys.Should().BeEquivalentTo(
+            "sprk_RegardingMatter@odata.bind", "sprk_RegardingProject@odata.bind",
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl");
+        body["sprk_RegardingProject@odata.bind"].ValueKind.Should().Be(JsonValueKind.Null);
+        body["sprk_RegardingMatter@odata.bind"].GetString().Should().Be($"/sprk_matters({OrdinaryMatter:D})");
+        _user.RefusedBodies.Should().BeEmpty();
     }
 
     [Theory]
@@ -1003,6 +1014,187 @@ public sealed partial class SecureChildOwnershipAiToolTests
                 { UserId = Guid.NewGuid().ToString() },
                 BuildAnalysisTool(nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseUpdateRecordHandler)), CancellationToken.None);
     }
+
+    // ── Task 147 r1c-v1 (verifier item 1): the body Dataverse RECEIVES. A lookup is set AND cleared through its navigation
+    //    property (`{Nav}@odata.bind`); its logical name is not a Web API property. The scripted Dataverse refuses a body
+    //    that names one (`RefusedBodies`, 400 0x80060888), as the real one does — before r1c-v1 every clear reached it as
+    //    `"<logical name>": null`, so every re-file that cleared a lookup (the resolver's pre-clear, Connections' unlink
+    //    and clear, the side pane's clear, the chat tool's clear) failed live while these tests passed. ─────────────────
+
+    [Fact]
+    public async Task ChildRefile_TheResolversSetAndPreClear_ReachDataverseAsNavigationPropertyBinds_NeverALogicalName()
+    {
+        // A RegardingResolver selection on a saved to-do: the chosen lookup, the pre-cleared sibling, a resolver field.
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        ShareWorld.OrdinaryChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+
+        var result = await RefileChild("sprk_todo", Todo, new()
+        {
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})",
+            ["sprk_RegardingProject@odata.bind"] = null,
+            ["sprk_regardingrecordname"] = "Secure matter",
+        });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.RefusedBodies.Should().BeEmpty();
+        var body = BodyOf(_user.Patches.Should().ContainSingle().Subject.Body);
+        body.Keys.Should().BeEquivalentTo(
+            "sprk_RegardingMatter@odata.bind", "sprk_RegardingProject@odata.bind", "sprk_regardingrecordname");
+        body["sprk_RegardingProject@odata.bind"].ValueKind.Should().Be(JsonValueKind.Null);
+        body["sprk_RegardingMatter@odata.bind"].GetString().Should().Be($"/sprk_matters({SecureMatter:D})");
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.SecureNamedTeam));
+    }
+
+    [Fact]
+    public async Task ChildRefile_AClearOnlyMoveOutOfASecureMatter_ClearsThroughTheNavigationProperty_ReturnsTheRowToItsBusinessUnit_AndTakesTheMirrorOff()
+    {
+        // AC3 through a CLEAR (the resolver's "clear", a move out of every secure record) by a Full Access holder.
+        _world.WithRecord("sprk_todo", Todo, Directory.SecureBu, owningTeam: Directory.SecureNamedTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        });
+        ShareWorld.SecureChild("sprk_todo", Todo, ("sprk_regardingmatter", "sprk_matter", SecureMatter));
+        _shareTable.Seed("sprk_todo", Todo, DataversePrincipalRef.User(Sharee), CollaborateMask);
+        _user.FullAccessOn.Add(SecureMatter);
+        _user.OwningTeamOf[Todo] = Directory.SecureNamedTeam;
+        ShareWorld.Set("sprk_todo", Todo, "sprk_regardingmatter", null); // what the caller's PATCH leaves
+
+        var result = await RefileChild("sprk_todo", Todo, new() { ["sprk_RegardingMatter@odata.bind"] = null });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.RefusedBodies.Should().BeEmpty();
+        _user.Patches.Should().ContainSingle().Which.Body.Should().Be("{\"sprk_RegardingMatter@odata.bind\":null}");
+        _world.Assignments.Should().Equal(("sprk_todo", Todo, Directory.ChildTeam));
+        _shareTable.MaskOf("sprk_todo", Todo, DataversePrincipalRef.User(Sharee)).Should().BeNull(
+            "the secure record's sharees no longer reach a child cleared out of it");
+    }
+
+    [Fact]
+    public async Task CommunicationFiling_AConnectionsUnlink_ClearsThroughTheNavigationProperty()
+    {
+        var communication = Guid.Parse("a2470000-0000-4000-8000-000000000006");
+        _world.WithRecord("sprk_communication", communication, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+            ["createdby"] = new EntityReference("systemuser", Caller),
+        });
+
+        var result = await RefileCommunication(communication, new() { ["sprk_RegardingMatter@odata.bind"] = null });
+
+        Status(result).Should().Be(StatusCodes.Status204NoContent, Detail(result));
+        _user.RefusedBodies.Should().BeEmpty();
+        _user.Patches.Should().ContainSingle().Which.Body.Should().Be("{\"sprk_RegardingMatter@odata.bind\":null}");
+    }
+
+    [Fact]
+    public async Task UpdateTool_ClearingALookupByItsLogicalName_ClearsThroughItsNavigationProperty()
+    {
+        // The chat tool's item is keyed by logical name (the GA MCP contract); the body is not.
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam, extra: new()
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", OrdinaryMatter),
+        });
+
+        var result = await UpdateRecord("sprk_todo", Todo, ("sprk_regardingmatter", JsonNull));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.RefusedBodies.Should().BeEmpty();
+        _user.Patches.Should().ContainSingle().Which.Body.Should().Be("{\"sprk_RegardingMatter@odata.bind\":null}");
+    }
+
+    [Fact]
+    public async Task UpdateTool_ClearingAPolymorphicLookup_ClearsThroughOneNavigationProperty_TheFirstByName()
+    {
+        var task = Guid.Parse("a2470000-0000-4000-8000-000000000021");
+
+        var result = await UpdateRecord("task", task, ("regardingobjectid", JsonNull), ("description", JsonNull));
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _user.RefusedBodies.Should().BeEmpty();
+        _user.Patches.Should().ContainSingle().Which.Body.Should().Be(
+            "{\"regardingobjectid_sprk_matter@odata.bind\":null,\"description\":null}",
+            "every navigation property of a polymorphic lookup binds the same column; a plain column's null stays its own");
+    }
+
+    [Fact]
+    public async Task ChildCreate_APayloadClearingALookup_CreatesWithTheNavigationPropertysNullBind()
+    {
+        var result = await CreateChild("sprk_todo", new()
+        {
+            ["sprk_name"] = "x",
+            ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({OrdinaryMatter:D})",
+            ["sprk_RegardingProject@odata.bind"] = null,
+        });
+
+        Status(result).Should().Be(StatusCodes.Status201Created, Detail(result));
+        var fields = _appCreates.Should().ContainSingle().Subject.Fields;
+        fields.Should().ContainKey("sprk_RegardingProject@odata.bind")
+            .WhoseValue.Should().BeOfType<JsonElement>().Which.ValueKind.Should().Be(JsonValueKind.Null);
+        fields.Keys.Should().NotContain(k => k.Equals("sprk_regardingproject", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("{\"sprk_RegardingMatter@odata.bind\":\"/sprk_matters(a2460000-0000-4000-8000-000000000002)\",\"sprk_regardingmatter@odata.bind\":null}")]
+    [InlineData("{\"sprk_regardingmatter\":null,\"sprk_RegardingMatter@odata.bind\":\"/sprk_matters(a2460000-0000-4000-8000-000000000002)\"}")]
+    [InlineData("{\"sprk_RegardingMatter@odata.bind\":\"/sprk_matters(a2460000-0000-4000-8000-000000000002)\",\"sprk_regardingmatter@odata.bind\":\"/sprk_matters(a2460000-0000-4000-8000-000000000001)\"}")]
+    [InlineData("{\"sprk_RegardingMatter@odata.bind\":null,\"sprk_regardingMatter@odata.bind\":null}")]
+    public async Task ChildRefile_APayloadNamingOneLookupTwice_IsRefused400_AndNothingIsWritten(string json)
+    {
+        _world.WithRecord("sprk_todo", Todo, Directory.ChildBu, owningTeam: Directory.ChildTeam);
+        using var document = JsonDocument.Parse(json);
+
+        var result = await ChildRecordEndpoints.RefileAsync(
+            "sprk_todo", Todo, document.RootElement.Clone(), _user, _world.Resolver(), Restamper(), Children(),
+            HttpContextOfCaller(), NullLogger<Program>.Instance, CancellationToken.None);
+
+        Status(result).Should().Be(StatusCodes.Status400BadRequest);
+        ReasonCode(result).Should().Be(ChildRecordEndpoints.InvalidPayloadCode);
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    // ── Task 147 r1c-v1 (verifier item 2, AC9): a row the caller may not READ answers exactly as a row that does not
+    //    exist, on every route that runs the ONE re-file (Dataverse answers the first 403, the second 404) ─────────────
+
+    public static TheoryData<string> RowReadRoutes => new() { "child-records", "event-filing", "communication-filing" };
+
+    [Theory]
+    [MemberData(nameof(RowReadRoutes))]
+    public async Task ARowTheCallerMayNotRead_AnswersExactlyAsARowThatDoesNotExist(string route)
+    {
+        var unreadable = Guid.Parse("a2470000-0000-4000-8000-0000000000f1");
+        var absent = Guid.Parse("a2470000-0000-4000-8000-0000000000f2");
+        _user.UnreadableRows.Add(unreadable);
+        _user.InvisibleRows.Add(absent);
+        var payload = new Dictionary<string, object?> { ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({SecureMatter:D})" };
+
+        var denied = await RefileThrough(route, unreadable, payload);
+        var missing = await RefileThrough(route, absent, payload);
+
+        Status(denied).Should().Be(StatusCodes.Status404NotFound, "an existing row the caller cannot read is not disclosed");
+        ProblemOf(denied).Should().Be(ProblemOf(missing),
+            "the same status, title, detail and reason code as a row that does not exist (round 9, AC9)");
+        Detail(denied).Should().NotContain("privilege").And.NotContain(unreadable.ToString("D"));
+        _user.Patches.Should().BeEmpty();
+        _world.Assignments.Should().BeEmpty();
+    }
+
+    private Task<IResult> RefileThrough(string route, Guid id, Dictionary<string, object?> payload) => route switch
+    {
+        "child-records" => RefileChild("sprk_todo", id, payload),
+        "event-filing" => Sprk.Bff.Api.Api.Events.EventEndpoints.RefileEventAsync(
+            id, Payload(payload), _user, _world.Resolver(), Restamper(), Children(), HttpContextOfCaller(),
+            NullLogger<Program>.Instance, CancellationToken.None),
+        _ => RefileCommunication(id, payload),
+    };
+
+    private static (int? Status, string? Title, string? Detail, string? ReasonCode) ProblemOf(IResult result) =>
+        (Status(result), (result as ProblemHttpResult)?.ProblemDetails.Title, Detail(result), ReasonCode(result));
+
+    private static readonly JsonElement JsonNull = JsonSerializer.SerializeToElement<object?>(null);
+
+    private static Dictionary<string, JsonElement> BodyOf(string json) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(json)!;
 
     // ── Harness ───────────────────────────────────────────────────────────────────────────────────────────────
 

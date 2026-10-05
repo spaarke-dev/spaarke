@@ -245,8 +245,20 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
         // counts toward the sweep window's position. A carried record that is no longer flagged secure is not carried on:
         // the sweep list is the authority on which records are.
         var secureKeys = roots.Select(r => (r.Table, r.Id)).ToHashSet();
+        var retriedRoots = retryRoots.Where(secureKeys.Contains).ToList();
+        // Task 147 r1c-v1: a carried record unsecured since (its F3 holder's /unsecure-project, or its flag cleared) is
+        // dropped — never reconciled again by this net, whose Sweep trigger only moves rows INTO isolation — and named in
+        // the report, so a record never leaves the carried set silently.
+        var droppedRoots = retryRoots.Where(r => !secureKeys.Contains(r)).ToList();
+        foreach (var (droppedTable, droppedId) in droppedRoots)
+        {
+            _logger.LogInformation(
+                "[SECURE-CHILD-RECONCILE] carried run={RunId} root={Table}:{Id}: no longer flagged secure, so it is no longer " +
+                "carried.", context.RunId, droppedTable, droppedId);
+        }
+
         var firstRoots = recent.Roots
-            .Concat(retryRoots.Where(secureKeys.Contains))
+            .Concat(retriedRoots)
             .Distinct()
             .ToList();
         var recentKeys = firstRoots.ToHashSet();
@@ -478,7 +490,9 @@ public sealed class SecureChildReconciliationJob : IScheduledJob
                     failure = recent.Failure,
                     // Task 147 r1: what earlier runs left unfinished and this run looked at again — records whose pass was
                     // incomplete, and changed rows that could not be placed — and what is carried to the next run.
-                    retriedRoots = retryRoots.Take(50).Select(r => $"{r.Table}:{r.Id:D}").ToArray(),
+                    retriedRoots = retriedRoots.Take(50).Select(r => $"{r.Table}:{r.Id:D}").ToArray(),
+                    // Task 147 r1c-v1: carried records no longer flagged secure — not reconciled again, not carried on.
+                    droppedRoots = droppedRoots.Take(50).Select(r => $"{r.Table}:{r.Id:D}").ToArray(),
                     retriedRows = recent.RetriedRows,
                     carriedRoots,
                     carriedRows,

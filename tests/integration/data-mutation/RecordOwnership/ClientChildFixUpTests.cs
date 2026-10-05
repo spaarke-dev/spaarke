@@ -385,6 +385,95 @@ public class ClientChildFixUpTests
         job.LastResult!.Success.Should().BeTrue();
     }
 
+    /// <summary>
+    /// Task 147 r1c-v1 (verifier item 4): a carried record that has been UNSECURED since (its flag cleared, its owner back
+    /// to an ordinary team — what <c>/unsecure-project</c> leaves) is dropped: the L4 net, whose Sweep trigger only moves
+    /// rows into isolation, never reconciles it again, never carries it on, and names it in <c>droppedRoots</c> rather than
+    /// letting it leave the carried set silently.
+    /// </summary>
+    [Fact]
+    public async Task ACarriedRecordNoLongerFlaggedSecure_IsDropped_NotReconciledAgain_AndReported()
+    {
+        var job = new JobHarness();
+        var (root, todo) = (Guid.NewGuid(), Guid.NewGuid());
+        job.World.SecureRoot("sprk_workassignment", root)
+            .UserOwnedChild("sprk_todo", todo, ("sprk_regardingworkassignment", "sprk_workassignment", root))
+            .Modified("sprk_todo", todo, MinutesAgo(2))
+            .RefusingOwnerWritesOf(todo);
+
+        var refused = await job.RunAsync(writesEnabled: null);
+        refused.GetProperty("recentChanges").GetProperty("carriedRoots").GetInt32().Should().Be(1);
+
+        // The record is unsecured before the next run (and the fault that refused the re-own clears).
+        job.World.Set("sprk_workassignment", root, "sprk_issecure", false);
+        job.World.MoveOwner("sprk_workassignment", root, DataversePrincipalRef.Team(GeneralTeam));
+        job.World.ClearOwnerWriteFaults();
+        var writesBefore = job.World.OwnerWrites.Count;
+
+        var next = await job.RunAsync(writesEnabled: null);
+
+        job.LastResult!.ProcessedItems.Should().Be(0, "a record no longer flagged secure is not reconciled by the L4 net");
+        next.GetProperty("examined").GetInt32().Should().Be(0);
+        job.World.OwnerWrites.Should().HaveCount(writesBefore, "nothing under the unsecured record is written");
+        var recent = next.GetProperty("recentChanges");
+        recent.GetProperty("carriedRoots").GetInt32().Should().Be(0, "it is not carried on");
+        recent.GetProperty("retriedRoots").GetArrayLength().Should().Be(0, "it was not looked at again");
+        recent.GetProperty("droppedRoots").EnumerateArray().Select(r => r.GetString())
+            .Should().Equal($"sprk_workassignment:{root:D}");
+        job.World.OwnerOf("sprk_todo", todo).Should().Be(DataversePrincipalRef.User(SecureChildShareWorld.SomeUser));
+        job.LastResult.Success.Should().BeTrue();
+    }
+
+    /// <summary>
+    /// Task 147 r1c-v1 (verifier item 3): the job carries at most <see cref="SecureChildReconciliationJob.MaxCarriedRows"/>
+    /// unplaced rows between runs. Past that, the WATERMARK HOLDS, so the next run lists the whole window again and a row
+    /// past the cap is never dropped from the L4 net. 1,000 events under one record flagged secure but not yet isolated
+    /// fill the carried set (they list first: <c>sprk_event</c> sorts before <c>sprk_todo</c>); the 1,001st unplaced row, a
+    /// to-do under a SECOND such record, is not carried. Once both records' provisioning completes, every row is corrected
+    /// — the to-do included, which only the re-listed window can still reach (the sweep is report-only, no catch-up runs on
+    /// a manual trigger, and no carried row is filed under its record).
+    /// </summary>
+    [Fact]
+    public async Task MoreUnplacedRowsThanTheJobCarries_HoldTheWatermark_SoTheRowPastTheCapIsNeverDropped()
+    {
+        var job = new JobHarness();
+        var (crowded, other, pastTheCap) = (Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+        job.World.FlaggedNotIsolatedRoot("sprk_workassignment", crowded).FlaggedNotIsolatedRoot("sprk_workassignment", other);
+        var events = Enumerable.Range(0, SecureChildReconciliationJob.MaxCarriedRows).Select(_ => Guid.NewGuid()).ToArray();
+        foreach (var @event in events)
+        {
+            job.World.UserOwnedChild("sprk_event", @event, ("sprk_regardingworkassignment", "sprk_workassignment", crowded))
+                .Modified("sprk_event", @event, MinutesAgo(10));
+        }
+        job.World.UserOwnedChild("sprk_todo", pastTheCap, ("sprk_regardingworkassignment", "sprk_workassignment", other))
+            .Modified("sprk_todo", pastTheCap, MinutesAgo(10));
+
+        var first = await job.RunAsync(writesEnabled: null);
+
+        var firstRecent = first.GetProperty("recentChanges");
+        firstRecent.GetProperty("rowsChanged").GetInt32().Should().Be(SecureChildReconciliationJob.MaxCarriedRows + 1);
+        firstRecent.GetProperty("pendingOverflow").GetBoolean().Should().BeTrue();
+        firstRecent.GetProperty("carriedRows").GetInt32().Should().Be(SecureChildReconciliationJob.MaxCarriedRows);
+        job.LastResult!.Success.Should().BeFalse("unplaced rows are reported");
+
+        var second = await job.RunAsync(writesEnabled: null);
+        second.GetProperty("recentChanges").GetProperty("rowsChanged").GetInt32().Should().Be(
+            SecureChildReconciliationJob.MaxCarriedRows + 1,
+            "the watermark held while the carried rows overflowed, so the whole window is listed again — the row past " +
+            "the cap included");
+
+        // Both records' provisioning completes: they are isolated now.
+        job.World.MoveOwner("sprk_workassignment", crowded, DataversePrincipalRef.Team(SecureTeam));
+        job.World.MoveOwner("sprk_workassignment", other, DataversePrincipalRef.Team(SecureTeam));
+        var third = await job.RunAsync(writesEnabled: null);
+
+        job.World.OwnerOf("sprk_todo", pastTheCap).Should().Be(DataversePrincipalRef.Team(SecureTeam),
+            "the row past the carried cap is still in the L4 net");
+        events.Should().OnlyContain(e => job.World.OwnerOf("sprk_event", e) == DataversePrincipalRef.Team(SecureTeam));
+        third.GetProperty("recentChanges").GetProperty("pendingOverflow").GetBoolean().Should().BeFalse();
+        third.GetProperty("recentChanges").GetProperty("carriedRows").GetInt32().Should().Be(0);
+    }
+
     // ── Task 147 r1c: the CATCH-UP — what an instance carried is lost on a restart, so a new instance walks every secure
     //    record once before it trusts its watermark alone ─────────────────────────────────────────────────────────────
 
