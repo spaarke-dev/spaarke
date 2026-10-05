@@ -478,7 +478,9 @@ public class PoaShareClientSingletonGuardTests
             "naming a POA action (GrantAccess / ModifyAccess / RevokeAccess) or a client POA write method as a constant "
             + "outside the client is how a write reaches Dataverse without the seam — an SDK OrganizationRequest by name, a "
             + "hand-built POST, a reflective call — and without the access-cache eviction (task 132). Call "
-            + "IDataverseRecordShareService."
+            + "IDataverseRecordShareService. (The rule reads constants, not intent: a log line that names an action as a "
+            + "word, or a nameof of an unrelated member that shares a write method's name, is flagged too — reword or "
+            + "rename it.)"
             + $"{Environment.NewLine}  {string.Join(Environment.NewLine + "  ", offenders)}");
     }
 

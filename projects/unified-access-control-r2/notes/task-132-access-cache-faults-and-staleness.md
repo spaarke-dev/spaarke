@@ -765,6 +765,13 @@ group, expression tree, SDK message or constant-named action ships without the a
 keeps access for up to 2 min) and the build stays green. Inbox reflection only; no package (no publish-size or CVE
 delta). No plugin (ADR-002); fail closed unchanged (ADR-003).
 
-**Results (f1-v1c).** RESULTS_PLACEHOLDER
+**Results (f1-v1c, 2026-10-04), after every seed was restored.** Build: BFF, ArchTests, BFF unit tests and
+`Sprk.Bff.Api.IntegrationTests` 0 warnings / 0 errors; `Spe.Integration.Tests` 0 errors and 5 CA2024 warnings, all in
+`AnalysisEndpointsIntegrationTests.cs` (untouched by this task, pre-existing). Affected first:
+`PoaShareClientSingletonGuardTests` **22 / 0 / 0** (14 before the round + 8 new); `AccessCacheInvalidationTests` +
+`DataverseRecordShare*` **49 / 0 / 0** (43 + 6 new). Then once, in full: BFF unit suite **15,436 passed / 0 failed /
+54 skipped (15,490; 25 m 33 s)**; NetArchTest **614 / 0 / 0** (606 + 8; re-run after the last edit, a failure-message
+wording change in the guard); `Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed /
+0 failed / 25 skipped (428)**. No contention failure. No package change (no publish-size or CVE delta).
 
 `.claude/**`: no edit needed.
