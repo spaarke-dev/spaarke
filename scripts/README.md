@@ -706,20 +706,25 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 # Build only the LegalWorkspace and SmartTodo solutions
 .\scripts\Build-AllClientComponents.ps1 -Component LegalWorkspace, SmartTodo
 
-# Preview what would happen when building PCF controls
+# Preview what would happen when building PCF controls (lists every discovered PCF)
 .\scripts\Build-AllClientComponents.ps1 -Component PCF -WhatIf
+
+# Shared libraries, then one PCF (production mode)
+.\scripts\Build-AllClientComponents.ps1 -Component SharedLibs, PCF/VisualHost
 ```
 
 **Parameters:**
 - `-SkipSharedLibs` — Skip shared library builds (step 1). Use when shared libs are already built.
-- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `SemanticSearch`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`.
+- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `SemanticSearch`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`. `PCF` selects every PCF; `PCF/<folder>` selects one (bare PCF folder names are not accepted — `DocumentRelationshipViewer` is both a PCF and a code page). `PCF` alone does not build the shared libraries the PCFs import; on a clean checkout use `-Component SharedLibs, PCF`.
 
 **Build Order:**
 1. Shared libraries (`Spaarke.Auth`, `Spaarke.SdapClient`, `Spaarke.UI.Components`)
 2. Vite solutions (20 projects in `src/solutions/`)
 3. Webpack code pages (4 projects in `src/client/code-pages/`)
-4. PCF controls (`src/client/pcf/`)
+4. PCF controls — **one at a time, production mode**. Every git-tracked `src/client/pcf/<name>/package.json` with a `build:prod` script is a PCF (the same discovery rule as `.github/workflows/pcf-build-prod-nightly.yml`); each gets `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod`, and is judged from its output by `PcfBuildResult.psm1` (`pcf-scripts` exits 0 when webpack fails). Each PCF is its own summary row (`PCF/<name>`), so a failure names the control; discovering zero PCFs is a `FAILED` row. *(Until 2026-10 this step ran one aggregate dev-mode `npm run build` at `src/client/pcf`; it never worked from a clean checkout — TS5083 on the controls' relative tsconfig `extends`, then out-of-memory building every control in one process — and nothing consumed its `src/client/pcf/out` output.)*
 5. External SPA (`src/client/external-spa/`)
+
+**Requires PowerShell 7 (`pwsh`)**: the file contains non-ASCII characters without a BOM, which Windows PowerShell 5.1 mis-decodes into parse errors (true before 2026-10 as well).
 
 ---
 
@@ -978,7 +983,8 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 `npm run build:prod` followed by "copy `bundle.js` and pack" ships the PREVIOUS bundle still sitting in `out/`.
 This script judges the result from the output: FAIL on a non-zero exit, `[build] Failed`, a `compiled with N error(s)`
 line or `[pcf-1033]`; PASS only on `[build] Succeeded`. The same rule is used by `Build-AllClientComponents.ps1`
-(PCF step) and the nightly CI workflow `.github/workflows/pcf-build-prod-nightly.yml`.
+(PCF step, which builds every PCF this way, one per summary row) and the nightly CI workflow
+`.github/workflows/pcf-build-prod-nightly.yml`.
 
 **Command:**
 ```powershell

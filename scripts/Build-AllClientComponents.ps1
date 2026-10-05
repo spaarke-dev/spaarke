@@ -10,12 +10,21 @@
        the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
     3. Webpack code pages (4 projects in src/client/code-pages/)
-    4. PCF controls (src/client/pcf/)
+    4. PCF controls (src/client/pcf/*) - ONE PCF AT A TIME, in production mode (`npm run build:prod`)
     5. External SPA (src/client/external-spa/)
 
     Each component runs `npm install --legacy-peer-deps --no-audit --no-fund` (only when needed —
     see the in-line "Install dependencies" comment for the trigger logic) followed by
     `npm run build`. Shared libraries must build first because downstream components depend on them.
+
+    PCF controls (Step 4) are different, mirroring .github/workflows/pcf-build-prod-nightly.yml:
+    every git-tracked src/client/pcf/<name>/package.json that declares a `build:prod` script is a
+    PCF; each one ALWAYS gets `npm install` and then `npm run build:prod`, and is judged from its
+    OUTPUT by scripts/PcfBuildResult.psm1 (pcf-scripts exits 0 when webpack fails). Each PCF is its
+    own row in the summary, so a failure names the control. Finding zero PCFs is a FAILED row.
+    (Until 2026-10 this step ran one aggregate dev-mode `npm run build` over all controls at
+    src/client/pcf; that never worked from a clean checkout - TS5083 on the controls' relative
+    tsconfig `extends`, then out-of-memory building every control in one process.)
 
 .PARAMETER SkipSharedLibs
     Skip the shared library builds (step 1). Use when shared libs are already built
@@ -25,6 +34,10 @@
     Build only specific components by name. Accepts an array of component names.
     Names match directory names (e.g., "LegalWorkspace", "SemanticSearch", "PCF").
     Special names: "SharedLibs", "PCF", "ExternalSPA".
+    "PCF" selects every PCF; "PCF/<folder>" (e.g. "PCF/VisualHost") selects one. Bare PCF folder
+    names are NOT accepted, because some collide with code pages (DocumentRelationshipViewer).
+    "PCF" does not build the shared libraries the PCFs import; on a clean checkout use
+    -Component SharedLibs,PCF.
 
 .EXAMPLE
     .\Build-AllClientComponents.ps1
@@ -40,7 +53,11 @@
 
 .EXAMPLE
     .\Build-AllClientComponents.ps1 -Component PCF -WhatIf
-    # Preview what would happen when building PCF controls.
+    # Preview what would happen when building PCF controls (lists every discovered PCF).
+
+.EXAMPLE
+    .\Build-AllClientComponents.ps1 -Component SharedLibs, PCF/VisualHost
+    # Build the shared libraries, then only the VisualHost PCF (production mode).
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -135,12 +152,20 @@ function Invoke-ComponentBuild {
     param(
         [string]$Name,
         [string]$BuildPath,
-        [string]$Category
+        [string]$Category,
+        # Names that select this component under -Component (default: just $Name).
+        [string[]]$SelectBy,
+        # npm script to run (PCF controls use build:prod).
+        [string]$NpmScript = 'build',
+        # Always run npm install, ignoring the node_modules freshness check (PCF controls).
+        [switch]$AlwaysInstall
     )
+
+    if (-not $SelectBy) { $SelectBy = @($Name) }
 
     # Filter check: if -Component was specified, only build matching components
     if ($Component -and $Component.Count -gt 0) {
-        if ($Name -notin $Component) {
+        if (-not ($SelectBy | Where-Object { $_ -in $Component })) {
             return
         }
     }
@@ -159,7 +184,7 @@ function Invoke-ComponentBuild {
         return
     }
 
-    if ($PSCmdlet.ShouldProcess("$Name ($BuildPath)", "install then npm run build")) {
+    if ($PSCmdlet.ShouldProcess("$Name ($BuildPath)", "install then npm run $NpmScript")) {
         Write-Host "  BUILD $Name" -ForegroundColor Cyan -NoNewline
         Write-Host " - $BuildPath" -ForegroundColor DarkGray
 
@@ -186,7 +211,12 @@ function Invoke-ComponentBuild {
             $nodeModulesPath = Join-Path $BuildPath "node_modules"
             $packageJsonPath = Join-Path $BuildPath "package.json"
             $needsInstall = $false
-            if (-not (Test-Path $nodeModulesPath)) {
+            if ($AlwaysInstall) {
+                # PCF controls: always install, like the nightly PCF workflow.
+                $needsInstall = $true
+                Write-Host "        installing..." -ForegroundColor DarkGray
+            }
+            elseif (-not (Test-Path $nodeModulesPath)) {
                 $needsInstall = $true
                 Write-Host "        installing (no node_modules)..." -ForegroundColor DarkGray
             }
@@ -211,13 +241,13 @@ function Invoke-ComponentBuild {
                 }
             }
 
-            # npm run build (same localized $ErrorActionPreference rationale)
+            # npm run <script> (same localized $ErrorActionPreference rationale)
             $buildOutput = & {
                 $ErrorActionPreference = 'Continue'
-                npm run build 2>&1
+                npm run $NpmScript 2>&1
             }
             if ($LASTEXITCODE -ne 0) {
-                throw "npm run build failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
+                throw "npm run $NpmScript failed (exit code $LASTEXITCODE)`n$($buildOutput | Out-String)"
             }
             # pcf-scripts EXITS 0 WHEN THE WEBPACK BUILD FAILS, so for PCF builds the exit code above
             # proves nothing. Judge the result from the output (rule shared with
@@ -330,9 +360,63 @@ foreach ($cp in $WebpackCodePages) {
 Write-Host ""
 
 # --- Step 4: PCF Controls ---
-Write-Host "Step 4/5: PCF Controls" -ForegroundColor White
-Write-Host "--------------------------------------" -ForegroundColor DarkGray
-Invoke-ComponentBuild -Name "PCF" -BuildPath "$RepoRoot\src\client\pcf" -Category "PCF Controls"
+# One PCF at a time, production mode, same discovery rule as .github/workflows/pcf-build-prod-nightly.yml:
+# a git-tracked src/client/pcf/<name>/package.json with a build:prod script. (The old single aggregate
+# dev-mode `npm run build` at src/client/pcf never worked from a clean checkout and ran out of memory;
+# nothing consumes its src/client/pcf/out output, so it is gone.)
+$pcfStepSelected = (-not $Component) -or [bool]($Component | Where-Object { $_ -eq 'PCF' -or $_ -like 'PCF/*' })
+if ($pcfStepSelected) {
+    $pcfFolders = @()
+    $pcfDiscoveryErrors = @()
+    $pcfPackageJsons = @(git -C $RepoRoot ls-files -- 'src/client/pcf/*/package.json' |
+        Where-Object { $_ -match '^src/client/pcf/[^/]+/package\.json$' })
+    foreach ($rel in $pcfPackageJsons) {
+        $dir = Split-Path (Join-Path $RepoRoot $rel) -Parent
+        try {
+            $scripts = (Get-Content -LiteralPath (Join-Path $dir 'package.json') -Raw | ConvertFrom-Json).scripts
+        }
+        catch {
+            $pcfDiscoveryErrors += "PCF/$(Split-Path $dir -Leaf): package.json could not be parsed: $($_.Exception.Message)"
+            continue
+        }
+        if ($scripts -and $scripts.'build:prod') { $pcfFolders += $dir }
+    }
+
+    Write-Host "Step 4/5: PCF Controls ($($pcfFolders.Count) discovered, npm run build:prod each)" -ForegroundColor White
+    Write-Host "--------------------------------------" -ForegroundColor DarkGray
+
+    foreach ($err in $pcfDiscoveryErrors) {
+        Write-Host "  FAIL  $err" -ForegroundColor Red
+        $null = $Results.Add([PSCustomObject]@{
+            Component = ($err -split ':')[0]
+            Category  = "PCF Controls"
+            Status    = "FAILED"
+            Duration  = "-"
+            Detail    = $err
+        })
+    }
+
+    if ($pcfFolders.Count -eq 0) {
+        # Zero PCFs is a discovery bug, not an empty repo: fail loudly rather than report a vacuous green.
+        Write-Host "  FAIL  No PCF with a build:prod script found under src/client/pcf (git ls-files)." -ForegroundColor Red
+        $null = $Results.Add([PSCustomObject]@{
+            Component = "PCF (discovery)"
+            Category  = "PCF Controls"
+            Status    = "FAILED"
+            Duration  = "-"
+            Detail    = "No git-tracked src/client/pcf/*/package.json with a build:prod script"
+        })
+    }
+
+    foreach ($dir in $pcfFolders) {
+        $leaf = Split-Path $dir -Leaf
+        Invoke-ComponentBuild -Name "PCF/$leaf" -SelectBy "PCF", "PCF/$leaf" -BuildPath $dir `
+            -Category "PCF Controls" -NpmScript "build:prod" -AlwaysInstall
+    }
+}
+else {
+    Write-Host "Step 4/5: PCF Controls - not selected by -Component" -ForegroundColor DarkGray
+}
 Write-Host ""
 
 # --- Step 5: External SPA ---
