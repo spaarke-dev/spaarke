@@ -12,7 +12,7 @@
 //   2. P95 latency > 100 ms over 5 min (scheduledQueryRule, App Insights)
 //   3. Memory > 80% of SKU over 15 min (metricAlert, Azure Managed Redis platform metric)
 //   4. RedisKeyRotation success absent >100 days (scheduledQueryRule, App Insights) — FR-11.
-//      NOT deployed for dev (T242b, 2026-10-05): the dev cache is Entra-only, there is no key to rotate.
+//      Deployed for staging/prod only (T242b, 2026-10-05): dev and demo are Entra-only, there is no key to rotate.
 //
 // Alert 3 targets `Microsoft.Cache/redisEnterprise` (Azure Managed Redis — ADR-009 as amended by T242:
 // every Spaarke Redis is Managed Redis). It targeted the retired `Microsoft.Cache/Redis` type until T242b.
@@ -39,8 +39,8 @@ param actionGroupResourceId string
 @description('Location for the metric alerts. Metric alerts are global by convention; scheduled-query rules respect RG location.')
 param location string = resourceGroup().location
 
-@description('Environment tag (dev | staging | prod) — flows into alert tags + display names for KQL filtering.')
-@allowed(['dev', 'staging', 'prod'])
+@description('Environment tag (dev | demo | staging | prod) — flows into alert tags + display names for KQL filtering. Must accept every value Deploy-RedisCache.ps1 -DeployAlerts passes.')
+@allowed(['dev', 'demo', 'staging', 'prod'])
 param environment string = 'dev'
 
 @description('Severity for the 3 cache alerts (0-4). Default 2 = Warning (Sev 2) per docs §8 convention.')
@@ -79,8 +79,9 @@ var alertNamePrefix = 'redis-cache'
 // module callable from any RG context (mirrors the redis.bicep output pattern).
 var redisCacheResourceId = resourceId('Microsoft.Cache/redisEnterprise', redisCacheName)
 
-// Dev has no Redis key (T242b): the missed-rotation alert is not deployed there.
-var deployMissedRotationAlert = environment != 'dev'
+// Dev and demo have no Redis key (T242b — Azure Managed Redis, access keys disabled): the
+// missed-rotation alert applies only where Rotate-RedisKey.ps1 still rotates (staging, prod).
+var deployMissedRotationAlert = contains(['staging', 'prod'], environment)
 var appInsightsResourceId = resourceId('Microsoft.Insights/components', appInsightsName)
 
 // KQL — hit rate below threshold (mirrors docs §8 Alert 1 KQL, threshold parameterized).
