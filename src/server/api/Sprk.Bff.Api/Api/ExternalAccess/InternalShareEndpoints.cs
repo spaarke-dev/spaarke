@@ -334,7 +334,9 @@ public static class InternalShareEndpoints
             ExternalGrantRoot.LogicalNameFor(root.Type), root.Id, systemUserId, SecureWallRecordScope.AsFlagged, ct);
         var wallList = wall.ParentTable is { } wallParent
             ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(wallParent)} this record is filed under"
-            : "the No Access list for this record";
+            : wall.FilingUnreadable
+                ? "the No Access list of a secure record this record is filed under"
+                : "the No Access list for this record";
         if (wall.Outcome == SecureShareWallOutcome.Walled)
         {
             logger.LogWarning(

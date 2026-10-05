@@ -836,7 +836,7 @@ public static class ProvisionProjectEndpoint
                 var record = root.DisplayLabel.ToLowerInvariant();
                 var list = resumeWall.ParentTable is { } parentTable
                     ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(parentTable)} it is filed under"
-                    : "its No Access list";
+                    : resumeWall.FilingUnreadable ? "the No Access list of a secure record it is filed under" : "its No Access list";
                 return Problem(
                     walled ? StatusCodes.Status409Conflict : StatusCodes.Status500InternalServerError,
                     walled ? "Conflict" : "Internal Server Error",
@@ -1407,7 +1407,7 @@ public static class ProvisionProjectEndpoint
             var whose = creator.IsRecordedCreator ? $"the person who created this {record} is" : "you are";
             var list = wall.ParentTable is { } parentTable
                 ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(parentTable)} it is filed under"
-                : $"the No Access list for this {record}";
+                : wall.FilingUnreadable ? "the No Access list of a secure record it is filed under" : $"the No Access list for this {record}";
             return CreatorShareStep.Failed(walled
                 ? Problem(StatusCodes.Status403Forbidden, "Forbidden",
                     $"{who} on {list} — directly, through an organization, or through an organization it references — so " +
@@ -2654,7 +2654,9 @@ public static class ProvisionProjectEndpoint
                 walled ? string.Join(",", wall.EntryIds) : wall.Fault, traceId);
             var list = wall.ParentTable is { } walledParent
                 ? $"the No Access list of the secure {SecureRootInheritance.WireTokenFor(walledParent)} this record is filed under"
-                : "the No Access list for this record";
+                : wall.FilingUnreadable
+                    ? "the No Access list of a secure record this record is filed under"
+                    : "the No Access list for this record";
             skipped.Add(walled
                 ? new ProvisionSkippedPrincipal(principalId, ReasonPrincipalNoAccess,
                     $"This person is on {list}, so it was not shared with them.")
@@ -2928,6 +2930,9 @@ public static class ProvisionProjectEndpoint
     {
         /// <summary>Walled, or could not tell: the share — and so the provisioning — is refused.</summary>
         public bool RefusesShare => Outcome is SecureShareWallOutcome.Walled or SecureShareWallOutcome.Unverifiable;
+
+        /// <summary>Task 158 r1c-v2: could not tell because what the record is filed under could not be read.</summary>
+        public bool FilingUnreadable { get; init; }
     }
 
     /// <summary>
@@ -2952,8 +2957,12 @@ public static class ProvisionProjectEndpoint
         return new CreatorWallDecision(
             decision.RefusesShare ? decision.Outcome : SecureShareWallOutcome.NotWalled,
             decision.ParentTable is { } parentTable ? $"{parentTable}:{decision.ParentId:D}"
+                : decision.FilingUnreadable ? "a record it is filed under"
                 : decision.RefusesShare ? $"{root.LogicalName}:{recordId:D}" : "every list",
-            decision.ParentTable, decision.EntryIds, decision.Fault);
+            decision.ParentTable, decision.EntryIds, decision.Fault)
+        {
+            FilingUnreadable = decision.FilingUnreadable,
+        };
     }
 
     /// <summary>

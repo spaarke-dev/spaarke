@@ -44,6 +44,13 @@ public sealed record SecureShareWallDecision(
     /// <summary>Task 158 r1c-v2: the id of <see cref="ParentTable"/>'s record (for the log).</summary>
     public Guid? ParentId { get; init; }
 
+    /// <summary>
+    /// Task 158 r1c-v2: <see cref="SecureShareWallOutcome.Unverifiable"/> because what the record is FILED UNDER could not
+    /// be read (the record, its pair type, or a parent's flag) — so whose list applies is unknown; the message says "a secure
+    /// record it is filed under", never "this record's list".
+    /// </summary>
+    public bool FilingUnreadable { get; init; }
+
     internal static SecureShareWallDecision NotSecure { get; } = new(SecureShareWallOutcome.NotSecure, Array.Empty<Guid>());
 
     internal static SecureShareWallDecision NotWalled { get; } = new(SecureShareWallOutcome.NotWalled, Array.Empty<Guid>());
@@ -199,7 +206,7 @@ public sealed class SecureShareNoAccessGuard
 
         var decisions = new List<SecureShareWallDecision> { own };
         if (!parents.IsKnown)
-            decisions.Add(SecureShareWallDecision.Unreadable(parents.Unverifiable!));
+            decisions.Add(SecureShareWallDecision.Unreadable(parents.Unverifiable!) with { FilingUnreadable = true });
 
         foreach (var parent in parents.SecureParents)
         {
