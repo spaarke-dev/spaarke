@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Xrm.Sdk;
@@ -117,8 +118,24 @@ public sealed class DocumentContainerRelocator
         Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) },
     };
 
-    /// <summary>How long one relocation of a document may hold its processing lock (a crashed holder's lock expires).</summary>
+    /// <summary>
+    /// How long one renewal of a document's relocation lock lasts. A crashed holder's lock expires after it; a running
+    /// relocation RENEWS it every <see cref="RelocationLockRenewInterval"/> (owner round 54 item 2), so a move that replays
+    /// a long history never outlives its lock.
+    /// </summary>
     internal static readonly TimeSpan RelocationLockDuration = TimeSpan.FromMinutes(10);
+
+    /// <summary>The heartbeat: how often a running relocation renews its lock (a fifth of <see cref="RelocationLockDuration"/>).</summary>
+    internal static readonly TimeSpan RelocationLockRenewInterval = TimeSpan.FromMinutes(2);
+
+    /// <summary>The report code of a relocation that lost its lock and stopped before its next destructive step (round 54 item 2).</summary>
+    internal const string LockLostPrefix = "lock-lost";
+
+    /// <summary>
+    /// The report code of a source edited after its move whose post-move versions cannot be put in order (round 54 item 3):
+    /// the row and the source are left untouched, and a repeat call retries.
+    /// </summary>
+    internal const string HistoryUndecidablePrefix = "history-undecidable";
 
     private readonly RecordContainerResolver _resolver;
     private readonly IGenericEntityService _dataverse;
@@ -129,6 +146,22 @@ public sealed class DocumentContainerRelocator
     private readonly TimeProvider _time;
     private readonly ILogger<DocumentContainerRelocator> _logger;
 
+    /// <summary>The relocation locks this instance holds, by document (each with its heartbeat).</summary>
+    private readonly ConcurrentDictionary<Guid, RelocationLease> _leases = new();
+
+    /// <param name="resolver">The container decisions.</param>
+    /// <param name="dataverse">The app-only entity service.</param>
+    /// <param name="spe">The app-only SPE facade.</param>
+    /// <param name="indexing">The PublicContracts indexing facade (ADR-013).</param>
+    /// <param name="locks">The ADR-004 processing lock (taken, confirmed, renewed and released per call).</param>
+    /// <param name="access">
+    /// Dataverse's own answer "may this person write the document?" — read FRESH (owner round 54 item 1).
+    /// <c>DocumentsModule</c> passes the UNCACHED <see cref="DataverseAccessDataSource"/>, never the 60-second
+    /// <c>CachedAccessDataSource</c>; and whatever is passed, an answer produced before the question was asked (a cached
+    /// one) is never taken as a right (<see cref="MayWriteAsync"/>).
+    /// </param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="timeProvider">The clock of the ledger and of the lock's heartbeat.</param>
     public DocumentContainerRelocator(
         RecordContainerResolver resolver,
         IGenericEntityService dataverse,
@@ -152,32 +185,194 @@ public sealed class DocumentContainerRelocator
     /// <summary>The processing-lock key of one document's relocation.</summary>
     internal static string RelocationLockKey(Guid documentId) => $"document-relocate-{documentId:N}";
 
+    /// <summary>
+    /// Takes the document's relocation lock as a lease of THIS call: an owner id of its own, confirmed by reading it back,
+    /// then renewed by a heartbeat until <see cref="UnlockAsync"/>. <see langword="false"/> = not held (another relocation
+    /// holds it, the lock store faulted, or the lock does not read back as ours) — nothing may run (fail closed).
+    /// </summary>
     private async Task<bool> TryLockAsync(Guid documentId, CancellationToken ct)
     {
-        try
+        var lease = await RelocationLease.TryTakeAsync(_locks, documentId, _time, _logger, ct).ConfigureAwait(false);
+        if (lease is null)
         {
-            return await _locks.TryAcquireProcessingLockAsync(RelocationLockKey(documentId), RelocationLockDuration, ct)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
-        {
-            // Unknown whether another relocation runs: do not run (fail closed); the repeat call retries.
-            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] the relocation lock of document {DocumentId} could not be taken.", documentId);
             return false;
         }
+
+        if (_leases.TryAdd(documentId, lease))
+        {
+            return true;
+        }
+
+        await lease.DisposeAsync().ConfigureAwait(false);
+        return false;
     }
 
     private async Task UnlockAsync(Guid documentId)
     {
-        try
+        if (_leases.TryRemove(documentId, out var lease))
         {
-            await _locks.ReleaseProcessingLockAsync(RelocationLockKey(documentId), CancellationToken.None).ConfigureAwait(false);
+            await lease.DisposeAsync().ConfigureAwait(false);
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>
+    /// Whether this call still holds the document's relocation lock: renewed and read back as ours NOW (owner round 54
+    /// item 2). Asked before every destructive step — the re-point, a ledger entry's settle (re-key, move-along), a source
+    /// delete, the ledger write — so a move that lost its lock stops there and never continues unlocked.
+    /// </summary>
+    private async Task<bool> StillLockedAsync(Guid documentId, CancellationToken ct)
+        => _leases.TryGetValue(documentId, out var lease) && await lease.ConfirmAsync(ct).ConfigureAwait(false);
+
+    /// <summary>The heartbeat already found the lock lost (a check between replay steps, without a round trip).</summary>
+    private bool LockKnownLost(Guid documentId) => !_leases.TryGetValue(documentId, out var lease) || lease.Lost;
+
+    private static string LockLost(Guid documentId, string where)
+        => $"{LockLostPrefix}: the relocation lock of document {documentId} was lost {where}; nothing more was written; a "
+           + "repeat call settles it";
+
+    /// <summary>
+    /// One call's hold on a document's relocation lock (owner round 54 item 2): taken under an owner id of its own and
+    /// confirmed by reading it back (the lock store's acquire is check-then-set and fails open on a cache fault, #984: a
+    /// lock is held only when it reads back as ours); renewed every <see cref="RelocationLockRenewInterval"/> by a
+    /// heartbeat; released only while still ours. A renewal that fails marks it <see cref="Lost"/>, for good.
+    /// </summary>
+    private sealed class RelocationLease : IAsyncDisposable
+    {
+        private readonly IIdempotencyService _locks;
+        private readonly TimeProvider _time;
+        private readonly ILogger _logger;
+        private readonly Guid _documentId;
+        private readonly CancellationTokenSource _stop = new();
+        private Task _heartbeat = Task.CompletedTask;
+        private int _lost;
+
+        private RelocationLease(IIdempotencyService locks, Guid documentId, TimeProvider time, ILogger logger)
         {
-            _logger.LogWarning(ex,
-                "[DOCUMENT-RELOCATE] the relocation lock of document {DocumentId} could not be released; it expires in {Duration}.",
-                documentId, RelocationLockDuration);
+            _locks = locks;
+            _documentId = documentId;
+            _time = time;
+            _logger = logger;
+            Key = RelocationLockKey(documentId);
+        }
+
+        public string Key { get; }
+
+        /// <summary>This call's owner id — never another call's, so no other relocation can take over or release this lock.</summary>
+        public string Owner { get; } = Guid.NewGuid().ToString("N");
+
+        public bool Lost => Volatile.Read(ref _lost) == 1;
+
+        public static async Task<RelocationLease?> TryTakeAsync(
+            IIdempotencyService locks, Guid documentId, TimeProvider time, ILogger logger, CancellationToken ct)
+        {
+            var lease = new RelocationLease(locks, documentId, time, logger);
+            bool taken;
+            try
+            {
+                taken = await locks.TryAcquireProcessingLockAsync(lease.Key, lease.Owner, RelocationLockDuration, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // Unknown whether another relocation runs: do not run (fail closed); the repeat call retries.
+                logger.LogWarning(ex, "[DOCUMENT-RELOCATE] the relocation lock of document {DocumentId} could not be taken.", documentId);
+                lease._stop.Dispose();
+                return null;
+            }
+
+            if (!taken)
+            {
+                lease._stop.Dispose();
+                return null;
+            }
+
+            if (!await lease.ConfirmAsync(ct).ConfigureAwait(false))
+            {
+                logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] the relocation lock of document {DocumentId} was answered taken but does not read back "
+                    + "as this call's; nothing runs.", documentId);
+                await lease.DisposeAsync().ConfigureAwait(false);
+                return null;
+            }
+
+            lease._heartbeat = lease.HeartbeatAsync(lease._stop.Token);
+            return lease;
+        }
+
+        /// <summary>Renews the lock now: <see langword="false"/> — and <see cref="Lost"/> from then on — unless it is still ours.</summary>
+        public async Task<bool> ConfirmAsync(CancellationToken ct)
+        {
+            if (Lost)
+            {
+                return false;
+            }
+
+            bool renewed;
+            try
+            {
+                renewed = await _locks.RenewProcessingLockAsync(Key, Owner, RelocationLockDuration, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] the relocation lock of document {DocumentId} could not be renewed.", _documentId);
+                renewed = false;
+            }
+
+            if (!renewed && Interlocked.Exchange(ref _lost, 1) == 0)
+            {
+                _logger.LogError(
+                    "[DOCUMENT-RELOCATE] lock-lost: the relocation lock of document {DocumentId} is no longer this call's; the "
+                    + "relocation stops before its next destructive step.", _documentId);
+            }
+
+            return renewed;
+        }
+
+        /// <summary>Renews the lock every <see cref="RelocationLockRenewInterval"/> until released or lost.</summary>
+        private async Task HeartbeatAsync(CancellationToken stop)
+        {
+            try
+            {
+                while (!Lost)
+                {
+                    await Task.Delay(RelocationLockRenewInterval, _time, stop).ConfigureAwait(false);
+                    await ConfirmAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            catch (OperationCanceledException) when (stop.IsCancellationRequested)
+            {
+                // Released.
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (!_stop.IsCancellationRequested)
+            {
+                await _stop.CancelAsync().ConfigureAwait(false);
+            }
+
+            try
+            {
+                await _heartbeat.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                // The heartbeat stops by cancellation.
+            }
+
+            _stop.Dispose();
+            try
+            {
+                // Only while still ours: a lease that lost its lock never removes the lock another relocation now holds.
+                await _locks.ReleaseProcessingLockAsync(Key, Owner, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[DOCUMENT-RELOCATE] the relocation lock of document {DocumentId} could not be released; it expires in {Duration}.",
+                    _documentId, RelocationLockDuration);
+            }
         }
     }
 
@@ -356,11 +551,12 @@ public sealed class DocumentContainerRelocator
 
         // ONE writer per document at a time: two concurrent relocations (a double-clicked Make Secure, or Make Secure while
         // the migration pass reaches the same row) would each copy and re-point, and the loser's copy and ledger entry
-        // would be lost. The existing ADR-004 processing lock; a held lock is reported (incomplete), never waited on.
+        // would be lost. The existing ADR-004 processing lock, held for as long as the move runs (renewed by a heartbeat,
+        // confirmed before every destructive step — round 54 item 2); a held lock is reported (incomplete), never waited on.
         if (!await TryLockAsync(documentId, ct).ConfigureAwait(false))
         {
             return DocumentRelocationOutcome.Of(documentId, RelocationState.Failed, null, null, expectedTargetContainer, null,
-                "another relocation of this document is running; a repeat call settles it");
+                "another relocation of this document is running, or its lock could not be confirmed; a repeat call settles it");
         }
 
         try
@@ -588,24 +784,57 @@ public sealed class DocumentContainerRelocator
         public static History Fail(string why) => new([], null, new RelocationWitness(null, null, null), why);
 
         /// <summary>
-        /// The steps written AFTER <paramref name="version"/> (a source's edits since its move), oldest first; when the
-        /// version ids cannot be ordered, the current content alone (it differs from the witness — that is why it is asked).
+        /// The steps written AFTER the state <paramref name="witness"/> recorded — a source's edits since its move — oldest
+        /// first, ending with its current content (owner round 54 item 3: no intermediate edit is dropped).
+        /// <list type="bullet">
+        /// <item>By version NUMBER when the witness's version and every listed id are numbers: every version above the
+        /// witnessed one. None above it = the witnessed version itself was changed in place, so its current content IS
+        /// the only content after the witness.</item>
+        /// <item>Otherwise by TIME: every version written after the witness's time (<see cref="RelocationWitness.Modified"/>),
+        /// in time order.</item>
+        /// </list>
+        /// <see langword="null"/> steps, with the reason, when that order cannot be decided — no witness time, a version
+        /// without a time, two versions at the same time, none later than the witness, or a current content that is not
+        /// the latest by time. Never "the current content alone", which would drop every intermediate edit.
         /// </summary>
-        public IReadOnlyList<ReplayStep> After(string? version)
+        public (IReadOnlyList<ReplayStep>? Steps, string? Undecidable) After(RelocationWitness? witness)
         {
             if (Steps.Count == 0)
             {
-                return [];
+                return (null, "the source lists no version");
             }
 
-            if (version is null || !System.Version.TryParse(version, out var witnessed)
-                || Steps.Any(s => !System.Version.TryParse(s.VersionId, out _)))
+            if (witness?.Version is { } version && System.Version.TryParse(version, out var witnessed)
+                && Steps.All(s => System.Version.TryParse(s.VersionId, out _)))
             {
-                return [Steps[^1]];
+                var newer = Steps.Where(s => System.Version.Parse(s.VersionId) > witnessed).ToList();
+                return (newer.Count > 0 ? newer : [Steps[^1]], null);
             }
 
-            var newer = Steps.Where(s => System.Version.Parse(s.VersionId) > witnessed).ToList();
-            return newer.Count > 0 ? newer : [Steps[^1]];
+            if (witness?.Modified is not { } since || since == default)
+            {
+                return (null, "the witness recorded neither a numbered version nor a time to order the later versions by");
+            }
+
+            if (Steps.Any(s => s.Origin.At is not { } at || at == default))
+            {
+                return (null, "a version of the source carries no time");
+            }
+
+            var later = Steps.Where(s => s.Origin.At > since).OrderBy(s => s.Origin.At).ToList();
+            if (later.Count == 0)
+            {
+                return (null, "no version of the source is later than the witness, though its content changed");
+            }
+
+            if (later.Select(s => s.Origin.At).Distinct().Count() != later.Count)
+            {
+                return (null, "two versions written after the move carry the same time");
+            }
+
+            return ReferenceEquals(later[^1], Steps[^1])
+                ? (later, null)
+                : (null, "the source's current content is not its latest version by time");
         }
     }
 
@@ -661,7 +890,11 @@ public sealed class DocumentContainerRelocator
                 new RelocatedVersionHistory.Entry(string.Empty, null, null, null, null, facts.Size ?? 0, item, null)));
         }
 
-        var witness = new RelocationWitness(facts.Size, facts.QuickXorHash, ordered.Count > 0 ? ordered[^1].Id : null);
+        // The witness: size, hash, the current version id and the time of the current content (that version's time, else
+        // the item's) — the time orders the versions a later edit adds when their ids cannot be (round 54 item 3).
+        var current = ordered.Count > 0 ? ordered[^1] : null;
+        var witness = new RelocationWitness(facts.Size, facts.QuickXorHash, current?.Id,
+            current is not null && current.LastModifiedDateTime != default ? current.LastModifiedDateTime : facts.LastModified);
         if (!witness.IsProvable)
         {
             return History.Fail($"{drive}/{item} reports no size, or neither a quickXorHash nor a version, so a later call "
@@ -714,6 +947,15 @@ public sealed class DocumentContainerRelocator
         for (var i = 0; i < plan.Steps.Count; i++)
         {
             var step = plan.Steps[i];
+            if (LockKnownLost(documentId))
+            {
+                // The heartbeat lost the lock mid-replay (round 54 item 2): stop now, remove the partial copy.
+                await RemoveCopyAsync(documentId, targetDrive, copy, ct).ConfigureAwait(false);
+                return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                    documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
+                    LockLost(documentId, $"during the copy (before version {step.VersionId}); the partial copy was removed")));
+            }
+
             FileHandleDto? written;
             try
             {
@@ -820,6 +1062,17 @@ public sealed class DocumentContainerRelocator
         };
         alsoWrite[RelocationLedgerColumn] = ledger.With(entry).Serialize();
         alsoWrite[RelocatedVersionHistory.Column] = record.Json!;
+
+        // Round 54 item 2: the re-point is destructive — only under a lock confirmed as this call's NOW. A lost lock
+        // stops here: the copy (this call's own, referenced by nothing) is removed; the row and the source are untouched.
+        if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            await DeleteQuietlyAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
+            return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
+                LockLost(documentId, "before the re-point; the row still names its file and the copy was removed")));
+        }
+
         try
         {
             await WritePointerAsync(documentId, targetDrive, copy.Id, copyFacts!.WebUrl, alsoWrite, ct).ConfigureAwait(false);
@@ -1006,6 +1259,12 @@ public sealed class DocumentContainerRelocator
         Guid documentId, Entity row, string currentDrive, string currentItem, SettleSummary summary, RelocationPurpose purpose,
         CancellationToken ct)
     {
+        if (LockKnownLost(documentId))
+        {
+            summary.AddPending(LockLost(documentId, "before the re-copy of a source edited after its move"));
+            return new RecopyResult(summary, null);
+        }
+
         var changed = summary.Changed.OrderBy(c => c.Entry.At).ToList();
         var current = await ReadHistoryAsync(currentDrive, currentItem, VersionRecordOf(row), ct).ConfigureAwait(false);
         if (current.Failure is not null)
@@ -1028,7 +1287,21 @@ public sealed class DocumentContainerRelocator
                 return new RecopyResult(summary, null);
             }
 
-            var after = history.After(source.Entry.Witness?.Version);
+            // Round 54 item 3: every version written after the witness, in order — or, when that order cannot be decided,
+            // nothing at all is moved (history-undecidable; the row and the source untouched; a repeat call retries).
+            var (after, undecidable) = history.After(source.Entry.Witness);
+            if (after is null)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] history-undecidable: the versions {SourceDrive}/{SourceItem} received after the move of "
+                    + "document {DocumentId} cannot be put in order ({Reason}); nothing is moved.",
+                    source.Entry.SourceDrive, source.Entry.SourceItem, documentId, undecidable);
+                summary.AddPending($"{HistoryUndecidablePrefix}: the versions {source.Entry.SourceDrive}/{source.Entry.SourceItem} "
+                                   + $"received after the move cannot be put in order ({undecidable}); the row and the source "
+                                   + "are untouched; a repeat call retries");
+                return new RecopyResult(summary, null);
+            }
+
             edits.AddRange(after);
             ledger = ledger.With(source.Entry with { Witness = history.Witness, Source = LedgerSourceState.Pending });
             lastSourceFacts = history.Facts;
@@ -1090,8 +1363,17 @@ public sealed class DocumentContainerRelocator
     /// <summary>
     /// May the person <paramref name="authorObjectId"/> (an Entra object id) write the document NOW? Dataverse's own
     /// answer for that principal (<see cref="IAccessDataSource.GetUserAccessAsync"/>: RetrievePrincipalAccess, which
-    /// factors in roles, teams and sharing). Not a person, no answer, or a fault: <see langword="false"/> (ADR-003).
+    /// factors in roles, teams and sharing), read FRESH (owner round 54 item 1). Not a person, no answer, an answer older
+    /// than the question, or a fault: <see langword="false"/> (ADR-003).
     /// </summary>
+    /// <remarks>
+    /// FRESH: a Write answer cached just before Make Secure must never make a non-writer's edit current. The production
+    /// wiring passes the uncached source; this method also refuses, whatever source it is given, an answer produced
+    /// BEFORE the question was asked — <see cref="AccessSnapshot.CachedAt"/> is when the answer was read
+    /// (<see cref="DataverseAccessDataSource"/> stamps the time of its Dataverse read; <c>CachedAccessDataSource</c> returns
+    /// the time it CACHED the answer), so an older one is a cached one. Compared on the system clock, the clock both stamp
+    /// it with.
+    /// </remarks>
     private async Task<bool> MayWriteAsync(Guid documentId, string? authorObjectId, CancellationToken ct)
     {
         if (!Guid.TryParse(authorObjectId, out var author) || author == Guid.Empty)
@@ -1101,8 +1383,18 @@ public sealed class DocumentContainerRelocator
 
         try
         {
+            var asked = DateTimeOffset.UtcNow;
             var snapshot = await _access.GetUserAccessAsync(author.ToString("D"), documentId.ToString("D"), userAccessToken: null, ct)
                 .ConfigureAwait(false);
+            if (snapshot.CachedAt < asked)
+            {
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] whether {Author} may write document {DocumentId} was answered from {AnsweredAt}, before "
+                    + "it was asked ({AskedAt}) — a cached answer, not a fresh one; their edit is kept in the history, not made "
+                    + "current.", author, documentId, snapshot.CachedAt, asked);
+                return false;
+            }
+
             return snapshot.AccessRights.HasFlag(AccessRights.Write);
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
@@ -1155,6 +1447,16 @@ public sealed class DocumentContainerRelocator
         var remaining = new List<RelocationLedgerEntry>();
         foreach (var original in ledger.Entries)
         {
+            // Round 54 item 2: each entry's settle writes (re-keys, a move-along, a delete) — only under the lock, confirmed
+            // as this call's now. A lost lock stops the settle: nothing more is written, the stored ledger is left as it was
+            // (every step is idempotent, so the repeat call redoes what is still owed).
+            if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+            {
+                summary.AddPending(LockLost(documentId, "while settling what its move owes"));
+                summary.Ledger = ledger;
+                return summary;
+            }
+
             var entry = original;
 
             // (a) RE-KEY the other rows that hold the old item id for THIS document.
@@ -1174,6 +1476,14 @@ public sealed class DocumentContainerRelocator
                     .ConfigureAwait(false);
                 entry = entry with { Source = source.State };
                 sourceDetail = source.Detail;
+            }
+
+            // A lock lost during (a) or (b) — a long move-along, or the source delete's confirmation — stops the settle here.
+            if (LockKnownLost(documentId))
+            {
+                summary.AddPending(LockLost(documentId, "while settling what its move owes"));
+                summary.Ledger = ledger;
+                return summary;
             }
 
             // (c) The INDEX: the new item indexed, the old item's chunks removed — all of them once the old item is gone.
@@ -1210,6 +1520,14 @@ public sealed class DocumentContainerRelocator
         var updated = new RelocationLedger(remaining);
         if (!updated.SameAs(ledger))
         {
+            if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+            {
+                // Writing the ledger unlocked could overwrite what another relocation of this document now records.
+                summary.AddPending(LockLost(documentId, "before its settled ledger was recorded"));
+                summary.Ledger = ledger;
+                return summary;
+            }
+
             try
             {
                 await _dataverse.UpdateAsync(DocumentEntity, documentId, new Dictionary<string, object>
@@ -1459,6 +1777,13 @@ public sealed class DocumentContainerRelocator
                 return new SourceSettlement(LedgerSourceState.Pending,
                     $"{SourceChangedAfterMovePrefix}: the source was edited after the move (it no longer matches the witness "
                     + "recorded when its copy was verified), so it is not deleted as it stands");
+        }
+
+        // Round 54 item 2: the source delete is destructive — only under the lock, confirmed as this call's now (a
+        // move-along above may have taken long).
+        if (!await StillLockedAsync(documentId, ct).ConfigureAwait(false))
+        {
+            return new SourceSettlement(LedgerSourceState.Pending, LockLost(documentId, "before the source delete; the source is kept"));
         }
 
         if (!await DeleteQuietlyAsync(entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false))
@@ -1832,9 +2157,10 @@ public sealed class DocumentContainerRelocator
 
     /// <summary>
     /// The witness of a source (owner round 45 item 4): its size, <c>quickXorHash</c> and current version id when its copy
-    /// was verified. Provable = a size and at least one of the hash or the version.
+    /// was verified, and the time of that content (<see cref="Modified"/>, round 54 item 3: what the versions an edit adds
+    /// later are ordered against when their ids are not numbers). Provable = a size and at least one of the hash or the version.
     /// </summary>
-    internal sealed record RelocationWitness(long? Size, string? QuickXorHash, string? Version)
+    internal sealed record RelocationWitness(long? Size, string? QuickXorHash, string? Version, DateTimeOffset? Modified = null)
     {
         [JsonIgnore]
         public bool IsProvable

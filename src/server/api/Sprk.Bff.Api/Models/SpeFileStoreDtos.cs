@@ -121,13 +121,18 @@ public record SpeDriveItemSummary(
 /// <param name="Size">The item's size in bytes (task 166 f1: the relocation copy is verified against it).</param>
 /// <param name="QuickXorHash">The SPE content identity, when Graph has computed it (task 166 f1: copy verification).</param>
 /// <param name="WebUrl">The item's web URL (task 166 f1: <c>sprk_filepath</c> of a server-attached or relocated file).</param>
+/// <param name="LastModified">
+///   <c>lastModifiedDateTime</c> (task 166, owner round 54 item 3): the time a relocation's witness records when Graph lists
+///   no version, so the versions written after the move can still be put in order by their times.
+/// </param>
 public record SpeItemCreator(
     string? Name,
     string? UserObjectId,
     string? ApplicationId,
     long? Size = null,
     string? QuickXorHash = null,
-    string? WebUrl = null);
+    string? WebUrl = null,
+    DateTimeOffset? LastModified = null);
 
 /// <summary>
 /// What Graph <c>/shares</c> said about an absolute document URL (FR-01, task 012).

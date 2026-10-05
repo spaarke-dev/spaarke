@@ -55,7 +55,12 @@ public static class DocumentsModule
         // (POST /api/v1/documents/{id}/file) and the relocation shared by the legacy migration and Make Secure. Scoped
         // like its dependencies (RecordContainerResolver, SpeFileStore); UNCONDITIONAL because the route that calls it
         // is mapped unconditionally (bff-extensions.md §F.1).
-        services.AddScoped<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>();
+        // Owner round 54 item 1: its "may the author of a post-move edit write the document NOW?" is read FRESH — it is
+        // given the UNCACHED DataverseAccessDataSource (registered by AddSpaarkeCore), never the 60-second
+        // CachedAccessDataSource that IAccessDataSource resolves to: a Write answer cached just before Make Secure must not
+        // make a non-writer's edit current. (The relocator also refuses any answer older than its question.)
+        services.AddScoped(sp => ActivatorUtilities.CreateInstance<Sprk.Bff.Api.Services.Documents.DocumentContainerRelocator>(
+            sp, sp.GetRequiredService<Spaarke.Dataverse.DataverseAccessDataSource>()));
 
         // The legacy migration (ADR-036 IScheduledJob, ADR-052 "BFF, schedule"): registered DISABLED — it runs only when
         // scripts/Invoke-DocumentContainerMigration.ps1 triggers it through /api/admin/jobs (SystemAdmin), and writes
