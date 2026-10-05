@@ -532,6 +532,25 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Use ONE guard entry point (`SecureShareNoAccessGuard`), never a second copy of the parent walk.
    - Tests and seeds.
 
+## Round 40 (2026-10-05). BINDING. Main-session decisions under round 15. Task 150's integration lane, from its verification.
+
+1. **R-150-6: a Make Secure that fails after the flag is written can always be finished (option 1, completed).**
+   - **The ribbon:** it also shows Make Secure when `sprk_issecure` is true and `sprk_containerid` is empty. It reads both in the same `retrieveRecord`, and a read failure follows the existing fail-closed enable rule. Acceptance (e) becomes "hidden on a PROVISIONED secure record".
+   - **Retryable failures after Step 7** (`files_incomplete`, `children_incomplete`): the alert becomes a confirm dialog showing the server's detail, with **Make Secure** / **Cancel**. That re-entry is the repeat call round 26 promises.
+   - **Every post-flag failure code is covered.** The note gives a table of the five codes, and for each names which closes it:
+     - the ribbon's retry;
+     - a scheduled job, by name and schedule (148's `SecureChildReconciliationJob` for children; for files, 166's relocator re-entry);
+     - both.
+     A code with neither is a defect to fix.
+   - Tests and seeds.
+2. **A non-creator who runs Make Secure keeps access, on BOTH paths (option a, made symmetric).**
+   - The caller is shared at the creator's level on the forward path (share first, move, prove). The unflagged RESUME path now does the same; the asymmetry is removed.
+   - The caller is then one of "the people it is shared with" in owner round 27's copy, so the copy holds as written.
+   - Option (b) is rejected: a Write holder who secures a record would lose it.
+   - Tests for both paths, with seeds.
+3. **`sdap.provision.principal_share_failed` copy accepted as recommended** (owner round 27's stance: adjust in UAT). In the wizard: "{name} was not given access to this project. You can share it with them later from Manage Access." The ribbon uses the same sentence with {record}, and round 29's two sentences are generalized to {record}. Each is pinned verbatim.
+   - An empty or unresolvable name falls back to "Someone" (finding: `personName("")` produced an empty name). Never an empty name, never silent.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
