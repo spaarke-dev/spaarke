@@ -4,7 +4,7 @@
     <title>Author scripts/Grant-GraphAppRoles.ps1 helper — reads GraphAppRoles.cs constant + syncs UAMI SP via az</title>
     <phase>B Gap Automation Script Hardening</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>NEW PowerShell script (creates new surface — §11 justification required); auth-tagged; reads a C# constant to derive grants. Per root CLAUDE.md §8, new file creation with explicit constraints = STANDARD. Auth tag would normally trigger FULL for BFF code, but this is a script (not BFF code) reading a BFF constant.</rigor-reason>
     <model-tier>sonnet</model-tier>

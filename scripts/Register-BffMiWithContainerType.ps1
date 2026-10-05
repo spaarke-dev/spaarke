@@ -2,6 +2,17 @@
 # Embedded container TYPE, so it can do app-only file writes (archive .eml,
 # attachment materialization) without 403 Access denied.
 #
+# NOTE (2026-10-03, customer-provisioning-orchestration-r1 task 248): owning apps
+# set up per docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md (MI-FIC) — e.g.
+# `Spaarke SPE Model 1 Owner` (bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e) — have NO
+# certificate and NO client secret; the L2 control plane acts as them through the
+# L2 Worker UAMI's federated identity credential. This script cannot sign in as
+# such an owning app. It applies only to legacy owning apps that still carry a
+# certificate (its defaults target the dev `Spaarke PAYGO 1` owner 170c98e1).
+# Never add a certificate to an MI-FIC owning app to make this script work. The
+# v1.0 equivalent of the PUT below is
+#   PUT /v1.0/storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}
+#
 # WHY (UAT email-r4, 2026-07-19): the archive uploads as the BFF managed identity
 # (mi-bff-api-dev / 5967251e) via GraphClientFactory.ForApp(). That identity was NOT
 # in the container type's applicationPermissionGrants — only the owner app (170c98e1)
@@ -18,9 +29,10 @@
 #
 # PREREQS:
 #  - The guest app (the MI) already holds the Graph app-role FileStorageContainer.Selected.
-#  - The OWNER app (170c98e1) has a VALID certificate (its original expired 2026-03-14;
-#    renew via `az ad app credential reset --id <owner> --cert @cert.cer --append`) that
-#    is present in the CurrentUser cert store on this machine (thumbprint below).
+#  - The legacy OWNER app (170c98e1 only) has a VALID certificate that is present in the
+#    CurrentUser cert store on this machine (thumbprint below). Its original expired
+#    2026-03-14; renewing it is a decision for that legacy app only — do not create a
+#    certificate on any MI-FIC owning app (see NOTE above).
 
 param(
     # v3.3 change: -TenantId is MANDATORY (was defaulted to Spaarke tenant) per r1

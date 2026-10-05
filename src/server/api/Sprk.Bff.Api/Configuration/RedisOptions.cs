@@ -17,9 +17,18 @@ public class RedisOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Redis connection string. Required when Enabled is true.
-    /// Store in Key Vault (production) or user-secrets (development).
-    /// Example: localhost:6379 (dev) or your-redis.redis.cache.windows.net:6380,password=...,ssl=True (prod)
+    /// Azure Managed Redis endpoint, <c>host:port</c> (e.g. <c>sprk-acme-prod-redis.westus2.redis.azure.net:10000</c>).
+    /// When set, the BFF authenticates ONLY with its user-assigned managed identity (Microsoft Entra; the cache has
+    /// access keys disabled) over RESP3, and any connection string is ignored. Required whenever Redis is enabled
+    /// outside Development/Testing (task 242, owner D12/D13). Not a secret — a plain app setting, never a Key Vault
+    /// reference.
+    /// </summary>
+    public string? Endpoint { get; set; }
+
+    /// <summary>
+    /// Redis connection string — Development and Testing only (e.g. <c>localhost:6379</c>), and only when
+    /// <see cref="Endpoint"/> is not set. Outside Development/Testing the BFF refuses to start on a connection string
+    /// without an endpoint (task 242: deployed environments are keyless).
     /// </summary>
     public string? ConnectionString { get; set; }
 

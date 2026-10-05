@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Seed the L2 platform-controlplane Key Vault (sprk-controlplane-{env}-kv)
-    with the 6 secrets its App Service KV-reference app-settings resolve --
+    with the 5 secrets its App Service KV-reference app-settings resolve --
     idempotent, never-overwrite, sentinel-aware.
 
 .DESCRIPTION
@@ -12,7 +12,7 @@
       infrastructure/bicep/platform-controlplane.bicep + its two App Service
       modules (modules/controlplane-app-service.bicep,
       modules/controlplane-worker-app-service.bicep) wire @Microsoft.KeyVault
-      references into L2 app-settings for SIX platform-KV secrets -- but
+      references into L2 app-settings for FIVE platform-KV secrets -- but
       NOTHING seeded those secrets. Handler H4 seeds CUSTOMER vaults
       (sprk-{env}-kv via the canonical-secret-catalog generated seeder), never
       the platform-controlplane vault. On a fresh stamp every KV ref therefore
@@ -21,8 +21,11 @@
       Validate() sees a non-empty string and SUCCEEDS, and the failure
       surfaces much later as garbage-credential errors downstream.
 
-    THE 6 SECRETS (names MUST match the Bicep modules' KV-reference
-    SecretName= values exactly):
+    THE 5 SECRETS (names MUST match the Bicep modules' KV-reference
+    SecretName= values exactly). Task 225b (D-12) retired the former third
+    entry, AzureOpenAI-Endpoint: it fed only H12c's Model 1 shared-platform
+    branch, which is gone (every customer stamp has its own OpenAI account).
+    The script no longer seeds it; a copy already in a vault is left alone.
       1. Dataverse-ClientSecret   (BINDING never-delete) -- deliberately
                                   seeded with a SENTINEL, never a real value,
                                   unless -DataverseClientSecret is explicitly
@@ -35,19 +38,17 @@
                                   Worker's EnvVarValuesOptions.Validate()
                                   fail-fasts at boot until the real value is
                                   populated.
-      3. AzureOpenAI-Endpoint     -- real value from -AzureOpenAiEndpoint,
-                                  else sentinel (only H12c's Model1Shared
-                                  branch consults it; not boot-blocking).
-      4. Sidecar-Shared-Secret    -- from -SidecarSharedSecret, else a
+      3. Sidecar-Shared-Secret    -- from -SidecarSharedSecret, else a
                                   freshly GENERATED random GUID (the sidecar
                                   container + Worker both resolve the SAME KV
                                   secret, so a generated value is immediately
                                   self-consistent).
-      5. Exchange-Connect-Cert    -- base64 cert bytes from
-                                  -ExchangeConnectCert, else sentinel (cert
-                                  material can only come from an operator OOB
-                                  ceremony).
-      6. Redis-ConnectionString   (G-8 Batch 4 AMENDMENT, for G-8 Batch 3's
+      (Exchange-Connect-Cert is no longer seeded -- task 251: the Exchange
+       sidecar holds no credential; the Worker signs in as 'Spaarke Exchange
+       Admin' through its managed identity's federated credential. An existing
+       sentinel copy in a vault is left in place -- never deleted -- and is
+       unused.)
+      5. Redis-ConnectionString   (G-8 Batch 4 AMENDMENT, for G-8 Batch 3's
                                   audit defect #6 fix) -- the Worker's
                                   ConnectionStrings__Redis KV-ref source
                                   (Level-2 dispatch-idempotency Redis; the
@@ -99,22 +100,11 @@
     'pending-oob-population' is seeded and an operator MUST replace it
     out-of-band before the Worker can pass EnvVarValuesOptions validation.
 
-.PARAMETER AzureOpenAiEndpoint
-    Optional real value for AzureOpenAI-Endpoint (shared-platform Azure
-    OpenAI resource endpoint, e.g. https://{name}.openai.azure.com/). If
-    unset, the sentinel 'pending-oob-population' is seeded.
-
 .PARAMETER SidecarSharedSecret
-    Optional value for Sidecar-Shared-Secret (the X-Sidecar-Auth per-boot
+    Optional value for Sidecar-Shared-Secret (the X-Sidecar-Auth
     shared secret). If unset, a random GUID is GENERATED and seeded -- both
     the Worker and the sidecar container resolve this same KV secret, so a
     generated value is self-consistent without operator follow-up.
-
-.PARAMETER ExchangeConnectCert
-    Optional base64-encoded certificate bytes for Exchange-Connect-Cert. If
-    unset, the sentinel 'pending-oob-population' is seeded and an operator
-    MUST replace it with the real cert material out-of-band before the
-    Exchange sidecar can connect.
 
 .PARAMETER RedisConnectionString
     Optional real value for Redis-ConnectionString (StackExchange.Redis
@@ -151,9 +141,8 @@
     .\Seed-PlatformKeyVault.ps1
 
 .EXAMPLE
-    # Dev: seed with a real OpenAI endpoint + real BFF client secret
+    # Dev: seed with a real BFF client secret
     .\Seed-PlatformKeyVault.ps1 `
-        -AzureOpenAiEndpoint 'https://spaarke-openai-dev.openai.azure.com/' `
         -BffApiClientSecret $env:BFF_API_CLIENT_SECRET
 
 .EXAMPLE
@@ -190,13 +179,7 @@ param(
     [string]$BffApiClientSecret,
 
     [Parameter(Mandatory = $false)]
-    [string]$AzureOpenAiEndpoint,
-
-    [Parameter(Mandatory = $false)]
     [string]$SidecarSharedSecret,
-
-    [Parameter(Mandatory = $false)]
-    [string]$ExchangeConnectCert,
 
     [Parameter(Mandatory = $false)]
     [string]$RedisConnectionString,
@@ -376,8 +359,7 @@ else {
 # Names MUST match the Bicep modules' KV-reference SecretName= values exactly:
 #   modules/controlplane-app-service.bicep        -> Dataverse-ClientSecret
 #   modules/controlplane-worker-app-service.bicep -> Dataverse-ClientSecret,
-#       BFF-API-ClientSecret, AzureOpenAI-Endpoint, Sidecar-Shared-Secret,
-#       Exchange-Connect-Cert, Redis-ConnectionString
+#       BFF-API-ClientSecret, Sidecar-Shared-Secret, Redis-ConnectionString
 # -----------------------------------------------------------------------------
 
 $secretPlan = @(
@@ -396,25 +378,11 @@ $secretPlan = @(
         Note       = 'BINDING never-delete. Shared multitenant BFF app-reg secret (H7 credential provisioning source).'
     }
     [pscustomobject]@{
-        Name       = 'AzureOpenAI-Endpoint'
-        Value      = if ($AzureOpenAiEndpoint) { $AzureOpenAiEndpoint } else { $SentinelValue }
-        Provenance = if ($AzureOpenAiEndpoint) { 'parameter' } else { 'sentinel' }
-        FollowUp   = if ($AzureOpenAiEndpoint) { $null } else { 'Operator MUST replace with the shared-platform Azure OpenAI endpoint before any Model1Shared H12c run.' }
-        Note       = 'Consumed by H12c Model1Shared branch (RuntimeReferences__SharedPlatformOpenAiEndpoint); not boot-blocking.'
-    }
-    [pscustomobject]@{
         Name       = 'Sidecar-Shared-Secret'
         Value      = if ($SidecarSharedSecret) { $SidecarSharedSecret } else { [guid]::NewGuid().ToString() }
         Provenance = if ($SidecarSharedSecret) { 'parameter' } else { 'generated' }
         FollowUp   = $null
         Note       = 'X-Sidecar-Auth shared secret. Worker AND sidecar container both resolve this same KV secret, so a generated value is self-consistent.'
-    }
-    [pscustomobject]@{
-        Name       = 'Exchange-Connect-Cert'
-        Value      = if ($ExchangeConnectCert) { $ExchangeConnectCert } else { $SentinelValue }
-        Provenance = if ($ExchangeConnectCert) { 'parameter' } else { 'sentinel' }
-        FollowUp   = if ($ExchangeConnectCert) { $null } else { 'Operator MUST replace with real base64 cert bytes out-of-band before the Exchange ApplicationAccessPolicy sidecar can connect.' }
-        Note       = 'Base64 Exchange app-only certificate for the DS-1b sidecar.'
     }
     [pscustomobject]@{
         Name       = 'Redis-ConnectionString'

@@ -131,16 +131,58 @@ function Get-IndexMarkers {
     # and reported a phantom drift on task 001. Do not reintroduce a cell-spanning pattern.
     $rowPattern = '^\|\s*([^\s|]+(?:\s*\[[a-z]+\])?)\s*\*{0,2}(\d{3})\*{0,2}\s*\|'
 
+    # SECOND LAYOUT — id first, status in a LATER cell (added 2026-10-01,
+    # customer-provisioning-orchestration-r1 T245a follow-up). This is the layout task-create
+    # Step 5 itself prescribes (`| 001 | Title | Phase | 🔲 [open] | ... |`), and the first pattern
+    # cannot match it: it needs a marker BEFORE the id in the first cell. A project written to the
+    # template therefore parsed ~0 rows (that project: 1 of 198). Tried only when the first pattern
+    # does not match, so every index that parsed before parses exactly as before.
+    #   - Id grammar: three digits plus an optional `.N` and/or letter suffix (`081.5`, `128b`,
+    #     `245a`) — the ids `<task id="...">` actually carries in such projects.
+    #   - The status cell is the first later cell holding a status token or glyph; a row with none
+    #     is not a status row (dependency / reference tables) and is skipped.
+    $idFirstPattern = '^\|\s*\*{0,2}(\d{3}(?:\.\d+)?[a-z]?)\*{0,2}\s*\|'
+    $statusTokenPattern = '\[(?:open|wip|done|escalated|blocked)\]'
+    $statusCellPattern = "$statusTokenPattern|✅|🔲|🔄|⚠️|🟡"
+
+    # A cell holding the ASCII token wins over one holding only a glyph — a title or dependency cell
+    # can mention ✅ ("master merge ✅ 40c4b2a02"); the token appears only in the status cell.
+    function Find-LaterStatusCell([string[]] $RowCells) {
+        $later = @($RowCells | Select-Object -Skip 1)
+        $cell = $later | Where-Object { $_ -match $statusTokenPattern } | Select-Object -First 1
+        if ($null -eq $cell) { $cell = $later | Where-Object { $_ -match $statusCellPattern } | Select-Object -First 1 }
+        return $cell
+    }
+
     $candidates = @()
     foreach ($line in (Get-Content -LiteralPath $IndexPath -Encoding UTF8)) {
-        $m = [regex]::Match($line, $rowPattern)
-        if (-not $m.Success) { continue }
         $cells = Get-RowCells -Line $line
-        # RULE 1 — a first cell naming more than one task id is a dependency list, not a status row.
-        if (([regex]::Matches($cells[0], '\d{3}')).Count -ne 1) { continue }
+        $m = [regex]::Match($line, $rowPattern)
+        if ($m.Success) {
+            # RULE 1 — a first cell naming more than one task id is a dependency list, not a status row.
+            if (([regex]::Matches($cells[0], '\d{3}')).Count -ne 1) { continue }
+            $marker = $m.Groups[1].Value.Trim()
+            # `| **001** | title | … | ✅ | …` matches this pattern with marker `**`, which carries no
+            # status — the status lives in a later cell (see the block comment above). Read it there
+            # when one exists; otherwise keep the old marker so the row still counts.
+            if ($marker -notmatch $statusCellPattern) {
+                $later = Find-LaterStatusCell $cells
+                if ($null -ne $later) { $marker = $later.Trim() }
+            }
+            $candidates += [pscustomobject]@{
+                Id     = $m.Groups[2].Value
+                Marker = $marker
+                Width  = $cells.Count
+            }
+            continue
+        }
+        $m = [regex]::Match($line, $idFirstPattern)
+        if (-not $m.Success) { continue }
+        $statusCell = Find-LaterStatusCell $cells
+        if ($null -eq $statusCell) { continue }
         $candidates += [pscustomobject]@{
-            Id     = $m.Groups[2].Value
-            Marker = $m.Groups[1].Value.Trim()
+            Id     = $m.Groups[1].Value
+            Marker = $statusCell.Trim()
             Width  = $cells.Count
         }
     }
@@ -162,7 +204,24 @@ function Get-IndexMarkers {
 # distinct outcomes — so the check compares DONE-ness, not the literal words.
 function Test-PomlDone {
     param([string] $Status)
-    return $Status.StartsWith('completed') -or $Status -eq 'blocked-shipped'
+    # `complete` is a real variant in older POMLs (e.g. ai-m365-copilot-integration) — same meaning.
+    return $Status.StartsWith('complete') -or $Status -eq 'blocked-shipped'
+}
+
+# Some projects prefix their POML ids (`ENV-001`, `MCI-001`) while the index names the bare id (`001`),
+# or the reverse. Without this, every task reports twice as unpaired (once per side) although both sides
+# describe the same task — measured 2026-10-01 on production-environment-setup-r2 (38 POMLs, 38 rows,
+# "76 unpaired"). Pair on the id with the alphabetic prefix removed, unless that makes two ids collide
+# on one side (two series sharing numbers), in which case the raw ids are kept.
+function ConvertTo-PairingKeys {
+    param([hashtable] $Map)
+    $out = @{}
+    foreach ($k in $Map.Keys) {
+        $canonical = $k -replace '^[A-Za-z]+-(?=\d)', ''
+        if ($out.ContainsKey($canonical)) { return $Map }
+        $out[$canonical] = $Map[$k]
+    }
+    return $out
 }
 
 # TERMINAL states — a task is "no longer open".
@@ -198,8 +257,8 @@ function Invoke-ProjectCheck {
         return [pscustomobject]@{ Project = $Name; Poml = 0; Index = 0; Drift = 0; Unparseable = $false; Skip = 'no tasks/ dir'; Details = @() }
     }
 
-    $poml = Get-PomlStatuses -TasksDir $tasksDir
-    $idx = Get-IndexMarkers -IndexPath $indexPath
+    $poml = ConvertTo-PairingKeys -Map (Get-PomlStatuses -TasksDir $tasksDir)
+    $idx = ConvertTo-PairingKeys -Map (Get-IndexMarkers -IndexPath $indexPath)
 
     # The load-bearing guard: POMLs present but NO index rows parsed means the format is one this
     # script does not understand. That is an unknown result, never a clean one.

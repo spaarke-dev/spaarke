@@ -12,6 +12,14 @@
 // NOT under test in the CI unit suite (real Dataverse Web API calls). Handler
 // unit tests substitute a fake IDataverseAppUserCreator — parity with
 // DataverseWebApiHealthProbe's file-header note.
+//
+// auth-v4 §10.4 DUAL APP-USER TRAP (task 205d / punch row A41): the UAMI row's
+// azureactivedirectoryobjectid MUST be the UAMI's principalId — NEVER its
+// clientId. See DataverseAppUserCreationRequest.AzureActiveDirectoryObjectId's
+// remarks for the full silent-fail shape. This creator writes that field
+// explicitly (in the same POST as applicationid) whenever the caller supplies
+// it; it does NOT rely on Dataverse's applicationid-only auto-resolution for
+// that field.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -73,6 +81,19 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                 $"ApplicationId '{request.ApplicationId}' is not a valid GUID — refusing to build an OData filter from it.");
         }
 
+        // auth-v4 §10.4 defense-in-depth: if the caller supplied an explicit
+        // azureactivedirectoryobjectid (the UAMI row's principalId — see
+        // DataverseAppUserCreationRequest's remarks for the silent-fail trap
+        // this guards against), validate its GUID shape before it reaches the
+        // POST payload, same rationale as the ApplicationId check above.
+        if (request.AzureActiveDirectoryObjectId is not null
+            && !Guid.TryParse(request.AzureActiveDirectoryObjectId, out _))
+        {
+            return new DataverseAppUserCreationOutcome.Failure(
+                $"AzureActiveDirectoryObjectId '{request.AzureActiveDirectoryObjectId}' is not a valid GUID — " +
+                "refusing to write it to the systemuser row.");
+        }
+
         AccessToken token;
         try
         {
@@ -105,9 +126,13 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
                         "Root business unit (parentbusinessunitid eq null) not found — cannot create App User.");
                 }
 
-                // (3) Create the App User.
+                // (3) Create the App User. Explicit azureactivedirectoryobjectid
+                // (when supplied) is written in the SAME POST as applicationid —
+                // never a follow-up PATCH — so there is no window where the row
+                // exists with an unset/auto-resolved value (auth-v4 §10.4).
                 systemUserId = await CreateSystemUserAsync(
-                    envUri, token, request.ApplicationId, rootBuId, cancellationToken).ConfigureAwait(false);
+                    envUri, token, request.ApplicationId, request.AzureActiveDirectoryObjectId, rootBuId,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             // (4) Resolve the requested security role at the root business unit.
@@ -172,7 +197,8 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
     }
 
     private async Task<string> CreateSystemUserAsync(
-        Uri envUri, AccessToken token, string applicationId, string rootBuId, CancellationToken ct)
+        Uri envUri, AccessToken token, string applicationId, string? azureActiveDirectoryObjectId,
+        string rootBuId, CancellationToken ct)
     {
         var uri = new Uri(envUri, "/api/data/v9.2/systemusers");
         var payload = new Dictionary<string, object?>
@@ -180,6 +206,21 @@ public sealed class DataverseWebApiAppUserCreator : IDataverseAppUserCreator
             ["applicationid"] = applicationId,
             ["businessunitid@odata.bind"] = $"/businessunits({rootBuId})",
         };
+
+        // auth-v4 §10.4 (BINDING, punch row A41): when the caller supplies an
+        // explicit azureactivedirectoryobjectid, write it in this SAME POST —
+        // do NOT rely on Dataverse's applicationid-only auto-resolution. That
+        // auto-resolution is reliable for a standard Entra app registration
+        // (BFF app-reg OBO row — omitted here, request.AzureActiveDirectoryObjectId
+        // is null) but is the exact silent-fail surface for a Managed Identity
+        // row: a row created with the WRONG value (e.g. the UAMI's clientId
+        // instead of its principalId) still passes T2's existence + count
+        // check — only the app-only Dataverse call's oid-claim match fails,
+        // 401ing every call for that customer until an operator repairs it.
+        if (!string.IsNullOrWhiteSpace(azureActiveDirectoryObjectId))
+        {
+            payload["azureactivedirectoryobjectid"] = azureActiveDirectoryObjectId;
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, uri)
         {

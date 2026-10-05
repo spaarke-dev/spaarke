@@ -124,6 +124,24 @@ public sealed class ServiceBusHandlerEnqueuer : IHandlerEnqueuer, IAsyncDisposab
         ArgumentException.ThrowIfNullOrWhiteSpace(envelope.ParametersJson);
 
         var body = JsonSerializer.Serialize(envelope, BodySerializerOptions);
+
+        // COMP-09 (customer-provisioning-orchestration-r1 Wave 7 completeness
+        // sweep, 2026-08-27): guard the serialized body against the Service Bus
+        // Standard 256 KB per-message cap BEFORE SendMessageAsync so a rare
+        // H4b/H7/H12x envelope that ballooned above the cap fails fast at
+        // enqueue with a diagnostic exception (classified Resumable by
+        // FailureClassifier's default IOE path) instead of surfacing an
+        // opaque MessageSizeExceededException from the SDK — or worse,
+        // silently succeeding on Premium and later collapsing on a Standard
+        // migration.
+        //
+        // The cap counts UTF-8-encoded bytes of the JSON body only; SB
+        // application-property + system-property overhead is capped elsewhere
+        // (see MaxEnvelopeBodyBytes XML doc). Log the offending byte-count
+        // to give operators a size delta to reason about.
+        var bodyByteCount = Encoding.UTF8.GetByteCount(body);
+        EnsureBodyWithinCap(envelope, bodyByteCount, _options.MaxEnvelopeBodyBytes, _options.QueueName, _logger);
+
         var messageId = ComputeMessageId(envelope);
         var ttl = ResolveTimeToLive(envelope.HandlerId);
 
@@ -196,6 +214,54 @@ public sealed class ServiceBusHandlerEnqueuer : IHandlerEnqueuer, IAsyncDisposab
     /// original dispatch's, per spec.md's MUST rule:
     /// <c>MessageId = SHA256(HandlerId|RunId|CustomerId|paramHash|attempt)</c>.
     /// </remarks>
+    /// <summary>
+    /// COMP-09 (customer-provisioning-orchestration-r1 Wave 7 completeness
+    /// sweep, 2026-08-27) — extracted for unit testing. Throws
+    /// <see cref="InvalidOperationException"/> when
+    /// <paramref name="bodyByteCount"/> exceeds
+    /// <paramref name="maxBytes"/>; emits a structured LogError first so the
+    /// offending byte-count is captured for postmortem.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// Thrown when the serialized envelope body exceeds the configured cap.
+    /// FailureClassifier's default path maps this to <c>Resumable</c>, so the
+    /// run pauses at operator-fixable state instead of Quarantining on an
+    /// opaque SDK MessageSizeExceededException.
+    /// </exception>
+    internal static void EnsureBodyWithinCap(
+        HandlerEnvelope envelope,
+        int bodyByteCount,
+        int maxBytes,
+        string queueName,
+        ILogger logger)
+    {
+        ArgumentNullException.ThrowIfNull(envelope);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        if (bodyByteCount <= maxBytes)
+        {
+            return;
+        }
+
+        logger.LogError(
+            "Envelope body exceeds MaxEnvelopeBodyBytes cap: HandlerId={HandlerId} RunId={RunId} " +
+            "CustomerIdHash={CustomerIdHash} BodyBytes={BodyBytes} MaxBytes={MaxBytes} Queue={Queue}",
+            envelope.HandlerId,
+            envelope.RunId,
+            HashCustomerIdForLog(envelope.CustomerId),
+            bodyByteCount,
+            maxBytes,
+            queueName);
+
+        throw new InvalidOperationException(
+            $"HandlerEnvelope body for HandlerId={envelope.HandlerId} RunId={envelope.RunId} " +
+            $"exceeds MaxEnvelopeBodyBytes ({bodyByteCount} > {maxBytes} bytes). " +
+            "Service Bus Standard tier caps per-message size at 256 KB total (body + properties); " +
+            "the L2 default cap is 224 KB. Restructure the handler payload to reference bulk data " +
+            "via a Cosmos-side blob URL rather than inline the payload, or raise the cap for a " +
+            "Premium namespace (1 MB per-message limit).");
+    }
+
     internal static string ComputeMessageId(HandlerEnvelope envelope)
     {
         ArgumentNullException.ThrowIfNull(envelope);

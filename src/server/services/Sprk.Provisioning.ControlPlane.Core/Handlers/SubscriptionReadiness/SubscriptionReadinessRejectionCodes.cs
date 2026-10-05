@@ -54,10 +54,13 @@ public static class SubscriptionReadinessRejectionCodes
     public const string MissingTenantId = "subready-missing-tenant-id";
 
     /// <summary>
-    /// <c>run.TenancyModel</c> was null / whitespace OR was an unrecognized
-    /// value (not one of <c>SpaarkeOwned</c> / <c>Model1Shared</c> /
-    /// <c>CustomerOwned</c> / <c>Model2Dedicated</c>). Handler cannot decide
-    /// whether the Lighthouse branch applies — Resumable.
+    /// <c>run.TenancyModel</c> was null / whitespace OR was an unrecognized value. Task 223
+    /// (D-12): the accepted set is now defined by
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/> (model literals)
+    /// + <c>SpaarkeOwned</c> / <c>CustomerOwned</c> (ownership vocabulary). Pre-D-12 the model
+    /// literals were co-mingled inside the ownership sets — that co-mingling was the P-2 defect
+    /// (H1 forced Lighthouse for every Model 2 stamp even when Spaarke-owned). Handler cannot
+    /// decide whether the Lighthouse branch applies — Resumable.
     /// </summary>
     public const string InvalidTenancyModel = "subready-invalid-tenancy-model";
 
@@ -101,6 +104,16 @@ public static class SubscriptionReadinessRejectionCodes
     /// resume.
     /// </summary>
     public const string RunDeletedDuringCheck = "subready-run-deleted-during-check";
+
+    /// <summary>
+    /// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6 verbatim.
+    /// One or more required Azure resource providers did NOT reach
+    /// <c>Registered</c> state within the H1 poll timeout (default 5 min).
+    /// Diagnostic cites which providers failed + their observed
+    /// registrationState so the operator can escalate manually via
+    /// <c>az provider register</c> under an elevated identity.
+    /// </summary>
+    public const string ProviderRegistrationFailed = "subready-provider-registration-failed";
 }
 
 /// <summary>

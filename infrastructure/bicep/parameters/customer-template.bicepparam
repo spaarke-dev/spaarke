@@ -1,26 +1,13 @@
 // infrastructure/bicep/parameters/customer-template.bicepparam
-// Template for onboarding new customers - COPY and customize for each customer
+// Reference parameter set for customer.bicep — documents its parameters and sensible values.
 //
-// +----------------------------------------------------------------------+
-// |  HOW TO USE THIS TEMPLATE                                            |
-// |                                                                      |
-// |  1. Copy this file:                                                  |
-// |     cp customer-template.bicepparam {customer-id}-customer.bicepparam|
-// |                                                                      |
-// |  2. Replace all REPLACE_* placeholders with actual values            |
-// |                                                                      |
-// |  3. Deploy:                                                          |
-// |     az deployment sub create \                                       |
-// |       --location westus2 \                                           |
-// |       --template-file infrastructure/bicep/customer.bicep \          |
-// |       --parameters {customer-id}-customer.bicepparam                 |
-// |                                                                      |
-// |  OR use the provisioning script (RECOMMENDED):                       |
-// |     ./scripts/Provision-Customer.ps1 \                               |
-// |       -CustomerId {customer-id} \                                    |
-// |       -CustomerName "Customer Display Name" \                        |
-// |       -DataverseUrl "https://org.crm.dynamics.com"                   |
-// +----------------------------------------------------------------------+
+// Customer stamps are deployed ONLY by the L2 control plane: handler H2a (ArmDeploymentRunner) sends a
+// computed parameter payload for each run; it does not read this file (owner D19, task 249). Start a
+// new customer with the `/provision-environment` skill. This file is kept as a compile-checked reference
+// (the "Validate Bicep Infrastructure" workflow builds it) and for one-off local what-if experiments:
+//     az deployment sub what-if --location westus2 \
+//       --template-file infrastructure/bicep/customer.bicep \
+//       --parameters infrastructure/bicep/parameters/customer-template.bicepparam
 //
 // Constraints:
 //   - FR-06: Demo and real customers use this SAME template (no special-casing)
@@ -35,11 +22,11 @@ using '../customer.bicep'
 // CUSTOMER IDENTITY (REQUIRED - must customize)
 // ============================================================================
 
-// Customer identifier - lowercase, alphanumeric, 3-10 characters.
+// Customer identifier - lowercase letters and digits, starting with a letter, 3-8 characters.
 // Used in resource naming (sprk-{id}-*) and Key Vault secret prefixes.
 // Examples: 'contoso', 'acme', 'fabrikam'
-// NOTE: max length is 10 chars (enforced by customer.bicep @maxLength(10)).
-param customerId = 'replaceme'
+// NOTE: max length is 8 chars (customer.bicep @maxLength(8) — the limit comes from the Key Vault name).
+param customerId = 'replace'
 
 // ============================================================================
 // ENVIRONMENT
@@ -50,21 +37,6 @@ param environmentName = 'prod'
 
 // Azure region (should match customer's region preference)
 param location = 'westus2'
-
-// ============================================================================
-// SHARED PLATFORM REFERENCES
-// ============================================================================
-
-// Platform Key Vault name - from platform.bicep deployment outputs.
-// Canonical naming: sprk-{env}-kv (matches customer.bicep's own
-// `param platformKeyVaultName string = 'sprk-${environmentName}-kv'` default
-// per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md "KV-Secret &
-// Resource Naming Standard" R3 + spec.md §7.9 / FR-35, task-018). This
-// template's `environmentName` above is 'prod', so the value below MUST
-// track it — update BOTH if you change environmentName.
-// Get from: az deployment sub show -n platform-prod \
-//   --query properties.outputs.keyVaultName.value -o tsv
-param platformKeyVaultName = 'sprk-prod-kv'
 
 // ============================================================================
 // STORAGE

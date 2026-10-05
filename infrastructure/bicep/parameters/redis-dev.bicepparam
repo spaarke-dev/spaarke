@@ -1,50 +1,35 @@
 // infrastructure/bicep/parameters/redis-dev.bicepparam
-// Dedicated BFF Redis cache — dev environment parameters
+// Dev per-environment Redis — Azure Managed Redis, Microsoft Entra only.
 //
-// Project: spaarke-redis-cache-remediation-r1 (task 022, FR-10)
-// Spec Q1: dev SKU = Basic C0 (~$15/mo) — cost-optimized for dev workloads.
-// NFR-03: canonical name `spaarke-bff-redis-{env}` (top-level env-suffix).
+// Task 242 (owner D12/D13, customer-provisioning-orchestration-r1) moved modules/redis.bicep to Azure Managed Redis;
+// task 242b creates this cache and cuts the dev BFF and the dev L2 Worker over to it. Dev = Balanced_B0 WITHOUT high
+// availability (cost); customer stamps use B0 WITH high availability (customer.bicep). High availability is fixed at
+// create time.
 //
-// Usage:
+// Usage (task 242b — owner-approved live step):
 //   az deployment group create \
-//     --resource-group <rg> \
+//     --resource-group spe-infrastructure-westus2 \
 //     --template-file infrastructure/bicep/modules/redis.bicep \
 //     --parameters infrastructure/bicep/parameters/redis-dev.bicepparam
 //
-// OR via deploy script (task 030+):
-//   ./scripts/Deploy-RedisCache.ps1 -Environment dev
-//
-// Constraints:
-//   - FR-09: targets the audited redis.bicep module (SKU shape = string+int per audit decision)
-//   - NFR-05: dev environment only — prod/demo are separate param files
-//   - Module defaults: redisVersion='' (Azure default), subnetId='' (public), staticIP=''
+// The cache has no access keys: the identities below are the only way in. Each connects with its user-assigned managed
+// identity using `Redis__Endpoint` (host:10000) — no connection string, no Key Vault secret.
 
 using '../modules/redis.bicep'
 
-// ============================================================================
-// IDENTITY
-// ============================================================================
-
-// Canonical resource name (NFR-03)
+// Canonical per-environment name (ADR-009). Azure accepted it for the new cluster while the old Azure Cache for Redis of
+// the same name (Microsoft.Cache/redis, a different DNS zone) still existed — created 2026-10-04 (task 242b step 2).
 param redisName = 'spaarke-bff-redis-dev'
 
-// ============================================================================
-// SKU (Basic C0 — dev cost optimization, Spec Q1)
-// ============================================================================
-
-param sku = 'Basic'
-param capacity = 0
-
-// ============================================================================
-// SECURITY
-// ============================================================================
-
+param skuName = 'Balanced_B0'
+param highAvailability = 'Disabled'
 param minimumTlsVersion = '1.2'
-param enableNonSslPort = false
+param publicNetworkAccess = 'Enabled'
 
-// ============================================================================
-// TAGS
-// ============================================================================
+param accessPolicyPrincipalIds = [
+  '9fd47efb-7962-492b-ac44-e5ccd0268ebb' // mi-bff-api-dev (dev BFF spaarke-bff-dev runs as it)
+  '38f7693f-e6e2-4a3e-9acf-7f9e29dd4044' // sprk-controlplane-dev-uami (L2 Worker dispatch-idempotency cache)
+]
 
 param tags = {
   environment: 'dev'

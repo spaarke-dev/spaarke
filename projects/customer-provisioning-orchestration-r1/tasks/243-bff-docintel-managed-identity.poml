@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="243" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>BFF: Document Intelligence extraction via the stamp's managed identity (owner D13, plan G17) — "key OR managed identity" in both TextExtractorService guards, then remove `DocumentIntelligence-ApiKey` from the catalog and `customer.bicep`</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T243 (owner decision D13 keyless stamps, gap G17)</phase>
+    <gate>startable now (T226 done); independent of T248 (owner-blocked)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF `.cs` (tag bff-api) + its unit tests, `customer.bicep` (deployed by H2a) and the canonical secret catalog.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, fully specified change on an existing credential-selection pattern; the risk is completeness (catalog regeneration, BFF §10 obligations), not judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/CHANGELOG.md (main-session-only) and the BFF hot path</parallel-reason>
+    <tags>bff-api, ai, document-intelligence, auth, provisioning, bicep, canonical-secret-catalog, testing, model1-dedicated</tags>
+    <deps>226</deps>
+  </metadata>
+
+  <prompt>
+    Let the BFF extract text and layout with Document Intelligence through its managed identity when no API key is
+    configured, then stop writing the Document Intelligence key into customer stamps.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer (.NET 10 BFF, Bicep, canonical secret catalog). Follow ADRs and BFF §10 strictly.
+  </role>
+
+  <goal>
+    On a customer stamp with no `DocumentIntelligence__DocIntelKey`, `TextExtractorService` text and layout extraction
+    reach Document Intelligence through the stamp UAMI (`CreateDocIntelClient`'s existing managed-identity branch);
+    environments that still configure the key keep using it. No customer stamp writes or references
+    `DocumentIntelligence-ApiKey` any more.
+  </goal>
+
+  <context>
+    <background>
+      Owner D13 (2026-09-30): keyless customer stamps; BFF changes follow "key if configured, else MI" so the shared dev
+      env keeps working. Plan G17: both extraction paths gate on `DocIntelKey` (`TextExtractorService.cs:743` text,
+      `:967` layout), so the managed-identity client in `CreateDocIntelClient` (`:76-98`, auth-v4 task 054) is never
+      reached. The credential is already injected: `TextExtractorService` takes an optional `TokenCredential`, and the BFF
+      registers the UAMI-pinned `TokenCredential` singleton (`AnalysisServicesModule.cs:181` builds the service through
+      DI). The stamp side is ready: `modules/doc-intelligence.bicep` sets `customSubDomainName` (Entra needs a custom
+      subdomain — the shared dev account `spaarke-docintel-dev` has none, which is why dev keeps its key) and grants the
+      stamp UAMI Cognitive Services User. `customer.bicep` still writes the key (`kvSecrets` `DocumentIntelligence-ApiKey`,
+      from the module's `listKeys` output) and H4b emits `DocumentIntelligence__DocIntelKey` from the catalog
+      (`scripts/canonical-secret-catalog/manifest.yaml:369`, marked INTERIM until T243).
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/TextExtractorService.cs (guards :743, :967; CreateDocIntelClient :76)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TextExtractorServiceTests.cs (configuration tests ~:125-210)</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs (DocIntelKey doc comment)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (DocumentIntelligence-ApiKey entry) + Invoke-CatalogGenerator.ps1 (regenerate generated/)</file>
+      <file>infrastructure/bicep/customer.bicep (kvSecrets map, comments ~:606-616, ~:740-756) + customer.json</file>
+      <file>infrastructure/bicep/modules/doc-intelligence.bicep (`docIntelligenceKey` listKeys output)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (D13, G17, T243, T244)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner D13">
+      "Key if configured, else managed identity": when `DocIntelKey` is set the key path is used exactly as today. The
+      guards require the endpoint plus a credential — the key OR the injected `TokenCredential`. Do not delete the key
+      fallback (that is the shared dev/demo follow-on, plan §6).
+    </constraint>
+    <constraint source="plan T244 (scope boundary)">
+      Do NOT set `disableLocalAuth` on the Document Intelligence account (T244 owns local-auth disabling for every
+      stamp resource). Do not change OpenAI, AI Search, Redis or Content Safety.
+    </constraint>
+    <constraint source="CLAUDE.md §10 BFF hygiene">
+      Modification of an existing service only — no new endpoint, service, DI registration or package. State the placement
+      (existing service, in BFF) in the notes; measure publish size against a FRESH master build from short-path
+      worktrees with `Compress-Archive` (report both absolute sizes, delta and file counts); confirm no new HIGH CVE.
+      Update `TextExtractorServiceTests` for the changed behaviour.
+    </constraint>
+    <constraint source="KV credential lifecycle (provisioning.md)">
+      Removing the catalog entry stops NEW stamps from receiving the key. Do not delete any existing vault secret
+      (dev/demo `ai-docintel-key` stay); no live Azure change in this task.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The BFF's DI does not pass the `TokenCredential` to `TextExtractorService` (the optional parameter is null at runtime) → STOP and report; do not add a registration without saying so.</trigger>
+    <trigger>Any consumer other than the BFF's `DocumentIntelligence:DocIntelKey` (H13 probe, script, test, Bicep output reader) depends on `DocumentIntelligence-ApiKey` or the `docIntelligenceKey` output → STOP and report it before removing.</trigger>
+    <trigger>Publish-size delta ≥ +5 MB, or file counts differ between the two publishes → STOP (CLAUDE.md §10).</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="1">Guards at `:743` and `:967`: configured = endpoint AND (key OR credential). Update the "not configured" messages to name both options.</step>
+    <step order="2">Tests: managed-identity path passes the guard (endpoint + no key + a fake `TokenCredential` → reaches the next check, e.g. file-size limit, without a network call) for text AND layout; endpoint + no key + no credential → "not configured" (rename the existing key-missing test accordingly).</step>
+    <step order="3">Catalog: remove `DocumentIntelligence-ApiKey` from `manifest.yaml`; regenerate `generated/` with the generator; `-Verify`.</step>
+    <step order="4">`customer.bicep`: drop the kvSecrets entry and fix the comments; `modules/doc-intelligence.bicep`: drop the `listKeys` output (no consumer left). Recompile `customer.json` (`--outfile`).</step>
+    <step order="5">Docs: deployment guide / inventory / any current doc that says stamps carry the Doc Intel key; `DocumentIntelligenceOptions.DocIntelKey` doc comment ("optional — managed identity when unset"); CHANGELOG entry if `.claude` changes.</step>
+    <step order="6">BFF §10: publish-size vs fresh master (short paths), CVE check, placement statement.</step>
+    <step order="7">Verify + Step 9.5 + close (POML notes, TASK-INDEX, plan §7 T243 + G17, current-task, drift check) + commit + push.</step>
+  </steps>
+
+  <outputs>
+    <output type="file-modified">TextExtractorService.cs; TextExtractorServiceTests.cs; DocumentIntelligenceOptions.cs (comment); manifest.yaml + generated/; customer.bicep + customer.json; modules/doc-intelligence.bicep; docs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Text and layout extraction with endpoint + injected credential and NO key pass the configuration guard (test reaches the next check without a network call).</criterion>
+    <criterion testable="true">Endpoint + no key + no credential → both paths return the "not configured" failure; endpoint missing → "not configured" (unchanged); endpoint + key → key path unchanged (existing tests pass).</criterion>
+    <criterion testable="true">`git grep DocumentIntelligence-ApiKey` outside historical notes/CHANGELOG returns nothing in the catalog, generated files, `customer.bicep`/`customer.json`; `docIntelligenceKey` output gone; catalog `-Verify` OK; checked-in `customer.json` = fresh compile; `bicep-e2e-dry-run.ps1` PASS.</criterion>
+    <criterion testable="true">BFF builds 0 errors; `Sprk.Bff.Api.Tests` TextExtractorService tests pass and the full BFF unit suite has no new failures vs master; ControlPlane.Tests no failures beyond the 6 T221 baseline; ArchTests pass.</criterion>
+    <criterion testable="true">Publish size: master vs branch from fresh short-path worktrees, `Compress-Archive`, both sizes + delta + equal file counts recorded in the notes; no new HIGH CVE.</criterion>
+    <criterion testable="true">Test scope: the two configuration branches above for text and layout; anything beyond needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Filed 2026-10-02 (SESSION 31) from plan §7 T243 after T249 closed; T248 is owner-blocked, T243 is next in order.
+
+    COMPLETION (2026-10-02). Verified: BFF builds 0 warnings 0 errors; BFF unit suite 13,575 pass / 0 fail / 54 skip of
+    13,629 (full run before the credential-rejection catch was added; TextExtractorServiceTests + ComposePdfIntakeSourceTests
+    re-run after it: 87/87); ControlPlane.Tests 2127 pass / 6 fail (T221 CustomerRunGuardModulePostConfigureTests baseline) /
+    1 skip; ArchTests 341/341; catalog -Verify OK; customer.json = fresh compile; bicep-e2e-dry-run PASS; prereqs OK;
+    task-status drift clean.
+
+    DONE: TextExtractorService — `IsDocIntelConfigured` = endpoint AND (key OR injected TokenCredential) gates text and
+    layout; CreateDocIntelClient unchanged (key wins when set — dev/demo keep theirs, D13); a rejected credential (401/403
+    or AuthenticationFailedException) returns a plain "rejected the service's credential" failure and does not trip the
+    circuit breaker (code-review W6); the managed-identity notice logs once per process (adr W4). DI already passes the
+    UAMI-pinned TokenCredential (Program.cs:48 → optional ctor param) — escalation trigger #1 did not fire. Catalog:
+    `DocumentIntelligence-ApiKey` removed (+ generated/); customer.bicep stops writing it; doc-intelligence.bicep's
+    `listKeys` output removed (its only consumer was customer.bicep — trigger #2 did not fire). `disableLocalAuth` left to
+    T244 (boundary kept). Docs: DocIntelKey option comment, appsettings.template `_DocIntelKey_comment`,
+    CONFIGURATION-MATRIX (DocIntelKey optional; DocumentIntelligence:Enabled is FALSE when unset), ai-document-summary,
+    inventory, spec ADR-028 tension row, .claude pattern + CHANGELOG.
+
+    SCOPE EXPANSION (owner D22, AskUserQuestion 2026-10-02): FOUND that no stamp ever set the BFF's AI master switch —
+    the DI gates read GetValue<bool>("DocumentIntelligence:Enabled") (false when unset; the options-class default true
+    does not apply), so stamps registered NullTextExtractor and ran without analysis/playbooks/search (the 2026-08-22
+    stand-up log). Added the catalog per-env literal `DocumentIntelligence__Enabled=true` (plan G29 ✅). It exposes AI Search
+    MI 403 until T244 and the BFF's hard-coded dev Content Safety fallback until T246 → owner: keep it, T244 + T246 are
+    hard prerequisites of T186 (recorded in the plan + T186 deps). Startup impact (code-review): no new fail-fast; two more
+    KV references (AzureOpenAI-Endpoint, AiSearch-Endpoint) must resolve at boot because the indexing worker builds its
+    clients — proven at T186.
+
+    BFF §10: PLACEMENT — modification of an existing BFF service (TextExtractorService, Services/Ai) only; no endpoint,
+    service, DI registration or package. PUBLISH SIZE (fresh short-path worktrees, `dotnet publish -c Release`,
+    PowerShell Compress-Archive, incl. PDBs): master 818840ac6 = 45.66 MB / 212 files; pre-T243 33365edd2 = 45.54 MB /
+    212 files; T243 = 45.54 MB / 212 files → delta +0.00 MB (branch −0.12 MB vs master = master's growth since the last
+    merge). CVE: `dotnet list package --vulnerable --include-transitive` — none; csproj unchanged.
+
+    QUALITY GATES (Step 9.5). code-review: no Critical; W1 → D22; W2 recorded above; W3 FIXED (DocumentIntelligence-ApiKey
+    in the removed-keys negative theory; the duplicate positive row dropped); W4 FIXED (the AI-flags literal test pins
+    DocumentIntelligence__Enabled); W5 FIXED (CONFIGURATION-MATRIX default); W6 FIXED (credential rejection); S1 log once;
+    S2 layout message aligned; S3 historical comments keep the canonical name (accepted — the catalog/Bicep carry no
+    entry, value or output for it); S4 → T244 row note (delete a leftover key setting before disabling local auth); S5 →
+    T235; S6 kept the unreachable null-credential throw as an invariant. adr-check: no blocking violation; V1 (ADR-028 —
+    E-2 covers only OpenAI; the dev/demo Doc Intel key is an un-enumerated exception) → path A now (spec ADR Tensions row
+    updated) + path B at T235 (enumerate it, or record D13); W1 = code-review W5; W2 = D22; W3 = W6; W4 = S1; W5 template
+    comment added; W6/W7 done here.
+
+    Test-scope justification: text + layout × (managed identity passes the guard; no key + no credential → not
+    configured) per the AC; plus one credential-rejection test per path for the W6 behaviour, and two catalog pins
+    (removed key, AI switch literal) that guard the regressions this task found.
+
+    FOLLOW-UPS: reconcile the `DocumentIntelligence:Enabled` code defaults (options class true vs DI gates false) — BFF
+    follow-up list; dev/demo env migration off the Doc Intel key (needs a custom subdomain on spaarke-docintel-dev —
+    irreversible endpoint change) = D13 follow-on; ADR-028 enumeration at T235.
+  </notes>
+</task>

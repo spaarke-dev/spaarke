@@ -1,0 +1,274 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="248" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>L2 signs in as the SPE owning app with MI-FIC, not a certificate (G28, owner D16) — live probe, credential factory, H0 + T6 probes, container-type registration, Worker configuration</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T248 (gap G28; owner decision D16; open items O1/O2)</phase>
+    <gate>blocked until the owner has created the `Spaarke Model 1` container type and sent its id (D16 owner action); after T249 (file overlap)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Auth-sensitive .cs changes (credential factory, H0/H8/H13 probes, options validation) plus Bicep, a Worker deployment and live Graph calls.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security/auth-sensitive: replaces the credential L2 uses to act as another application's identity; includes live token-exchange verification and a production-relevant registration call.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (provisioning constraints/patterns, provision-environment skill) — main-session-only; live steps need operator confirmation; file overlap with T225b/T249 (Worker Bicep module)</parallel-reason>
+    <tags>provisioning, l2-controlplane, provisioning-handler, auth, spe, bicep, deploy, testing, model1-dedicated</tags>
+    <deps>249, owner: Spaarke Model 1 container type</deps>
+  </metadata>
+
+  <prompt>
+    Replace the SPE owning-app certificate with the federated credential created on 2026-10-02: prove it works from
+    inside Azure first, then make L2 acquire owning-app tokens from the Worker's managed identity, make H0 and the H13 T6
+    trap probe check things that can actually pass, register `Spaarke Model 1` in Spaarke's tenant, and point the Worker
+    at the container type.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane, expert in Entra workload identity federation,
+    Azure.Identity and Microsoft Graph SharePoint Embedded APIs. Follow ADR-028 A4 strictly.
+  </role>
+
+  <goal>
+    A Model 1 run's H0 passes the SPE owner check without any certificate or stored secret; H8 creates and verifies the
+    customer container as the `Spaarke SPE Model 1 Owner` app using a token obtained through the Worker UAMI's federated
+    credential; H13's T6 probe makes an app-only call that succeeds for a correctly configured stamp; `Spaarke Model 1`
+    is registered in Spaarke's tenant; the Worker (dev) is configured with `{containerTypeId, ownerAppId}`; no document
+    or skill tells an operator to create an owning-app certificate.
+  </goal>
+
+  <context>
+    <background>
+      G28: H0 rejects every run because L2 expected a password-less base64 PFX `SPE-OwnerCert-Pfx` in the platform vault
+      (`SpeContainerOptions.ContainerTypeOwners` → `SpeConfidentialClientGraphFactory` builds a `ClientCertificateCredential`;
+      `KeyVaultCertBootstrapProbe` checks the secret exists and is ≥ 24 h old) and none exists. Owner D16 (2026-10-02):
+      use MI-FIC — ADR-028 A4's default credential; no ADR-028 amendment (spec row → path C). Done live 2026-10-02 with the
+      operator identity: app `Spaarke SPE Model 1 Owner` (appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, single-tenant),
+      Graph `FileStorageContainer.Selected` + `FileStorageContainerTypeReg.Selected` (Application) consented, FIC
+      `sprk-controlplane-dev-uami-assertion` (subject = principalId `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044` of
+      `sprk-controlplane-dev-uami`, client id `965a4a01-01e1-442b-97a6-6a98308018b3`; structure verified, token exchange
+      NOT yet tested — only possible from compute carrying the UAMI). Researcher findings
+      (`.claude/agent-memory/researcher/spe-owning-app-mi-as-fic-2026-10-02.md`): FIC tokens are client assertions
+      (`appidacr`/`azpacr` = 2), same shape as a certificate; container-type registration is now documented only as Graph
+      v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{id}`; the legacy SharePoint REST registration returns
+      `apiNotFound` in this tenant. Separately, the H13 T6 probe calls app-only `GET /storage/fileStorage/containerTypes`,
+      which is documented to return 403 app-only — it could never pass.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/SpeConfidentialClientGraphFactory.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/SpeContainerOptions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/SpeContainerRejectionCodes.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/H8SpeContainerHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/GraphContainerProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/GraphAppOnlyContainerVerifier.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/KeyVaultCertBootstrapProbe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/H0PreflightHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/T6SpeConfidentialClientTrapProbe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/GraphContainerTypesListAppOnlyProbe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/WorkerDataverseCredentialFactory.cs (REFERENCE — its MI-FIC branch)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/HandlersModule.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/{SpeConfidentialClientGraphFactoryTests, SpeContainerOptionsTests, KeyVaultCertBootstrapProbeTests, T6SpeConfidentialClientTrapProbeTests, H8SpeContainerHandlerTests, H0PreflightHandlerTests}.cs</file>
+      <file>infrastructure/bicep/modules/controlplane-worker-app-service.bicep, infrastructure/bicep/platform-controlplane.bicep (+ .json), infrastructure/bicep/parameters/platform-controlplane-dev.bicepparam</file>
+      <file>scripts/provisioning-prereqs/spaarke-constants.yaml</file>
+      <file>docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md, docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md, docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md, docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md, .claude/constraints/provisioning.md, .claude/patterns/provisioning/*.md, .claude/CHANGELOG.md (main session)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md (ADR Tensions: ADR-028 E-1 row)</file>
+      <file>.claude/agent-memory/researcher/spe-owning-app-mi-as-fic-2026-10-02.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+    <patterns>
+      <pattern name="Worker MI-FIC client assertion" location="Handlers/Credentials/WorkerDataverseCredentialFactory.cs">
+        The Worker already exchanges its UAMI token (audience api://AzureADTokenExchange) for an app token via a client
+        assertion. Copy that mechanism; do not introduce a second way to obtain the UAMI assertion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-028 A4 + owner D16">
+      Every owning-app token L2 acquires in this task comes from a client assertion fed by the Worker UAMI. No certificate,
+      no client secret, no Key Vault read for the owning-app credential. Do not keep the certificate path as a silent
+      fallback; if the live probe fails, escalation 1 applies.
+    </constraint>
+    <constraint source="live-change discipline (root CLAUDE.md — outward-facing actions)">
+      Before each live action — creating any temporary Azure resource for the probe, the registration `PUT`, the
+      `platform-controlplane` deployment, the Worker code deployment — state exactly what will change and get the owner's
+      confirmation. Read-only calls need no confirmation. Delete any temporary resource the probe created.
+    </constraint>
+    <constraint source=".claude/constraints/provisioning.md § KV credential lifecycle (BINDING)">
+      No Key Vault secret is created, deleted or purged. The soft-deleted `spe-app-cert` and every E-1 secret
+      (`spe-owning-app-secret` etc.) are untouched. Do not add any federated credential other than the one already on the
+      owning app.
+    </constraint>
+    <constraint source="scope">
+      Per-customer BFF grants on the registration (G9) are T227 — the registration created here grants only the owning
+      app itself. `spaarke-constants.yaml` gets the Model 1 container type id under the env key the
+      `/provision-environment` skill reads for Model 1 stamps; the file's stale trial-era structure is T227 (G2). No change
+      to `src/server/api/Sprk.Bff.Api` (its SpeAdmin secret path is E-1, unchanged).
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The live probe cannot obtain an owning-app token through the FIC, or Graph/SPE rejects the FIC-acquired token on any call this task needs → STOP. Report the error and the decoded token claims (no token values). The certificate is then ADR-028 A4's sanctioned alternative for a stated reason — that is an owner decision, not an implementation choice.</trigger>
+    <trigger>The container type the owner created is not `standard`, is owned by an app other than `bfac7f6e-…`, or has no billing attached → STOP before registering it.</trigger>
+    <trigger>Graph's registration contract (body shape, permission names) differs from the researcher note in a way that changes what is granted → STOP and report before sending the PUT.</trigger>
+  </escalation>
+
+  <steps mode="prescriptive">
+    <step order="0">Precondition: owner has sent the `Spaarke Model 1` container type id. Read-only: `GET` the container type (delegated, via a tool that has the scope, or the SharePoint admin center) and confirm name, owning app `bfac7f6e-…`, `standard`, billing attached. 0 behind origin/master.</step>
+    <step order="1">LIVE PROBE (confirm first). From compute that carries `sprk-controlplane-dev-uami` — preferred `az webapp ssh` into the Worker's app container (not the SCM container); otherwise a throwaway ACI with the UAMI attached — obtain the UAMI assertion, exchange it for an owning-app Graph token (tenant `a221a95e-…`, client `bfac7f6e-…`), record `appidacr`/`azpacr`/`roles` claims (never the token), then: `GET /storage/fileStorage/containerTypeRegistrations/{id}`; if not registered, `PUT` the registration granting the owning app itself (confirm the body first); `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}`. Record results in the POML notes. Escalation 1 if anything fails.</step>
+    <step order="2">Code — credential: `SpeConfidentialClientGraphFactory` builds a client-assertion credential fed by the Worker UAMI (reference: `WorkerDataverseCredentialFactory`); `SpeContainerOptions` owner entries become `{ContainerTypeId, OwnerAppId}` (vault/secret properties and their validation removed; GUID + duplicate checks kept).</step>
+    <step order="3">Code — H0: replace `KeyVaultCertBootstrapProbe` with an owner-credential probe: owner entry exists for the run's `containerTypeId`; an owning-app token can be acquired; the registration `GET` succeeds. Retire the 24 h age gate and `spe-cert-bootstrap-missing`; distinct Resumable codes for (a) no owner entry, (b) token exchange failed, (c) container type not registered. Update H0's rejection-code documentation and every consumer of the old code (grep: skill, docs).</step>
+    <step order="4">Code — H13 T6: replace the app-only `GET /storage/fileStorage/containerTypes` probe with app-only `GET /storage/fileStorage/containers?$filter=containerTypeId eq {id}`, passing when the call succeeds and the run's container is listed.</step>
+    <step order="5">Tests for steps 2–4 (see test-scope criterion). Build + run ControlPlane.Tests and ArchTests.</step>
+    <step order="6">Configuration: Worker Bicep emits only `ContainerTypeId` + `OwnerAppId` per owner entry; `platform-controlplane-dev.bicepparam` `speContainerTypeOwners = [{ containerTypeId: '{id}', ownerAppId: 'bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e' }]`; recompile JSON (`--outfile`); `spaarke-constants.yaml` Model 1 container type id.</step>
+    <step order="7">DEPLOY (confirm first): `platform-controlplane` to dev, then the Worker code. Verify read-only: Worker app settings carry the owner entry and no `OwnerCert*` setting; Worker healthy; trigger nothing else.</step>
+    <step order="8">Docs: topology runbook rewritten for MI-FIC (owning app → consent via `appRoleAssignedTo` → FIC → container type in admin center → registration via Graph v1.0) incl. its drift (H8 "uses the BFF UAMI", FIC "added in Step 8", grants `POST` vs per-item `PUT`); topology doc owning-app credential section; inventory; deployment guide; `.claude` constraints/patterns/skill (main session) + CHANGELOG; spec ADR-028 E-1 row notes the probe result; plan §4 G28 closed.</step>
+    <step order="9">Step 9.5 gates (code-review + adr-check — auth-sensitive). Close: POML notes, TASK-INDEX `✅ [done]`, current-task.md, drift check. Commit + push.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">Graph via `az rest` (read-only checks), `az webapp ssh`, `az bicep build --outfile`, deployments (after confirmation)</tool>
+    <tool name="dotnet">Build + test ControlPlane and ArchTests</tool>
+    <tool name="pwsh">Scripts, check-task-status-drift.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">SpeConfidentialClientGraphFactory, SpeContainerOptions, H0 owner-credential probe (replaces KeyVaultCertBootstrapProbe), T6 probe, rejection codes, DI</output>
+    <output type="test">Updated/replaced tests for the factory, options, H0 probe, T6 probe, H8</output>
+    <output type="config">Worker Bicep module, platform-controlplane (+ JSON), dev bicepparam, spaarke-constants.yaml</output>
+    <output type="docs">Topology runbook + doc, inventory, deployment guide, .claude constraints/patterns/skill, CHANGELOG, spec row, plan G28</output>
+    <output type="live">Registration of Spaarke Model 1 in Spaarke's tenant; dev Worker configuration + deployment (after confirmation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The live probe obtained an owning-app token through the FIC from compute carrying the Worker UAMI, and the registration `GET` and the containers `GET` succeeded with it; the POML notes record the claims checked and each call's status (no token values). If not, the task stopped at escalation 1.</criterion>
+    <criterion testable="true">`SpeConfidentialClientGraphFactory` obtains owning-app tokens only through a UAMI-fed client assertion; no code path in L2 loads a certificate or secret for the owning app; `SpeContainerOptions` owner entries have no vault/secret properties.</criterion>
+    <criterion testable="true">H0: a run whose `containerTypeId` has an owner entry, a working token exchange and an existing registration passes the SPE check with no time gate; a run with no owner entry, a failed token exchange, or an unregistered container type is rejected Resumable with three distinct codes; `spe-cert-bootstrap-missing` no longer exists in code or current docs.</criterion>
+    <criterion testable="true">H13 T6: passes when the app-only containers listing for the container type succeeds and includes the run's container; fails (with its existing trap semantics) when the call is refused or the container is absent; no code calls app-only `GET /storage/fileStorage/containerTypes`.</criterion>
+    <criterion testable="true">Worker (dev) app settings contain `SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId` / `__OwnerAppId` with the Model 1 values and no `OwnerCert*` setting; checked-in JSON = fresh compile.</criterion>
+    <criterion testable="true">No Key Vault secret was created, deleted or purged; no federated credential other than `sprk-controlplane-dev-uami-assertion` exists on the owning app; any temporary probe resource was deleted.</criterion>
+    <criterion testable="true">ControlPlane projects build 0/0; ControlPlane.Tests no failures beyond the 6 T221 baseline; ArchTests pass (incl. CredentialGuardTests with no new allowlist entry).</criterion>
+    <criterion testable="true">Test scope: cover the credential factory's assertion path, owner-options validation, the H0 probe's pass + three rejection paths, and the T6 probe's pass + refused + container-absent paths. Anything beyond that needs a one-line justification in the POML notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Filed 2026-10-02 from plan §7 T248 / owner D16. Live state at filing: owning app + consent + FIC exist (plan §2 D16);
+    the container type does not yet (owner action).
+
+    2026-10-03 — CONTAINER TYPE CREATED by the owner (SharePoint admin center): `Spaarke Model 1`, id `fb3817a8-5a55-42ba-8cc9-12cf055168b8`.
+    Read-only checks (operator identity): the id is not an app registration or service principal (it is the container
+    type); standard billing IS attached — `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b`
+    (`identityType: ContainerType`, `identityId: fb3817a8-5a55-42ba-8cc9-12cf055168b8`, created 2026-10-03T15:55Z by the operator) in subscription
+    *Spaarke Shared Production* (renamed from Spaarke Model 1 Production 2026-10-03), resource group `rg-spaarke-shared-prod`, eastus. The owning app
+    `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e` still has 0 secrets / 0 certificates (the admin-center flow asked for a client
+    secret; none was added). NOT yet verified: the container type's owning app (Graph `containerTypes/{id}` is 403 for the
+    Azure CLI identity — owner to confirm in the admin center). Escalation trigger #2 stays armed until it is.
+    🔴 The billing account sits in `rg-spaarke-shared-prod`, which T241 planned to delete; the billing binding is permanent
+    (notes/spe-billing-attach-requirement.md) — T241 row updated to keep it.
+    Owner confirmed in the admin center (2026-10-03): the container type's owning app is `bfac7f6e-…` → escalation
+    trigger #2 disarmed. Step 0 also: branch merged with origin/master (66 behind → 0; merge `cc7f76aa3`, two conflicts
+    resolved — .claude/CHANGELOG.md both entries kept; Register-EntraAppRegistrations.ps1 kept T213.4's topology params +
+    functions and master's `-AcctClaimOnly` params + functions; parses, parameter set complete).
+
+    STEP 1 LIVE PROBE — PASSED (2026-10-03, owner-approved "Run + register"). Compute: throwaway ACI
+    `sprk-t248-fic-probe` (rg-spaarke-platform-dev, westus2, mcr azure-cli image, restart Never) carrying
+    `sprk-controlplane-dev-uami`; DELETED after reading its logs (exit 0). `az webapp ssh` was not usable (interactive
+    only). Script printed claims + statuses only, never a token.
+      1. UAMI assertion (IMDS, resource api://AzureADTokenExchange): 200 — iss = tenant v2.0, sub/oid = 38f7693f-… ,
+         azp = 965a4a01-… (the UAMI client id).
+      2. FIC exchange (client_credentials, client_id bfac7f6e-…, jwt-bearer client_assertion = step 1, scope Graph
+         .default): 200 — aud https://graph.microsoft.com, tid a221a95e-…, appid bfac7f6e-…, **appidacr "2"**
+         (client-assertion class — same as a certificate; the researcher's prediction holds), idtyp app, ver 1.0,
+         roles [FileStorageContainerTypeReg.Selected, FileStorageContainer.Selected].
+      3. GET /v1.0/storage/fileStorage/containerTypeRegistrations/fb3817a8-…: 200 — ALREADY REGISTERED
+         (registeredDateTime 2026-10-03T22:54:58Z, i.e. by the owner today), owningAppId bfac7f6e-…,
+         billingClassification standard, billingStatus valid. Grants: bfac7f6e-… delegated [full] / application [full];
+         **de8bc8b5-d9f9-48b1-a8ad-b748da725064 = Microsoft "Graph Explorer"** delegated [full] / application [none]
+         (not added by L2 — reported to the owner). Settings: isDiscoverabilityEnabled false, isSearchEnabled true,
+         isItemVersioningEnabled true, itemMajorVersionLimit 500, isSharingRestricted false, urlTemplate "".
+      4. PUT: not sent (registration existed — the GET did not return 404).
+      5. GET /v1.0/storage/fileStorage/containers?$filter=containerTypeId eq fb3817a8-…: 200, value [] (no containers yet).
+    Conclusion: Graph accepts owning-app tokens obtained through the MI-FIC for both SPE calls this task needs →
+    escalation trigger #1 does NOT fire; no certificate needed. Note for T227 (G9): the registration PUT is
+    create-OR-REPLACE — adding per-customer BFF grants must keep the owning-app grant (or use the per-app grant API).
+
+    COMPLETION (2026-10-03). Steps 0–9 done; owner approvals: live probe ("Run + register"), dev deploy ("Deploy as
+    described"), Graph Explorer grant ("Keep it").
+    STEP 2–4 CODE: `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential` — the one place the Worker
+    mints the UAMI assertion (FR-39 MI-FIC branch now calls it); `SpeConfidentialClientGraphFactory` → instance singleton,
+    credential cached per (tenant, owning app), callers dispose Graph clients; `SpeContainerOptions` owner =
+    {ContainerTypeId, OwnerAppId} (CertLoadTimeout + vault/secret + their validation removed); H8 provisioner/verifier +
+    request records cert-free; `KeyVaultCertBootstrapProbe` deleted → `Preflight/SpeOwnerCredentialProbe.cs` (check
+    `SpeOwnerCredential`; registration GET as the owner; Resumable `spe-owner-not-configured` / `spe-owner-token-failed`
+    (exchange failed OR Graph 401/403) / `spe-container-type-not-registered`; no time gate) via new optional
+    `PreflightCheckResult.RejectionCode`; T6 → `GraphContainersListAppOnlyProbe` (git mv; app-only containers listing of
+    the type as the owner, nextLink followed, page cap = no verdict) + `TrapVerificationRequest.SpeContainerId` from H13
+    (declared in HandlerRunInputs, optional). JUDGMENT: container listed-but-absent → T6 **Failed** (QuarantineRequired):
+    the run recorded a container the owner cannot see — the silent-fail class T6 exists for; refusals keep the existing
+    semantics (trap phrase → Failed, other → InfraFault).
+    STEP 5 TESTS: ControlPlane.Tests 2121 pass / 6 fail (T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip;
+    ArchTests 346/346 (CredentialGuardTests: text-only edits, no new allowlist entry; census Sites: 2 unchanged). New:
+    SpeOwnerCredentialProbeTests (pass + 3 codes, real Graph SDK over a fake handler), GraphContainersListAppOnlyProbeTests
+    (6 — added after the gates' W1), factory F2 assertion-path test (real Azure.Identity/MSAL over a fake Entra transport).
+    Test-scope justifications (beyond the closed set): factory F1 guards "never a certificate or secret credential" (the
+    task's security invariant); F3 keeps the existing trap-phrase detector test (T6 depends on it); T6 ReplicationPending
+    and seam-throw tests were existing behaviour, rewritten for the new seam; the boot-test / H0 / H8 fixture edits only
+    follow the removed options. Removed: KeyVaultCertBootstrapProbeTests (whole class retired), the T6 argument-guard test
+    (ADR-038 B4).
+    STEP 6 CONFIG: Worker Bicep emits only ContainerTypeId + OwnerAppId; dev bicepparam speContainerTypeOwners =
+    [{fb3817a8-…, bfac7f6e-…}]; platform-controlplane.json recompiled; spaarke-constants.yaml dev containerTypeId set
+    (stale trial-era structure left for T227/G2); prereqs validate.ps1 OK.
+    STEP 7 DEPLOY (2026-10-03, owner-approved): `az deployment sub create` t248-platform-controlplane-dev-20261003-205456 —
+    all modules Succeeded EXCEPT the Api site (`controlplane-app-service`: Conflict "configuration settings have been
+    prepared for swap" — a swap-with-preview left pending on spaarke-provisioning-controlplane-dev; its template had no
+    change since 2026-08-21; NOT resolved — owner to decide). Worker settings read back: ControlPlaneIdentity__PrincipalObjectId
+    = 38f7693f-…, SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId = fb3817a8-…, __OwnerAppId = bfac7f6e-…, no
+    OwnerCert* setting. Worker code: Deploy-ControlPlane.ps1 -Target Worker (zip deployed 20:59Z, OneDeploy success).
+    Worker /healthz = 503: the deploy also created the Exchange-policy sidecar for the FIRST time and it refuses to start
+    (env vars passed as literals where App Service expects app-setting NAMES; sentinel Exchange cert; placeholder app id) —
+    App Service holds the site until all containers run. Owner direction: fix the sidecar properly, Worker down meanwhile
+    is fine → **T251 / G30** (prerequisite of T186). The .NET Worker itself booted (ValidateOnStart passed; reconciler
+    started). The Worker code redeployed with T251 will include this task's post-gate fixes (credential caching, page cap).
+    Fix-at-discovery: Deploy-ControlPlane.ps1 Worker zip deploy `--track-status false` (it deadlocked: the CLI waited
+    ~17 min for a stopped site to start). Note: the script's ShouldProcess prompt fails in a non-interactive shell — pass
+    `-Confirm:$false` there.
+    No KV secret created/deleted/purged; the owning app still has exactly one FIC; the probe ACI was deleted.
+    STEP 8 DOCS: topology runbook rewritten for MI-FIC (+ drifts: H8 identity, FIC placement, v1.0 per-app grant PUT);
+    topology doc §3A owning-app credential + Model 1 state (Graph Explorer grant: owner keep); inventory; deployment guide;
+    retired scripts/preflight/Test-SpeCertBootstrap.ps1 (throws); legacy notes on Get-SpeConfidentialClientToken.ps1,
+    Register-BffMiWithContainerType.ps1, New-BusinessUnitContainer.ps1, Get-SpeContainerMetadata-AppOnly.ps1;
+    config/spaarke-resources.yaml; .claude constraints (new BINDING SPE owning-app section), skill (Step 0.5b/0.5c — the
+    container-type GET 403 to the operator's CLI token is expected → defer to H0; check (5) flagged for T227), ADR-028 E-1
+    informational note, CHANGELOG; spec ADR-028 row (probe PASSED) + new ADR-007 scope row; plan G28 closed.
+    STEP 9.5 GATES: code-review approve-with-warnings, 0 Critical; adr-check PASS, 0 violations. Fixed: W1 listing-probe
+    tests; W2 page cap → InfraFault; credential caching + Graph client disposal (A4); diagnostics (FIC issuer = the UAMI's
+    tenant; transient faults); stale comments (csproj, InterStepState, HandlerResult, IPreflightQuotaProbe, H0
+    infra-error message); docs (deployment guide Phase 5, legacy script notes, resources yaml, runbook deploy-order reason,
+    skill grant message); spec ADR-007 row; ADR-028 E-1 note; test trims. Not changed (follow-ups): system-assigned MI
+    fallback when ManagedIdentity:ClientId is unset (fails loudly as spe-owner-token-failed); registration owningAppId /
+    billingStatus are recorded, not enforced; rename WorkerDataverseCredentialFactory (now also the SPE owner credential);
+    reconsider the IT6GraphAppOnlyProbe / ISpeContainer* seams now that a transport seam exists.
+    FOLLOW-UPS: T251 (sidecar, G30 — T186 prerequisite); Api site pending swap (owner); T227 per-customer BFF grants (keep
+    the owning-app + Graph Explorer grants — the registration PUT is create-or-replace); T250 BFF SpeAdmin MI-FIC.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute; FULL rigor; Step 9.5 gates are mandatory; live steps need owner confirmation each time.</protocol>
+  </execution>
+</task>

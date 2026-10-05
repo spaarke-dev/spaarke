@@ -36,7 +36,7 @@
 - Data model = 12 new columns on `sprk_dataverseenvironment` + Cosmos DB `spaarke-provisioning` database
 - Infrastructure = 25 Bicep modules (+ new `uami.bicep`) + `platform.bicep` rebuild + `customer.bicep` extension + `model1-shared.bicep` first-class + `platform-controlplane.bicep` new
 - Governance = Phase G canonical naming + Phase H canonical secret-catalog manifest + Phase C UAMI structural migration
-- Enforcement = 5 new ArchTests (§4D I1–I5 tenant isolation) + 6 handler post-condition trap-verifications (T1–T6)
+- Enforcement = 5 new ArchTests (§4D I1–I5 tenant isolation) + 7 handler post-condition trap-verifications (T1–T7; T7 added by T238)
 - Docs = version-compatibility matrix + 6 U-CB customer-comms templates + consolidated deploy guide
 - Acceptance = E2E dry run on `trial-{yyyymmdd}` Model 1 stamp
 
@@ -446,7 +446,7 @@ Phase F (E2E dry run: trial-{yyyymmdd} Model 1 stamp end-to-end)
 **Objectives** (per R18 + H-6 decision + FR-18 acceptance criteria):
 1. Provision fresh `trial-{yyyymmdd}` customer stamp using Model 1 profile via new pipeline
 2. Reach `Setup Status = Ready` end-to-end
-3. Verify all 6 §4B silent-fail traps (T1–T6) cleared by owning handler post-conditions
+3. Verify all 7 §4B silent-fail traps (T1–T7) cleared by owning handler post-conditions
 4. Verify all 5 §4D tenant-isolation invariants (I1–I5) sample-verified
 5. Verify `scripts/naming-conformance-check.ps1` exits 0 on r1-owned surfaces
 6. Verify cost envelope conforms per pricing model (§15 #14)
@@ -606,7 +606,7 @@ Full list at [spec.md § Success Criteria (22 items)](./spec.md#success-criteria
 
 **Phase F**:
 - Fresh `trial-{yyyymmdd}` stamp reaches `Setup Status = Ready` via new pipeline
-- All 6 §4B T1–T6 traps verified cleared
+- All 7 §4B T1–T7 traps verified cleared
 - All 5 §4D I1–I5 invariants sample-verified
 - Cost envelope per pricing model (§15 #14) confirmed
 - `naming-conformance-check.ps1` exits 0 on r1-owned surfaces

@@ -1,0 +1,156 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="238" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H4b emits Customer__Id (INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1–§1.2) + H13 trap T7 — both slots carry Customer__Id equal to the run's customerId</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T238</phase>
+    <gate>none (T245a ✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a production H13 trap probe (.cs), changes the canonical manifest + generated script, and updates H13 composition tests; root §8 test-modifying override applies.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single new probe following the existing T1/T5 ARM-read probes, plus one manifest entry through the T245a source catalog — explicit reference implementations exist.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>shares manifest.yaml / PerEnvSourceCatalog / H13 composition with T245a-c (sequential by design)</parallel-reason>
+    <deps>245a</deps>
+    <tags>provisioning, l2-controlplane, provisioning-handler, config, testing, customer-provisioning, d-14</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Make `Customer__Id` part of the app settings H4b writes to both slots of every customer BFF, sourced from the run's
+    own customerId (never re-derived), and add an H13 silent-fail trap T7 that reads both slots' app settings from ARM
+    and fails the run unless each carries `Customer__Id` equal to the run's customerId.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane. Follow ADRs strictly. Expert in Azure.ResourceManager.AppService and the H13 trap-probe framework.
+  </role>
+
+  <goal>
+    After this task: (1) the manifest's `per_env_settings` has `Customer__Id` with `per_env_source: from-intake-parameter:customer_id`,
+    required, resolved by `PerEnvSourceCatalog` from `run.CustomerId`; the generated Configure script writes it to the
+    production and staging slots; (2) `TrapKind.T7CustomerIdentityExplicit` exists with a real probe registered in
+    `E2EAcceptanceModule`, and H13 quarantines a run whose stamp lacks the setting on either slot or carries a different value.
+  </goal>
+
+  <context>
+    <background>
+      INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1 (emit from the App Service configuration handler, same value as the Bicep
+      `customerId` and `sprk_dataverseenvironment.sprk_customerid`, never re-derived) and §1.2 (missing = provisioning
+      failure). The BFF resolves `Customer:Id` first and only then derives from `WEBSITE_RESOURCE_GROUP` with a warning
+      (`Sprk.Bff.Api/Configuration/CustomerIdResolver.cs`); a stamp on the derived path "was never finished".
+      `customer.bicep:617` already sets `Customer__Id` on the production site only; the generated
+      `Configure-AppServiceSettings.generated.ps1` writes every setting to production AND the `staging` slot, and H9
+      swaps staging → production, so the staging slot must carry it too. Trap framework: `IE2ETrapVerifier.cs` (TrapKind,
+      TrapVerificationRequest already carries SubscriptionId / ResourceGroupName / AppServiceName / CustomerId),
+      `CompositeTrapVerifier.cs`, `PlaceholderTrapVerifier.cs`, `E2EAcceptanceModule.cs`, H13 rejection mapping
+      (`H13E2EAcceptanceGateHandler.cs` ~778). Reference probe: `KeyVaultReferenceIdentityT1Probe.cs` (ArmClient,
+      WebSiteResource + WebSiteSlotResource reads of both slots).
+    </background>
+    <relevant-files>
+      <file>scripts/canonical-secret-catalog/manifest.yaml + generated/* (regenerate)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/PerEnvSourceCatalog.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/{IE2ETrapVerifier,CompositeTrapVerifier,PlaceholderTrapVerifier,E2EAcceptanceModule,H13E2EAcceptanceGateHandler,H13RejectionCodes}.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/CustomerIdentityT7Probe.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/CustomerIdentityT7ProbeTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/{CompositeTrapVerifierTests,H13E2EAcceptanceGateHandlerTests,H4bBulkAppSettingsHandlerTests,FilePerEnvSettingsManifestTests}.cs + E2EAcceptance/E2EAcceptanceCompositionRootTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (trap-count comment)</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md (§4B trap catalog row T7)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (§6.5.1 — who sets Customer__Id)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1 / §2 (BINDING)">The value is exactly `run.CustomerId` — no trimming, lower-casing or derivation. There is no default and no sentinel.</constraint>
+    <constraint source="INCOMING §5">Nothing in this task treats `Customer__Id` as a security boundary in code comments or docs; it is defence in depth + observability.</constraint>
+    <constraint source="project">T7 compares with ordinal string equality on BOTH slots; a missing setting, a blank value or a different value on either slot is `Failed` (QuarantineRequired via H13's existing mapping); ARM read faults are `InfraFault`. The probe never logs other app-setting values.</constraint>
+    <constraint source="CLAUDE.md §10">No change to `Sprk.Bff.Api` or Bicep.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-CUSTOMER-RUNTIME-IDENTITY.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md</file>
+      <file>.claude/patterns/provisioning/run-context-contract.md</file>
+      <file>.claude/patterns/provisioning/manifest-driven-secret-catalog.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/CustomerIdResolver.cs</file>
+    </files>
+    <patterns>
+      <pattern name="Both-slot ARM trap probe" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/KeyVaultReferenceIdentityT1Probe.cs">Copy its input guards, ArmClient reads of WebSiteResource + WebSiteSlotResource, and InfraFault discipline; read app settings with the SDK's application-settings list operations.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add `PerEnvSourceCatalog` entry `from-intake-parameter:customer_id` → `run.CustomerId`; add the manifest `per_env_settings` entry `Customer__Id` (required, iOptionsModule `CustomerOptions`, notes citing INCOMING §1.1); regenerate; `-Verify`.</step>
+    <step order="2">Add `TrapKind.T7CustomerIdentityExplicit`, `CustomerIdentityT7Probe : ITrapProbe`, rejection code `h13-trap-t7-failed`, H13 mapping, Placeholder entry, module registration; update the composite canonical order and every test/comment that pins six traps.</step>
+    <step order="3">Tests: probe Passed / missing-on-staging / blank / mismatch / ARM-fault; H4b passes `-CustomerId`; manifest loads; composition root registers 7 probes.</step>
+    <step order="4">Docs: design.md §4B T7 row; deployment guide §6.5.1 (H4b writes both slots; H13 T7 verifies); INCOMING doc status line; plan T238 ✅; TASK-INDEX `✅ [done]`; POML status.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the App Service SDK cannot read slot app settings with the L2 identity's existing RBAC (Reader is not enough for the list operation), STOP and escalate — do not widen RBAC in this task.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Six trap probes exist (T1–T6); none reads `Customer__Id` (grep "Customer__Id" in src/server/services → none). SpeContainerTenantDerivationInvariantProbe reads app settings for a different invariant (I4).</existing>
+    <extension>No — the I4 probe answers a different question (KV-reference shape of one setting, production only) and is registered for InvariantKind.I4; folding a customer-identity check into it would make one verdict carry two unrelated failures. T7 reuses the T1 probe's read pattern.</extension>
+    <cost-of-doing-nothing>A stamp whose staging slot lacks the setting runs on the derived path after the first swap (warning-only), or a stamp carrying another customer's id is handed over — INCOMING §1.2 says both must fail provisioning, and nothing checks it today.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">manifest.yaml + generated/*, PerEnvSourceCatalog.cs, CustomerIdentityT7Probe.cs, trap framework files</output>
+    <output type="test">CustomerIdentityT7ProbeTests.cs + updated trap/H13/H4b/manifest tests</output>
+    <output type="docs">design.md §4B, SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §6.5.1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The generated Configure script carries `Customer__Id=$CustomerId` with a mandatory `-CustomerId` parameter; H4b passes `-CustomerId {run.CustomerId}`; `-Verify` passes.</criterion>
+    <criterion testable="true">T7 returns Passed when both slots carry Customer__Id equal to the run's customerId; Failed when either slot lacks it, has it blank, or has a different value (including a case-only difference); InfraFault on an ARM read failure or a missing request field.</criterion>
+    <criterion testable="true">H13 maps a T7 failure to `h13-trap-t7-failed` + QuarantineRequired; the composite verifier and composition root expect 7 trap kinds.</criterion>
+    <criterion testable="true">Build 0/0; no new ControlPlane.Tests failures beyond the T221 baseline. Test scope: the probe outcomes listed, the H4b argument, the manifest load, the composition count. Anything beyond needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETION (2026-10-01). All acceptance criteria verified: ControlPlane.Tests 2077 pass / 6 fail (the T221
+    CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; ArchTests 337/337; Api, Worker, LoadTests build 0/0;
+    Invoke-CatalogGenerator.ps1 -Verify OK. Escalation trigger checked and NOT fired: the L2 identity already holds
+    Website Contributor on the customer BFF (customer-l2-bff-rbac.bicep), and H9's ArmSlotStickyAppSettingWriter
+    already issues the slot config/appsettings/list call.
+
+    DEVIATIONS:
+    (a) Rejection code is `h13-trap-T7-customer-identity`, not the POML's `h13-trap-t7-failed` (step 2, AC 3): it
+        follows all six sibling codes (`h13-trap-T{n}-{what}`); codes are external and stable, so consistency wins.
+    (b) Beyond the POML (gate findings, fix-at-discovery): H13AcceptanceOptions.TrapVerifierTimeout is now applied
+        by the T1, T5 and T7 ARM probes (it was documented as the per-probe bound but only T6 honoured it), and their
+        OperationCanceledException catch is filtered to caller cancellation — a transport/timeout cancellation is an
+        InfraFault instead of aborting the whole trap pass. T1/T5 constructors gained IOptions&lt;H13AcceptanceOptions&gt;
+        (already registered; DI resolves it).
+    (c) T7 hardening from code review: two names differing only in case with different values are AMBIGUOUS → Failed;
+        an echoed mismatched value is length-capped and control characters escaped; the Failed diagnostic carries the
+        repair command for stamps whose H4b ran before T238.
+    (d) Trap-count text T1–T6 → T1–T7 swept across code comments, design/spec/README/plan, the deployment guide
+        (incl. a §12.3 T7 verification command), the /provision-environment skill, the run-log template, the
+        version-compat matrix, the superseded guide stubs, and the root CLAUDE.md pointer row (+ CHANGELOG; that row's
+        stale "Model 1 (shared trial/SMB)" text corrected at the same time).
+    (e) The per_env source keeps the `from-intake-parameter:` prefix (customerId IS intake — the POST body field), but
+        resolves run.CustomerId, not an IntakeParameterCatalog key; the catalog header, manifest schema comment,
+        PerEnvSettingSource doc and H4b's missing-value diagnostic now say so.
+    Publish size: N/A — no Sprk.Bff.Api source changed (delta 0 by construction).
+    Test-scope justification: one test beyond the closed list — FindSetting's case-variant ambiguity (new behaviour
+    from code review). Trap-count tests now assert Enum.GetValues&lt;TrapKind&gt;().Length (pins the composite's
+    "every enum member" invariant, which its own comment said was unpinned) while T7 stays pinned by InlineData rows.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

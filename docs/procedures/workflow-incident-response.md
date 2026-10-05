@@ -28,7 +28,7 @@ This runbook is **specific to GitHub Actions workflow failures**. For broader pr
 | `sdap-ci.yml` | Build + test + quality scan (PR gate) | push/PR |
 | `adr-audit.yml` | ADR architecture audit | weekly + manual |
 | `deploy-bff-api.yml` | BFF API staging-slot deploy | push to `master` (api paths) + manual |
-| `deploy-infrastructure.yml` | Bicep validate + what-if + deploy | PR/push to `master` (infra paths) + manual |
+| `deploy-infrastructure.yml` | "Validate Bicep Infrastructure" — Bicep lint + compile only; deploys nothing (what-if/deploy retired by task 249, 2026-10-02) | PR/push to `master` (infra paths) + manual |
 | `deploy-office-addins.yml` | Office Add-ins to Azure Static Web App | push to `master` (add-in paths) + manual |
 | `deploy-promote.yml` | dev → staging → prod promotion | after-sdap-ci success + manual |
 | `workflows-validate.yml` | actionlint on `.github/workflows/**` | PR/push touching workflows |

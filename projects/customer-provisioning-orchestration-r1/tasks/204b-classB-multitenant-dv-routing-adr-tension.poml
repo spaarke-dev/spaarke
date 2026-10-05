@@ -4,7 +4,7 @@
     <title>Class-B B04 multi-tenant Dataverse routing — ADR tension resolution FIRST, then apply chosen path</title>
     <phase>Pre-Live-Fire — Class-B foundational architectural resolution</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architectural / ADR-adjacent — high blast radius. Root CLAUDE.md §8 rigor decision tree explicitly cites `bff-api` + ADR-migration-adjacent + high-blast-radius as FULL triggers. Terminal decision touches Model 1 tenancy design (D3, ADR-027 exception territory).</rigor-reason>
     <model-tier>opus</model-tier>

@@ -1,217 +1,148 @@
 // -----------------------------------------------------------------------------
 // SpeConfidentialClientGraphFactoryTests.cs
 //
-// L2 CONTROL-PLANE unit tests for SpeConfidentialClientGraphFactory (task 131,
-// Wave G-3) — the shared T6 cert-from-KV + ClientCertificateCredential
-// construction helper H8's GraphContainerTypeProvisioner /
-// GraphAppOnlyContainerVerifier both use.
+// Task 248 (G28, owner D16) — the SPE owning-app credential is the Worker UAMI's
+// federated identity credential (MI-FIC), never a certificate or a secret.
 //
-// THIS IS THE T6 CERT-PATH TEST (POML acceptance criterion #3: "A test
-// confirms GraphContainerTypeProvisioner constructs its Graph client with a
-// certificate credential sourced from KV, not a secret"). ADR-038 path #1 —
-// a REAL Azure.Security.KeyVault.Secrets.SecretClient runs against a fake
-// Azure.Core.Pipeline.HttpClientTransport (same pattern as
-// SecretClientKvWriterTests.cs / task 125) — never Mock&lt;HttpMessageHandler&gt;
-// as the SDK's own request/response marshaling. A REAL self-signed
-// X509Certificate2 (generated in-test, base64-PFX-encoded) stands in for the
-// KV secret value, proving the base64-decode + X509CertificateLoader.LoadPkcs12
-// round-trip actually works end to end, not just that SOME bytes were read.
-//
-// The Graph HTTP calls themselves are NOT exercised here (parity with the
-// established project precedent — see GraphContainerTypeProvisioner.cs's
-// file header "NOT UNIT-TESTED IN THE CI SUITE" section); this file's scope
-// is exactly the KV cert-load + credential-construction seam, which IS fully
-// exercisable without a live Graph tenant.
+//   F1  The production factory's credential is a ClientAssertionCredential built by
+//       WorkerDataverseCredentialFactory (the single place the Worker mints the UAMI
+//       assertion) — not a certificate or secret credential.
+//   F2  THE assertion path, end to end through Azure.Identity/MSAL: asking that
+//       credential for a Graph token asks the UAMI for `api://AzureADTokenExchange`
+//       and posts that token to the owning app's tenant token endpoint as a
+//       jwt-bearer client_assertion for the owning app's client id — and no
+//       client_secret. The UAMI is a fake TokenCredential; Entra is a fake
+//       HttpMessageHandler behind Azure.Core's HttpClientTransport (ADR-038 — the
+//       SDK's own request marshaling runs; never Mock<HttpMessageHandler>).
+//   F3  The T6 delegated-token trap phrase detector.
 // -----------------------------------------------------------------------------
 
 using System.Net;
-using System.Security.Cryptography;
-using System.Security.Cryptography.X509Certificates;
+using System.Text;
+using System.Web;
 using Azure.Core;
 using Azure.Core.Pipeline;
 using Azure.Identity;
-using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph.Models.ODataErrors;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
 
 public sealed class SpeConfidentialClientGraphFactoryTests
 {
-    private const string VaultName = "sprk-acme-prod-kv";
-    private const string SecretName = "SPE-OwnerCert-Pfx";
     private const string TenantId = "11111111-2222-3333-4444-555555555555";
-    private const string ClientAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+    private const string OwnerAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+    private const string UamiClientId = "965a4a01-0000-0000-0000-000000000001";
+    private const string UamiAssertion = "uami-assertion-for-token-exchange";
 
-    // ---------- T1 — cert loads from a fake-KV base64-PFX secret ----------
+    // ---------- F1 — production credential is the UAMI-fed client assertion ----------
 
     [Fact]
-    public async Task LoadCertificateAsync_DecodesBase64PfxFromKvSecret_ReturnsCertWithPrivateKey()
+    public void CreateCredential_Production_IsTheUamiClientAssertion_NeverACertificateOrSecret()
     {
-        using var sourceCert = CreateSelfSignedTestCertificate();
-        var base64Pfx = Convert.ToBase64String(sourceCert.Export(X509ContentType.Pfx));
-        var handler = new FakeSecretGetHandler(base64Pfx);
-        var options = new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) };
+        var factory = new SpeConfidentialClientGraphFactory(BuildWorkerCredentialFactory());
 
-        using var loaded = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-            new FakeCredential(), options, VaultName, SecretName, TimeSpan.FromSeconds(5), CancellationToken.None);
+        var credential = factory.CreateCredential(TenantId, OwnerAppId);
 
-        loaded.HasPrivateKey.Should().BeTrue();
-        loaded.Thumbprint.Should().Be(sourceCert.Thumbprint);
-        handler.RequestedUris.Should().ContainSingle(
-            u => u.AbsolutePath.Contains(SecretName, StringComparison.Ordinal));
+        credential.Should().BeOfType<ClientAssertionCredential>(
+            "the owning app trusts the Worker UAMI through a federated identity credential (ADR-028 A4, owner D16) — " +
+            "never a certificate or secret credential");
     }
 
-    // ---------- T2 — THE cert-path assertion: ClientCertificateCredential, NEVER ClientSecretCredential ----------
+    // ---------- F2 — the assertion path ----------
 
     [Fact]
-    public async Task BuildCredential_FromKvSourcedCert_ProducesClientCertificateCredential_NeverClientSecretCredential()
+    public async Task OwnerCredential_GetToken_ExchangesTheUamiAssertionForAnOwningAppToken()
     {
-        using var sourceCert = CreateSelfSignedTestCertificate();
-        var base64Pfx = Convert.ToBase64String(sourceCert.Export(X509ContentType.Pfx));
-        var handler = new FakeSecretGetHandler(base64Pfx);
-        var options = new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) };
+        var uami = new FakeUamiCredential();
+        var entra = new FakeEntraHandler();
+        var credential = BuildWorkerCredentialFactory().CreateManagedIdentityFederatedCredential(
+            TenantId, OwnerAppId, uami, new ClientAssertionCredentialOptions
+            {
+                Transport = new HttpClientTransport(new HttpClient(entra)),
+                DisableInstanceDiscovery = true,
+            });
 
-        using var loaded = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-            new FakeCredential(), options, VaultName, SecretName, TimeSpan.FromSeconds(5), CancellationToken.None);
+        var token = await credential.GetTokenAsync(
+            new TokenRequestContext(SpeConfidentialClientGraphFactory.GraphDefaultScope), CancellationToken.None);
 
-        var credential = SpeConfidentialClientGraphFactory.BuildCredential(TenantId, ClientAppId, loaded);
-
-        // AC#3 — T6's whole point: confidential-client CERT credential, sourced
-        // from KV, never a secret-based credential.
-        credential.Should().BeOfType<ClientCertificateCredential>();
-        credential.Should().NotBeOfType<ClientSecretCredential>();
-        credential.GetType().Should().NotBe(typeof(ClientSecretCredential));
+        token.Token.Should().Be(FakeEntraHandler.IssuedToken);
+        uami.RequestedScopes.Should().ContainSingle().Which.Should().Equal(
+            WorkerDataverseCredentialFactory.FederatedTokenExchangeScope);
+        entra.TokenRequestUri!.AbsolutePath.Should().Be($"/{TenantId}/oauth2/v2.0/token",
+            "the token is requested in the run's tenant (§4D I5)");
+        entra.TokenRequestForm!["client_id"].Should().Be(OwnerAppId);
+        entra.TokenRequestForm["grant_type"].Should().Be("client_credentials");
+        entra.TokenRequestForm["client_assertion_type"].Should().Be("urn:ietf:params:oauth:client-assertion-type:jwt-bearer");
+        entra.TokenRequestForm["client_assertion"].Should().Be(UamiAssertion,
+            "the UAMI's token IS the client assertion — no certificate signs it");
+        entra.TokenRequestForm["scope"].Should().Contain("https://graph.microsoft.com/.default");
+        entra.TokenRequestForm.AllKeys.Should().NotContain("client_secret");
     }
 
-    [Fact]
-    public void BuildGraphClient_ReturnsClientBoundToCertificateCredential()
+    // ---------- F3 — T6 delegated-token trap phrase detection ----------
+
+    [Theory]
+    [InlineData(403, "Public client not allowed for this resource.", true)]
+    [InlineData(400, "Invalid request payload.", false)]
+    public void IsDelegatedTokenTrapError_MatchesOnlyTheTrapPhrase(int status, string message, bool expected)
     {
-        using var sourceCert = CreateSelfSignedTestCertificate();
+        var ex = new ODataError { ResponseStatusCode = status, Error = new MainError { Message = message } };
 
-        var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(TenantId, ClientAppId, sourceCert);
-
-        graph.Should().NotBeNull();
-        graph.RequestAdapter.Should().NotBeNull();
-    }
-
-    // ---------- T3 — malformed base64 -> InvalidOperationException (infra fault, no side effect) ----------
-
-    [Fact]
-    public async Task LoadCertificateAsync_SecretValueNotValidBase64_ThrowsInvalidOperationException()
-    {
-        var handler = new FakeSecretGetHandler("not-valid-base64!!!");
-        var options = new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) };
-
-        var act = async () => await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-            new FakeCredential(), options, VaultName, SecretName, TimeSpan.FromSeconds(5), CancellationToken.None);
-
-        await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*not valid base64*");
-    }
-
-    // ---------- T4 — secret not found (404) propagates (handler classifies as infra fault) ----------
-
-    [Fact]
-    public async Task LoadCertificateAsync_SecretNotFound_PropagatesRequestFailedException()
-    {
-        var handler = new FakeSecretGetHandler(base64PfxOrNull: null); // 404
-        var options = new SecretClientOptions { Transport = new HttpClientTransport(new HttpClient(handler)) };
-
-        var act = async () => await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
-            new FakeCredential(), options, VaultName, SecretName, TimeSpan.FromSeconds(5), CancellationToken.None);
-
-        await act.Should().ThrowAsync<Azure.RequestFailedException>();
-    }
-
-    // ---------- T5 — T6 delegated-token trap phrase detection ----------
-
-    [Fact]
-    public void IsDelegatedTokenTrapError_MessageContainsTrapPhrase_ReturnsTrue()
-    {
-        var ex = new ODataError
-        {
-            ResponseStatusCode = 403,
-            Error = new MainError { Message = "Public client not allowed for this resource." },
-        };
-
-        SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError(ex).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsDelegatedTokenTrapError_UnrelatedError_ReturnsFalse()
-    {
-        var ex = new ODataError
-        {
-            ResponseStatusCode = 400,
-            Error = new MainError { Message = "Invalid request payload." },
-        };
-
-        SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError(ex).Should().BeFalse();
+        SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError(ex).Should().Be(expected);
     }
 
     // ---------- helpers ----------
 
-    private static X509Certificate2 CreateSelfSignedTestCertificate()
-    {
-        using var rsa = RSA.Create(2048);
-        var req = new CertificateRequest(
-            "CN=spe-test-cert", rsa, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
-        // Exportable — this in-memory cert stands in for the KV secret's SOURCE
-        // material (what an operator would have uploaded); it is exported to
-        // PFX bytes below to simulate the KV secret's stored value. The
-        // FACTORY's own loaded-cert (EphemeralKeySet, non-exportable) is a
-        // SEPARATE object under test, not this one.
-        return req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(30));
-    }
+    private static WorkerDataverseCredentialFactory BuildWorkerCredentialFactory() => new(
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?> { ["ManagedIdentity:ClientId"] = UamiClientId })
+            .Build(),
+        NullLogger<WorkerDataverseCredentialFactory>.Instance);
 
-    private sealed class FakeCredential : TokenCredential
+    /// <summary>Stands in for the Worker UAMI: hands out a fixed assertion and records the scopes asked for.</summary>
+    private sealed class FakeUamiCredential : TokenCredential
     {
+        public List<string[]> RequestedScopes { get; } = new();
+
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
-            => new("fake-kv-test-token", DateTimeOffset.UtcNow.AddHours(1));
+        {
+            RequestedScopes.Add(requestContext.Scopes);
+            return new AccessToken(UamiAssertion, DateTimeOffset.UtcNow.AddHours(1));
+        }
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => new(GetToken(requestContext, cancellationToken));
     }
 
-    /// <summary>Fakes a single GET /secrets/{name} call — parity with SecretClientKvWriterTests.cs's FakeSecretsHandler GET branch.</summary>
-    private sealed class FakeSecretGetHandler : HttpMessageHandler
+    /// <summary>Stands in for Entra ID's token endpoint; captures the client-credentials request.</summary>
+    private sealed class FakeEntraHandler : HttpMessageHandler
     {
-        private readonly string? _base64PfxOrNull;
+        public const string IssuedToken = "owner-app-graph-token";
 
-        public FakeSecretGetHandler(string? base64PfxOrNull)
+        public Uri? TokenRequestUri { get; private set; }
+
+        public System.Collections.Specialized.NameValueCollection? TokenRequestForm { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            _base64PfxOrNull = base64PfxOrNull;
-        }
-
-        public List<Uri> RequestedUris { get; } = new();
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            RequestedUris.Add(request.RequestUri!);
-
-            if (_base64PfxOrNull is null)
+            if (request.Method == HttpMethod.Post && request.RequestUri!.AbsolutePath.EndsWith("/oauth2/v2.0/token", StringComparison.Ordinal))
             {
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NotFound)
-                {
-                    Content = new StringContent("""{"error":{"code":"SecretNotFound","message":"not found"}}""",
-                        System.Text.Encoding.UTF8, "application/json"),
-                });
+                TokenRequestUri = request.RequestUri;
+                TokenRequestForm = HttpUtility.ParseQueryString(await request.Content!.ReadAsStringAsync(cancellationToken));
+                return Json($$"""{"token_type":"Bearer","expires_in":3599,"ext_expires_in":3599,"access_token":"{{IssuedToken}}"}""");
             }
-
-            var name = request.RequestUri!.AbsolutePath.Trim('/').Split('/').First();
-            var body = System.Text.Json.JsonSerializer.Serialize(new
-            {
-                value = _base64PfxOrNull,
-                id = $"https://{VaultName}.vault.azure.net/secrets/{name}/v1",
-                attributes = new { enabled = true },
-            });
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-            {
-                Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json"),
-            });
+            return new HttpResponseMessage(HttpStatusCode.NotFound);
         }
+
+        private static HttpResponseMessage Json(string body) => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(body, Encoding.UTF8, "application/json"),
+        };
     }
 }

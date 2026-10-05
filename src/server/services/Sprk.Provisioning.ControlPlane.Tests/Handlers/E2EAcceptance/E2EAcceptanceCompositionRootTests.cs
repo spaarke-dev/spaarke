@@ -54,8 +54,8 @@
 //        retired NamingConformanceScriptRunner shell-out not registered).
 //   CR7  IE2EValidationRunner == E2EValidationRunner (task 181; retired
 //        ValidateDeployedEnvironmentScriptRunner shell-out not registered).
-//   CR8  All 6 ITrapProbe kinds are registered exactly once (T1-T6, tasks
-//        171/177/178/180/172/175) with the expected concrete types.
+//   CR8  All 7 ITrapProbe kinds are registered exactly once (T1-T7, tasks
+//        171/177/178/180/172/175/238) with the expected concrete types.
 //   CR9  All 5 IInvariantProbe kinds are registered exactly once (I1-I5,
 //        tasks 170/173/174/176/179) with the expected concrete types.
 //   CR10 The composite verifiers accept the resolved probe collections
@@ -249,6 +249,7 @@ public sealed class E2EAcceptanceCompositionRootTests
             { TrapKind.T4ExchangePolicyCount,       typeof(ExchangePolicyCountT4Probe) },
             { TrapKind.T5SlotMiKvRbac,              typeof(T5SlotMiKvRbacTrapProbe) },
             { TrapKind.T6SpeConfidentialClient,     typeof(T6SpeConfidentialClientTrapProbe) },
+            { TrapKind.T7CustomerIdentityExplicit,  typeof(CustomerIdentityT7Probe) },   // task 238
         };
     }
 
@@ -275,15 +276,15 @@ public sealed class E2EAcceptanceCompositionRootTests
     }
 
     [Fact]
-    public void CR8_TrapProbes_TotalRegistrationCount_Equals6()
+    public void CR8_TrapProbes_TotalRegistrationCount_EqualsEveryTrapKind()
     {
         using var scope = _factory.Services.CreateScope();
 
         var probes = scope.ServiceProvider.GetServices<ITrapProbe>().ToList();
 
-        probes.Should().HaveCount(6,
-            "exactly 6 ITrapProbe registrations MUST exist post-Wave-G-7 (one " +
-            "per TrapKind T1-T6). Under-registration re-inerts H13's trap " +
+        probes.Should().HaveCount(Enum.GetValues<TrapKind>().Length,
+            "exactly one ITrapProbe registration MUST exist per TrapKind (T1-T7; T7 added by " +
+            "task 238). Under-registration re-inerts H13's trap " +
             "surface; over-registration would fail CompositeTrapVerifier's " +
             "duplicate-registration guard at construction time. Observed: " +
             $"[{string.Join(", ", probes.Select(p => $"{p.Kind}={p.GetType().Name}"))}].");
@@ -300,7 +301,7 @@ public sealed class E2EAcceptanceCompositionRootTests
             { InvariantKind.I1NoHardcodedTenant,    typeof(PackagedScriptTenantLiteralInvariantProbe) },
             { InvariantKind.I2AiSearchTenantFilter, typeof(AiSearchTenantFilterInvariantProbe) },
             { InvariantKind.I3CosmosPartitionKey,   typeof(CosmosPartitionKeyInvariantProbe) },
-            { InvariantKind.I4SpeContainerResolver, typeof(SpeContainerResolverInvariantProbe) },
+            { InvariantKind.I4SpeContainerResolver, typeof(SpeContainerTenantDerivationInvariantProbe) },   // task 204c B07 SESSION 12 2026-08-26: swap from task-176 SpeContainerResolverInvariantProbe (BFF-diagnostic) to independent ARM app-settings re-verification per 204c dispatch principle
             { InvariantKind.I5GraphTokenTenant,     typeof(I5GraphTokenTenantScopeProbe) },
         };
     }

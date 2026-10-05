@@ -4,7 +4,7 @@
     <title>Bicep: recreate sprk-provisioning-jobs queue with sessions + dedup (C5.4/C4.6) + drain-verify runbook</title>
     <phase>C'' Wave G-1 -- Foundation</phase>
     <gate>startable</gate>
-    <status>authoring-complete-live-recreate-pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live queue delete+recreate is a destructive Azure operation with an irreversible in-flight-message-loss window; touches Bicep AND live Azure state per the parent task's Wave G-1 description. FULL + prescriptive steps.</rigor-reason>
     <model-tier>sonnet</model-tier>

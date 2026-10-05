@@ -234,21 +234,52 @@ jobs:
   # redden `CI / Router` (see ci-router.yml router-result), so headroom is free
   # while a too-tight value costs the signal entirely. Re-tune from observed p95
   # once green runs accumulate.
+  #
+  # SHARDED 2026-10-05 (customer-provisioning-orchestration-r1). The 30-minute
+  # guard above stopped being reachable: Sprk.Bff.Api.Tests alone took 48m50s on
+  # master (legacy SDAP CI run 37319731281, 14,306 tests; it was ~20 min on
+  # 2026-09-21), so this job was cancelled on every run and Tier 2 reported
+  # nothing. Raising the timeout was rejected: the Router waits on tier2, so a
+  # ~60-minute job would make every merge wait an hour. Time is dominated by tests
+  # that boot a full BFF host (~4 CPU-seconds per warm host; 193 test-minutes in
+  # all on a 4-core runner), so the cure is parallel runners, not a bigger wall.
+  #
+  # The four shards are namespace filters over FullyQualifiedName. Shards 1-3 name
+  # namespaces; `rest` is the complement of all of them, so a test in a new
+  # namespace (or a new test project) always runs somewhere. Simulated against
+  # every test in master's 2026-10-05 TRX: 16,553 tests, each in exactly one
+  # shard; shares 25.0 / 24.9 / 27.3 / 22.8 % of test time. Rebalance by moving a
+  # namespace between the named shards and its exclusion into `rest`/`api-seam`
+  # - never by listing it in two shards.
+  #
+  # Each shard writes its own verdict; `full-unit-tests` (below) aggregates them,
+  # so the PR comment keeps one line and a cancelled or crashed shard reads as a
+  # failure, never as green.
   # ============================================================================
-  full-unit-tests:
-    name: Full Unit Tests (Debug)
+  full-unit-tests-shard:
+    name: Full Unit Tests (Debug) / ${{ matrix.shard }}
     runs-on: windows-latest
     if: ${{ inputs.run-unit-tests != 'false' }}
     continue-on-error: true
-    timeout-minutes: 30
-    outputs:
-      result: ${{ steps.report.outputs.result }}
+    # Runaway guard: expected ~18 min per shard (~13-14 min of tests + ~4.5 min setup).
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         # Debug-only is BINDING through Phase 2 per spec MUST §125 / FR-B07.
         # Restore Release here ONLY after surviving suite green >= 7 days (CICD-075).
         configuration: [Debug]
+        # KEEP IN SYNC with the shard list in `full-unit-tests` (the aggregator).
+        shard: [api-office, api-insights-integration, api-seam, rest]
+        include:
+          - shard: api-office
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Office.'
+          - shard: api-insights-integration
+            filter: 'FullyQualifiedName~Sprk.Bff.Api.Tests.Api.Insights.|FullyQualifiedName~Sprk.Bff.Api.Tests.Integration.'
+          - shard: api-seam
+            filter: '(FullyQualifiedName~Sprk.Bff.Api.Tests.Api.|FullyQualifiedName~Sprk.Bff.Api.Tests.Seam.)&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Office.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.Insights.'
+          - shard: rest
+            filter: 'FullyQualifiedName!~Sprk.Bff.Api.Tests.Api.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Seam.&FullyQualifiedName!~Sprk.Bff.Api.Tests.Integration.'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -306,6 +337,7 @@ jobs:
         shell: pwsh
         run: |
           dotnet test -c ${{ matrix.configuration }} --no-build `
+            --filter "${{ matrix.filter }}" `
             --logger "trx;LogFilePrefix=tier2-pass1" `
             --results-directory ./TestResults/tier2/pass1
 
@@ -329,13 +361,28 @@ jobs:
         id: verdict
         shell: pwsh
         run: |
+          # The shard verdict: pass = pass 1 clean, or every pass-1 failure passed on
+          # retry. A failure in both passes, a test that was not re-run, a crash,
+          # or a red pass 1 with no failed test to retry (build/host crash) = fail.
+          function Write-Verdict([string]$v) {
+            "verdict=$v" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+            New-Item -ItemType Directory -Force -Path ./TestResults/verdict | Out-Null
+            Set-Content -Path "./TestResults/verdict/verdict-${{ matrix.shard }}.txt" -Value $v -NoNewline
+          }
           if ("${{ steps.classify.outputs.retry_needed }}" -ne "true") {
-            Write-Host "Pass 1 clean — full suite green"
+            if ("${{ steps.tests.outcome }}" -eq "success") {
+              Write-Host "Pass 1 clean — shard green"
+              Write-Verdict "pass"
+            } else {
+              Write-Host "::warning::Pass 1 failed with no failed test to retry — dotnet test likely crashed"
+              Write-Verdict "fail"
+            }
             exit 0
           }
           $trx = @(Get-ChildItem -Path ./TestResults/tier2/pass2 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
           if ($trx.Count -eq 0) {
             Write-Host "::warning::Pass 2 produced no TRX — dotnet test likely crashed"
+            Write-Verdict "fail"
             exit 0
           }
           $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
@@ -362,25 +409,66 @@ jobs:
           } else {
             Write-Host "All pass-1 failures passed on retry — no real failures"
           }
+          if ($stillFailing.Count -gt 0 -or $notReRun.Count -gt 0) { Write-Verdict "fail" } else { Write-Verdict "pass" }
 
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: tier2-unit-test-results-${{ matrix.configuration }}
+          name: tier2-unit-test-results-${{ matrix.configuration }}-${{ matrix.shard }}
           path: ./TestResults/tier2/
           if-no-files-found: warn
 
+      - name: Upload shard verdict
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tier2-unit-verdict-${{ matrix.shard }}
+          path: ./TestResults/verdict/
+          if-no-files-found: ignore
+
+  # ============================================================================
+  # Job 3b — full-unit-tests: aggregates the shard verdicts into the ONE result
+  # the PR comment reads. A shard with no verdict (cancelled at its timeout, or
+  # crashed before the verdict step) counts as a failure.
+  # ============================================================================
+  full-unit-tests:
+    name: Full Unit Tests (Debug)
+    runs-on: ubuntu-latest
+    needs: full-unit-tests-shard
+    if: ${{ always() && needs.full-unit-tests-shard.result != 'skipped' }}
+    continue-on-error: true
+    timeout-minutes: 5
+    outputs:
+      result: ${{ steps.report.outputs.result }}
+    steps:
+      - name: Download shard verdicts
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          pattern: tier2-unit-verdict-*
+          path: ./verdicts
+          merge-multiple: true
+
       - name: Report result
         id: report
-        if: always()
+        shell: bash
         run: |
-          if ("${{ steps.tests.outcome }}" -eq "success") {
-            "result=pass" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          } else {
-            "result=fail" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          }
-        shell: pwsh
+          # KEEP IN SYNC with the `shard` list in full-unit-tests-shard's matrix.
+          result=pass
+          for shard in api-office api-insights-integration api-seam rest; do
+            f="./verdicts/verdict-$shard.txt"
+            if [ ! -f "$f" ]; then
+              echo "::warning::shard '$shard' reported no verdict (cancelled or crashed)"
+              result=fail
+            elif [ "$(cat "$f")" != "pass" ]; then
+              echo "::warning::shard '$shard' verdict: $(cat "$f")"
+              result=fail
+            else
+              echo "shard '$shard': pass"
+            fi
+          done
+          echo "result=$result" >> "$GITHUB_OUTPUT"
 
   # ============================================================================
   # Job 4 — adr-compliance (NetArchTest full suite). Budget: <60s.

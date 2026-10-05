@@ -51,7 +51,7 @@ public sealed class H14bGraphWebhookSubHandler : IProvisioningHandler
     /// <summary>Sub-step token used in the idempotency key format h14-{customerId}-{subStep}-{hash}.</summary>
     public const string SubStep = "graph";
 
-    /// <summary>Canonical KV secret name H4 provisions (task 047, StaticKvSecretManifest) that H14b reads back as the Graph subscription clientState.</summary>
+    /// <summary>Canonical KV secret name H4 provisions (canonical secret catalog, manifest.yaml) that H14b reads back as the Graph subscription clientState.</summary>
     public const string SigningKeySecretName = "Communication-Webhook-SigningKey";
 
     private readonly IKvSecretReader _secretReader;

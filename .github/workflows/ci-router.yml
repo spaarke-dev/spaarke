@@ -23,10 +23,11 @@
 #   The router MUST NOT inspect commit messages for [skip ci]-style markers.
 #   Path-based dispatch via `classify` is the ONLY relief mechanism.
 #
-# SHADOW MODE (Phase 2)
-#   This workflow runs in PARALLEL with the existing `sdap-ci.yml` for ≥14
-#   days. Branch protection is NOT flipped to require `CI / Router` until
-#   task 071 (cutover). Until then, this workflow's result is observational.
+# CUTOVER DONE (was: SHADOW MODE, Phase 2)
+#   The master ruleset requires `Router` — it is the ONLY required status
+#   check (verified 2026-09-30 with
+#   `gh api repos/spaarke-dev/spaarke/rules/branches/master`). The legacy
+#   `sdap-ci.yml` still runs in parallel but is not required.
 #
 # MERGE QUEUE COMPATIBILITY (spec FR-C01)
 #   The `merge_group` trigger is included from day 1. When merge queue is
@@ -295,6 +296,9 @@ jobs:
       # i.e. repo-wide. Root cause was tier2's 6-minute unit-test budget (raised
       # to 30 in ci-tier2-advisory.yml in the same change), but the gate must
       # survive ANY future tier2 cancellation source, not just that one.
+      # (2026-10-05: the suite outgrew 30 minutes too — 48m50s for the BFF
+      # assembly alone — so tier2 now runs it as four parallel shards; see
+      # `full-unit-tests-shard` in ci-tier2-advisory.yml.)
       #
       # tier2 stays in `needs:` so the Router still sequences after it and the
       # decision summary below still reports its real result.

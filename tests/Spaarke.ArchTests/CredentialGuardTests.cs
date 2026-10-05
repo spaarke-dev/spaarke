@@ -77,6 +77,29 @@ public class CredentialGuardTests
                 + "deletes the branch and this entry with it."),
 
         new AllowlistEntry(
+            FileName: "WorkerDataverseCredentialFactory.cs",
+            Adr: "ADR-028 A4 (§6.5 resolution — prong 3)",
+            Reason:
+                "L2 Worker's FR-39 ordered-credential factory for its own Dataverse auth AS the shared BFF "
+                + "app registration (1e40baad-... / SDAP-BFF-SPE-API) — the Worker-side analog of the BFF's "
+                + "OrderedCredentialClientProvider. Ordered selection necessarily contains a `new "
+                + "ClientSecretCredential(...)` call in the prong-3 ClientSecret branch of the "
+                + "CredentialKind switch: the secret is the prong-3 transitional last option AND the rollback "
+                + "target for unmigrated environments (currently `spaarkedev1` only, per "
+                + "adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25 — H4 executor MUST "
+                + "NOT provision new Model 2 stamps under prong-3 until A36-A42 land per Q6). A selector "
+                + "without it cannot express the rollback NFR-06 depends on. This is CONSOLIDATION, not "
+                + "expansion — the three handler surfaces that formerly constructed their own credentials "
+                + "(DataverseWebApiEnvVarValuesWriter, DataverseWebApiSolutionImporter, "
+                + "DataverseWebApiSolutionVerifier) now consume this factory (WorkerDataverseCredentialFactory, injected concretely). "
+                + "The MI-FIC branch (`CredentialKind.ManagedIdentityFederated` — ClientAssertionCredential over "
+                + "ManagedIdentityCredential, in CreateManagedIdentityFederatedCredential) is the DEFAULT secret-free path per A4 — and, since task 248 (2026-10-03), also the ONLY credential L2 uses for the SPE container type's owning app (SpeConfidentialClientGraphFactory; no certificate, no secret); the ClientSecret branch "
+                + "is dead code in `spaarke-bff-dev` (live order = [ManagedIdentityFederated] since 2026-08-24 "
+                + "E-3 closure) and only selected for prong-3 unmigrated environments. Retires when auth-v4's "
+                + "obligation 051-E retirement runbook executes against those environments, sunset 2026-11-23 "
+                + "per §6.5 resolution."),
+
+        new AllowlistEntry(
             FileName: "DataverseWebApiEnvVarValuesWriter.cs",
             Adr: "ADR-028 E-1",
             Reason:

@@ -4,7 +4,7 @@
     <title>Class-B B07 H13 real probes (10 sub-tasks — T1/T2/T3/T4/T5/T6 traps + I2/I3/I4/I5 invariants) — HARD-BLOCKS TASK 186 E2E</title>
     <phase>Pre-Live-Fire — Class-B H13 acceptance-gate real probes (task 186 blocker)</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Every sub-task modifies `tests/**` (per-probe unit tests) AND touches `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/` DI wiring. Per root CLAUDE.md §8 TEST-MODIFYING override row (2026-06-26): tasks tagged `testing` / `integration-test` trigger FULL rigor UNCONDITIONALLY. Also `l2-controlplane` + `blocks-186` = highest-severity acceptance-gate work.</rigor-reason>
     <model-tier>sonnet</model-tier>

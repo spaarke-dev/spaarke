@@ -4,7 +4,7 @@
     <title>Real Phase F E2E acceptance rerun (task 089 for real this time)</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>authoring-and-framework-proof-complete-live-ceremony-pending</status>
+    <status>blocked-shipped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Full E2E acceptance run against a real customer stamp -- irreversible-adjacent (live Azure/Dataverse/SPE/Exchange resources provisioned for a real trial customer), the project's terminal deliverable.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -12,7 +12,9 @@
     <effort>xhigh</effort>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <deps>185, 113, 162</deps>
+    <deps>185, 113, 162, 244, 246, 251</deps>
+    <!-- 2026-10-02 owner D22 (T243): T244 (keyless AI Search) and T246 (per-stamp Content Safety, which also removes
+         the BFF's hard-coded dev Content Safety fallback) are HARD prerequisites — stamps run the AI platform since T243. -->
     <tags>l2-controlplane, deploy, testing, integration-test</tags>
     <estimated-effort>16-24 hours (spans a 24h+ calendar window for the SPE replication gate)</estimated-effort>
   </metadata>

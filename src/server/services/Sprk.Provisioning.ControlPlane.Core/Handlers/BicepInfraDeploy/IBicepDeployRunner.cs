@@ -1,31 +1,21 @@
 // -----------------------------------------------------------------------------
 // IBicepDeployRunner.cs
 //
-// L2 abstraction over the actual per-customer Bicep deploy invocation. The
-// production implementation
-// (<see cref="ProvisionCustomerScriptBicepDeployRunner"/>) shells out to
-// <c>scripts/Provision-Customer.ps1</c> (the hardened wrapper around
-// <c>customer.bicep</c> / <c>stacks/model1-shared.bicep</c> / etc.). Unit
-// tests inject stubs to avoid pwsh + Azure round-trips.
+// L2 abstraction over the per-customer infrastructure deploy H2a performs. The
+// production implementation (<see cref="ArmDeploymentRunner"/>, task 123)
+// deploys the CI-precompiled ARM JSON (task 117's
+// publish-provisioning-arm-artifacts.yml) through Azure.ResourceManager — no
+// shell, no bicep CLI in the L2 runtime. Unit tests inject stubs to avoid
+// Azure round-trips.
 //
-// SEAM JUSTIFICATION (ADR-010):
-//   ≥2 implementations exist from day 1:
-//     - Production: <see cref="ProvisionCustomerScriptBicepDeployRunner"/> —
-//       shells out to Provision-Customer.ps1 with parsed outputs.
-//     - Test: stubs injected per unit test that construct
-//       <see cref="BicepDeployOutcome"/> directly (see
-//       <c>H2aBicepInfraDeployHandlerTests</c>).
-//   Interface earns its keep — no NIH.
+// SEAM JUSTIFICATION (ADR-010): production <see cref="ArmDeploymentRunner"/> +
+// the per-test stubs in <c>H2aBicepInfraDeployHandlerTests</c> that construct
+// <see cref="BicepDeployOutcome"/> directly.
 //
-// DESIGN CHOICE (shell-out vs SDK):
-//   Same trade-off as H0 preflight probes (see
-//   <c>Handlers/Preflight/IPreflightQuotaProbe.cs</c>): the PS script IS the
-//   source-of-truth for the 13-step provisioning orchestration + naming
-//   conventions + state-file resume logic. Re-implementing in C# via
-//   Azure.ResourceManager SDK is a large surface area that duplicates the
-//   Bicep/az CLI flow the script already tested. H2a therefore WRAPS the
-//   script (adding post-condition verification the script does not perform,
-//   per POML acceptance §4B T1) rather than replacing it.
+// TEMPLATE RESOLUTION (task 245b): <see cref="IBicepDeployRunner.ResolveTemplateAsync"/>
+// is separate from <see cref="IBicepDeployRunner.DeployAsync"/> so H2a can derive
+// its idempotency version from the template BEFORE deciding whether to deploy,
+// and so every step (inspection, what-if, deploy) works on the same bytes.
 //
 // UPGRADE-MODE INTEGRATION:
 //   H2a itself (NOT the runner) owns the upgrade-mode branch:
@@ -47,12 +37,25 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 public interface IBicepDeployRunner
 {
     /// <summary>
+    /// Task 245b: resolves the ARM template H2a will deploy for <paramref name="tenancyModel"/> — the
+    /// CI-published artifact named by the manifest's mutable "latest" pointer — and returns its JSON
+    /// together with its content version (<see cref="ArtifactVersion"/> of the downloaded bytes). H2a
+    /// resolves ONCE per invocation and hands the result to the inspector, the upgrade what-if and
+    /// <see cref="DeployAsync"/> on <see cref="BicepDeployRequest.Template"/>, so the bytes that are
+    /// versioned, checked and deployed are the same bytes. An unreadable or corrupt artifact THROWS
+    /// (infra fault — the handler classifies it).
+    /// </summary>
+    Task<ResolvedArmTemplate> ResolveTemplateAsync(
+        Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel tenancyModel,
+        CancellationToken cancellationToken);
+
+    /// <summary>
     /// Runs the deploy. Returns a typed outcome — success carries the outputs
     /// consumed by downstream handlers (UAMI resource id, endpoint URIs);
     /// failure carries a diagnostic. Domain failures do NOT throw (parity
     /// with <see cref="IPreflightQuotaProbe"/> — infra faults MAY throw).
     /// </summary>
-    /// <param name="request">Deploy inputs (customerId, tenantId, subscription id, bicep-repo git SHA, tenancy model, feature flags).</param>
+    /// <param name="request">Deploy inputs (customerId, tenantId, subscription id, the resolved template, tenancy model, feature flags).</param>
     /// <param name="cancellationToken">Cancellation token — a long-running deploy MUST honor it.</param>
     Task<BicepDeployOutcome> DeployAsync(BicepDeployRequest request, CancellationToken cancellationToken);
 }
@@ -63,30 +66,67 @@ public interface IBicepDeployRunner
 /// <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.Parameters"/>
 /// + <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>
 /// <param name="SubscriptionId">Target subscription id (ADR-027 D4 — customer subscription, never platform).</param>
 /// <param name="TenancyModel">
-/// <c>Model1Shared</c> or <c>Model2Dedicated</c> per <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
-/// Selects the Bicep stack: Model1Shared → <c>stacks/model1-shared.bicep</c>;
-/// Model2Dedicated → <c>customer.bicep</c> (or <c>stacks/model2-full.bicep</c>).
+/// <c>Model1</c> or <c>Model2</c> per <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.TenancyModel"/>.
+/// Model 2 deploys <c>customer.bicep</c>. Model 1 fails closed (ArmDeploymentRunner) until tasks 225b + 228
+/// converge it onto the same dedicated stamp — task 225a retired <c>stacks/model1-shared.bicep</c> (D-12).
 /// </param>
-/// <param name="BicepVersion">
-/// git SHA of the <c>infrastructure/bicep/</c> tree — feeds the idempotency
-/// key <c>infra-{customerId}-{bicepVer}</c> per POML constraint + spec FR-04.
+/// <param name="Template">
+/// Task 245b: the ARM template this run deploys, resolved once by
+/// <see cref="IBicepDeployRunner.ResolveTemplateAsync"/>. Its <see cref="ResolvedArmTemplate.Version"/>
+/// is the <c>bicepVer</c> of the idempotency key <c>infra-{customerId}-{bicepVer}</c> (spec FR-04) —
+/// formerly a run parameter nothing wrote.
 /// </param>
 /// <param name="EnvironmentName">Target environment (<c>dev</c> / <c>staging</c> / <c>prod</c>) — feeds naming per §7.1.</param>
 /// <param name="Location">Azure region for all customer resources (default westus2 per <c>customer.bicep</c>).</param>
 /// <param name="SignalREnabled">Feature-gate for the SignalR resource (ADR-032 Null-Object kill-switch — see §7.2 #13).</param>
+/// <param name="OpenAiLocation">
+/// ISH-08 (customer-provisioning-orchestration-r1 Wave 5 punchlist, 2026-08-27):
+/// Optional Azure OpenAI region override. When non-empty, overrides customer.bicep's
+/// <c>openAiLocation</c> parameter default (<c>westus3</c>). When empty / null, the
+/// Bicep parameter default wins — bit-identical to pre-ISH-08 behavior so existing
+/// callers that do not supply it are unaffected. Populated by
+/// <see cref="H2aBicepInfraDeployHandler"/> from
+/// <c>run.Parameters.NonSecret[H2aBicepInfraDeployHandler.OpenAiLocationParameterKey]</c>.
+/// </param>
 public sealed record BicepDeployRequest(
     string CustomerId,
     string TenantId,
     string SubscriptionId,
     string TenancyModel,
-    string BicepVersion,
+    ResolvedArmTemplate Template,
     string EnvironmentName,
     string Location,
-    bool SignalREnabled);
+    bool SignalREnabled,
+    string? OpenAiLocation = null)
+{
+    /// <summary>The template's content version — the <c>bicepVer</c> of <c>infra-{customerId}-{bicepVer}</c>.</summary>
+    public string BicepVersion => Template.Version;
+}
+
+/// <summary>
+/// Task 245b: the ARM template H2a deploys — the compiled <c>customer.bicep</c> artifact CI publishes
+/// (<c>publish-provisioning-arm-artifacts.yml</c>).
+/// </summary>
+/// <param name="TemplateKey">The manifest's template key (<c>customer</c> — the only key published since task 225a).</param>
+/// <param name="ArmJsonBlobName">The immutable per-build blob the manifest pointed at.</param>
+/// <param name="Json">The template JSON, exactly as downloaded.</param>
+/// <param name="Version">
+/// <see cref="ArtifactVersion"/> of the downloaded bytes (lowercase-hex SHA-256) — equal to the manifest's
+/// <c>sha256</c> for an intact download. Same template ⇒ same version.
+/// </param>
+public sealed record ResolvedArmTemplate(string TemplateKey, string ArmJsonBlobName, string Json, string Version)
+{
+    // The template is ~200 KB — never let a record ToString() (logs, assertion messages) print it.
+    private bool PrintMembers(System.Text.StringBuilder builder)
+    {
+        builder.Append($"TemplateKey = {TemplateKey}, ArmJsonBlobName = {ArmJsonBlobName}, Version = {Version}, Json = ({Json.Length} chars)");
+        return true;
+    }
+}
 
 /// <summary>
 /// Discriminated result of <see cref="IBicepDeployRunner.DeployAsync"/>.

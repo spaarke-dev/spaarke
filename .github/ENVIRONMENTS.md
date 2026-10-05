@@ -120,6 +120,6 @@ gh workflow run deploy-promote.yml -f target_environment=prod
 | Workflow | Purpose |
 |----------|---------|
 | `sdap-ci.yml` | Build, test, produce deployment artifacts |
-| `deploy-infrastructure.yml` | Bicep IaC deployment (separate from app deployment) |
+| `deploy-infrastructure.yml` | "Validate Bicep Infrastructure" — lint + compile only; uses no GitHub Environment and deploys nothing (customer stamps are deployed by the L2 control plane, H2a) |
 | `deploy-promote.yml` | Environment promotion (this pipeline) |
 | `deploy-staging.yml` | Legacy staging deployment (superseded by deploy-promote.yml) |

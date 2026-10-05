@@ -214,15 +214,21 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 ### Per-Customer Resources
 
 Each customer gets its own resource group — and per [ADR-027](../adr/ADR-027-azure-subscription-topology.md)
-as amended, its own **subscription**. Patterns below are taken from the deploying Bicep, not from intent:
+as amended, its own **subscription**. Patterns below are taken from the deploying Bicep, not from intent.
+`infrastructure/bicep/customer.bicep` is the **only** customer-stamp template (owner decision D19,
+2026-10-02), deployed by the L2 control plane's handler H2a; the "Source" column names its variable/param:
 
-| Resource Type | Pattern | Example (`acme`, prod) | Source |
+| Resource Type | Pattern | Example (`acme`, prod) | Source (`customer.bicep`) |
 |---|---|---|---|
-| Resource Group | `rg-spaarke-{customerId}-{env}` | `rg-spaarke-acme-prod` | `stacks/model2-full.bicep:62` |
-| Storage Account | `sprk{customerId}{env}sa` | `sprkacmeprodsa` | `:66` (hyphens stripped, lowercased, capped 24) |
-| Key Vault | `sprk{customerId}{env}-kv` | `sprkacmeprod-kv` | `:101` |
-| Redis Cache | `sprk-{customerId}-{env}-redis` | `sprk-acme-prod-redis` | `customer.json:229` |
-| UAMI | `sprk-{env}-{customerId}-uami` | `sprk-prod-acme-uami` | `model2-full.bicep:47` |
+| Resource Group | `rg-spaarke-{customerId}-{env}` | `rg-spaarke-acme-prod` | `var resourceGroupName` |
+| UAMI | `mi-spaarke-{customerId}-{env}` | `mi-spaarke-acme-prod` | `module uami` → `name` |
+| Key Vault | `take('sprk-{customerId}-{env}-kv', 24)` | `sprk-acme-prod-kv` | `param keyVaultName` (default; overridable only for a registered naming exception) |
+| Storage Account | `sprk{customerId}{env}sa` | `sprkacmeprodsa` | `var storageAccountName` (hyphens stripped, lowercased, capped 24) |
+| Service Bus | `spaarke-{customerId}-{env}-sbus` | `spaarke-acme-prod-sbus` | `var serviceBusName` (`-sb` is reserved by Azure) |
+| Cosmos DB | `spaarke-{customerId}-{env}-cosmos` | `spaarke-acme-prod-cosmos` | `var cosmosAccountName` (capped 44) |
+| Azure OpenAI · AI Search · Document Intelligence · Redis · App Insights · Log Analytics | `sprk-{customerId}-{env}-{openai\|search\|docintel\|redis\|insights\|logs}` | `sprk-acme-prod-openai` | `var openAiName` / `searchServiceName` / `docIntelligenceName` / `redisCacheName` / `appInsightsName` / `logAnalyticsName` |
+| App Service Plan · BFF App Service | `sprk-{customerId}-{env}-{plan\|api}` | `sprk-acme-prod-api` | `module appServicePlan` → `planName`, `module bffApi` → `appServiceName` |
+| SignalR · ACS (only when enabled) | `sprk-{customerId}-{env}-{signalr\|acs}` | `sprk-acme-prod-signalr` | `var signalrName` / `acsResourceName` |
 
 > ⚠️ **Corrected 2026-09-29 (task 124).** This table previously gave `rg-spaarke-prod-{customer}` — env
 > BEFORE customer — which is the reverse of what the Bicep deploys, and omitted `{env}` from the other
@@ -230,9 +236,10 @@ as amended, its own **subscription**. Patterns below are taken from the deployin
 > API from `rg-spaarke-prod`"*, which **D-12 retired**: there is no shared tier. Each customer's stamp
 > includes its own BFF, Redis, OpenAI and Search.
 >
-> ⚠️ **Two Key Vault forms exist** and they are not interchangeable: `stacks/model2-full.bicep` composes
-> `sprk{customerId}{env}-kv` (no separators), while `customer.bicep` composes
-> `take('sprk-{customerId}-{env}-kv', 24)`. The second is what sets the length limit below.
+> **One Key Vault form.** `customer.bicep` composes `take('sprk-{customerId}-{env}-kv', 24)`, which is what
+> sets the length limit below. The separator-less `sprk{customerId}{env}-kv` form and the
+> `sprk-{env}-{customerId}-uami` identity name belonged to `stacks/model2-full.bicep`, which deployed no live
+> environment *(retired by task 249, 2026-10-02 — file deleted; git history keeps it)*.
 
 ---
 
@@ -311,6 +318,12 @@ relax it rather than to reject the customer.
 
 Names longer than 8 characters are abbreviated at intake — `northwind` → `nwind`. The abbreviation is a
 decision made once, at onboarding, and recorded on the registry row; it is not re-derived anywhere.
+
+**Reserved: `platform`, `shared`, `byok`.** They match the pattern but already occupy the customerId position in
+non-customer resource-group names — `rg-spaarke-platform-{env}` (the BFF and the L2 control plane),
+`rg-spaarke-shared-{env}` (Spaarke's shared production resources — the Model 1 SPE billing account and, from its first prod deployment, the L2 control plane; formerly the retired Model 1 tier, D23 2026-10-03), `rg-spaarke-byok-prod`. A customer with one of these ids would
+deploy into that group. Intake refuses them (`CustomerIdStandard.ReservedIds`), and the BFF refuses to derive them
+at runtime (`CustomerIdResolver`).
 
 ---
 

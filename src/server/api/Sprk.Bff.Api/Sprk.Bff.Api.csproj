@@ -122,6 +122,12 @@
     <!-- Microsoft.Extensions.Caching.Abstractions 10.0.3: bumped from 10.0.1 to satisfy Microsoft.Extensions.AI 10.3.0 dependency chain -->
     <PackageReference Include="Microsoft.Extensions.Caching.Abstractions" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.11" />
+    <!-- Microsoft Entra authentication to Azure Managed Redis (task 242, owner D12/D13): CacheModule calls
+         ConfigureForAzureWithUserAssignedManagedIdentityAsync when Redis:Endpoint is set (no key exists).
+         It needs StackExchange.Redis >= 2.10.1; pinned to the latest 2.x (OpenTelemetry.Instrumentation
+         .StackExchangeRedis requires < 3.0; Microsoft.Extensions.Caching.StackExchangeRedis floors 2.7.27). -->
+    <PackageReference Include="Microsoft.Azure.StackExchangeRedis" Version="3.3.1" />
+    <PackageReference Include="StackExchange.Redis" Version="2.13.17" />
     <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.11" />
 
     <!-- Microsoft Graph SDK v6.x (dotnet-10-upgrade-r1 task 033, 2026-08-13): bumped 5.105.0 -> 6.5.0.

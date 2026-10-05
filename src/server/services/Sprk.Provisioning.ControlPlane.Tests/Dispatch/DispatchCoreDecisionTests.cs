@@ -90,7 +90,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Dispatch;
 
 public sealed class DispatchCoreDecisionTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
     private const string TestHandlerId = "H1";
 
@@ -453,7 +453,7 @@ public sealed class DispatchCoreDecisionTests
         RunId = TestRunId,
         CustomerId = TestCustomerId,
         EnvironmentId = "env-1",
-        TenancyModel = "Model2Dedicated",
+        TenancyModel = "Model2",
         Profile = "spaarke-hosted-model2",
         Status = status,
     };

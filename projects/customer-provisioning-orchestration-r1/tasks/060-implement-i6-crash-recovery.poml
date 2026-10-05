@@ -4,7 +4,7 @@
     <title>Implement I6 crash recovery — L2 startup scan re-schedules orphaned runs from currentPhase</title>
     <phase>C Wave C5 — L2 REST + Reconciler</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler'; implements FR-23 crash-recovery; a bug here silently strands runs (customer never reaches Setup Status = Ready).</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -4,7 +4,7 @@
     <title>Codify spaarke-spekvcert DO-NOT-RENAME dev exception in Bicep param defaults + config; publish exception registry</title>
     <phase>G Canonical Naming Compliance</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies Bicep param defaults + writes new notes registry (NEW-surface documentation-adjacent). Per root CLAUDE.md §8, cross-file config + docs = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

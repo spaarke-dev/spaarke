@@ -5,7 +5,7 @@
 // handler + its 3 DAG-parallel sub-handlers (task 073).
 //
 // SCOPE:
-//   - Bind IntegrationWiring:{ExchangePolicyDescriptionPrefix,
+//   - Bind IntegrationWiring:{ExchangeAdminAppId, ExchangeAssignmentNamePrefix,
 //     GraphRequestTimeout, GraphSubscriptionExpirationMinutes,
 //     DataverseRequestTimeout, ServiceEndpoint*, KvReadTimeout,
 //     SidecarBaseUrl, SidecarRequestTimeout, SidecarTransientRetryDelay,
@@ -43,13 +43,11 @@
 // 151's AppConfigSeedModule) so a misconfigured KvReadTimeout fails the
 // Worker at boot instead of surfacing only on H14b/H14c's first dispatch.
 //
-// TASK 161 (Wave G-6): IExchangePolicyApplier swapped from
-// ExchangePolicyScriptApplier (pwsh + Set-ExchangeApplicationAccessPolicy.ps1
-// shell-out, RETIRED — kept on disk unregistered, see that file's retirement
-// banner) to ExchangePolicySidecarClient (typed HttpClient posting to task
-// 114's Listener.ps1 sitecontainer sidecar on
-// http://127.0.0.1:8091/apply-policy, per DS-1b §3). Registered via
-// AddHttpClient&lt;TInterface, TImpl&gt;() — parity with GraphRestSubscriptionCreator
+// TASK 161 (Wave G-6) / TASK 251: IExchangePolicyApplier + IExchangePolicyReadClient are
+// both ExchangePolicySidecarClient (typed HttpClient posting to the Listener.ps1
+// sitecontainer sidecar on http://127.0.0.1:8091/apply-mailbox-access and
+// /read-mailbox-access, per DS-1b §3; the pwsh shell-out applier was deleted by
+// task 251). Registered via AddHttpClient&lt;TImpl&gt;() — parity with GraphRestSubscriptionCreator
 // / DataverseWebApiServiceEndpointWebhookRegistrar's own typed-HttpClient
 // registrations — so IHttpClientFactory manages the underlying handler pool.
 // The client depends on IKvSecretReader (task 160) for the per-boot
@@ -109,25 +107,15 @@ public static class IntegrationWiringModule
         // Collaborator seams — one production impl each (ADR-010 ≥2-impl
         // justification: the 2nd impl is the per-unit-test fake).
         //
-        // Task 161 (Wave G-6): IExchangePolicyApplier bound to the new
-        // ExchangePolicySidecarClient (typed HttpClient) — replaces the
-        // retired ExchangePolicyScriptApplier's pwsh shell-out. Underlying
-        // HttpClient is IHttpClientFactory-managed (handler pool) — parity
-        // with GraphRestSubscriptionCreator's own AddHttpClient<> below.
-        services.AddHttpClient<IExchangePolicyApplier, ExchangePolicySidecarClient>();
-
-        // Task 180 (Wave G-7): IExchangePolicyReadClient bound to the new
-        // ExchangePolicySidecarReadClient (typed HttpClient) -- the sibling
-        // READ-ONLY client for the H13 T4 acceptance-gate probe. Same
-        // sidecar (task 114's Listener.ps1), same auth model + shared
-        // secret KV read, disjoint GET /policies route (task 180's route
-        // extension). Registered here (not in E2EAcceptanceModule) because
-        // the sidecar transport + KV secret plumbing lives in this module;
-        // the T4 probe (ExchangePolicyCountT4Probe) will consume this
-        // interface once assembly task 185 wires it into the aggregate
-        // IE2ETrapVerifier composition, per the sibling standalone-probe
-        // convention (T1/T5/T6 file headers).
-        services.AddHttpClient<IExchangePolicyReadClient, ExchangePolicySidecarReadClient>();
+        // The H14a Exchange sidecar (task 251): ONE typed HttpClient for the one upstream
+        // (localhost:8091), serving both seams — IExchangePolicyApplier (H14a apply) and
+        // IExchangePolicyReadClient (H13 T4 read-only). The client also needs the Worker's
+        // ExchangeAdminTokenSource (registered by the Worker host beside the other MI-FIC
+        // credential source, SpeConfidentialClientGraphFactory — both depend on the
+        // Worker-only WorkerDataverseCredentialFactory).
+        services.AddHttpClient<ExchangePolicySidecarClient>();
+        services.AddTransient<IExchangePolicyApplier>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
+        services.AddTransient<IExchangePolicyReadClient>(sp => sp.GetRequiredService<ExchangePolicySidecarClient>());
 
         // Task 160: SecretClientKvReader needs the shared UAMI-pinned
         // TokenCredential singleton (AddCosmosModule, ADR-028 MI-outbound) —

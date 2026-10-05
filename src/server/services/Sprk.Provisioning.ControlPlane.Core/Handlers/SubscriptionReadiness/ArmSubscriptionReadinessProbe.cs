@@ -57,6 +57,7 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.ManagedServices;
 using Azure.ResourceManager.Resources;
+using Azure.ResourceManager.Resources.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 
@@ -276,6 +277,169 @@ public sealed class ArmSubscriptionReadinessProbe : ISubscriptionReadinessProbe
                     "verify the L2 control-plane UAMI has Reader RBAC on this subscription and that the " +
                     "Microsoft.ManagedServices resource provider is registered.",
                 Evidence: evidence);
+        }
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6 verbatim
+    /// absorption. For each provider namespace:
+    ///   1. GET providers/{ns} — read observed registrationState.
+    ///   2. If already "Registered": record + continue.
+    ///   3. Else POST providers/{ns}/register (idempotent server-side).
+    ///   4. Poll GET providers/{ns} every <paramref name="pollInterval"/>
+    ///      until state flips to "Registered" or the shared deadline
+    ///      derived from <paramref name="totalTimeout"/> elapses.
+    /// The shared deadline means a slow-registering RP does not steal the
+    /// budget from later RPs — they simply share the remaining window.
+    /// </remarks>
+    public async Task<SubscriptionReadinessCheckResult> RegisterAndPollRequiredProvidersAsync(
+        string subscriptionId,
+        string tenantId,
+        IReadOnlyList<string> requiredProviders,
+        TimeSpan pollInterval,
+        TimeSpan totalTimeout,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentNullException.ThrowIfNull(requiredProviders);
+        if (pollInterval <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(pollInterval));
+        if (totalTimeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(totalTimeout));
+
+        if (requiredProviders.Count == 0)
+        {
+            return new SubscriptionReadinessCheckResult(
+                Passed: true,
+                Diagnostic: $"No required resource providers configured for subscription '{subscriptionId}' (no-op).",
+                Evidence: JsonDocument.Parse("{}").RootElement.Clone());
+        }
+
+        var subscriptionResource = _armClient.GetSubscriptionResource(
+            SubscriptionResource.CreateResourceIdentifier(subscriptionId));
+        var providerCollection = subscriptionResource.GetResourceProviders();
+
+        var deadline = DateTimeOffset.UtcNow.Add(totalTimeout);
+        var perProviderOutcome = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var failedProviders = new List<string>();
+
+        foreach (var ns in requiredProviders)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var outcome = await RegisterAndPollOneAsync(
+                providerCollection, ns, pollInterval, deadline, cancellationToken).ConfigureAwait(false);
+            perProviderOutcome[ns] = outcome;
+            if (!string.Equals(outcome, "Registered", StringComparison.OrdinalIgnoreCase))
+            {
+                failedProviders.Add(ns);
+            }
+        }
+
+        var evidence = JsonSerializer.SerializeToElement(new
+        {
+            subscriptionId,
+            requiredProviderCount = requiredProviders.Count,
+            perProvider = perProviderOutcome,
+            totalTimeoutSeconds = (int)totalTimeout.TotalSeconds,
+            pollIntervalSeconds = (int)pollInterval.TotalSeconds,
+        });
+
+        if (failedProviders.Count == 0)
+        {
+            return new SubscriptionReadinessCheckResult(
+                Passed: true,
+                Diagnostic:
+                    $"All {requiredProviders.Count} required resource providers are Registered on " +
+                    $"subscription '{subscriptionId}'.",
+                Evidence: evidence);
+        }
+
+        return new SubscriptionReadinessCheckResult(
+            Passed: false,
+            Diagnostic:
+                $"Provider registration did NOT reach 'Registered' within {(int)totalTimeout.TotalSeconds}s for " +
+                $"{failedProviders.Count} of {requiredProviders.Count} required providers on subscription " +
+                $"'{subscriptionId}': " +
+                $"{string.Join(", ", failedProviders.Select(p => $"{p}={perProviderOutcome[p]}"))}. " +
+                "Remediation: escalate via `az provider register --namespace <ns>` under an elevated identity " +
+                "(the L2 UAMI must have Contributor RBAC on this subscription); investigate ARM if the " +
+                "Registering state does not converge server-side. F6 verbatim from the 2026-08-27 pre-dispatch audit.",
+            Evidence: evidence);
+    }
+
+    /// <summary>
+    /// Register-and-poll one provider namespace within the shared deadline
+    /// budget. Returns the observed <c>registrationState</c> string
+    /// ("Registered" / "Registering" / "NotRegistered" / "PollDeadlineExceeded"
+    /// / "ArmError-{status}" ). Never throws on ARM domain rejections; only
+    /// propagates <see cref="OperationCanceledException"/>.
+    /// </summary>
+    private async Task<string> RegisterAndPollOneAsync(
+        ResourceProviderCollection providerCollection,
+        string providerNamespace,
+        TimeSpan pollInterval,
+        DateTimeOffset deadline,
+        CancellationToken cancellationToken)
+    {
+        // Read current state first — if already Registered, skip the register call entirely.
+        try
+        {
+            var initial = await providerCollection.GetAsync(providerNamespace, expand: null, cancellationToken).ConfigureAwait(false);
+            var initialState = initial.Value.Data.RegistrationState ?? "(unknown)";
+            if (string.Equals(initialState, "Registered", StringComparison.OrdinalIgnoreCase))
+            {
+                _logger.LogInformation(
+                    "ArmSubscriptionReadinessProbe: provider {Ns} already Registered", providerNamespace);
+                return "Registered";
+            }
+
+            // POST register — idempotent server-side. Property bag is empty for the RP-side default consent.
+            _logger.LogInformation(
+                "ArmSubscriptionReadinessProbe: registering provider {Ns} (observed state '{State}')",
+                providerNamespace, initialState);
+            await initial.Value.RegisterAsync(new ProviderRegistrationContent(), cancellationToken).ConfigureAwait(false);
+        }
+        catch (RequestFailedException ex)
+        {
+            _logger.LogWarning(ex,
+                "ArmSubscriptionReadinessProbe: provider {Ns} initial read / register failed " +
+                "(status={Status} errorCode={ErrorCode})", providerNamespace, ex.Status, ex.ErrorCode);
+            return $"ArmError-{ex.Status}";
+        }
+
+        // Poll until Registered or deadline elapses.
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(false);
+                var poll = await providerCollection.GetAsync(providerNamespace, expand: null, cancellationToken).ConfigureAwait(false);
+                var state = poll.Value.Data.RegistrationState ?? "(unknown)";
+                if (string.Equals(state, "Registered", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Registered";
+                }
+            }
+            catch (RequestFailedException ex)
+            {
+                _logger.LogWarning(ex,
+                    "ArmSubscriptionReadinessProbe: provider {Ns} poll failed transiently " +
+                    "(status={Status} errorCode={ErrorCode}) — will retry until deadline",
+                    providerNamespace, ex.Status, ex.ErrorCode);
+                // Continue polling — transient ARM faults during registration are common.
+            }
+        }
+
+        // Final read after deadline so the diagnostic carries the last observed state.
+        try
+        {
+            var final = await providerCollection.GetAsync(providerNamespace, expand: null, cancellationToken).ConfigureAwait(false);
+            return final.Value.Data.RegistrationState ?? "PollDeadlineExceeded";
+        }
+        catch
+        {
+            return "PollDeadlineExceeded";
         }
     }
 }

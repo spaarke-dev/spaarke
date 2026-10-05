@@ -4,41 +4,40 @@
 // L2 CONTROL-PLANE H2b AI Search index-provisioning handler (task 045, wave C4).
 //
 // PURPOSE:
-//   Provisions (Model 2) or verifies + templates (Model 1) the 7 canonical
-//   Spaarke AI Search indexes per FR-05 / §11.2 catalog. Model 2 uses
-//   SearchIndexClientProvisioner (Azure.Search.Documents.Indexes.SearchIndexClient
-//   under UAMI RBAC, task 124 — REPLACES the retired script-shelling
-//   DeployAllIndexesScriptProvisioner; the embedded JSON schemas remain the
-//   FR-07 catalog authority per task 002 audit § 1). Model 1 verifies
-//   presence on the shared platform AI Search + provisions a REAL per-tenant
-//   tenantId-filter query template via AiSearchTenantFilterTemplateProvisioner
-//   (§4D I2 / FR-29 enforcement at onboarding — task 124 replaced the
-//   wave-C4 logging-only Stub with a Cosmos-backed real provisioner).
+//   Provisions the 7 canonical Spaarke AI Search indexes per FR-05 / §11.2
+//   catalog on the stamp's OWN AI Search service (the endpoint H2a deployed),
+//   via SearchIndexClientProvisioner (Azure.Search.Documents.Indexes.SearchIndexClient
+//   under UAMI RBAC, task 124 — the embedded JSON schemas remain the FR-07
+//   catalog authority per task 002 audit § 1), then verifies them.
+//
+//   Model 1 and Model 2 take the same path (task 225b, D-12): every customer is
+//   a dedicated stamp with its own AI Search service. The retired Model 1 branch
+//   verified indexes on a SHARED platform service and wrote a per-tenant
+//   tenantId-filter template to Cosmos; with one service per customer there is
+//   no shared index to filter, so both are gone.
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-05 (H2b):
-//       7 canonical indexes; per-index invariant verifier passes; Model 1
-//       verifies presence + provisions per-tenant filter template.
+//       7 canonical indexes; per-index invariant verifier passes.
 //   - projects/customer-provisioning-orchestration-r1/spec.md § MUST rules
 //       (§4D I1 / FR-28): -TenantId mandatory; no hardcoded default.
 //   - projects/customer-provisioning-orchestration-r1/spec.md § MUST rules
 //       (§4D I2 / FR-29): unconditional `tenantId eq` filter on every AI
-//       Search query — Model 1 template provisioning is the onboarding-time
-//       enforcement mechanism.
+//       Search query — enforced by the BFF at query time; H13's I2 probe
+//       checks the stamp's indexes.
 //   - projects/customer-provisioning-orchestration-r1/spec.md SC #10:
 //       spaarke-playbook-embeddings (ADR-039) + spaarke-knowledge-index*
 //       (audit § 2) MUST NOT be re-provisioned.
-//   - projects/customer-provisioning-orchestration-r1/design.md §4.1a
-//       Model 1 vs Model 2 handler-behavior differences (H2b row).
+//   - projects/customer-provisioning-orchestration-r1/notes/
+//       model1-dedicated-remediation-plan.md — D-12, T225b (one path).
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C
 //       rollback taxonomy — failure-mode classification.
 //   - projects/customer-provisioning-orchestration-r1/notes/
 //       ai-search-catalog-audit-2026-08.md — canonical 7 + retired lineage.
 //   - ADR-013: MUST use PublicContracts/ facade if AI needed; H2b consumes
 //       NO AI-internal types (only AI Search REST/SDK collaborators).
-//   - ADR-028: DefaultAzureCredential + UAMI outbound — verifier,
-//       SearchIndexClientProvisioner, and the tenant-filter template
-//       provisioner's Cosmos store ALL use the shared UAMI-pinned credential;
+//   - ADR-028: DefaultAzureCredential + UAMI outbound — verifier and
+//       SearchIndexClientProvisioner use the shared UAMI-pinned credential;
 //       zero admin-key / zero operator `az` chain anywhere in this handler's
 //       collaborator graph (task 124, Wave G-2).
 //   - ADR-032: SignalR feature-gate does NOT apply to H2b DI — unconditional
@@ -54,26 +53,18 @@
 //   │ Failure mode                        │ §4C class                 │
 //   ├─────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId (§4D I1)           │ Resumable                 │
-//   │ Missing indexVer                    │ Resumable                 │
+//   │ Requested index has no schema (245b)│ Resumable                 │
 //   │ Run not found in Cosmos partition   │ Resumable                 │
-//   │ Missing search endpoint             │ Resumable (Model 2 —      │
-//   │ (Model 2 InterStepState blank)      │ H2a must have populated)  │
-//   │ Missing shared platform endpoint    │ Resumable (Model 1 —      │
-//   │ (Model 1 config blank)              │ config error, operator    │
-//   │                                     │ fixes app-setting +       │
-//   │                                     │ resumes)                  │
+//   │ Missing search endpoint             │ Resumable (H2a must have  │
+//   │ (InterStepState blank)              │ populated it)             │
 //   │ Retired index in requested catalog  │ QuarantineRequired        │
 //   │ (spec SC #10 / ADR-039)             │ (structural design-intent │
 //   │                                     │ violation — never proceed)│
-//   │ Model 2 provisioner failed          │ QuarantineRequired        │
+//   │ Provisioner failed                  │ QuarantineRequired        │
 //   │ (partial deploy possible)           │                           │
 //   │ Verifier InvariantViolation         │ QuarantineRequired        │
 //   │ (index exists but schema wrong —    │                           │
 //   │ won't self-heal on retry)           │                           │
-//   │ Model 1 verifier: index Missing     │ QuarantineRequired        │
-//   │ (shared platform under-provisioned) │ (operator ops action)     │
-//   │ Model 1 template provisioner failed │ Resumable                 │
-//   │ (PUT is idempotent — retry-safe)    │                           │
 //   │ Concurrent Cosmos writer conflict   │ Resumable                 │
 //   │ Run row deleted mid-flight          │ Resumable                 │
 //   └─────────────────────────────────────┴───────────────────────────┘
@@ -87,8 +78,9 @@
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H2b",
 //           IdempotencyKey==aisearch-{customerId}-{indexVer}). Match ⇒ Success
-//           no-op. indexVer is the manifest hash of the schema JSONs in
-//           scripts/ai-search/ (POML constraint) — NOT an attempt counter.
+//           no-op. indexVer is the content version of the embedded schema
+//           bodies H2b applies (IndexSchemaSet — task 245b) — NOT an attempt
+//           counter.
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H2b does NOT enqueue H3 (sibling task 046) directly. The downstream DAG
@@ -101,7 +93,7 @@
 
 using System.Collections.Immutable;
 using System.Diagnostics;
-using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -118,21 +110,6 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
     public const string TenantIdParameterKey = "tenantId";
 
     /// <summary>
-    /// Non-secret parameter key carrying the AI Search index-schema version.
-    /// Feeds the idempotency key <c>aisearch-{customerId}-{indexVer}</c> per
-    /// POML constraint (manifest hash of schema JSONs in
-    /// <c>scripts/ai-search/</c>).
-    /// </summary>
-    public const string IndexVersionParameterKey = "indexVer";
-
-    /// <summary>
-    /// Non-secret parameter key carrying the target environment (dev / staging /
-    /// prod / demo) — passed through to <c>Deploy-AllIndexes.ps1 -Environment</c>
-    /// for Model 2. Defaults to <c>prod</c> when absent.
-    /// </summary>
-    public const string EnvironmentNameParameterKey = "environmentName";
-
-    /// <summary>
     /// Optional non-secret parameter key carrying a comma-separated subset of
     /// canonical index short-keys to provision (parity with the script's
     /// <c>-Indexes</c> parameter). Empty / absent ⇒ provision all canonical 7.
@@ -140,15 +117,10 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
     /// </summary>
     public const string RequestedIndexesParameterKey = "requestedIndexes";
 
-    /// <summary>Default target environment when the parameter is absent.</summary>
-    private const string DefaultEnvironmentName = "prod";
-
     private readonly IProvisioningRunRepository _repository;
     private readonly ICanonicalIndexCatalog _catalog;
     private readonly IAiSearchIndexProvisioner _provisioner;
     private readonly IAiSearchIndexVerifier _verifier;
-    private readonly IAiSearchTenantFilterTemplateProvisioner _templateProvisioner;
-    private readonly AiSearchIndexOptions _options;
     private readonly ILogger<H2bAiSearchIndexHandler> _logger;
 
     /// <inheritdoc/>
@@ -164,24 +136,18 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         ICanonicalIndexCatalog catalog,
         IAiSearchIndexProvisioner provisioner,
         IAiSearchIndexVerifier verifier,
-        IAiSearchTenantFilterTemplateProvisioner templateProvisioner,
-        IOptions<AiSearchIndexOptions> options,
         ILogger<H2bAiSearchIndexHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(verifier);
-        ArgumentNullException.ThrowIfNull(templateProvisioner);
-        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _catalog = catalog;
         _provisioner = provisioner;
         _verifier = verifier;
-        _templateProvisioner = templateProvisioner;
-        _options = options.Value;
         _logger = logger;
     }
 
@@ -229,46 +195,19 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         var parameters = run.Parameters.NonSecret;
 
         // (2) §4D I1 tenant guard — H2b MUST NOT fall back to a default tenant.
-        //     Model 1's tenant-filter template embeds this value verbatim; a
-        //     default fallback would put the template on the wrong tenant.
         if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var tenantId))
         {
             var diagnostic =
                 "Run parameter 'tenantId' is required by H2b (§4D I1 no-hardcoded-tenant). " +
-                "Upstream handler (H0.5 for Model 2, L2 endpoint for Model 1) MUST populate this before H2b dispatches.";
+                "The L2 intake (POST /api/runs) requires it; a run without it cannot reach H2b legitimately.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 AiSearchIndexRejectionCodes.MissingTenantId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (3) Index-version guard — feeds the idempotency key. Absence means
-        //     level-3 dedup would collide across upgrades → refuse.
-        if (!TryGetNonEmpty(parameters, IndexVersionParameterKey, out var indexVer))
-        {
-            var diagnostic =
-                "Run parameter 'indexVer' is required by H2b (idempotency key: aisearch-{customerId}-{indexVer}). " +
-                "indexVer MUST be the manifest hash of the schema JSONs in scripts/ai-search/ per POML constraint " +
-                "/ design.md §4.1 preamble.";
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                AiSearchIndexRejectionCodes.MissingIndexVersion, diagnostic, cancellationToken).ConfigureAwait(false);
-        }
-
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, indexVer);
-
-        // (4) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
-        {
-            _logger.LogInformation(
-                "H2b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
-        }
-
-        // (5) Resolve requested index catalog. Empty request ⇒ canonical 7.
+        // (3) Resolve requested index catalog. Empty request ⇒ canonical 7.
         //     The retired-name guard fires BEFORE the provisioner OR verifier
-        //     runs regardless of Model 1 / Model 2 branch — structural
-        //     design-intent violation must never proceed to a live API call.
+        //     runs — structural design-intent violation must never proceed to a
+        //     live API call.
         var requestedIndexes = ResolveRequestedIndexes(parameters);
         var retiredHit = requestedIndexes.FirstOrDefault(_catalog.IsRetired);
         if (!string.IsNullOrEmpty(retiredHit))
@@ -284,29 +223,67 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        // (6) Branch on tenancy model — Model 2 provisions dedicated indexes;
-        //     Model 1 verifies shared platform + provisions per-tenant template.
-        var tenancyModel = string.IsNullOrWhiteSpace(run.TenancyModel) ? "Model2Dedicated" : run.TenancyModel;
-        var environmentName = TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var env)
-            ? env
-            : DefaultEnvironmentName;
-
-        HandlerResult branchResult;
-        if (string.Equals(tenancyModel, "Model1Shared", StringComparison.OrdinalIgnoreCase))
+        // (4) Task 245b: the idempotency version is the content version of the schema bodies H2b
+        //     applies (IndexSchemaSet) — formerly a run parameter nothing wrote. Same schemas ⇒ same
+        //     key; an edited schema ⇒ a new key and a re-apply.
+        string indexVer;
+        string? unknownIndex;
+        try
         {
-            branchResult = await HandleModel1BranchAsync(
-                run, etag, envelope, tenantId, requestedIndexes, cancellationToken).ConfigureAwait(false);
+            IndexSchemaSet.TryComputeVersion(requestedIndexes, out indexVer, out unknownIndex);
         }
-        else
+        catch (InvalidOperationException ex)
         {
-            branchResult = await HandleModel2BranchAsync(
-                run, etag, envelope, tenantId, environmentName, requestedIndexes, indexVer, cancellationToken)
+            // An embedded schema resource is missing from the build — a packaging fault, nothing applied.
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                AiSearchIndexRejectionCodes.IndexSchemaUnavailable, ex.Message, cancellationToken).ConfigureAwait(false);
+        }
+        if (unknownIndex is not null)
+        {
+            var diagnostic =
+                $"Requested index '{unknownIndex}' has no embedded schema (Handlers/AiSearchIndex/IndexSchemas/). " +
+                $"Valid names: {string.Join(", ", _catalog.CanonicalIndexNames)}. Fix the run's requestedIndexes " +
+                "intake value; nothing has been applied.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                AiSearchIndexRejectionCodes.IndexSchemaUnavailable, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, indexVer);
+
+        // (5) Level-3 idempotency: durable no-op on duplicate.
+        if (run.CompletedPhases.Any(cp =>
+                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
+                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        {
+            _logger.LogInformation(
+                "H2b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, idempotencyKey);
+            return new HandlerResult.Success(idempotencyKey);
+        }
+
+        // (6) Task 223 (D-12): an unparseable tenancy model is a corrupted run — reject it rather
+        //     than default. Both models then take the same path (task 225b): every customer has
+        //     its own AI Search service, deployed by H2a.
+        if (!TenancyModelParser.TryParse(run.TenancyModel, out var tenancyModel))
+        {
+            var diagnostic =
+                $"ProvisioningRun.tenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel. " +
+                $"Expected: {TenancyModelParser.FormatExpectedValues()}. Pre-D-12 handler defaulted blank to " +
+                "Model2Dedicated; Task 223 retires that silent default (per INCOMING-D12-D13-REMEDIATION.md §5 Item 2 / D2).";
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                AiSearchIndexRejectionCodes.InvalidTenancyModel, diagnostic, cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        if (branchResult is HandlerResult.Failure)
+        var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
+
+        var provisionResult = await ProvisionIndexesAsync(
+            run, etag, envelope, tenantId, environmentName, requestedIndexes, indexVer, idempotencyKey, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (provisionResult is HandlerResult.Failure)
         {
-            return branchResult;
+            return provisionResult;
         }
 
         // (7) All post-conditions cleared — advance Cosmos state. H2b writes
@@ -337,7 +314,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         return $"aisearch-{customerId}-{indexVer}";
     }
 
-    private async Task<HandlerResult> HandleModel2BranchAsync(
+    private async Task<HandlerResult> ProvisionIndexesAsync(
         ProvisioningRun run,
         string etag,
         HandlerEnvelope envelope,
@@ -345,22 +322,23 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         string environmentName,
         ImmutableArray<string> requestedIndexes,
         string indexVer,
+        string idempotencyKey,
         CancellationToken cancellationToken)
     {
-        // Model 2 endpoint comes from H2a's InterStepState — if blank, H2a
+        // The endpoint comes from H2a's InterStepState — if blank, H2a
         // hasn't run (or the reconciler dispatched H2b out of order).
         var endpoint = run.InterStepState.AiSearchEndpoint;
         if (string.IsNullOrWhiteSpace(endpoint))
         {
             var diagnostic =
-                "Model 2 branch requires ProvisioningRun.InterStepState.AiSearchEndpoint (populated by H2a). " +
+                "H2b requires ProvisioningRun.InterStepState.AiSearchEndpoint (populated by H2a). " +
                 "H2b was dispatched before H2a completed OR H2a's output was not persisted — " +
                 "reconciler MUST advance DAG in order.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 AiSearchIndexRejectionCodes.MissingSearchEndpoint, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (M2.a) Invoke the Model 2 provisioner (wraps Deploy-AllIndexes.ps1).
+        // (a) Invoke the provisioner (SearchIndexClientProvisioner).
         AiSearchIndexProvisionOutcome outcome;
         try
         {
@@ -376,10 +354,10 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "H2b Model 2 provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
+                "H2b provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
                 envelope.RunId, envelope.CustomerId);
             var diagnostic =
-                $"Model 2 provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                $"Index provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
                 "Partial index state may exist — treated as Quarantine-required per §4C.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 AiSearchIndexRejectionCodes.IndexProvisioningFailed, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -392,94 +370,9 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        // (M2.b) Independent post-deploy verifier — belt-and-suspenders vs
-        //         script's Invoke-PostDeployVerifier. See
-        //         RestApiAiSearchIndexVerifier file header.
-        return await RunVerifierAsync(run, etag, endpoint, envelope, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async Task<HandlerResult> HandleModel1BranchAsync(
-        ProvisioningRun run,
-        string etag,
-        HandlerEnvelope envelope,
-        string tenantId,
-        ImmutableArray<string> requestedIndexes,
-        CancellationToken cancellationToken)
-    {
-        // Model 1 endpoint comes from L2 config (shared platform), NOT from
-        // H2a's InterStepState (Model 1 does not deploy dedicated AI Search).
-        var endpoint = _options.SharedPlatformSearchEndpoint;
-        if (string.IsNullOrWhiteSpace(endpoint))
-        {
-            var diagnostic =
-                "Model 1 branch requires AiSearchIndex:SharedPlatformSearchEndpoint config. " +
-                "Operator must set the shared platform AI Search endpoint app-setting on L2 App Service " +
-                "(e.g. https://spaarke-search-prod.search.windows.net) before onboarding Model 1 tenants.";
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                AiSearchIndexRejectionCodes.MissingSearchEndpoint, diagnostic, cancellationToken).ConfigureAwait(false);
-        }
-
-        // (M1.a) Verify the 7 canonical indexes ALREADY exist on the shared
-        //         service. H2b MUST NOT re-create them (spec MUST rule +
-        //         design.md §4.1a — Model 1 shares platform indexes).
-        var verifyResult = await RunVerifierRawAsync(endpoint, requestedIndexes, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (verifyResult is AiSearchIndexVerifyResult.Missing missing)
-        {
-            var diagnostic =
-                $"Model 1 shared platform AI Search '{endpoint}' is missing indexes: " +
-                $"[{string.Join(", ", missing.MissingIndexNames)}]. " +
-                "H2b MUST NOT re-create shared indexes — operator must run " +
-                "scripts/ai-search/Deploy-AllIndexes.ps1 -Environment {env} against the shared service " +
-                "BEFORE onboarding this Model 1 tenant.";
-            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                AiSearchIndexRejectionCodes.SharedIndexMissing, diagnostic, cancellationToken).ConfigureAwait(false);
-        }
-
-        if (verifyResult is AiSearchIndexVerifyResult.InvariantViolation violation)
-        {
-            var diagnostic = FormatInvariantDiagnostic(endpoint, violation);
-            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                AiSearchIndexRejectionCodes.IndexInvariantViolation, diagnostic, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        // (M1.b) Provision the per-tenant filter template — §4D I2 / FR-29
-        //         enforcement at onboarding time.
-        AiSearchTenantFilterTemplateOutcome templateOutcome;
-        try
-        {
-            var templateRequest = new AiSearchTenantFilterTemplateRequest(
-                SearchEndpoint: endpoint,
-                TenantId: tenantId,
-                CustomerId: envelope.CustomerId,
-                IndexNames: requestedIndexes);
-            templateOutcome = await _templateProvisioner.ProvisionAsync(templateRequest, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex,
-                "H2b Model 1 template provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            var diagnostic =
-                $"Model 1 tenant-filter template provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "PUT semantics make retry safe — treated as Resumable per §4C.";
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                AiSearchIndexRejectionCodes.TenantFilterTemplateProvisionFailed, diagnostic, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        if (templateOutcome is AiSearchTenantFilterTemplateOutcome.Failure templateFailure)
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                AiSearchIndexRejectionCodes.TenantFilterTemplateProvisionFailed,
-                templateFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
-        }
-
-        return new HandlerResult.Success(BuildIdempotencyKey(envelope.CustomerId,
-            run.Parameters.NonSecret[IndexVersionParameterKey]));
+        // (b) Independent post-deploy verifier. See RestApiAiSearchIndexVerifier
+        //     file header.
+        return await RunVerifierAsync(run, etag, endpoint, envelope, idempotencyKey, cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<HandlerResult> RunVerifierAsync(
@@ -487,6 +380,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
         string etag,
         string endpoint,
         HandlerEnvelope envelope,
+        string idempotencyKey,
         CancellationToken cancellationToken)
     {
         // Always verify against the FULL canonical 7 (even if the run
@@ -499,10 +393,10 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
 
         if (verifyResult is AiSearchIndexVerifyResult.Missing missing)
         {
-            // Model 2 provisioner returned success but verifier says an
+            // The provisioner returned success but the verifier says an
             // expected index is absent — SDK PUT drift.
             var diagnostic =
-                $"Model 2 provisioner returned Success but verifier found missing indexes at '{endpoint}': " +
+                $"Index provisioner returned Success but verifier found missing indexes at '{endpoint}': " +
                 $"[{string.Join(", ", missing.MissingIndexNames)}]. " +
                 "SearchIndexClientProvisioner reported all PUTs succeeded but drift is present — investigate provisioner vs deployed state.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
@@ -517,8 +411,7 @@ public sealed class H2bAiSearchIndexHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        return new HandlerResult.Success(BuildIdempotencyKey(envelope.CustomerId,
-            run.Parameters.NonSecret[IndexVersionParameterKey]));
+        return new HandlerResult.Success(idempotencyKey);
     }
 
     private async Task<AiSearchIndexVerifyResult> RunVerifierRawAsync(

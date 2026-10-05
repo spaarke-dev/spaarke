@@ -21,8 +21,9 @@
 //       §4C rollback: H1 failures are Resumable class (operator resolves
 //       subscription config / Lighthouse offer + POST /api/runs/{id}/resume).
 //   - projects/customer-provisioning-orchestration-r1/design.md §3A A2:
-//       Tenancy models — Model 1 (SpaarkeOwned, shared) skips the Lighthouse
-//       branch; Model 2 (CustomerOwned, dedicated) requires it.
+//       Tenancy models — Model 1 (SpaarkeOwned — a dedicated stamp in Spaarke's
+//       tenant, D-12) skips the Lighthouse branch; Model 2 (CustomerOwned)
+//       requires it.
 //   - .claude/adr/ADR-004-job-contract.md: idempotent + at-least-once safe.
 //   - .claude/adr/ADR-010-di-minimalism.md: probe seam ≥2 impls (Null +
 //     test stubs; Wave C5 adds real ARM-backed impl).
@@ -80,6 +81,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -105,22 +107,30 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the Azure subscription id (§ 4D I1).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    // Tenancy-model normalization. All comparisons are case-insensitive.
+    // Tenancy-ownership vocabulary. Task 223 (D-12) closed P-2 by retiring the two *model*
+    // literals ("Model1Shared" from SpaarkeOwned, "Model2Dedicated" from CustomerOwned) —
+    // the model axis is now parsed via TenancyModelParser and mapped to ownership below
+    // in ClassifyTenancy. These sets survive for callers passing "SpaarkeOwned" /
+    // "CustomerOwned" directly (there is no current in-tree caller — run.TenancyModel is
+    // always a model literal — but the sets are retained per INCOMING §5 Item 2's
+    // "retire only *model* literals, keep ownership vocabulary" instruction so a future
+    // caller can still classify by ownership word without going through the enum).
+    // Case-insensitive because the ownership vocabulary itself has no case-sensitivity
+    // requirement (unlike the model literals which H12c embeds byte-for-byte).
     private static readonly HashSet<string> CustomerOwnedTenancyValues = new(StringComparer.OrdinalIgnoreCase)
     {
         "CustomerOwned",
-        "Model2Dedicated",
     };
 
     private static readonly HashSet<string> SpaarkeOwnedTenancyValues = new(StringComparer.OrdinalIgnoreCase)
     {
         "SpaarkeOwned",
-        "Model1Shared",
     };
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IHandlerEnqueuer _enqueuer;
     private readonly ISubscriptionReadinessProbe _probe;
+    private readonly SubscriptionReadinessOptions _options;
     private readonly ILogger<H1SubscriptionReadinessHandler> _logger;
 
     /// <inheritdoc/>
@@ -132,21 +142,25 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H2a on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="probe">The ARM readiness probe — <see cref="ArmSubscriptionReadinessProbe"/> in production (task 121, Wave G-2; real Azure.ResourceManager SDK calls).</param>
+    /// <param name="options">HANDLER-04 options — canonical required-provider list + poll timeout / interval (Wave 2 pre-dispatch remediation).</param>
     /// <param name="logger">Structured logger.</param>
     public H1SubscriptionReadinessHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         ISubscriptionReadinessProbe probe,
+        IOptions<SubscriptionReadinessOptions> options,
         ILogger<H1SubscriptionReadinessHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _enqueuer = enqueuer;
         _probe = probe;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -241,18 +255,22 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 diagnostic);
         }
 
-        // (4) Tenancy-model normalization. Accepts both the design.md §6.2
-        // structured names (Model1Shared / Model2Dedicated) and the POML's
-        // colloquial names (SpaarkeOwned / CustomerOwned). Unknown values
-        // fail Resumable so the operator sees the mismatch explicitly.
+        // (4) Tenancy-model normalization. Task 223 (D-12 P-2 closure): parses via
+        // TenancyModelParser (primary) + falls back to the ownership-word sets
+        // (SpaarkeOwned / CustomerOwned) for a future direct-ownership caller. Unknown
+        // values fail Resumable so the operator sees the mismatch explicitly. The
+        // pre-D-12 bug that unconditionally mapped "Model2Dedicated" → CustomerOwned
+        // (forcing Lighthouse on Spaarke-owned Model 2) is closed by the enum path
+        // above — ownership is now derived from the enum, not from a co-mingled set.
         var requiresLighthouseCheck = ClassifyTenancy(
             run.TenancyModel, out var tenancyKnown);
         if (!tenancyKnown)
         {
             var diagnostic =
                 $"ProvisioningRun.TenancyModel value '{run.TenancyModel ?? "(null)"}' is not recognized. " +
-                $"Accepted values: {string.Join(", ", SpaarkeOwnedTenancyValues.Concat(CustomerOwnedTenancyValues))}. " +
-                "H1 cannot decide whether to run the Lighthouse-delegation branch.";
+                $"Accepted values: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()} " +
+                $"(model literals) or {string.Join(", ", SpaarkeOwnedTenancyValues.Concat(CustomerOwnedTenancyValues))} " +
+                "(ownership vocabulary). H1 cannot decide whether to run the Lighthouse-delegation branch.";
             await MarkFailedAsync(
                 run, etag, SubscriptionReadinessRejectionCodes.InvalidTenancyModel,
                 diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
@@ -309,6 +327,64 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 FailureClass.Resumable,
                 SubscriptionReadinessRejectionCodes.SubscriptionUnreachable,
                 reachabilityResult.Diagnostic);
+        }
+
+        // (5.5) HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6:
+        //       register + poll canonical Azure resource providers on the
+        //       target subscription BEFORE H2a's ~20 min Bicep deploy fails
+        //       with `MissingSubscriptionRegistration` on a random RP. Runs
+        //       after reachability (subscription must be reachable) but
+        //       BEFORE Lighthouse (delegation doesn't imply RPs registered).
+        //       Skipped only when the required-provider list is empty
+        //       (operator opt-out via config; not the default path).
+        if (_options.RequiredResourceProviders.Count > 0)
+        {
+            SubscriptionReadinessCheckResult providerResult;
+            try
+            {
+                providerResult = await _probe.RegisterAndPollRequiredProvidersAsync(
+                    subscriptionId,
+                    tenantId,
+                    (IReadOnlyList<string>)_options.RequiredResourceProviders.ToList(),
+                    _options.PollInterval,
+                    _options.PollTotalTimeout,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(
+                    ex,
+                    "H1 subscription-readiness probe (provider registration) threw unexpected exception: " +
+                    "runId={RunId} customerId={CustomerId} subscriptionId={SubscriptionId}",
+                    envelope.RunId, envelope.CustomerId, subscriptionId);
+                var diagnostic =
+                    $"Subscription-readiness probe (provider registration) infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                    "This is Resumable — operator resolves the ARM SDK / connectivity issue and " +
+                    "POSTs /api/runs/{id}/resume.";
+                await MarkFailedAsync(
+                    run, etag, SubscriptionReadinessRejectionCodes.ProbeInfrastructureError,
+                    diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
+                return new HandlerResult.Failure(
+                    FailureClass.Resumable,
+                    SubscriptionReadinessRejectionCodes.ProbeInfrastructureError,
+                    diagnostic);
+            }
+
+            if (!providerResult.Passed)
+            {
+                _logger.LogWarning(
+                    "H1 subscription readiness failed (provider registration): runId={RunId} customerId={CustomerId} " +
+                    "subscriptionId={SubscriptionId}",
+                    envelope.RunId, envelope.CustomerId, subscriptionId);
+                await MarkFailedAsync(
+                    run, etag, SubscriptionReadinessRejectionCodes.ProviderRegistrationFailed,
+                    providerResult.Diagnostic, providerResult.Evidence, cancellationToken)
+                    .ConfigureAwait(false);
+                return new HandlerResult.Failure(
+                    FailureClass.Resumable,
+                    SubscriptionReadinessRejectionCodes.ProviderRegistrationFailed,
+                    providerResult.Diagnostic);
+            }
         }
 
         // (6) Lighthouse delegation check — CustomerOwned only.
@@ -391,6 +467,16 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// an <c>InvalidTenancyModel</c> failure rather than silently defaulting.
     /// Exposed as internal so unit tests can validate the mapping.
     /// </summary>
+    /// <remarks>
+    /// Task 223 (D-12 P-2 closure) + Task 224 (INCOMING §5 Item 3 rename): the mapping is enum-first —
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1"/> → SpaarkeOwned (no
+    /// Lighthouse); <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2"/> →
+    /// CustomerOwned (Lighthouse required). Pre-T224 the enum members were <c>Model1Shared</c> and
+    /// <c>Model2Dedicated</c> — the pre-D-12 bug had "Model2Dedicated" unconditionally in the
+    /// CustomerOwned set, which incorrectly forced Lighthouse delegation for a Spaarke-owned Model 2
+    /// stamp. Post-P-2 + T224 the model axis maps to ownership via the enum; the ownership-word sets
+    /// remain as a secondary path for direct callers passing "SpaarkeOwned" / "CustomerOwned".
+    /// </remarks>
     internal static bool ClassifyTenancy(string? tenancyModel, out bool known)
     {
         if (string.IsNullOrWhiteSpace(tenancyModel))
@@ -398,6 +484,24 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
             known = false;
             return false;
         }
+
+        // Primary path: enum-parse. Model1 → Spaarke-owned tenancy;
+        // Model2 → customer-owned tenancy (Lighthouse required).
+        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(tenancyModel, out var parsedModel))
+        {
+            known = true;
+            return parsedModel switch
+            {
+                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => false,
+                Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => true,
+                _ => throw new InvalidOperationException(
+                    $"Unhandled TenancyModel '{parsedModel}' in H1.ClassifyTenancy. " +
+                    "Add a switch arm here when the enum grows (Task 224 / Item 3 territory).")
+            };
+        }
+
+        // Secondary path: ownership vocabulary (no current in-tree caller — retained per
+        // INCOMING §5 Item 2 for a future direct-ownership-word caller).
         if (CustomerOwnedTenancyValues.Contains(tenancyModel))
         {
             known = true;

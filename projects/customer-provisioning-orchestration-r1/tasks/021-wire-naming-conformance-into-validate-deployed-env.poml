@@ -4,7 +4,7 @@
     <title>Update Validate-DeployedEnvironment.ps1 design to invoke scripts/naming-conformance-check.ps1 in H13 acceptance; require exit 0</title>
     <phase>G Canonical Naming Compliance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies existing PowerShell script; introduces a new step to invoke another check + gate on exit code; azure-deployment scope. Per root CLAUDE.md §8 = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

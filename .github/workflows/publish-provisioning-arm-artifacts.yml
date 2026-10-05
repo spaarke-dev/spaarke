@@ -21,16 +21,18 @@
 #   study chose instead.
 #
 # TEMPLATE SCOPE (verified against
-# Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.FileBicepTemplateInspector.
-# ResolveTemplatePath, the authoritative C# source for which template H2a
-# deploys per TenancyModel):
-#   - infrastructure/bicep/customer.bicep            (DEFAULT -- Model2Dedicated
-#     and any TenancyModel value other than 'Model1Shared')
-#   - infrastructure/bicep/stacks/model1-shared.bicep (TenancyModel == 'Model1Shared')
-#   Both templates compose exclusively local relative-path `module` references
+# Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.ArmDeploymentRunner.
+# ResolveArmTemplateAsync -- since task 245b the ONE place that maps a
+# TenancyModel to a manifest template key; it is an exhaustive switch over the
+# typed enum (task 223), so a new enum member throws rather than defaulting):
+#   - infrastructure/bicep/customer.bicep -- the one template H2a deploys
+#     (TenancyModel.Model2; Model 1 fails closed at H2a until tasks 225b + 228
+#     put it on the same dedicated stamp -- D-12). stacks/model1-shared.bicep was
+#     retired by task 225a (2026-10-01).
+#   The template composes exclusively local relative-path `module` references
 #   (infrastructure/bicep/modules/*.bicep) -- no `Microsoft.Resources/templateSpecs`
-#   / template-spec-by-id references were found in either template's module
-#   graph, so `az bicep build` fully flattens each into nested
+#   / template-spec-by-id references in its module graph, so `az bicep build`
+#   fully flattens it into nested
 #   `Microsoft.Resources/deployments` resources within a SINGLE ARM JSON file.
 #   (The POML's escalation trigger -- a module referencing a template spec by
 #   id, which would force a nested-template strategy change on H2a's handler
@@ -60,8 +62,11 @@ on:
     branches: [master]
     paths:
       - 'infrastructure/bicep/customer.bicep'
-      - 'infrastructure/bicep/stacks/model1-shared.bicep'
       - 'infrastructure/bicep/modules/**'
+      # customer.bicep composes the generated KV-secret module
+      # (kv-secrets.generated.bicep) -- a catalog change must republish the
+      # template H2a deploys, or H2a keeps deploying the old secret set.
+      - 'scripts/canonical-secret-catalog/generated/**'
       - '.github/workflows/publish-provisioning-arm-artifacts.yml'
   workflow_dispatch: {}
 
@@ -119,16 +124,7 @@ jobs:
             --file infrastructure/bicep/customer.bicep \
             --outfile "./out/customer-arm-${{ steps.build-id.outputs.build_id }}.json"
 
-      - name: Compile stacks/model1-shared.bicep -> ARM JSON
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p ./out
-          az bicep build \
-            --file infrastructure/bicep/stacks/model1-shared.bicep \
-            --outfile "./out/model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json"
-
-      # Both `az bicep build` invocations above run WITHOUT continue-on-error:
+      # The `az bicep build` above runs WITHOUT continue-on-error:
       # a Bicep compile failure means there is no valid ARM JSON to publish at
       # all, so this job fails fast and hard here -- unlike task 116's r3
       # gates (which are advisory-in-manifest, hard-fail-at-the-end), a broken
@@ -141,17 +137,12 @@ jobs:
         run: |
           set -euo pipefail
           customer_file="./out/customer-arm-${{ steps.build-id.outputs.build_id }}.json"
-          shared_file="./out/model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json"
 
           customer_sha256="$(sha256sum "${customer_file}" | cut -d' ' -f1)"
-          shared_sha256="$(sha256sum "${shared_file}" | cut -d' ' -f1)"
           customer_size="$(stat -c%s "${customer_file}")"
-          shared_size="$(stat -c%s "${shared_file}")"
 
           echo "customer_sha256=${customer_sha256}" >> "$GITHUB_OUTPUT"
-          echo "shared_sha256=${shared_sha256}" >> "$GITHUB_OUTPUT"
           echo "customer_size=${customer_size}" >> "$GITHUB_OUTPUT"
-          echo "shared_size=${shared_size}" >> "$GITHUB_OUTPUT"
 
       - name: Azure Login (OIDC)
         uses: azure/login@v2
@@ -194,7 +185,7 @@ jobs:
         # second grant. Still well short of subscription scope.
         #
         # Verified: this workflow ran green end-to-end after the grant --
-        # Azure Login, both blob uploads, and manifest generation.
+        # Azure Login, the template blob upload(s), and manifest generation.
         #
         # NOTE if you are running this from Git Bash on Windows: MSYS rewrites a
         # leading /subscriptions/... into a Windows path and az fails with a
@@ -208,15 +199,7 @@ jobs:
             --auth-mode login \
             --overwrite false
 
-          az storage blob upload \
-            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
-            --container-name provisioning-artifacts \
-            --name "model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json" \
-            --file "./out/model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json" \
-            --auth-mode login \
-            --overwrite false
-
-      - name: Generate manifest (versioned + latest pointer -- AFTER both blobs upload)
+      - name: Generate manifest (versioned + latest pointer -- AFTER the template blob uploads)
         shell: bash
         run: |
           set -euo pipefail
@@ -229,17 +212,10 @@ jobs:
             "templates": {
               "customer": {
                 "sourcePath": "infrastructure/bicep/customer.bicep",
-                "resolutionHint": "Default template -- selected by FileBicepTemplateInspector.ResolveTemplatePath for any TenancyModel value other than 'Model1Shared' (currently: 'Model2Dedicated').",
+                "resolutionHint": "Selected by ArmDeploymentRunner.ResolveArmTemplateAsync for TenancyModel.Model2 (Model1 fails closed until tasks 225b + 228; task 225a).",
                 "armJsonBlobName": "customer-arm-${{ steps.build-id.outputs.build_id }}.json",
                 "sha256": "${{ steps.hashes.outputs.customer_sha256 }}",
                 "sizeBytes": ${{ steps.hashes.outputs.customer_size }}
-              },
-              "model1-shared": {
-                "sourcePath": "infrastructure/bicep/stacks/model1-shared.bicep",
-                "resolutionHint": "Selected by FileBicepTemplateInspector.ResolveTemplatePath when TenancyModel == 'Model1Shared' (case-insensitive).",
-                "armJsonBlobName": "model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json",
-                "sha256": "${{ steps.hashes.outputs.shared_sha256 }}",
-                "sizeBytes": ${{ steps.hashes.outputs.shared_size }}
               }
             }
           }
@@ -278,7 +254,6 @@ jobs:
             echo "- Build ID: \`${{ steps.build-id.outputs.build_id }}\`"
             echo "- SHA: \`${{ steps.build-id.outputs.sha }}\`"
             echo "- customer-arm-${{ steps.build-id.outputs.build_id }}.json: ${{ steps.hashes.outputs.customer_size }} bytes"
-            echo "- model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json: ${{ steps.hashes.outputs.shared_size }} bytes"
             echo "- Manifest: provisioning-arm-${{ steps.build-id.outputs.build_id }}.json + provisioning-arm-latest.json"
             echo "- Container: provisioning-artifacts (account: \`${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}\`)"
           } >> "$GITHUB_STEP_SUMMARY"

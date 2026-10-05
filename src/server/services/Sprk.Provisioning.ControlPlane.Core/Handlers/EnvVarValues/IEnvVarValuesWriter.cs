@@ -75,7 +75,14 @@ public interface IEnvVarValuesWriter
 /// <see cref="Models.InterStepState.BffAppRegId"/>) used as the
 /// client-credentials confidential-client identity.
 /// </param>
-/// <param name="ClientSecret">Client secret for <paramref name="ClientId"/> (from <see cref="EnvVarValuesOptions.ClientSecret"/>).</param>
+/// <param name="ClientSecret">
+/// Client secret for <paramref name="ClientId"/> (from
+/// <see cref="EnvVarValuesOptions.ClientSecret"/>). A44.5 (task 205i): MAY be
+/// <c>null</c>/empty on secret-free environments — the production writer then
+/// resolves its credential from the FR-39 ordered chain
+/// (<see cref="Credentials.WorkerDataverseCredentialFactory"/>, MI-FIC first).
+/// Empty is the SIGNAL (auth-v4 §9.1); never pass a sentinel value.
+/// </param>
 /// <param name="Values">
 /// The resolved 7 canonical (schemaName, value) pairs, in the fixed
 /// declaration order from <see cref="H7DataverseEnvVarValuesHandler.CanonicalSchemaNamesInOrder"/>.
@@ -86,7 +93,7 @@ public sealed record EnvVarValuesWriteRequest(
     string TargetDataverseUrl,
     string TenantId,
     string ClientId,
-    string ClientSecret,
+    string? ClientSecret,
     IReadOnlyList<KeyValuePair<string, string>> Values);
 
 /// <summary>

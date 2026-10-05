@@ -9,8 +9,8 @@
 //      (H2b, H3, H4, H5, H12c per design.md §6.2).
 //
 // PARITY WITH BICEP OUTPUTS:
-//   Property names mirror the output names in <c>customer.bicep</c> +
-//   <c>stacks/model1-shared.bicep</c> + <c>modules/uami.bicep</c> +
+//   Property names mirror the output names in <c>customer.bicep</c> (the one
+//   customer-stamp template since task 225a) + <c>modules/uami.bicep</c> +
 //   <c>modules/openai.bicep</c> so the runner (shell-out to Provision-Customer.ps1
 //   or SDK-based) can map by string key without a translation layer. Required
 //   outputs (throw on missing) vs optional outputs (nullable) reflect the
@@ -54,6 +54,26 @@ public sealed class BicepDeployOutputs
 
     /// <summary>Cosmos DB account endpoint URI — written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.CosmosEndpoint"/>. Prerequisite for BFF boot (R11).</summary>
     public required string CosmosEndpoint { get; init; }
+
+    /// <summary>Customer Key Vault name (ARM output <c>keyVaultName</c>) — written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.KeyVaultName"/> (task 245a).</summary>
+    public required string KeyVaultName { get; init; }
+
+    /// <summary>Customer Key Vault URI (ARM output <c>keyVaultUri</c>) — written to <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.KeyVaultUri"/> (task 245a).</summary>
+    public required string KeyVaultUri { get; init; }
+
+    /// <summary>
+    /// Customer Service Bus fully-qualified namespace (<c>{ns}.servicebus.windows.net</c>) — the HOST of ARM
+    /// output <c>serviceBusEndpoint</c>; written to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.ServiceBusFullyQualifiedNamespace"/> (task 245a).
+    /// </summary>
+    public required string ServiceBusFullyQualifiedNamespace { get; init; }
+
+    /// <summary>
+    /// Customer Azure Managed Redis endpoint, <c>{host}:10000</c> (ARM output <c>redisEndpoint</c>) — written to
+    /// <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.RedisEndpoint"/> and set by H4b as the BFF's
+    /// <c>Redis__Endpoint</c> (task 242). Not a secret: the cache has access keys disabled.
+    /// </summary>
+    public required string RedisEndpoint { get; init; }
 
     /// <summary>Whether SignalR was deployed this run (mirrors <see cref="BicepDeployRequest.SignalREnabled"/>; downstream handlers may read to skip SignalR-touching steps when off).</summary>
     public required bool SignalRDeployed { get; init; }

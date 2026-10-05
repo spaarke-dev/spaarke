@@ -17,7 +17,7 @@
 //   AC-2  B2BGuest happy path — invitations sent, consent Verified.
 //   AC-3  B2BGuest consent Pending — WaitingOnGate (not Failed).
 //   AC-4  License-assignment failure — distinct code "LicenseAssignmentFailed"
-//         naming the user; classified RetryableWithCleanup.
+//         identifying the user by position (never by name — D15); RetryableWithCleanup.
 //   AC-5  Idempotency — second invocation with a matching CompletedPhase
 //         entry short-circuits Success no-op; no collaborator calls.
 //   AC-6  Missing tenantId (§4D I1) — Resumable, no collaborator calls.
@@ -146,7 +146,7 @@ public sealed class H11UserProvisioningHandlerTests
     // ---------- AC-4 license-assignment failure ----------
 
     [Fact]
-    public async Task AC4_LicenseAssignmentFails_FailsRetryableWithCleanup_NamesTheUser()
+    public async Task AC4_LicenseAssignmentFails_FailsRetryableWithCleanup_IdentifiesTheUserByPosition()
     {
         var run = BuildRun(identityPreset: "NativeAccount", usersJson: NativeUsersJson);
         var repo = new FakeRepository(run, etag: "etag-4");
@@ -158,7 +158,9 @@ public sealed class H11UserProvisioningHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.RetryableWithCleanup);
         failure.RejectionCode.Should().Be(H11Rejections.LicenseAssignmentFailed);
-        failure.Diagnostic.Should().Contain("Grace").And.Contain("Hopper");
+        // D15 (task 245c): the diagnostic reaches run.ErrorDetail and logs — position + Entra id, never the name.
+        // (The fake provisioner's Entra id is "userid-Grace"; a real one is a GUID — so check the surname and email.)
+        failure.Diagnostic.Should().Contain("entry 2").And.NotContain("Hopper").And.NotContain("grace@acme.com");
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed, "RetryableWithCleanup maps to Failed, not Quarantined");
         userProvisioner.CreateCallCount.Should().Be(2, "first user fully succeeded before the second user's license call failed");
         userProvisioner.AssignLicenseCallCount.Should().Be(2);
@@ -285,6 +287,28 @@ public sealed class H11UserProvisioningHandlerTests
         failure.RejectionCode.Should().Be(H11Rejections.MissingUsers);
     }
 
+    // ---------- T245c: the whole list is checked before the first Graph call ----------
+
+    [Fact]
+    public async Task B2BGuestListWithAnEntryMissingItsEmail_FailsBeforeAnyInvitationIsSent()
+    {
+        // Before T245c H11 found the missing email while inviting — after entry 1's invitation had gone out.
+        var run = BuildRun(identityPreset: "B2BGuest", usersJson:
+            "[{\"firstName\":\"Ada\",\"lastName\":\"Lovelace\",\"email\":\"ada@customer.com\"}," +
+            "{\"firstName\":\"Grace\",\"lastName\":\"Hopper\"}]");
+        var repo = new FakeRepository(run, etag: "etag-t245c");
+        var invitationClient = FakeInvitationClient.Success();
+        var handler = BuildHandler(repo, FakeUserProvisioner.AllSucceed(), invitationClient, FakeConsentVerifier.Verified());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H11Rejections.InvalidUserEntry);
+        failure.Diagnostic.Should().Contain("entry 2");
+        invitationClient.CallCount.Should().Be(0, "no invitation is sent from a list H11 cannot complete");
+    }
+
     // ---------- AC-12 run not found ----------
 
     [Fact]
@@ -337,7 +361,7 @@ public sealed class H11UserProvisioningHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(H11Rejections.UserCreationFailed);
-        failure.Diagnostic.Should().Contain("Ada").And.Contain("Lovelace");
+        failure.Diagnostic.Should().Contain("entry 1").And.NotContain("Ada").And.NotContain("Lovelace");
         userProvisioner.CreateCallCount.Should().Be(1, "fails fast on the first user — second user never attempted");
         userProvisioner.AssignLicenseCallCount.Should().Be(0);
     }
@@ -372,7 +396,7 @@ public sealed class H11UserProvisioningHandlerTests
         k1.Should().Be(k2);
         k1.Should().Be("users-acme");
 
-        var k3 = H11UserProvisioningHandler.BuildIdempotencyKey("other-customer");
+        var k3 = H11UserProvisioningHandler.BuildIdempotencyKey("other");
         k3.Should().NotBe(k1);
     }
 
@@ -403,7 +427,7 @@ public sealed class H11UserProvisioningHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };

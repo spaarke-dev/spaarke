@@ -24,7 +24,7 @@
 // Production <see cref="ISolutionImporter"/> — shells out to
 // <c>scripts/Deploy-DataverseSolutions.ps1</c> (task 012 wave 0 hardened
 // Package Deployer wrapper). The PS script's <c>$SolutionImportOrder</c>
-// hashtable IS the runtime source of truth for the 8 authoritative solutions
+// hashtable IS the runtime source of truth for the 9 authoritative solutions
 // per task 008 R5 binding — this importer does NOT pass
 // <c>-SolutionsToImport</c>, so the script's own catalog drives which
 // solutions get pushed to Dataverse (no ad-hoc list literal is passed from
@@ -33,10 +33,10 @@
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-09
-//       acceptance: 8 authoritative solutions per §11.1a; upgrade mode
+//       acceptance: 9 authoritative solutions per §11.1a; upgrade mode
 //       retires holding solution via Package Deployer --stage-and-upgrade.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H6:
-//       Long-running (up to 60 min for 8 solutions).
+//       Long-running (up to 65 min for 9 solutions).
 //   - scripts/Deploy-DataverseSolutions.ps1 (task 012): the authoritative
 //       $SolutionImportOrder + per-tier Test-TierImport gate + rollup
 //       verification. Idempotent by design (Package Deployer skips

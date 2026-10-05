@@ -32,13 +32,18 @@
 //       BicepDeployOutputs (including the honest-empty fields for outputs
 //       customer.bicep does not currently produce — see ArmDeploymentRunner.cs
 //       file-header "BLOCKING DISCOVERY" note).
-//   T2  Model1Shared routes the manifest lookup to the "model1-shared" key.
+//   T2  Model 1 fails closed (task 225a): its shared stack is retired and the dedicated
+//       Model 1 path is task 228 (T225b landed) — no template is resolved or downloaded
+//       (ResolveTemplateAsync — task 245b split template resolution from deploy).
 //   T3  RG-ensure ARM rejection (403) -> BicepDeployOutcome.Failure, domain
 //       result (does NOT throw).
 //   T4  Deployment ARM rejection (400 quota) -> BicepDeployOutcome.Failure.
 //   T5  Manifest missing the requested template key -> throws
 //       InvalidOperationException (infra-configuration fault, MAY throw per
 //       IBicepDeployRunner's contract).
+//   T7  Task 245b: the resolved template's Version is the SHA-256 of the
+//       downloaded bytes; a manifest sha256 that disagrees throws
+//       InvalidDataException (nothing is deployed from unvouched bytes).
 //   T6  Deploy call asserted to have actually reached ARM (RequestedUris
 //       assertion) — not a hard-coded Success.
 // -----------------------------------------------------------------------------
@@ -52,6 +57,7 @@ using Azure.Storage.Blobs;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 using Xunit;
 
@@ -68,12 +74,17 @@ public sealed class ArmDeploymentRunnerTests
         ArmManifestBlobName = "provisioning-arm-latest.json",
     };
 
-    private static BicepDeployRequest NewRequest(string tenancyModel = "Model2Dedicated") => new(
+    private const string L2PrincipalObjectId = "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f";
+
+    private static IOptions<ControlPlaneIdentityOptions> Identity() =>
+        Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId });
+
+    private static BicepDeployRequest NewRequest(string tenancyModel = "Model2") => new(
         CustomerId: CustomerId,
         TenantId: "00000000-1111-2222-3333-444444444444",
         SubscriptionId: SubscriptionId,
         TenancyModel: tenancyModel,
-        BicepVersion: "abc123",
+        Template: new ResolvedArmTemplate("customer", "customer-arm-2026.08.19-1.json", """{"resources":[]}""", "abc123"),
         EnvironmentName: "prod",
         Location: "westus2",
         SignalREnabled: false);
@@ -83,42 +94,13 @@ public sealed class ArmDeploymentRunnerTests
     [Fact]
     public async Task DeployAsync_HappyPath_CustomerTemplate_MapsOutputsAndReturnsSuccess()
     {
-        var handler = ArmSdkTestFakes.NewHandler(request =>
-        {
-            var path = request.RequestUri!.AbsolutePath;
-            if (path.EndsWith("provisioning-arm-latest.json"))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmManifestBody());
-            }
-            if (path.EndsWith("customer-arm-2026.08.19-1.json"))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
-            }
-            if (path.Contains("resourcegroups", StringComparison.OrdinalIgnoreCase)
-                && !path.Contains("providers", StringComparison.OrdinalIgnoreCase))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ResourceGroupBody(SubscriptionId, "rg-spaarke-acme-prod"));
-            }
-            if (path.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmDeploymentSuccessBody(
-                    "customer-acme-1",
-                    outputs: """
-                    {
-                      "resourceGroupName": { "type": "String", "value": "rg-spaarke-acme-prod" },
-                      "cosmosAccountEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-cosmos.documents.azure.com:443/" },
-                      "userAssignedIdentityResourceId": { "type": "String", "value": "" },
-                      "signalrEnabled": { "type": "Bool", "value": false }
-                    }
-                    """));
-            }
-            throw new InvalidOperationException("unexpected request: " + path);
-        });
+        var handler = ArmSdkTestFakes.NewHandler(RespondHappyPath);
 
         var runner = new ArmDeploymentRunner(
             ArmSdkTestFakes.NewArmClient(handler),
             ArmSdkTestFakes.NewBlobContainerClient(handler),
             Options.Create(NewOptions()),
+            Identity(),
             NullLogger<ArmDeploymentRunner>.Instance);
 
         var outcome = await runner.DeployAsync(NewRequest(), CancellationToken.None);
@@ -127,6 +109,12 @@ public sealed class ArmDeploymentRunnerTests
         success.Outputs.ResourceGroupName.Should().Be("rg-spaarke-acme-prod");
         success.Outputs.CosmosEndpoint.Should().Be("https://spaarke-acme-prod-cosmos.documents.azure.com:443/");
         success.Outputs.SignalRDeployed.Should().BeFalse();
+        // Task 245a — customer.bicep outputs H2a now persists for downstream handlers.
+        success.Outputs.KeyVaultName.Should().Be("sprk-acme-prod-kv");
+        success.Outputs.KeyVaultUri.Should().Be("https://sprk-acme-prod-kv.vault.azure.net/");
+        success.Outputs.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
+        // Task 242 — the Managed Redis endpoint, verbatim (host:10000).
+        success.Outputs.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
         // Honest-empty per the file-header "BLOCKING DISCOVERY" note — customer.bicep
         // does not currently produce these; the runner must NOT fabricate values.
         success.Outputs.UserAssignedIdentityObjectId.Should().BeEmpty();
@@ -138,12 +126,66 @@ public sealed class ArmDeploymentRunnerTests
             "asserts the ARM deployment CreateOrUpdate call was actually invoked over HTTP, not a hard-coded Success");
     }
 
-    // ---------- T2 Model1Shared template routing ----------
+    [Theory]
+    [InlineData("https://spaarke-acme-prod-sbus.servicebus.windows.net:443/", "spaarke-acme-prod-sbus.servicebus.windows.net")]
+    [InlineData("https://spaarke-acme-prod-sbus.servicebus.windows.net/", "spaarke-acme-prod-sbus.servicebus.windows.net")]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("not a uri", "")]
+    public void ServiceBusFullyQualifiedNamespaceFromEndpoint_ReturnsTheEndpointHost(string endpoint, string expected)
+    {
+        // The FQNS is parsed from the authoritative ARM endpoint, never composed from
+        // the naming convention; blank/unparseable → empty → H2a reports the output incomplete.
+        ArmDeploymentRunner.ServiceBusFullyQualifiedNamespaceFromEndpoint(endpoint).Should().Be(expected);
+    }
+
+    // ---------- Task 249: the L2 principal reaches customer.bicep for Model 1 stamps only ----------
+
+    [Theory]
+    [InlineData("Model1", true)]
+    [InlineData("Model2", false)]
+    public async Task DeployAsync_SendsTheConfiguredL2Principal_ForModel1StampsOnly(string tenancyModel, bool expectSent)
+    {
+        string? deploymentBody = null;
+        var handler = ArmSdkTestFakes.NewHandler(request =>
+        {
+            if (request.Method == HttpMethod.Put && request.Content is not null
+                && request.RequestUri!.AbsolutePath.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase))
+            {
+                deploymentBody = request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
+            }
+            return RespondHappyPath(request);
+        });
+        var runner = new ArmDeploymentRunner(
+            ArmSdkTestFakes.NewArmClient(handler),
+            ArmSdkTestFakes.NewBlobContainerClient(handler),
+            Options.Create(NewOptions()),
+            Identity(),
+            NullLogger<ArmDeploymentRunner>.Instance);
+
+        await runner.DeployAsync(NewRequest(tenancyModel), CancellationToken.None);
+
+        deploymentBody.Should().NotBeNull("the deployment PUT carries the parameters payload");
+        using var body = System.Text.Json.JsonDocument.Parse(deploymentBody!);
+        var parameters = body.RootElement.GetProperty("properties").GetProperty("parameters");
+        if (expectSent)
+        {
+            parameters.GetProperty("controlPlaneUamiPrincipalId").GetProperty("value").GetString()
+                .Should().Be(L2PrincipalObjectId, "a Model 1 stamp grants L2 Website Contributor on its BFF (H4b + H9)");
+        }
+        else
+        {
+            parameters.TryGetProperty("controlPlaneUamiPrincipalId", out _).Should().BeFalse(
+                "a Model 2 stamp is in the customer's tenant — a role assignment cannot name a Spaarke-tenant principal");
+        }
+    }
+
+    // ---------- T2 Model 1 fails closed (task 225a) ----------
 
     [Fact]
-    public async Task DeployAsync_Model1Shared_ResolvesModel1SharedTemplateFromManifest()
+    public async Task ResolveTemplateAsync_Model1_FailsClosed_DownloadsNoTemplate()
     {
-        var requestedTemplateBlob = string.Empty;
+        var templateRequests = 0;
         var handler = ArmSdkTestFakes.NewHandler(request =>
         {
             var path = request.RequestUri!.AbsolutePath;
@@ -151,34 +193,18 @@ public sealed class ArmDeploymentRunnerTests
             {
                 return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmManifestBody());
             }
-            if (path.EndsWith("model1-shared-arm-2026.08.19-1.json"))
-            {
-                requestedTemplateBlob = path;
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
-            }
-            if (path.Contains("resourcegroups", StringComparison.OrdinalIgnoreCase)
-                && !path.Contains("providers", StringComparison.OrdinalIgnoreCase))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ResourceGroupBody(SubscriptionId, "rg-spaarke-acme-prod"));
-            }
-            if (path.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase))
-            {
-                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmDeploymentSuccessBody(
-                    "customer-acme-1", outputs: """{ "resourceGroupName": { "type": "String", "value": "rg-spaarke-acme-prod" } }"""));
-            }
-            throw new InvalidOperationException("unexpected request: " + path);
+            templateRequests++;
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
         });
 
-        var runner = new ArmDeploymentRunner(
-            ArmSdkTestFakes.NewArmClient(handler),
-            ArmSdkTestFakes.NewBlobContainerClient(handler),
-            Options.Create(NewOptions()),
-            NullLogger<ArmDeploymentRunner>.Instance);
+        var runner = NewRunner(handler);
 
-        var outcome = await runner.DeployAsync(NewRequest(tenancyModel: "Model1Shared"), CancellationToken.None);
+        var resolve = () => runner.ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1, CancellationToken.None);
 
-        outcome.Should().BeOfType<BicepDeployOutcome.Success>();
-        requestedTemplateBlob.Should().Contain("model1-shared-arm-2026.08.19-1.json");
+        (await resolve.Should().ThrowAsync<InvalidOperationException>())
+            .WithMessage("*not deployable yet*task 228*");
+        templateRequests.Should().Be(0, "no customer.bicep template may be deployed for Model 1 before task 228");
     }
 
     // ---------- T3 RG-ensure ARM rejection ----------
@@ -208,6 +234,7 @@ public sealed class ArmDeploymentRunnerTests
             ArmSdkTestFakes.NewArmClient(handler),
             ArmSdkTestFakes.NewBlobContainerClient(handler),
             Options.Create(NewOptions()),
+            Identity(),
             NullLogger<ArmDeploymentRunner>.Instance);
 
         var act = async () => await runner.DeployAsync(NewRequest(), CancellationToken.None);
@@ -249,6 +276,7 @@ public sealed class ArmDeploymentRunnerTests
             ArmSdkTestFakes.NewArmClient(handler),
             ArmSdkTestFakes.NewBlobContainerClient(handler),
             Options.Create(NewOptions()),
+            Identity(),
             NullLogger<ArmDeploymentRunner>.Instance);
 
         var outcome = await runner.DeployAsync(NewRequest(), CancellationToken.None);
@@ -260,7 +288,7 @@ public sealed class ArmDeploymentRunnerTests
     // ---------- T5 manifest missing requested template ----------
 
     [Fact]
-    public async Task DeployAsync_ManifestMissingTemplateKey_Throws()
+    public async Task ResolveTemplateAsync_ManifestMissingTemplateKey_Throws()
     {
         var handler = ArmSdkTestFakes.NewHandler(request =>
         {
@@ -269,19 +297,106 @@ public sealed class ArmDeploymentRunnerTests
             {
                 return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{ "templates": { } }""");
             }
-            throw new InvalidOperationException("must not reach RG/deploy calls: " + path);
+            throw new InvalidOperationException("must not reach the template blob: " + path);
         });
 
-        var runner = new ArmDeploymentRunner(
-            ArmSdkTestFakes.NewArmClient(handler),
-            ArmSdkTestFakes.NewBlobContainerClient(handler),
-            Options.Create(NewOptions()),
-            NullLogger<ArmDeploymentRunner>.Instance);
-
-        var act = async () => await runner.DeployAsync(NewRequest(), CancellationToken.None);
+        var act = async () => await NewRunner(handler).ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*armJsonBlobName*");
+    }
+
+    // ---------- T7 template content version (task 245b) ----------
+
+    private const string TemplateBody = """{"resources":[{"type":"Microsoft.Storage/storageAccounts"}]}""";
+
+    private static string Sha256Of(string body) =>
+        Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(body)));
+
+    private static FakeArmHttpMessageHandler TemplateHandler(string body, string? manifestSha256) =>
+        ArmSdkTestFakes.NewHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            if (path.EndsWith("provisioning-arm-latest.json"))
+            {
+                var sha = manifestSha256 is null ? string.Empty : $", \"sha256\": \"{manifestSha256}\"";
+                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK,
+                    $$"""{ "templates": { "customer": { "armJsonBlobName": "customer-arm-1.json"{{sha}} } } }""");
+            }
+            if (path.EndsWith("customer-arm-1.json"))
+            {
+                return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, body);
+            }
+            throw new InvalidOperationException("unexpected request: " + path);
+        });
+
+    [Fact]
+    public async Task ResolveTemplateAsync_VersionIsTheSha256OfTheDownloadedBytes_SameBytesSameVersion()
+    {
+        var first = await NewRunner(TemplateHandler(TemplateBody, Sha256Of(TemplateBody))).ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2, CancellationToken.None);
+        var second = await NewRunner(TemplateHandler(TemplateBody, manifestSha256: null)).ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2, CancellationToken.None);
+        var changed = await NewRunner(TemplateHandler(TemplateBody + " ", manifestSha256: null)).ResolveTemplateAsync(
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2, CancellationToken.None);
+
+        first.Version.Should().Be(Sha256Of(TemplateBody));
+        first.Json.Should().Be(TemplateBody);
+        second.Version.Should().Be(first.Version, "the same template bytes give the same version");
+        changed.Version.Should().NotBe(first.Version, "changed bytes give a new version");
+    }
+
+    [Fact]
+    public async Task ResolveTemplateAsync_ManifestSha256Disagrees_ThrowsInvalidData()
+    {
+        var act = async () => await NewRunner(TemplateHandler(TemplateBody, Sha256Of("something else")))
+            .ResolveTemplateAsync(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidDataException>().WithMessage("*does not vouch*");
+    }
+
+    private static ArmDeploymentRunner NewRunner(FakeArmHttpMessageHandler handler) => new(
+        ArmSdkTestFakes.NewArmClient(handler),
+        ArmSdkTestFakes.NewBlobContainerClient(handler),
+        Options.Create(NewOptions()),
+        Identity(),
+        NullLogger<ArmDeploymentRunner>.Instance);
+
+    private static HttpResponseMessage RespondHappyPath(HttpRequestMessage request)
+    {
+        var path = request.RequestUri!.AbsolutePath;
+        if (path.EndsWith("provisioning-arm-latest.json"))
+        {
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmManifestBody());
+        }
+        if (path.EndsWith("customer-arm-2026.08.19-1.json"))
+        {
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, """{"resources":[]}""");
+        }
+        if (path.Contains("resourcegroups", StringComparison.OrdinalIgnoreCase)
+            && !path.Contains("providers", StringComparison.OrdinalIgnoreCase))
+        {
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ResourceGroupBody(SubscriptionId, "rg-spaarke-acme-prod"));
+        }
+        if (path.Contains("Microsoft.Resources/deployments", StringComparison.OrdinalIgnoreCase))
+        {
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, ArmSdkTestFakes.ArmDeploymentSuccessBody(
+                "customer-acme-1",
+                outputs: """
+                {
+                  "resourceGroupName": { "type": "String", "value": "rg-spaarke-acme-prod" },
+                  "cosmosAccountEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-cosmos.documents.azure.com:443/" },
+                  "userAssignedIdentityResourceId": { "type": "String", "value": "" },
+                  "keyVaultName": { "type": "String", "value": "sprk-acme-prod-kv" },
+                  "keyVaultUri": { "type": "String", "value": "https://sprk-acme-prod-kv.vault.azure.net/" },
+                  "serviceBusEndpoint": { "type": "String", "value": "https://spaarke-acme-prod-sbus.servicebus.windows.net:443/" },
+                  "redisEndpoint": { "type": "String", "value": "sprk-acme-prod-redis.westus2.redis.azure.net:10000" },
+                  "signalrEnabled": { "type": "Bool", "value": false }
+                }
+                """));
+        }
+        throw new InvalidOperationException("unexpected request: " + path);
     }
 }
 
@@ -306,8 +421,7 @@ internal static partial class ArmSdkTestFakes
         {
           "buildId": "2026.08.19-1",
           "templates": {
-            "customer": { "armJsonBlobName": "customer-arm-2026.08.19-1.json" },
-            "model1-shared": { "armJsonBlobName": "model1-shared-arm-2026.08.19-1.json" }
+            "customer": { "armJsonBlobName": "customer-arm-2026.08.19-1.json" }
           }
         }
         """;

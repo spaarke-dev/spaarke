@@ -59,7 +59,7 @@ internal static class ConsentCallbackE2EConstants
     /// <summary>Endpoint route (mirrors ConsentCallbackEndpoint.Route).</summary>
     public const string Route = "/api/onboarding/consent-callback";
 
-    public const string CustomerId = "acme-corp-e2e";
+    public const string CustomerId = "acmee2e";
     public const string CustomerTenantId = "22222222-3333-4444-5555-666666666666";
     public const string CorrelationId = "e2e-correlation-42";
 }

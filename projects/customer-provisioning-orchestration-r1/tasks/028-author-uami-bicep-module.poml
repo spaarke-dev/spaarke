@@ -4,7 +4,7 @@
     <title>Author NEW infrastructure/bicep/modules/uami.bicep — per-customer User-Assigned Managed Identity module</title>
     <phase>C Wave C2 — Bicep + UAMI</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Structural authoring of the module that becomes the identity for every per-customer BFF App Service (both slots) + the RBAC-migration target for KV/Storage/Cognitive/Cosmos roles + the Dataverse App User principal + the Graph app-role grant target. Blast radius: every customer environment. task-create Step 3.5.5 FULL (auth tag; §10 §F.1 asymmetric-registration rule adjacent; NEW surface).</rigor-reason>
     <model-tier>opus</model-tier>

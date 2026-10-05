@@ -35,6 +35,7 @@ using Azure.ResourceManager.CostManagement.Models;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 using Xunit;
 
@@ -49,7 +50,8 @@ public sealed class ArmCostEnvelopeCheckerTests
     // Envelope defaults from H13AcceptanceOptions.
     private const decimal Model2EmptyEnvelope = 400m;
     private const decimal Model1MarginalEnvelope = 430m;
-    private const decimal Model1SharedFloorEnvelope = 400m;
+    // Task 223 (D-12): Model1SharedFloorEnvelope constant + its option field DELETED — the
+    // shared-tier "floor" concept was retired alongside the enum-exhaustive switch.
     private const decimal DriftAdvisoryThreshold = 0.20m;
 
     // ---------- Silent-fail defense (a): missing SubscriptionId ----------
@@ -108,7 +110,7 @@ public sealed class ArmCostEnvelopeCheckerTests
         });
 
         var checker = NewChecker(handler);
-        var result = await checker.CheckAsync(NewRequest(tenancyModel: "Model2Dedicated"), CancellationToken.None);
+        var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2), CancellationToken.None);
 
         result.ExpectedMonthlyUsd.Should().Be(Model2EmptyEnvelope);
         result.ExceedsAdvisoryThreshold.Should().BeFalse();
@@ -129,13 +131,13 @@ public sealed class ArmCostEnvelopeCheckerTests
             ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, CostBodies.QueryResultBody(10_000m)));
 
         var checker = NewChecker(handler);
-        var result = await checker.CheckAsync(NewRequest(tenancyModel: "Model2Dedicated"), CancellationToken.None);
+        var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2), CancellationToken.None);
 
         result.ExceedsAdvisoryThreshold.Should().BeTrue();
         result.DriftFraction.Should().BeGreaterThan(DriftAdvisoryThreshold,
             "10000+ mtd is well beyond the 20% drift band around the 400 USD envelope");
         result.Summary.Should().Contain("exceeds=True");
-        result.Summary.Should().Contain("tenancyModel=Model2Dedicated");
+        result.Summary.Should().Contain("tenancyModel=Model2");
     }
 
     // ---------- Tenancy-model branches ----------
@@ -145,7 +147,7 @@ public sealed class ArmCostEnvelopeCheckerTests
     {
         var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope("Model2Dedicated").Should().Be(Model2EmptyEnvelope);
+        checker.SelectExpectedEnvelope(TenancyModel.Model2).Should().Be(Model2EmptyEnvelope);
     }
 
     [Fact]
@@ -153,16 +155,15 @@ public sealed class ArmCostEnvelopeCheckerTests
     {
         var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
             new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope("Model1Shared").Should().Be(Model1MarginalEnvelope);
+        checker.SelectExpectedEnvelope(TenancyModel.Model1).Should().Be(Model1MarginalEnvelope);
     }
 
-    [Fact]
-    public void SelectExpectedEnvelope_UnknownTenancyModel_FallsBackToSharedFloor()
-    {
-        var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope("SomeFutureModel").Should().Be(Model1SharedFloorEnvelope);
-    }
+    // Task 223 (D-12) — the pre-D-12 SelectExpectedEnvelope_UnknownTenancyModel_FallsBackToSharedFloor
+    // test was DELETED: SelectExpectedEnvelope now accepts a typed TenancyModel enum, and the enum's
+    // domain admits no "unknown" input. The pre-D-12 `_`-arm fallback to Model1SharedFloorEnvelopeUsd
+    // was retired along with the shared-tier "floor" concept per INCOMING-D12-D13-REMEDIATION §5 Item 2.
+    // Parse-or-reject at the edge (RunsEndpoints.ValidateTenancyProfilePair, H1/H2a/H2b/H12c/H13
+    // handler entries) gates unknown strings before they ever reach this checker.
 
     // ---------- Silent-fail defense (b): ARM errors propagate (never zero-cost silent Pass) ----------
 
@@ -233,11 +234,11 @@ public sealed class ArmCostEnvelopeCheckerTests
     private static ArmCostEnvelopeChecker NewChecker(FakeArmHttpMessageHandler handler)
     {
         var arm = ArmSdkTestFakes.NewArmClient(handler);
+        // Task 223 (D-12): Model1SharedFloorEnvelopeUsd deleted from H13AcceptanceOptions.
         var options = Options.Create(new H13AcceptanceOptions
         {
             Model2EmptyEnvelopeUsd = Model2EmptyEnvelope,
             Model1MarginalEnvelopeUsd = Model1MarginalEnvelope,
-            Model1SharedFloorEnvelopeUsd = Model1SharedFloorEnvelope,
             CostDriftAdvisoryThreshold = DriftAdvisoryThreshold,
         });
         return new ArmCostEnvelopeChecker(arm, options, NullLogger<ArmCostEnvelopeChecker>.Instance);
@@ -245,7 +246,7 @@ public sealed class ArmCostEnvelopeCheckerTests
 
     private static CostEnvelopeRequest NewRequest(
         string? subscriptionId = null,
-        string tenancyModel = "Model2Dedicated") => new(
+        TenancyModel tenancyModel = TenancyModel.Model2) => new(
             CustomerId: CustomerId,
             RunId: RunId,
             SubscriptionId: subscriptionId ?? SubscriptionId,

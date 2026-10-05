@@ -1,0 +1,278 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="220" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>STEP 1 completion — bring Spaarke.ArchTests 322/4 → 326/326 (unblocks INCOMING-D12-D13-REMEDIATION §5 Items 1-4)</title>
+    <phase>D-12/D-13 remediation gate (per INCOMING-D12-D13-REMEDIATION.md §3 STEP 1 + §4 verify commands; MUST be green before starting §5 Items 1-4)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <completed>2026-09-29</completed>
+    <completion-notes>
+      SESSION 24 (2026-09-28 → 2026-09-29) — STEP 1 gate CLEARED. Full ArchTest suite:
+      326/326 PASS (previously 322/4). Items 1-4 from INCOMING-D12-D13-REMEDIATION.md §5
+      are now UNBLOCKED.
+
+      **Fix disposition summary (§6.5 paths cited per fix)**:
+      - FR-F1 → Path A: added `WorkerDataverseCredentialFactory.cs` allowlist entry citing
+        ADR-028 A4 + `adr-028-a4-integration-conflict-resolution.md` Q7 owner narrowing
+        (2026-08-25) for spaarkedev1-only prong-3 scope, sunset 2026-11-23.
+      - FR-F2 → Path C: census reconciliation. Removed 3 stale entries
+        (DataverseWebApiEnvVarValuesWriter/SolutionImporter/SolutionVerifier — grep-verified
+        0 credential-construction hits per file after migration to
+        IWorkerDataverseCredentialFactory) + added 1 consolidated entry
+        (WorkerDataverseCredentialFactory.cs, Sites: 2 — MI-FIC + ClientSecret paths).
+      - FR-B4 → Path C: renamed test fixture literal `"mi-bff-api-dev-assertion"` to
+        `private const string ArbitraryDifferentFicName = "differently-named-fic-fixture"`.
+        The literal semantic is "any name that is NOT canonical"; a non-MI-shaped fixture
+        serves the test without triggering the guard on a value that isn't a real runtime
+        identity binding. Guard scope (src/server/**) intentionally includes the
+        misplaced test dir `src/server/services/Sprk.Provisioning.ControlPlane.Tests/`.
+      - FR-27 → Path A (OWNER-APPROVED DEVIATION from POML's Path C, escalated via
+        AskUserQuestion 2026-09-28): added 3 entries to ExcludedTypeFullNames in
+        CosmosProvisioningSecretGuardTests.cs — OrgSettingsContractApplyRequest +
+        RequiredApplicationsInstallRequest (structurally identical to already-excluded
+        SolutionImportRequest / SolutionVerificationRequest: same H6 handler, same pac
+        CLI shell-out that REQUIRES raw secret string, same transient/method-scoped
+        lifecycle) + RegistryCredentialModeUpdate (CredentialMode is an enum discriminator
+        holding values like "secret-free" per SecretFreeMarker.CredentialModeSecretFree —
+        NOT a secret material carrier; analog of the day-1 KeyVaultSecretRef.SecretName
+        exclusion). Rationale: POML's Path C was authored without knowledge of the
+        existing Path A precedent (2026-08-27 addition of SolutionVerificationRequest
+        explicitly cited "looks like an oversight" that structurally identical siblings
+        were excluded but it wasn't — same oversight pattern reproduced here).
+
+      **Verification**:
+      - `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` = 326/326 PASS
+        (0 failed, 0 skipped, 326 total, 18s duration)
+      - `dotnet build src/server/api/Sprk.Bff.Api/` = 0 errors, 0 warnings
+      - Sprk.Provisioning.ControlPlane.Tests: 23 baseline failures CONFIRMED PRE-EXISTING
+        via stash-and-compare (`git stash push -u -m t220-inflight-fixes-baseline-check-*`
+        → run baseline → same 23 failures → `git stash apply <sha>` → drop). Zero T220-caused
+        regressions. Failure classes: 17× FileKvSecretManifestTests (KV manifest reader
+        auth-v4 A38a logic) + 6× CustomerRunGuardModulePostConfigureTests (post-configure
+        validation). Both classes are SESSION 23 master-merge domain — filed as follow-up
+        task 221 (non-blocking, does not gate Items 1-4).
+
+      **Quality Gates (UNCONDITIONAL per root CLAUDE.md §8 test-modifying override)**:
+      - code-review: PASS (0 critical, 0 warning, 4 optional style suggestions for
+        follow-up hygiene: S1 doc-pattern consistency in CosmosProvisioningSecretGuardTests,
+        S2 line-number specificity in reasons, S3 const naming verbosity, S4 fixture
+        realism trade-off documented)
+      - adr-check: PASS (0 violations; 1 non-T220 warning W1 — pre-existing doc drift in
+        concise ADR-028 A4 text says "zero secret-bearing BFF-identity sites" but
+        WorkerDataverseCredentialFactory adds a site post-master-merge; §6.5 resolution
+        doc properly documents the exception, only the concise ADR text hasn't been
+        updated to reference it — filed as follow-up task 222)
+
+      **Escalations that fired + resolution**:
+      - FR-27 disposition change (POML's Path C → owner-approved Path A): surfaced via
+        AskUserQuestion per §6.5 silent-violation-forbidden rule. Owner selected
+        "Path A for all 3 (Recommended)". Documented inline + in commit.
+      - No other escalations fired.
+
+      **Master-merge check**:
+      - `git fetch origin master`: 0 new master commits since 88de485b1 (current HEAD)
+      - No overlap with T220 files. Ready to push cleanly.
+
+      Post-T220 next per BINDING sequence: **Item 1 (delete H3 shared-app-reg branch — D-13)**
+      per INCOMING-D12-D13-REMEDIATION.md §5.
+    </completion-notes>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying per root CLAUDE.md §8 override (touches tests/Spaarke.ArchTests/** AND src/server/services/Sprk.Provisioning.ControlPlane.*/**). Unconditional FULL rigor + unconditional Step 9.5 quality gates. Also tags include `auth` (credential-guard tests).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical + targeted work with fully-specified failure details (4 exact file:line references). No architectural judgment required for FR-F1/F2/B4; FR-27 POCO-3 is the one judgment call and it's guarded by an explicit escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>~4-6h total: FR-F1 allowlist add (~30m) + FR-F2 census reconciliation (~45m + grep-verify) + FR-B4 test refactor + guard-scope investigation (~1h) + FR-27 POCO shape changes on 2 request types + consumer-site updates + escalation on POCO 3 (~2h) + full ArchTest re-run + adjacent Sprk.Provisioning.ControlPlane.Tests regression check (~30m) + Step 9.5 quality gates + commit + push (~1h). Sonnet 5 @ high is right; not xhigh (spec is complete + concrete).</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches tests + src together across FR-F1/F2/B4/27; single-agent serial required. Also touches `tests/Spaarke.ArchTests/**` which is one shared file per guard — parallelization within-task would race.</parallel-reason>
+    <deps>215</deps>
+    <tags>testing, test-reset, integration-test, provisioning, auth, arch-test, credential-guard, cosmos-secret-guard</tags>
+    <estimated-effort>4-6h high (Sonnet 5)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Bring the Spaarke.ArchTests suite to 326/326 by fixing 4 pre-existing failures that were surfaced when master's stricter suite merged in SESSION 23 (commit `92b480500`). Per INCOMING-D12-D13-REMEDIATION.md §3 line 181 ("Do not proceed to §5 until the arch suite is green"), the §5 Items 1-4 (delete H3 shared-app-reg branch, TenancyModel enum, sprk_tenancymodel migration, model1-*.bicep retirement) are all BLOCKED until this task completes. Each failure resolves via root CLAUDE.md §6.5 (path A allowlist entry + reason, path B ADR amendment, or path C pivot-to-comply); silent violation is forbidden. Do NOT weaken, delete, or scope-narrow any ArchTest to make it pass — they are forcing functions per tests/CLAUDE.md.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in ArchTest patterns (Roslyn source-scan guards, credential-shape rules), the ADR-028 auth v2 lifecycle (Amendment A4 + E-3 closure + FR-39 credential-type seam), and Cosmos-persisted POCO shape rules (FR-27 secret-shape ban → KeyVaultSecretRef references). Familiar with the notes/decisions/adr-028-a4-integration-conflict-resolution.md owner-approved 2026-08-25 disposition.
+  </role>
+
+  <goal>
+    `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` reports 326/326 pass (currently 322/4). Each of the 4 failures dispositioned per §6.5 path (A/B/C) with reason documented in code + commit message. `dotnet build src/server/api/Sprk.Bff.Api/` = 0 errors. Sprk.Provisioning.ControlPlane.Tests suite still passes (no regression from POCO shape changes). INCOMING §5 Items 1-4 unblocked.
+  </goal>
+
+  <context>
+    <background>
+      SESSION 23 (2026-09-28) merged 812 master commits into our branch. Master's stricter ArchTest suite surfaced 4 pre-existing failures rooted in our code (measured 2026-09-28 15:04Z on commit `88de485b1`, re-verified 2026-09-28 15:07Z after T215 landing + master resync):
+
+      **FR-F1** (`CredentialGuardTests.NoSecretBearingConfidentialClientOutsideTheAllowlist`, guard at tests/Spaarke.ArchTests/CredentialGuardTests.cs:168): `WorkerDataverseCredentialFactory.cs:213` uses `new ClientSecretCredential(tenantId, clientId, clientSecret)` (prong-3 path per FR-39 credential-type seam). Not in allowlist. Second guard at CredentialGuardTests.cs:182 (`EveryAllowlistEntryCarriesAReasonAndAnAdrReference`) MEANS the allowlist entry MUST carry a non-empty written reason + ADR citation.
+
+      **FR-F2** (`CredentialCensusTests.EveryConfidentialClientSiteIsCensused`, guard at tests/Spaarke.ArchTests/CredentialCensusTests.cs:217): 2 UNLISTED sites in `WorkerDataverseCredentialFactory.cs` (line 173 `new ClientAssertionCredential`, line 213 `new ClientSecretCredential`) + 3 CENSUSED BUT ABSENT sites (`DataverseWebApiEnvVarValuesWriter.cs`, `DataverseWebApiSolutionImporter.cs`, `DataverseWebApiSolutionVerifier.cs` — migrated to `IConfidentialClientProvider` per auth-v4 task 022 and no longer construct credentials directly).
+
+      **FR-B4** (`CredentialGuardTests.NoManagedIdentityIsResolvedByName`, guard at tests/Spaarke.ArchTests/CredentialGuardTests.cs:324): `A42FicReconciliationTests.cs:79` uses literal MI-shaped name `"mi-bff-api-dev-assertion"` in `Fic(...)` fixture call. Guard scans via `SourceScan.ServerSourceFiles()` (line 311) — need to verify whether that scan intentionally includes tests/** or is a scoping bug.
+
+      **FR-27** (`CosmosProvisioningSecretGuardTests.L2Types_HaveNoStringTypedSecretShapedProperties`, guard at tests/Spaarke.ArchTests/CosmosProvisioningSecretGuardTests.cs:488): 3 offending POCOs on Sprk.Provisioning.ControlPlane persist string-typed secret-shaped properties to Cosmos (cleartext-leak risk):
+        (1) `OrgSettingsContractApplyRequest.ClientSecret : string` (H6 solution-import flow)
+        (2) `RequiredApplicationsInstallRequest.ClientSecret : string` (H6 solution-import flow)
+        (3) `RegistryCredentialModeUpdate.CredentialMode : string` (FR-39 credential-mode enum discriminator — matches secret-shape regex but is semantically an enum, not a secret)
+
+      Blocks INCOMING §5 (Items 1-4). Non-blocking for T215 (hygiene) which already landed.
+
+      Pre-work verified 2026-09-28:
+      - `KeyVaultSecretRef` type already exists at src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/KeyVaultSecretRef.cs → FR-27 fix EXTENDS existing type; no new-component justification required.
+      - `notes/decisions/adr-028-a4-integration-conflict-resolution.md` exists → safe FR-F1 allowlist citation.
+    </background>
+    <relevant-files>
+      <file role="guard">tests/Spaarke.ArchTests/CredentialGuardTests.cs</file>
+      <file role="guard">tests/Spaarke.ArchTests/CredentialCensusTests.cs</file>
+      <file role="guard">tests/Spaarke.ArchTests/CosmosProvisioningSecretGuardTests.cs</file>
+      <file role="offender-src">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/WorkerDataverseCredentialFactory.cs</file>
+      <file role="offender-test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/A42FicReconciliationTests.cs</file>
+      <file role="offender-poco">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/PacOrgSettingsContractApplier.cs (or wherever OrgSettingsContractApplyRequest lives — grep before editing)</file>
+      <file role="offender-poco">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/PacRequiredApplicationsInstaller.cs (or wherever RequiredApplicationsInstallRequest lives — grep before editing)</file>
+      <file role="offender-poco">src/server/services/Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs (or wherever RegistryCredentialModeUpdate lives — grep before editing)</file>
+      <file role="existing-type">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/KeyVaultSecretRef.cs</file>
+      <file role="citation-doc">projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md</file>
+      <file role="verify">tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj (test project — MUST report 326/326 to unblock §5)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="215" status="completed">T215 SPE cert retirement landed 2026-09-28 (commit `1d575f29d`). Working tree synced with master (commit `88de485b1`). Nothing else pending before this task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root-CLAUDE.md-section-8">TEST-MODIFYING override — unconditional FULL rigor + unconditional Step 9.5 quality gates (code-review + adr-check) regardless of default rigor level. Path-check enforcement (FR-B06): any deletion under `tests/integration/{auth,regression,data-mutation,tenant}/**` requires same-PR replacement — N/A here because ArchTests are under `tests/Spaarke.ArchTests/` not integration paths, but the spirit applies: DO NOT delete/weaken guard tests.</constraint>
+    <constraint source="root-CLAUDE.md-section-6.5">SILENT VIOLATION IS FORBIDDEN. Each fix explicitly cites §6.5 path (A/B/C) in commit message + code comments. Path A (allowlist entry / exception) requires written reason + ADR citation + reviewer approval. Path B (ADR amendment) triggers separate ADR-amendment task — do NOT bundle silently. Path C (pivot to comply) is default when clean.</constraint>
+    <constraint source="tests-CLAUDE.md">ArchTests are FORCING FUNCTIONS. NEVER weaken, delete, or scope-narrow to make a test pass. If a guard has a scoping bug (e.g., wrongly includes tests/**), surface as separate amendment candidate; do not silently trim it.</constraint>
+    <constraint source="provisioning-KV-lifecycle-rule-1">NEVER re-introduce BFF-API-ClientSecret (either casing) under any name. Not directly touched by this task, but reminder: the FR-F1 fix ADDS an allowlist entry for prong-3 ClientSecret usage — do not use this as license to create a new secret.</constraint>
+    <constraint source="provisioning-KV-lifecycle-rule-2">NEVER delete Dataverse-ClientSecret or the soft-deleted rollback copies before 2026-11-23 (auth-v4 rollback window). Not touched by this task; reminder only.</constraint>
+    <constraint source="ADR-028-A4">BFF identity is secret-free. `.WithClientSecret(...)` on the BFF identity is a plain A4 violation with no exception. The FR-F1 offender `WorkerDataverseCredentialFactory.cs:213` authenticates as the WORKER's Dataverse identity (a different identity from the BFF), which is why the prong-3 path is a legitimate transitional exception per adr-028-a4-integration-conflict-resolution.md — but this exception is NARROW: it does NOT extend to BFF identity credential construction anywhere else.</constraint>
+    <constraint source="adr-028-a4-integration-conflict-resolution-doc">Owner-approved 2026-08-25 Q7 narrowing: prong 3 applies to `spaarkedev1` and any as-yet-unprovisioned Model 2 stamp; H4 executor MUST NOT provision new Model 2 stamps under this prong until A36-A42 land per Q6. FR-F1 allowlist entry text must reference this scope narrowly, not implicitly extend it.</constraint>
+    <constraint source="FR-39-credential-type-seam">The credential-type seam in H3/H4 stays in code (pluggability); the SECRET path may only be selected for a prong-3 unmigrated environment. `WorkerDataverseCredentialFactory` correctly implements this seam — the ArchTest allowlist just needs to acknowledge the site.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>tests/Spaarke.ArchTests/CredentialGuardTests.cs</file>
+      <file>tests/Spaarke.ArchTests/CredentialCensusTests.cs</file>
+      <file>tests/Spaarke.ArchTests/CosmosProvisioningSecretGuardTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/WorkerDataverseCredentialFactory.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/KeyVaultSecretRef.cs</file>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md (§3 STEP 1 + §4 verify commands + §7 DoD)</file>
+    </files>
+    <patterns>
+      <pattern name="ArchTest allowlist entry format" location="tests/Spaarke.ArchTests/CredentialGuardTests.cs">
+        The Allowlist static collection contains entries with { FilePathContains, Line, Reason, AdrRef }. Reason field is enforced non-empty by the second FR-F1 test (EveryAllowlistEntryCarriesAReasonAndAnAdrReference). Format precedent: read the existing entries at the top of CredentialGuardTests.cs to mirror the shape.
+      </pattern>
+      <pattern name="Credential census entry format" location="tests/Spaarke.ArchTests/CredentialCensusTests.cs">
+        See the MAINTENANCE PROCEDURE comment referenced in the FR-F2 error message. Census is a static list of expected confidential-client construction sites with identity + credential source + reason per site.
+      </pattern>
+      <pattern name="KeyVaultSecretRef POCO shape" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/KeyVaultSecretRef.cs">
+        URI-only reference to a KV secret; the value is resolved at use-site via Azure SDK. Use this in place of `string ClientSecret` on any Cosmos-persisted POCO.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Verify current failure state. Run `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --nologo --logger "console;verbosity=minimal" 2>&amp;1 | tail -80`. Expect exactly the 4 failures (FR-F1, FR-F2, FR-B4, FR-27) with the offender file:line references documented in `&lt;background&gt;`. If any drift, HALT and escalate — the brief may be stale.</step>
+
+    <step order="2">FR-F1 fix (path A allowlist entry). Read `tests/Spaarke.ArchTests/CredentialGuardTests.cs` MAINTENANCE PROCEDURE + existing Allowlist entries (mirror the shape). Add ONE new entry for `WorkerDataverseCredentialFactory.cs:213`: FilePathContains="WorkerDataverseCredentialFactory.cs", Line=213 (or omit line if the shape uses file-only), Reason="Transitional prong-3 ClientSecret path per FR-39 credential-type seam. Owner-approved 2026-08-25 (adr-028-a4-integration-conflict-resolution.md Q7 narrowing) for spaarkedev1 + as-yet-unprovisioned Model 2 stamps only. NOT a BFF-identity exception. Retires with auth-v4 A36-A42 landing.", AdrRef="ADR-028 A4 (§6.5 path A) + notes/decisions/adr-028-a4-integration-conflict-resolution.md". Re-run FR-F1 → PASS. Verify the second FR-F1 test (EveryAllowlistEntryCarriesAReasonAndAnAdrReference) also passes.</step>
+
+    <step order="3">FR-F2 fix (census reconciliation). Read `tests/Spaarke.ArchTests/CredentialCensusTests.cs` MAINTENANCE PROCEDURE + Census static list. VERIFY absence before removing — grep each of `DataverseWebApiEnvVarValuesWriter.cs`, `DataverseWebApiSolutionImporter.cs`, `DataverseWebApiSolutionVerifier.cs` for `new ClientSecretCredential`/`new ClientAssertionCredential`/`new ClientCertificateCredential`/`new ManagedIdentityCredential`. Expected: 0 hits per file (all migrated to `IConfidentialClientProvider` per auth-v4 task 022). If ANY hit found, STOP — census removal would be wrong. If 0 hits: REMOVE those 3 census entries. ADD 2 new census entries: (a) `WorkerDataverseCredentialFactory.cs:173` — new ClientAssertionCredential — identity="Worker-Dataverse-credential-factory" — credential-source="FR-39 seam prong-2 (FIC)" — reason="Transitional prong-2 FIC path per FR-39; A38-A42 progression"; (b) `WorkerDataverseCredentialFactory.cs:213` — new ClientSecretCredential — identity="Worker-Dataverse-credential-factory" — credential-source="FR-39 seam prong-3 (ClientSecret)" — reason="Transitional prong-3 ClientSecret per adr-028-a4-integration-conflict-resolution.md Q7 narrowing". Re-run FR-F2 → PASS.</step>
+
+    <step order="4">FR-B4 investigation + fix (path C preferred). Read `CredentialGuardTests.cs` around line 311 to see whether `SourceScan.ServerSourceFiles()` intentionally scans tests/** or not. If tests/** is intentionally in-scope (the guard's intent is "no real MI names ANYWHERE in code"), apply path C: refactor `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/A42FicReconciliationTests.cs:79` to use a non-MI-shaped fixture name (e.g., `private const string DifferentTestFicName = "test-fic-different-oid-fixture"`) that doesn't match the MI-name pattern. If tests/** is a scoping BUG (guard's intent is src/** only), surface as ADR-032-adjacent amendment candidate + apply path C to the test as a temporary appeasement anyway (both must pass). Re-run FR-B4 → PASS.</step>
+
+    <step order="5">FR-27 fix — POCO 1+2 (path C, straightforward). Grep the codebase for `OrgSettingsContractApplyRequest` + `RequiredApplicationsInstallRequest` to locate declarations + all consumer sites. For EACH POCO: replace `string ClientSecret` (property) with `KeyVaultSecretRef ClientSecretRef` (URI-only reference). For EACH consumer site: update to resolve the secret value at use-site via Azure SDK using the `KeyVaultSecretRef.SecretUri` (see existing KeyVaultSecretRef pattern usage elsewhere in Sprk.Provisioning.ControlPlane.Core for the resolution idiom — grep for `KeyVaultSecretRef` usage). Adjacent tests in `tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SolutionImport/**` MUST update accordingly. Re-run adjacent tests → PASS.</step>
+
+    <step order="6">FR-27 fix — POCO 3 (`RegistryCredentialModeUpdate.CredentialMode`). ESCALATION TRIGGER FIRES: this is a §6.5 path A-vs-C judgment call. Do NOT silently pick. Surface to owner via AskUserQuestion with two options: (a) path C rename `CredentialMode` → `CredentialKindMarker` or similar (cheap, preserves enum discriminator semantics, avoids the regex match); (b) path A add `RegistryCredentialModeUpdate.CredentialMode` to the guard's excluded-list with written reason ("Not a secret — enum discriminator for FR-39 credential-type seam. Values are literal enum strings ManagedIdentityFederated / ClientSecret / ClientAssertion, not a secret material carrier"). Apply owner's choice.</step>
+
+    <step order="7">Re-run FULL Spaarke.ArchTests suite: `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --nologo --logger "console;verbosity=minimal"`. MUST report 326/326 pass. If any test still fails, HALT and diagnose — do NOT proceed to Step 8 on red.</step>
+
+    <step order="8">Regression check adjacent suites: `dotnet build src/server/api/Sprk.Bff.Api/` → 0 errors. `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` → pre-existing green count preserved (no regressions from POCO shape change in Step 5). If Sprk.Provisioning.ControlPlane.Tests regresses due to POCO shape change, HALT and investigate — do NOT force-pass by ignoring test failures.</step>
+
+    <step order="9">Step 9.5 quality gates (UNCONDITIONAL per test-modifying override). Run code-review on: WorkerDataverseCredentialFactory.cs (no change expected but touched by allowlist addition), CredentialGuardTests.cs (allowlist entry added), CredentialCensusTests.cs (census entries added + removed), A42FicReconciliationTests.cs (const rename), 2 POCO files (shape change), consumer files updated for KeyVaultSecretRef resolution. Run adr-check on same set. Any critical issue → fix + re-run BEFORE marking complete.</step>
+
+    <step order="10">Commit + push. Commit message MUST cite §6.5 path for each of the 4 fixes (path A / A / C / C+A or C+C per Step 6 owner decision). Update POML `&lt;status&gt;` to `completed` + add completion notes. Update TASK-INDEX.md row 220 → ✅ [done] (bracketed ASCII token mandatory per task-create Step 5 status table). Update current-task.md Quick Recovery → next action = Item 1 (delete H3 shared-app-reg branch — INCOMING §5 Item 1). Run `pwsh scripts/check-task-status-drift.ps1` (may report parser mismatch systemic — that's pre-existing, not this task's problem).</step>
+  </steps>
+
+  <escalation>
+    <trigger>FR-F1 (Step 2) — if the CredentialGuardTests Allowlist collection shape differs from what this brief assumes, or if adding the new entry conflicts with an existing entry's semantics, STOP and escalate before pushing through.</trigger>
+    <trigger>FR-F2 (Step 3) — if ANY of the 3 "CENSUSED BUT ABSENT" files actually still has a `new ClientSecretCredential`/`new ClientAssertionCredential`/`new ClientCertificateCredential`/`new ManagedIdentityCredential` site, STOP: removing the census entry would be wrong. Escalate + reconcile the census against the actual code state.</trigger>
+    <trigger>FR-B4 (Step 4) — if `SourceScan.ServerSourceFiles()` inspection reveals a genuine scoping bug (guard scans tests/** when its intent is src/** only), file a separate amendment candidate task for the guard; do NOT silently trim the scan.</trigger>
+    <trigger>FR-27 POCO 3 (Step 6) — MANDATORY escalation before silently picking path A vs path C for `RegistryCredentialModeUpdate.CredentialMode`. Owner call.</trigger>
+    <trigger>Step 8 regression — if Sprk.Provisioning.ControlPlane.Tests regresses due to POCO shape change, HALT and investigate root cause; do NOT force-pass by disabling tests or reverting the shape change.</trigger>
+    <trigger>ANY temptation to weaken, delete, or scope-narrow an ArchTest to make it pass is an automatic STOP-AND-ESCALATE per tests/CLAUDE.md ArchTest forcing-function rules.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + test .NET projects (dotnet build, dotnet test)</tool>
+    <tool name="Grep">Search for consumer sites + verify census-removal safety</tool>
+    <tool name="Read/Edit">Inspect + modify tests + POCOs</tool>
+    <tool name="Bash/PowerShell">git operations + push</tool>
+  </tools>
+
+  <outputs>
+    <output type="test-config">tests/Spaarke.ArchTests/CredentialGuardTests.cs (Allowlist entry added for WorkerDataverseCredentialFactory.cs:213)</output>
+    <output type="test-config">tests/Spaarke.ArchTests/CredentialCensusTests.cs (census: 2 added, 3 removed)</output>
+    <output type="test-code">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/A42FicReconciliationTests.cs (line 79 const rename)</output>
+    <output type="code">2 POCO files under Sprk.Provisioning.ControlPlane.Core/Handlers/SolutionImport/** (string ClientSecret → KeyVaultSecretRef ClientSecretRef)</output>
+    <output type="code">Consumer sites for the 2 POCOs (resolve via KeyVaultSecretRef.SecretUri at use-site)</output>
+    <output type="code">1 POCO under Sprk.Provisioning.ControlPlane.Core/Registry/** (rename OR guard-excluded per owner decision — Step 6)</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/tasks/220-step1-completion-archtest-326.poml (this file — status=completed + notes)</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md (row 220 → ✅ [done])</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/current-task.md (Quick Recovery → next=Item 1)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the current 322/4 baseline, when `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` runs, then it reports EXACTLY 326/326 pass (zero failures, zero skips).</criterion>
+    <criterion testable="true">Given the ArchTest suite passes, when `dotnet build src/server/api/Sprk.Bff.Api/` runs, then it reports 0 errors.</criterion>
+    <criterion testable="true">Given the POCO shape changes in Step 5, when `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` runs, then the pass count matches or exceeds the pre-task baseline (no regressions).</criterion>
+    <criterion testable="true">The FR-F1 allowlist entry contains a non-empty Reason field + ADR reference; the second FR-F1 guard (`EveryAllowlistEntryCarriesAReasonAndAnAdrReference`) passes.</criterion>
+    <criterion testable="true">The FR-F2 census contains WorkerDataverseCredentialFactory.cs lines 173 + 213 (present + not orphaned) and does NOT contain DataverseWebApiEnvVarValuesWriter.cs, DataverseWebApiSolutionImporter.cs, or DataverseWebApiSolutionVerifier.cs (removed because migrated to IConfidentialClientProvider per auth-v4 task 022; grep-verified 0 credential-construction hits per file).</criterion>
+    <criterion testable="true">A42FicReconciliationTests.cs line 79 (or wherever the literal-MI-name was) uses a fixture constant whose value does NOT match the MI-name pattern that FR-B4 scans for.</criterion>
+    <criterion testable="true">Both `OrgSettingsContractApplyRequest` + `RequiredApplicationsInstallRequest` POCOs no longer expose `string ClientSecret` (use `KeyVaultSecretRef` instead). Consumer sites resolve the secret at use-site.</criterion>
+    <criterion testable="true">FR-27 POCO 3 (`RegistryCredentialModeUpdate.CredentialMode`) dispositioned per owner's Step 6 choice (path A guard exclusion OR path C rename), documented in commit message + task notes.</criterion>
+    <criterion testable="true">The commit message cites §6.5 path (A/B/C) for EACH of the 4 fixes. Task completion notes cite §6.5 disposition + owner decision (if any) explicitly.</criterion>
+    <criterion testable="true">NO ArchTest weakened, deleted, or scope-narrowed as part of this task. Any scoping bug found (e.g., FR-B4) surfaced as separate amendment candidate, not silently trimmed.</criterion>
+    <criterion testable="true">TASK-INDEX.md row 220 shows `✅ [done]` (bracketed ASCII token mandatory per task-create Step 5 status table; emoji alone is NOT greppable per FAILURE-MODES G-16). POML `&lt;status&gt;` = `completed`.</criterion>
+    <criterion testable="true">current-task.md Quick Recovery "Next Action" points to INCOMING §5 Item 1 (delete H3 shared-app-reg branch — D-13) with the correct file path reference.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test-scope clause (per task-create Step 3.5.5b authoring rule): Cover the 4 named ArchTest fix cases + the adjacent regression checks named above. Anything beyond that (e.g., adding NEW ArchTest coverage for scenarios these tests don't already cover) needs a one-line justification in task notes. No numeric test count target — the goal is 326/326 pass, not "add N tests."
+
+    §6.5 disposition matrix (author's expected disposition; task-execute may adjust with owner input at Step 6):
+    - FR-F1: path A (allowlist entry with narrow reason + citation)
+    - FR-F2: path C (census is the truth-source; the code moved, so the census must too)
+    - FR-B4: path C preferred (test refactor); path B possibility (guard scoping bug) surfaces as separate amendment candidate
+    - FR-27 POCO 1+2: path C (POCO shape change to KeyVaultSecretRef)
+    - FR-27 POCO 3: MANDATORY owner escalation between path A vs path C
+
+    Pre-work already done (2026-09-28, this session):
+    - `KeyVaultSecretRef` type confirmed to exist → FR-27 fix extends existing; no new-component justification needed
+    - `notes/decisions/adr-028-a4-integration-conflict-resolution.md` confirmed to exist → safe FR-F1 citation
+    - FR-F1 second guard (`EveryAllowlistEntryCarriesAReasonAndAnAdrReference`) confirmed to exist → allowlist entry MUST carry non-empty Reason + ADR citation
+    - FR-B4 scanner (`SourceScan.ServerSourceFiles()`) — scope needs Step 4 investigation
+
+    Post-task follow-ons (do NOT bundle into this task):
+    - INCOMING §5 Item 1 (delete H3 shared-app-reg branch — D-13) is next per BINDING sequence
+    - If FR-B4 investigation reveals a genuine guard scoping bug, file a separate amendment candidate task (ADR-032-adjacent)
+    - If FR-27 POCO 3 owner picks path A, the exclusion entry is added; if path C, follow-on consumer-site rename cascade may be needed (grep first)
+
+    Task-status-drift check (task-execute Step 10): the drift-check script has a pre-existing parser mismatch with this project's TASK-INDEX format (reports "index rows parsed: 1" for 173 POMLs). This is systemic tooling gap, NOT drift caused by this task. Note in commit message; do not block on it.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting, load all files listed in `&lt;knowledge&gt;&lt;files&gt;`. Follow task-execute FULL rigor protocol including Step 4a constraint loading (provisioning.md + auth.md + testing.md) + Step 5 ADR loading (ADR-028 A4 + resolution doc) + Step 6 always-apply skills + Step 8.5 checkpoint every 3 steps + Step 9 acceptance verification + Step 9.5 UNCONDITIONAL code-review + adr-check (test-modifying override). Steps are `mode="prescriptive"` — the exact sequence binds; a deviation is an escalation, not a silent improvisation.
+    </protocol>
+  </execution>
+</task>

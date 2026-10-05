@@ -1,0 +1,294 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="245a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Run context, part 1 (G25) — every handler input declared with one producer: H2a persists its ARM outputs, consumers read typed state, closed intake catalog at POST /api/runs, H4b closed per-env source catalog, DAG gaps closed, forcing-function test</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T245 (G25, notes/run-context-dataflow-gap.md)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production .cs in Api + Core (H2a, H3, H4, H4b, H9, H12b, H13, H14, DagAdvancer, RunsEndpoints, InterStepState), adds a forcing-function test, updates many handler test fixtures; root §8 test-modifying override applies.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting refactor of the handler data-flow contract across 8+ handlers plus a new contract abstraction and a DAG change (high blast radius, architectural).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (constraints + pattern pointer) — main-session-only; also shares InterStepState / DagAdvancer / RunsEndpoints with T245b/T245c/T238 (sequential by design)</parallel-reason>
+    <deps>none (T226 ✅, T237 ✅)</deps>
+    <tags>provisioning, l2-controlplane, provisioning-handler, api, endpoints, testing, config, customer-provisioning</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    A real provisioning run cannot get past H0 because ~20 required handler inputs are read from
+    `run.Parameters.NonSecret`, which only the intake copy ever writes. Establish the run-context contract — every
+    value a handler reads has exactly one declared source (intake, run identity, or a typed handler output written by
+    a handler that runs earlier) — and move every customer-stamp value H2a already receives from ARM into typed
+    `InterStepState`, so H3/H4/H4b/H9/H12b/H13/H14 stop reading values nobody writes. Inputs owned by T245b (L2-owned
+    values) and T245c (operator intake additions) are declared as known gaps that this task's test pins.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane. Follow ADRs strictly. Expert in C#/.NET 10,
+    System.Text.Json, ARM deployment outputs, xUnit + FluentAssertions fitness-function tests.
+  </role>
+
+  <goal>
+    After this task: (1) H2a writes resource group, App Service name, staging slot name, Key Vault name + URI, UAMI
+    resource id and Service Bus FQNS to `InterStepState`; (2) H3, H4, H4b, H9, H12b, H13 and H14 read those values (and
+    H5's `DataverseEnvUrl`) from `InterStepState`, never from `Parameters.NonSecret`; (3) `POST /api/runs` accepts only
+    keys in a closed intake catalog and defaults/validates `environmentName`; (4) H4b resolves `per_env_settings` sources
+    through a closed catalog; (5) the DAG makes every required handler-output producer an ancestor of its reader; (6) a
+    test fails if any handler reads an input that has no declared producer — except the pinned known gaps owned by
+    T245b/T245c.
+  </goal>
+
+  <context>
+    <background>
+      Evidence: notes/run-context-dataflow-gap.md (audit 2026-09-30). The only production write to
+      `Parameters.NonSecret` is `RunsEndpoints.cs:645`. H2a already maps ResourceGroupName, AppServiceName,
+      AppServiceStagingSlotName and UserAssignedIdentityResourceId from ARM (`BicepDeployOutputs.cs:29-60`,
+      `ArmDeploymentRunner.cs:465-479`) but persists only five fields (`H2aBicepInfraDeployHandler.cs:797-801`).
+      `customer.bicep` outputs `keyVaultName`, `keyVaultUri` (:796-797) and `serviceBusEndpoint` (:808, shape
+      `https://{ns}.servicebus.windows.net:443/`) — unmapped. The H4b `per_env_settings` sources in
+      `scripts/canonical-secret-catalog/manifest.yaml:676-863` are snake_case keys nothing writes; two of them mislabel
+      their origin (`from-h0-parameter:tenant_id` and `from-h8-output:container_type_id` are intake values). H4b depends
+      only on H4 (`DagAdvancer.cs:151`) although it needs H3's `BffAppRegId`; H6 reads `BffAppRegId` but depends only on
+      H5 (:152); H7 reads `SpeContainerId` (H8 output) but depends only on H6 (:153). H2a's name-availability check builds
+      the Service Bus name `sprk-{id}-{env}-sb` (`H2a:659`) while `customer.bicep:177` names it `spaarke-{id}-{env}-sbus`.
+      `environmentName` is silently defaulted to "prod" by H2a (:319) and H2b (:302) but required with no default by
+      H4b; nothing sends it. D6: customer stamps are prod-only for now.
+      SECOND CHANNEL — `run.Parameters.Secrets` (KeyVaultSecretRef map): H4's manifest-driven resolver reads it for
+      `from-run-parameter` / `from-existing-kv` entries (`KvSecretValueResolver.cs:231-250`) — `TenantId`,
+      `BFF-API-ClientId`, `BFF-API-Audience` (manifest.yaml:126-235). The only writer is H3 on consent-verified success
+      (`H3EntraAppRegHandler.cs:653-659`), but H3 depends on H4 (`DagAdvancer.cs:150`, H3 needs H4's KV RBAC bootstrap),
+      so H4 can never see them: every real run fails at H4 and resuming cannot help — a deadlock. H3 already commits
+      BFF-API-ClientId / BFF-API-Audience to the customer vault itself (`GraphAppRegistrationProvisioner.cs:223-227`),
+      and nothing supplies a `TenantId` reference (the tenant id is a non-secret intake value).
+      Model 1 still routes to `model1-shared.bicep`, whose outputs use different names (T225a/T225b converge it); after
+      this task a Model 1 run fails `BicepDeployOutputsIncomplete` at H2a exactly as it already fails today — no
+      regression, and no Model 1 template work in this task.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/InterStepState.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/ProducedByAttribute.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/HandlerRunInputs.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/BicepDeployOutputs.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/H2aBicepInfraDeployHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/H4bBulkAppSettingsHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/IPerEnvSettingsManifest.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/FilePerEnvSettingsManifest.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings/PerEnvSourceCatalog.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/H9BffDeployHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AppConfigSeed/H12bAppConfigSeedHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/IntegrationWiring/H14IntegrationWiringHandler.cs</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (per_env_source strings only) + generated/* (regenerate)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/RunContextContractTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/ — tests of every handler/endpoint listed above + DagAdvancerTests + Model1SharedDagParityTests</file>
+      <file>tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/{EnqueueLatencyScenario,LongHandlerScenario}.cs (request bodies, only if they send non-catalog keys)</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file role="new">.claude/patterns/provisioning/run-context-contract.md (+ INDEX.md row)</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md (§6.2 interStepState keys, §4.1 DAG rows)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project (this task's contract — BINDING)">
+      Every input a handler in this repo reads comes from exactly one of: (a) the run's top-level identity
+      (`CustomerId`, `TenancyModel`, `Profile`, `EnvironmentId`); (b) an intake key in `IntakeParameterCatalog`, read
+      from `Parameters.NonSecret`; (c) a typed `InterStepState` property whose `[ProducedBy]` handler is a strict
+      transitive DAG ancestor of the reader (required inputs) — optional reads (e.g. H4's leak scan) are exempt from
+      the ancestor rule but still declared. No handler may read a handler-produced value from `Parameters.NonSecret`.
+    </constraint>
+    <constraint source="project — known gaps">
+      Inputs whose source is decided by T245b or T245c stay as they are in code and are declared as known gaps with the
+      owning task id. The exact known-gap set is pinned by `RunContextContractTests` (adding or removing one is a test
+      edit). T245a does not implement T245b/T245c scope: artifact versions (`bicepVer`, `indexVer`, `secretsVer`), the
+      SPE owner-certificate vault (H0 probe, H8, T6 probe), H9 outputs (`bffApiUrl`, `buildId`) and H14
+      `webhookNotificationBaseUrl` → T245b; H11 `identityPreset`/`usersJson`, H14 `exchangePolicyScopeGroupId` +
+      Graph resources → T245c.
+    </constraint>
+    <constraint source="CLAUDE.md §10 + project boundary">
+      No change to `Sprk.Bff.Api` or `infrastructure/bicep/**` (H2a derives the Service Bus FQNS from the existing
+      `serviceBusEndpoint` output by URI host — it does not compose names). The control plane MUST NOT reference the BFF.
+    </constraint>
+    <constraint source="ADR-001 / ADR-008 / .claude/constraints/api.md">
+      CreateRun rejections use the endpoint's existing `BadRequest(httpContext, ...)` ProblemDetails helper and run
+      before the registry lookup, CustomerRunGuard, Cosmos write and enqueue (same placement as the T237 checks).
+    </constraint>
+    <constraint source="ADR-010">
+      New types are static catalogs / attributes / records — no new interfaces or DI registrations unless a second
+      implementation exists.
+    </constraint>
+    <constraint source="ADR-038 §7 + tests/CLAUDE.md">
+      Handler tests that seeded `NonSecret` keys for values now read from `InterStepState` are changed to seed
+      `InterStepState`; no test is deleted, skipped or weakened. Missing-input tests keep asserting the same rejection
+      code for the same missing value (now absent from `InterStepState`). No Mock&lt;HttpMessageHandler&gt;.
+    </constraint>
+    <constraint source="manifest generator contract">
+      `per_env_source` strings keep the generator's grammar `from-{origin}-{output|parameter}:{key}`; changed origins
+      are `from-intake-parameter:tenant_id` and `from-intake-parameter:container_type_id`. `Invoke-CatalogGenerator.ps1
+      -Verify` passes after regeneration; the generated script's parameter names do not change.
+    </constraint>
+    <constraint source="NFR-11 / no live changes">
+      No live Azure or Dataverse change in this task.
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/patterns/provisioning/INDEX.md</file>
+      <file>.claude/patterns/provisioning/handler-registration-completeness.md</file>
+      <file>.claude/patterns/provisioning/manifest-driven-secret-catalog.md</file>
+      <file>.claude/patterns/api/endpoint-definition.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fitness-function test over a closed registry" location="src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerRegistrationCompletenessTests.cs">
+        Shape for RunContextContractTests: enumerate the closed set, assert each member satisfies the contract, name the
+        offender in the failure message.
+      </pattern>
+      <pattern name="Closed source vocabulary" location="FileKvSecretManifest.cs (T226 closed value_source set)">
+        An unknown source key is a manifest read failure, not a silent skip.
+      </pattern>
+      <pattern name="Controlled InterStepState extension" location="InterStepState.cs remarks on ImportedSolutions / SpeContainerId">
+        New properties carry the CONTROLLED SCHEMA EXTENSION remark naming this task.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Add `ProducedByAttribute(string handlerId)` and `NoProducerAttribute(string reason)` (Core/Models). Annotate every `InterStepState` property with exactly one: BffAppRegId/FicPendingPostAppServiceVerification ← H3; MiObjectId/MiClientId/OpenAiEndpoint/AiSearchEndpoint/CosmosEndpoint ← H2a; DataverseEnvUrl ← H5; ImportedSolutions ← H6; SpeContainerId ← H8; SystemUserId/BffAppRegSystemUserId ← H10; ProvisionedUsers ← H11; S2SAppRegId, ContainerTypeId, SpeConsentCorrelationId → `[NoProducer]` with the reason (legacy guard / intake value / Model 2 H0.5 out of scope). Add H2a-produced properties: ResourceGroupName, AppServiceName, AppServiceStagingSlotName, KeyVaultName, KeyVaultUri, MiResourceId, ServiceBusFullyQualifiedNamespace (JSON camelCase names, WhenWritingNull).</step>
+    <step order="2">H2a: extend `BicepDeployOutputs` with KeyVaultName, KeyVaultUri, ServiceBusFullyQualifiedNamespace (required); `ArmDeploymentRunner.MapOutputs` reads `keyVaultName`, `keyVaultUri`, and derives the FQNS as the host of `serviceBusEndpoint` (blank if absent/unparseable → existing BicepDeployOutputsIncomplete). H2a writes all seven new properties next to the existing five. Fix `BuildGloballyNamespacedNameChecks` to check `spaarke-{id}-{env}-sbus` (customer.bicep:177).</step>
+    <step order="3">Add `IntakeParameterCatalog`: the closed set of intake keys (every key the skill sends at SKILL.md Step 4.0 + every optional override a handler reads today that is genuinely operator/intake-owned + `environmentName`), each with required/optional and a one-line description. `CreateRun`: 400 for any key not in the catalog (message lists the unknown keys); `environmentName` absent → store "prod" in the run's NonSecret; present but not dev|staging|prod → 400. Existing tenantId/subscriptionId checks stay. H2a/H2b drop their silent "prod" defaults (missing → Resumable failure with a clear code; unreachable after CreateRun).</step>
+    <step order="4">Switch consumers to typed state: H3 (customer KV), H4 (KV, RG, App Service, UAMI resource id, staging slot), H4b (KV, RG, App Service), H9 (RG, App Service, staging slot), H12b (`DataverseEnvUrl`), H13 (RG, App Service, KV — now required; containerTypeId from intake, no ISS fallback), H14 (KV). Remove the now-unused `*ParameterKey` constants for those values. Keep each handler's existing rejection code for the missing value; update the diagnostic text to name the producing handler.</step>
+    <step order="5">H4b: add `PerEnvSourceCatalog` — closed map from `per_env_source` string to (origin, resolver over the run): `from-h2a-output:kv_vault_uri`→KeyVaultUri, `from-h2a-output:cosmos_endpoint`→CosmosEndpoint, `from-h2a-output:uami_client_id`→MiClientId, `from-h2a-output:service_bus_fqns`→ServiceBusFullyQualifiedNamespace, `from-h3-output:bff_app_client_id`→BffAppRegId, `from-intake-parameter:tenant_id`→intake `tenantId`, `from-intake-parameter:container_type_id`→intake `containerTypeId`. An unknown source string fails the manifest read (`FilePerEnvSettingsManifest`). Update the two mislabelled `per_env_source` strings in manifest.yaml; regenerate; `-Verify`. Fix the "envelope.Parameters.NonSecret" misnomers in H4b / IPerEnvSettingsManifest / manifest comments.</step>
+    <step order="6">DAG (`DagAdvancer.HandlerDependencies`): H4b ← {H4, H3}; H6 ← {H5, H3}; H7 ← {H6, H8}. Confirm no cycle; update DagAdvancerTests / Model1SharedDagParityTests rows.</step>
+    <step order="6b">Secrets channel (H3 ↔ H4 deadlock): give every H4 manifest entry a producer that runs before H4 or is H4 itself. `TenantId` is written from the intake `tenantId` value (a non-secret source in the manifest's closed value_source set — extend the set + generator + FileKvSecretManifest + resolver if needed, same discipline as T226). `BFF-API-ClientId` / `BFF-API-Audience` are produced by H3's own KV commit: mark them in the manifest as written by H3 and make H4 skip (not fail) entries another handler writes; H3 no longer writes `run.Parameters.Secrets` refs for them. Declare `Parameters.Secrets` reads/writes in HandlerRunInputs and cover them in the contract test (rule (e) scans `Parameters.Secrets[...]` too).</step>
+    <step order="7">Add `HandlerRunInputs` (one static table: handler id → declared inputs: Identity / Intake(key, required) / Output(InterStepState property, required) / KnownGap(name, owningTask)). Add `RunContextContractTests`: (a) every InterStepState property has exactly one of [ProducedBy]/[NoProducer] and every [ProducedBy] id is a real handler id; (b) every required Output input's producer is a strict transitive DAG ancestor of the reader; (c) every Intake key is in the catalog; (d) a [NoProducer] property is never a required input; (e) SOURCE SCAN — for each handler's folder under Core/Handlers (explicit folder→handler map in the test), every `InterStepState.{Prop}` read and every `const string ...ParameterKey = "..."` value is declared for that handler, and every `InterStepState.{Prop} =` assignment is in its [ProducedBy] handler's folder; (f) the KnownGap set equals a pinned list. Failure messages name handler + input + rule.</step>
+    <step order="8">Docs: `.claude/constraints/provisioning.md` rule (declare every new handler input in HandlerRunInputs; never read a handler output from NonSecret); `.claude/patterns/provisioning/run-context-contract.md` 25-line pointer + INDEX row; `.claude/CHANGELOG.md`; design.md §6.2 key list + §4.1 DAG rows; notes/run-context-dataflow-gap.md §5 "T245a done" + remaining gaps.</step>
+    <step order="9">Build + run ControlPlane.Tests, LoadTests compile, ArchTests; `Invoke-CatalogGenerator.ps1 -Verify`; prereqs validate.ps1.</step>
+    <step order="10">Update TASK-INDEX.md row 245a to `✅ [done]`, POML status completed, plan §3/§4/§7 rows.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a handler input cannot be classified as identity / intake / typed handler output / T245b-T245c known gap without an owner decision (e.g. a value that would need a new operator prompt), STOP and escalate per CLAUDE.md §6 rather than inventing a source.</trigger>
+    <trigger>If a DAG change in step 6 creates a cycle, or any change alters Model 2 / H0.5 behaviour, STOP and escalate.</trigger>
+    <trigger>If rejecting unknown intake keys would break a caller other than the skill, RunsEndpointsTests or the two LoadTests scenarios, STOP and escalate.</trigger>
+    <trigger>If resolving the H3 ↔ H4 secrets deadlock requires splitting H4 into two handlers or reordering H3 before H4 (H3 needs H4's KV RBAC bootstrap), STOP and escalate with the options — that is a DAG redesign, not a source fix.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Producer/consumer contract today exists only as prose in InterStepState.cs ("Handlers write once; downstream handlers read") and per-handler "upstream MUST populate" comments; `HandlerRegistrationCompletenessTests` checks registration, not data flow (grep "ProducedBy|RunInputs|IntakeParameter" → none).</existing>
+    <extension>The new types extend InterStepState (attributes) and DagAdvancer's existing dependency map (the test reads it); a declared-inputs table cannot be expressed by extending either, because the inputs are per-handler facts that neither type holds.</extension>
+    <cost-of-doing-nothing>A real run fails at H0 and every later handler with a value nobody writes; the next handler author adds another unproduced NonSecret key and unit tests stay green because they seed it by hand — exactly how G25 happened. PerEnvSourceCatalog: without it an unknown/mislabelled per_env_source resolves to a missing key at runtime instead of failing at manifest load.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test</tool>
+    <tool name="pwsh">Run the catalog generator and prereqs validator</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/{ProducedByAttribute,IntakeParameterCatalog}.cs, Reconciler/HandlerRunInputs.cs, Handlers/BulkAppSettings/PerEnvSourceCatalog.cs + the modified files above</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/RunContextContractTests.cs + updated handler/endpoint/DAG tests</output>
+    <output type="docs">.claude/constraints/provisioning.md, .claude/patterns/provisioning/run-context-contract.md, design.md §6.2/§4.1, notes/run-context-dataflow-gap.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a deployment whose outputs carry keyVaultName, keyVaultUri, serviceBusEndpoint and the existing outputs, when H2a completes, then InterStepState holds ResourceGroupName, AppServiceName, AppServiceStagingSlotName, KeyVaultName, KeyVaultUri, MiResourceId and ServiceBusFullyQualifiedNamespace (= host of serviceBusEndpoint); given any of the three new outputs is missing, H2a returns the existing BicepDeployOutputsIncomplete code.</criterion>
+    <criterion testable="true">Given a run whose NonSecret has NO keyVaultName/resourceGroupName/appServiceName/userAssignedIdentityResourceId/dataverseUrl but whose InterStepState carries the H2a/H5 outputs, H3, H4, H4b (up to its known-gap secretsVer check), H9, H12b, H13 (up to its known-gap buildId check) and H14 (up to its known-gap checks) get past every input guard for those values; given the InterStepState value is absent, each returns its existing rejection code for that value.</criterion>
+    <criterion testable="true">POST /api/runs with a nonSecretParameters key outside the catalog returns 400 naming the key, with no registry lookup, Cosmos write or enqueue; with environmentName absent the stored run has environmentName=prod; with environmentName=demo returns 400; the skill's current 11-key payload is accepted.</criterion>
+    <criterion testable="true">H4b resolves all seven per_env sources from the run (InterStepState / intake) and passes them as script arguments; a manifest with an unknown per_env_source string fails the manifest read (ManifestReadFailed); the real embedded manifest loads through the catalog.</criterion>
+    <criterion testable="true">DagAdvancer: H4b becomes ready only after H4 and H3; H6 only after H5 and H3; H7 only after H6 and H8; no cycle.</criterion>
+    <criterion testable="true">Given a run with NO `Parameters.Secrets` entries (state before H3 has run), H4 resolves `TenantId` from the intake tenantId, skips BFF-API-ClientId / BFF-API-Audience as H3-written, and does not fail on them; given the real embedded manifest, `Invoke-CatalogGenerator.ps1 -Verify` passes and an unknown value_source still fails the manifest read.</criterion>
+    <criterion testable="true">RunContextContractTests rules (a)–(f) pass; deliberately adding an undeclared `InterStepState.X` read or an undeclared `...ParameterKey` constant to a handler file makes rule (e) fail naming the file (verify once by hand, then revert).</criterion>
+    <criterion testable="true">Invoke-CatalogGenerator.ps1 -Verify passes; prereqs validate.ps1 passes; ControlPlane builds 0 errors / 0 warnings; ControlPlane.Tests has no new failures beyond the 6-test T221 baseline; LoadTests compile; ArchTests pass.</criterion>
+    <criterion testable="true">Test scope: cover the contract rules and the behaviours named above (H2a mapping incl. missing-output case, each switched consumer's present/absent path, CreateRun unknown-key / environmentName default / invalid, per-env catalog resolve + unknown-source, DAG readiness). Anything beyond that needs a one-line justification in task notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Source scan in rule (e) reads handler source files located from the repo root (walk up from the test
+    assembly to the directory holding `.git`). H0 probes live under Handlers/Preflight and belong to H0 in the folder map.
+
+    COMPLETION (2026-10-01, SESSION 28/29). All acceptance criteria verified: ControlPlane.Tests 2063 pass / 6 fail
+    (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; RunContextContractTests 30/30; ArchTests
+    337/337; Api, Worker, LoadTests build 0/0; Invoke-CatalogGenerator.ps1 -Verify OK; customer.json rebuilt.
+    Rule (e) verified by hand: a seeded `_ = run.InterStepState?.CosmosEndpoint;` in H9 failed it naming
+    "Handlers/BffDeploy (H9) reads InterStepState.CosmosEndpoint", then was removed.
+
+    DEVIATIONS (each deliberate; reviewer-visible):
+    (a) Step 3 — environmentName: one shared IntakeParameterCatalog.ResolveEnvironmentName (default `prod`, owner D6)
+        for H2a/H2b/H4b instead of making H2a/H2b fail; CreateRun also stores the default. The
+        `h4b-missing-environment-name` rejection code is retired (it can no longer occur) despite "keep existing
+        rejection codes". A stored invalid value is not re-validated by handlers: customer.bicep's @allowed list fails
+        it at H2a, which precedes H2b/H4b.
+    (b) Step 6b — found 10 Secrets-channel consumers, not 3. Fixed: TenantId (`from-intake-parameter`),
+        BFF-API-ClientId/Audience (`written-by-h3`; H3 no longer writes run.Parameters.Secrets). The rest are pinned in
+        PinnedManifestGaps with owners (T245b, T245c, T225b; the two SPE container ids → T227/G18, found by the gates).
+        The scan covers Parameters.Secrets as step 6b asked, as a rule rather than HandlerRunInputs entries: nobody may
+        write it; only H4 may read it (RunSecretsReaders, with its reason).
+    (c) Added: T6 trap probe reads TrapVerificationRequest.SpeOwnerCertKeyVaultName (platform vault, interim from intake
+        `keyVaultName`); H13 passes the CUSTOMER vault as KeyVaultName (correct for T1/T5).
+    (d) Rename TopologyConstantValues → IntakeValues across H4 / writer / resolver.
+    (e) IntakeParameter.Key → Name (the FR-27 ArchTest treats a string property named Key as secret-shaped).
+    (f) The scanner is a Roslyn syntax walk, not the regex the POML named (Microsoft.CodeAnalysis.CSharp 5.9.0 added
+        to the L2 TEST project only). The regex scan had one comment bug found by its own producer-truthfulness check
+        and three more found by code review (string literals, `?.`/`!.`, raw/verbatim strings), and was blind to the
+        aliased reads six handlers use. Added beyond the POML: declared ⇒ read (stale declarations fail), literal intake
+        keys beside the NonSecret map, rule (g) checked against customer.bicep's kvSecretValues, rule (h) generator ⇔
+        PerEnvSourceCatalog parity, and negative + positive controls for every rule (tests/CLAUDE.md).
+    (g) LoadTests request bodies fixed (pre-broken: T224-retired tenancy values, no tenantId).
+    (h) H13: three new required-input codes `h13-missing-{resource-group,app-service,key-vault}-name`.
+    (i) infrastructure/bicep/customer.json changed despite "no change to infrastructure/bicep/**": a regeneration
+        (contentType tags from the regenerated kv-secrets module) plus one comment edit in customer.bicep (JSON unchanged).
+    (j) Test deleted: H3EntraAppRegHandlerTests.AcParse_KvUriReference_RoundTrips — the production ParseKvUriReference
+        it tested was removed as dead code; the H3 happy path now asserts Parameters.Secrets is empty.
+    (k) Quality-gate fixes beyond the POML (owner: fix at discovery):
+        - ADR-019: every control-plane ProblemDetails now carries a stable `errorCode` (Api/ControlPlaneProblems.cs,
+          one helper for RunsEndpoints + RunLogsEndpoints); the unknown-key 400 returns `acceptedKeys`.
+        - H4 cleartext-leak guard flagged real Azure host names (would have quarantined every real run at H4); it now
+          exempts DNS hosts, scans URI path/query/user-info, and reflects over every InterStepState string property.
+        - H13 sprk_azuresubscriptionid ← `subscriptionId` (the `azureSubscriptionId` intake key is removed); H13's literal
+          intake keys became *ParameterKey constants.
+        - New pinned T245b gaps: H7 `bffApiBaseUrl` (falls back to the PLATFORM BFF), H13 `bffVersion` /
+          `solutionVersion` / `clientCacheBustToken`. T245b POML step 4c also carries the H4 KV-bootstrap principal
+          defect (grants the stamp UAMI Secrets Officer instead of L2's principal) for owner review.
+        - /provision-environment skill: `Model2Dedicated` comparisons (dead since T223/T224) now test `Model2`; the
+          "L2 ignores unknown keys" comment replaced; Step 1c literals corrected; Step 5 gate note for the new edges.
+        - Generator mirrors the closed per_env_source set (-Verify fails on a mislabelled source).
+        - PerEnvSourceCatalog trims intake values like H4/H8; ArmDeploymentRunner.MapOutputs and H2a.MissingOutputs
+          back to private (no test needed them); unused EnvironmentNameParameterKey constants removed (H2a, H2b).
+    (l) ADR tensions recorded in spec.md: ADR-020 (strict intake reader, no deprecation window — path A) and
+        ADR-038 (L2 fitness functions off the KEEP paths — path A, deletion-protected by that row).
+    (m) DAG edges H4b←H3, H6←H3, H7←H8 apply to Model 2 as well; they only add true data dependencies (Model 2 is out
+        of scope; H0.5 untouched).
+    Test-scope justification: AC1b (H4b, every catalog source end-to-end) and AC28b–e (leak guard) cover the two
+    production defects the gates found; the scanner controls are required by tests/CLAUDE.md. Four new tests that fed
+    keys CreateRun now rejects were removed or narrowed to the reachable case (H9 AC2c2, H12b DataverseUrlOnlyInNonSecret,
+    H13 AC2fgh rows, H4 keyVaultResourceId override).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

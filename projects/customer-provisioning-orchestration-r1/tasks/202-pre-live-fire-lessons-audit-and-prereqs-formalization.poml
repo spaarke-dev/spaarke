@@ -4,7 +4,7 @@
     <title>Pre-live-fire lessons audit + formalize PROVISIONING-PREREQUISITES + design provisioning-run structure (blocker for task 186 E2E)</title>
     <phase>Pre-Live-Fire — Consolidate lessons + structural gaps before E2E ceremony</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Doc-heavy authoring task: audit + inventory of all captured-but-unapplied lessons across notes/*, then author (a) PROVISIONING-PREREQUISITES.md machine-parseable YAML + rendered markdown, (b) provisioning-run structural specs, (c) punch list for task 203 (apply). No .cs modifications in this task; substantial code changes ride in task 203. Owner directive 2026-08-24: "for point 1 - AND these need to be actually documented somewhere that can then feed into the process; this needs to be formalized e.g., a file, an app, a table--something that is codified" — this task is that codification.</rigor-reason>
     <model-tier>opus</model-tier>

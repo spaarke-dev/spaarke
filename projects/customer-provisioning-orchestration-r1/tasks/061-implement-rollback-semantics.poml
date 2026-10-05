@@ -4,7 +4,7 @@
     <title>Implement §4C rollback semantics — 4-class failure taxonomy + Quarantined state + clear-quarantine audit</title>
     <phase>C Wave C5 — L2 REST + Reconciler</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; implements FR-24 rollback semantics; a bug here strands runs OR silently retries a Quarantine-required failure. Audit-log obligation makes this security-adjacent.</rigor-reason>
     <model-tier>sonnet</model-tier>

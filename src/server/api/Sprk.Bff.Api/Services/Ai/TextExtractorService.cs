@@ -60,6 +60,33 @@ public class TextExtractorService : ITextExtractor
     /// <summary>Managed-identity credential (Program.cs singleton) for the Entra auth path.</summary>
     private readonly Azure.Core.TokenCredential? _managedIdentityCredential;
 
+    /// <summary>1 once the managed-identity notice has been logged (the client is built per call; log it once).</summary>
+    private int _managedIdentityAuthLogged;
+
+    /// <summary>
+    /// Document Intelligence is usable when the endpoint is set AND there is a credential: the API key, or the
+    /// injected managed-identity <see cref="Azure.Core.TokenCredential"/> ("key if configured, else MI" — owner
+    /// D13, customer-provisioning-orchestration-r1 task 243). Both extraction paths gate on this; before task 243
+    /// they required the key, so <see cref="CreateDocIntelClient"/>'s managed-identity branch was unreachable.
+    /// </summary>
+    private bool IsDocIntelConfigured =>
+        !string.IsNullOrWhiteSpace(_options.DocIntelEndpoint)
+        && (!string.IsNullOrWhiteSpace(_options.DocIntelKey) || _managedIdentityCredential is not null);
+
+    /// <summary>
+    /// A rejected credential (HTTP 401/403, or a managed-identity token that could not be obtained) is a
+    /// configuration fault, not a transient one: report it plainly and do not count it toward the circuit
+    /// breaker (task 243 — otherwise a keyless environment whose account cannot use Entra would surface as
+    /// "temporarily unavailable due to repeated failures").
+    /// </summary>
+    private static bool IsDocIntelCredentialRejection(Exception ex) =>
+        ex is Azure.Identity.AuthenticationFailedException or RequestFailedException { Status: 401 or 403 };
+
+    private const string DocIntelCredentialRejectedMessage =
+        "Document Intelligence rejected the service's credential. With managed identity the account needs a " +
+        "custom subdomain and the service identity needs the Cognitive Services User role; with an API key, " +
+        "the key must be valid for the account.";
+
     /// <summary>
     /// Builds the Document Intelligence client, selecting Entra (managed identity) when no
     /// <c>DocumentIntelligence:DocIntelKey</c> is configured (auth-v4 task 054 / FR-E5).
@@ -90,10 +117,13 @@ public class TextExtractorService : ITextExtractor
                 "TextExtractorService with the DI TokenCredential (ADR-028).");
         }
 
-        _logger.LogInformation(
-            "DocumentIntelligence auth: Managed Identity (ADR-028). Requires a custom subdomain on " +
-            "the account plus a Cognitive Services User role assignment; a regional endpoint will " +
-            "reject the token.");
+        if (Interlocked.Exchange(ref _managedIdentityAuthLogged, 1) == 0)
+        {
+            _logger.LogInformation(
+                "DocumentIntelligence auth: Managed Identity (ADR-028). Requires a custom subdomain on " +
+                "the account plus a Cognitive Services User role assignment; a regional endpoint will " +
+                "reject the token.");
+        }
         return new DocumentIntelligenceClient(endpoint, _managedIdentityCredential);
     }
 
@@ -739,12 +769,12 @@ public class TextExtractorService : ITextExtractor
         string fileName,
         CancellationToken cancellationToken)
     {
-        // Check if Document Intelligence is configured
-        if (string.IsNullOrEmpty(_options.DocIntelEndpoint) || string.IsNullOrEmpty(_options.DocIntelKey))
+        // Check if Document Intelligence is configured (endpoint + key OR managed identity — task 243)
+        if (!IsDocIntelConfigured)
         {
             _logger.LogWarning(
                 "Document Intelligence not configured. Cannot extract text from {FileName}. " +
-                "Set Ai:DocIntelEndpoint and Ai:DocIntelKey in configuration.",
+                "Set DocumentIntelligence:DocIntelEndpoint, plus DocumentIntelligence:DocIntelKey or a managed identity.",
                 fileName);
             return TextExtractionResult.Failed(
                 "Document Intelligence is not configured. PDF/DOCX extraction is unavailable.",
@@ -932,6 +962,11 @@ public class TextExtractorService : ITextExtractor
                 "The document format is invalid or unsupported by Document Intelligence.",
                 TextExtractionMethod.DocumentIntelligence);
         }
+        catch (Exception ex) when (IsDocIntelCredentialRejection(ex))
+        {
+            _logger.LogError(ex, "Document Intelligence rejected the credential for {FileName}", fileName);
+            return TextExtractionResult.Failed(DocIntelCredentialRejectedMessage, TextExtractionMethod.DocumentIntelligence);
+        }
         catch (RequestFailedException ex)
         {
             _logger.LogError(ex, "Document Intelligence API error for {FileName}: {Status} {Code}",
@@ -964,10 +999,12 @@ public class TextExtractorService : ITextExtractor
         string fileName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrEmpty(_options.DocIntelEndpoint) || string.IsNullOrEmpty(_options.DocIntelKey))
+        if (!IsDocIntelConfigured)
         {
             _logger.LogWarning(
-                "Document Intelligence not configured. Cannot extract layout from {FileName}.", fileName);
+                "Document Intelligence not configured. Cannot extract layout from {FileName}. " +
+                "Set DocumentIntelligence:DocIntelEndpoint, plus DocumentIntelligence:DocIntelKey or a managed identity.",
+                fileName);
             return LayoutExtractionResult.Failed(
                 "Document Intelligence is not configured. Structured layout extraction is unavailable.");
         }
@@ -1086,6 +1123,11 @@ public class TextExtractorService : ITextExtractor
                 fileName);
             return LayoutExtractionResult.Failed(
                 "The document format is invalid or unsupported by Document Intelligence.");
+        }
+        catch (Exception ex) when (IsDocIntelCredentialRejection(ex))
+        {
+            _logger.LogError(ex, "Document Intelligence rejected the credential for layout of {FileName}", fileName);
+            return LayoutExtractionResult.Failed(DocIntelCredentialRejectedMessage);
         }
         catch (RequestFailedException ex)
         {

@@ -104,40 +104,23 @@ public class CredentialCensusTests
                 + "the OBO migration. Revisit when Power BI is adopted (tasks 040-042)."),
 
         new CensusEntry(
-            FileName: "DataverseWebApiEnvVarValuesWriter.cs",
-            Sites: 1,
-            Identity: "The CUSTOMER's own Entra app registration (per-request), not the BFF's",
-            CredentialSource: "TenantId/ClientId/ClientSecret supplied on the handler request record, resolved from Key Vault upstream",
+            FileName: "WorkerDataverseCredentialFactory.cs",
+            Sites: 2,
+            Identity: "The shared BFF app registration (SDAP-BFF-SPE-API 1e40baad-...) — the L2 Worker's own Dataverse identity; and (MI-FIC site only, task 248) the SPE container type's owning app, via SpeConfidentialClientGraphFactory",
+            CredentialSource: "Ordered selection over the CredentialKind switch: (a) `CredentialKind.ManagedIdentityFederated` branch — ClientAssertionCredential over ManagedIdentityCredential — as the DEFAULT secret-free path per ADR-028 A4; (b) `CredentialKind.ClientSecret` branch — ClientSecretCredential — as prong-3 transitional fallback for unmigrated environments (spaarkedev1 only per adr-028-a4-integration-conflict-resolution.md Q7 narrowing 2026-08-25), sunset 2026-11-23 per §6.5 resolution",
             Reason:
-                "ADR-028 E-1. Writes environment-variable values into the customer env (H7). L2 provisions into an environment owned by the customer's "
-                + "tenant, so the identity is theirs; MI-FIC would have to be federated onto each "
-                + "customer's registration. Added to the census 2026-08-27 — it had been absent since "
-                + "the sites landed 2026-08-19, which is why FR-F1/FR-F2 were red from the day the "
-                + "guard shipped (issue #839)."),
-
-        new CensusEntry(
-            FileName: "DataverseWebApiSolutionImporter.cs",
-            Sites: 1,
-            Identity: "The CUSTOMER's own Entra app registration (per-request), not the BFF's",
-            CredentialSource: "TenantId/ClientId/ClientSecret supplied on the handler request record, resolved from Key Vault upstream",
-            Reason:
-                "ADR-028 E-1. Imports solutions into the customer env (H6). L2 provisions into an environment owned by the customer's "
-                + "tenant, so the identity is theirs; MI-FIC would have to be federated onto each "
-                + "customer's registration. Added to the census 2026-08-27 — it had been absent since "
-                + "the sites landed 2026-08-19, which is why FR-F1/FR-F2 were red from the day the "
-                + "guard shipped (issue #839)."),
-
-        new CensusEntry(
-            FileName: "DataverseWebApiSolutionVerifier.cs",
-            Sites: 1,
-            Identity: "The CUSTOMER's own Entra app registration (per-request), not the BFF's",
-            CredentialSource: "TenantId/ClientId/ClientSecret supplied on the handler request record, resolved from Key Vault upstream",
-            Reason:
-                "ADR-028 E-1. Verifies imported solutions in the customer env (H6). L2 provisions into an environment owned by the customer's "
-                + "tenant, so the identity is theirs; MI-FIC would have to be federated onto each "
-                + "customer's registration. Added to the census 2026-08-27 — it had been absent since "
-                + "the sites landed 2026-08-19, which is why FR-F1/FR-F2 were red from the day the "
-                + "guard shipped (issue #839)."),
+                "The Worker-side analog of OrderedCredentialClientProvider — L2 Worker's own FR-39 ordered-credential factory "
+                + "authenticating AS the shared BFF app registration for Dataverse operations. Consolidation of what were previously "
+                + "three credential-construction sites in DataverseWebApiEnvVarValuesWriter (H7), DataverseWebApiSolutionImporter (H6), "
+                + "and DataverseWebApiSolutionVerifier (H6) — those three files now consume this factory (WorkerDataverseCredentialFactory, injected concretely) "
+                + "(parallel of the BFF's route through OrderedCredentialClientProvider). Cannot literally use OrderedCredentialClientProvider "
+                + "because L2 Worker is a separate service (Sprk.Provisioning.ControlPlane.Worker) with its own DI container, config sections, "
+                + "and idiom (Azure.Identity direct vs MSAL) — DELIBERATE NARROWING documented in the file header (no probe-before-bind, no "
+                + "negative cache, no runtime downgrade from ManagedIdentityFederated). TWO sites in this file — the count is explicit so "
+                + "that removing one and adding another elsewhere in the file cannot pass unnoticed. Landed at customer-provisioning-orchestration-r1 "
+                + "task 205i (punch row A44.5) 2026-08-25; the 3 previously-censused handler-surface entries "
+                + "(DataverseWebApiEnvVarValuesWriter/SolutionImporter/SolutionVerifier) were removed from this census in task 220 (2026-09-28) "
+                + "after grep-verifying 0 credential-construction hits per file."),
 
         new CensusEntry(
             FileName: "ReportingProfileManager.cs",

@@ -63,6 +63,35 @@ function Set-VaultSecret {
         [string]$Description,
         [string]$Category
     )
+    # ---------------------------------------------------------------------
+    # Bucket B HIGH#11 guard (customer-provisioning-orchestration-r1 SESSION 18,
+    # adversarial e2e verify workflow wepdcb8we) + .claude/constraints/provisioning.md
+    # § KV credential lifecycle rule 1:
+    #
+    # BindingNeverDelete secrets (BFF-API-ClientSecret, Dataverse-ClientSecret) are
+    # retained as ROLLBACK SLOTS ONLY on their canonical platform vault. This seeder
+    # MUST NEVER CREATE them anywhere. Prior to this guard, if the target vault did
+    # NOT already contain the secret, the -SkipExisting early-out at line 66 fell
+    # through and the placeholder Set-VaultSecret call at line 703 (from the
+    # from-existing-kv emission branch) would seed placeholder-value-source-is-existing-kv
+    # into a secret-free customer vault — a silent contract violation.
+    #
+    # The guard is written as fail-loud REFUSAL (not silent skip) so an operator
+    # running the seeder against the wrong vault gets a diagnostic pointing them
+    # at the rollback runbook, not a phantom success. Enforcement is defense-in-depth
+    # — the emission branches also skip these secrets in most modes — but a single
+    # code path centralizes the invariant.
+    # ---------------------------------------------------------------------
+    if ($script:BindingNeverDelete -contains $Name) {
+        $existing = az keyvault secret show --vault-name $VaultName --name $Name --query 'name' --output tsv 2>$null
+        if (-not $existing) {
+            Write-Host "  REFUSED: $Name (BINDING never-delete; not present in target vault '$VaultName' — this seeder MUST NOT create it. Auth-v4 task 033 (2026-08-24) deleted both KV copies of BFF-API-ClientSecret; Dataverse-ClientSecret is retained ONLY on its canonical platform vault as rollback per auth-v4 §10. If a rollback genuinely requires re-seeding, use the auth-v4 rollback runbook — NOT this generator-emitted seeder.)" -ForegroundColor Yellow
+            return
+        }
+        Write-Host "  SKIP: $Name (BINDING never-delete; already present in vault, live value preserved)" -ForegroundColor Gray
+        return
+    }
+
     if ($SkipExisting) {
         $existing = az keyvault secret show --vault-name $VaultName --name $Name --query 'name' --output tsv 2>$null
         if ($existing) {
@@ -89,11 +118,6 @@ Write-Host "  BINDING never-delete: $($script:BindingNeverDelete -join ', ')"
 Write-Host '=================================================================='
 Write-Host ''
 
-# ---- AiSearch--AdminKey (ai) ----
-# Purpose: Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
-# Value source: from-shared-service
-Write-Host '  SKIP: AiSearch--AdminKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source search:sprksharedprod-search)' -ForegroundColor Gray
-
 # ---- AiSearch-Endpoint (ai) ----
 # Purpose: Azure AI Search service endpoint.
 # Value source: from-bicep-output
@@ -112,11 +136,6 @@ if ($SeedPlaceholders) {
     Write-Host '  SKIP: AppInsights-ConnectionString (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- AzureOpenAI-ApiKey (ai) ----
-# Purpose: Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
-# Value source: from-shared-service
-Write-Host '  SKIP: AzureOpenAI-ApiKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source cognitiveservices:sprksharedprod-openai)' -ForegroundColor Gray
-
 # ---- AzureOpenAI-Endpoint (ai) ----
 # Purpose: Azure OpenAI resource endpoint (https://{name}.openai.azure.com/).
 # Value source: from-bicep-output
@@ -128,21 +147,13 @@ if ($SeedPlaceholders) {
 
 # ---- BFF-API-Audience (identity) ----
 # Purpose: BFF API audience URI (api://{clientId}).
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BFF-API-Audience' -Value 'placeholder-from-run-parameter' -Description 'BFF API audience URI (api://{clientId}).' -Category 'identity'
-} else {
-    Write-Host '  SKIP: BFF-API-Audience (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: written-by-h3
+Write-Host '  SKIP: BFF-API-Audience (value_source=written-by-h3; written by H3 with the app registration)' -ForegroundColor Gray
 
 # ---- BFF-API-ClientId (identity) ----
 # Purpose: BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BFF-API-ClientId' -Value 'placeholder-from-run-parameter' -Description 'BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.' -Category 'identity'
-} else {
-    Write-Host '  SKIP: BFF-API-ClientId (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: written-by-h3
+Write-Host '  SKIP: BFF-API-ClientId (value_source=written-by-h3; written by H3 with the app registration)' -ForegroundColor Gray
 
 # ---- BFF-API-ClientSecret (auth) ----
 # Purpose: BFF API app-registration client secret. Consumed by the OBO confidential-client flow (per OAuth spec — required even under ADR-028 MI-first outbound) and by any shared-lib Dataverse boot path still on client-credentials. BINDING never-delete per r3 handoff §4a.
@@ -154,23 +165,10 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
     Set-VaultSecret -Name 'BFF-API-ClientSecret' -Value 'placeholder-value-source-is-existing-kv' -Description 'BFF API app-registration client secret. Consumed by the OBO confidential-client flow (per OAuth spec — required even under ADR-028 MI-first outbound) and by any shared-lib Dataverse boot path still on client-credentials. BINDING never-delete per r3 handoff §4a. [BINDING never-delete: skip in seed]' -Category 'auth'
 }
 
-# ---- BingSearch-ApiKey (ai) ----
-# Purpose: Bing Search v7 API key.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'BingSearch-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Bing Search v7 API key.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: BingSearch-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- Communication-DefaultMailbox (communication) ----
 # Purpose: Default mailbox address for Communication module (outbound + Approved-Senders default).
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Communication-DefaultMailbox' -Value 'placeholder-from-run-parameter' -Description 'Default mailbox address for Communication module (outbound + Approved-Senders default).' -Category 'communication'
-} else {
-    Write-Host '  SKIP: Communication-DefaultMailbox (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-intake-parameter
+Write-Host '  SKIP: Communication-DefaultMailbox (value_source=from-intake-parameter; written by H4 from the intake value)' -ForegroundColor Gray
 
 # ---- Communication-Webhook-SigningKey (communication) ----
 # Purpose: HMAC-SHA256 signing key for /api/communications/incoming-webhook (X-Hub-Signature-256 header). Kebab canonical per §7.9 R2 (new secrets are kebab-case; the drift form `compose-webhook-signingkey` run-together is a Phase H alias-collapse target on the sibling Compose secret, not this one — the two just look similar).
@@ -236,20 +234,6 @@ if ($SeedPlaceholders -and -not $SkipExisting) {
     Set-VaultSecret -Name 'Dataverse-ClientSecret' -Value 'placeholder-value-source-is-existing-kv' -Description 'OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track). [BINDING never-delete: skip in seed]' -Category 'auth'
 }
 
-# ---- Dataverse-ServiceUrl (dataverse) ----
-# Purpose: Dataverse environment URL (https://{org}.crm.dynamics.com).
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'Dataverse-ServiceUrl' -Value 'placeholder-from-run-parameter' -Description 'Dataverse environment URL (https://{org}.crm.dynamics.com).' -Category 'dataverse'
-} else {
-    Write-Host '  SKIP: Dataverse-ServiceUrl (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- DocumentIntelligence-ApiKey (ai) ----
-# Purpose: Azure Document Intelligence API key.
-# Value source: from-shared-service
-Write-Host '  SKIP: DocumentIntelligence-ApiKey (value_source=from-shared-service; handler-populated by H4-shared at run time from source cognitiveservices:sprksharedprod-docintel)' -ForegroundColor Gray
-
 # ---- DocumentIntelligence-Endpoint (ai) ----
 # Purpose: Azure Document Intelligence endpoint.
 # Value source: from-bicep-output
@@ -277,43 +261,6 @@ if ($SeedPlaceholders) {
     Write-Host '  SKIP: Email-WebhookSigningKey (value_source=generated; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- LlamaParse-ApiKey (ai) ----
-# Purpose: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'LlamaParse-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: LlamaParse-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- PromptFlow-Endpoint (ai) ----
-# Purpose: AI Foundry Prompt Flow endpoint.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'PromptFlow-Endpoint' -Value 'placeholder-from-run-parameter' -Description 'AI Foundry Prompt Flow endpoint.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: PromptFlow-Endpoint (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- PromptFlow-Key (ai) ----
-# Purpose: AI Foundry Prompt Flow API key.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'PromptFlow-Key' -Value 'placeholder-from-run-parameter' -Description 'AI Foundry Prompt Flow API key.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: PromptFlow-Key (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
-# ---- Redis-ConnectionString (data-services) ----
-# Purpose: Azure Cache for Redis connection string.
-# Value source: from-shared-service
-Write-Host '  SKIP: Redis-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source redis:sprksharedprod-redis)' -ForegroundColor Gray
-
-# ---- ServiceBus-ConnectionString (data-services) ----
-# Purpose: Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
-# Value source: from-shared-service
-Write-Host '  SKIP: ServiceBus-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source servicebus:sprksharedprod-servicebus)' -ForegroundColor Gray
-
 # ---- SPE-CommunicationArchiveContainerId (spe) ----
 # Purpose: SPE communication-archive container ID (archived email / communication payloads).
 # Value source: from-bicep-output
@@ -324,13 +271,9 @@ if ($SeedPlaceholders) {
 }
 
 # ---- SPE-ContainerTypeId (spe) ----
-# Purpose: SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.
-# Value source: from-bicep-output
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'SPE-ContainerTypeId' -Value 'placeholder-from-bicep-output' -Description 'SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.' -Category 'spe'
-} else {
-    Write-Host '  SKIP: SPE-ContainerTypeId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
-}
+# Purpose: SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
+# Value source: from-topology-constants
+Write-Host '  SKIP: SPE-ContainerTypeId (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray
 
 # ---- SPE-DefaultContainerId (spe) ----
 # Purpose: SPE default container ID (per-customer root container for uploaded files).
@@ -341,19 +284,10 @@ if ($SeedPlaceholders) {
     Write-Host '  SKIP: SPE-DefaultContainerId (value_source=from-bicep-output; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- Storage-ConnectionString (data-services) ----
-# Purpose: Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
-# Value source: from-shared-service
-Write-Host '  SKIP: Storage-ConnectionString (value_source=from-shared-service; handler-populated by H4-shared at run time from source storage:sprksharedprodsa)' -ForegroundColor Gray
-
 # ---- TenantId (identity) ----
 # Purpose: Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'TenantId' -Value 'placeholder-from-run-parameter' -Description 'Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.' -Category 'identity'
-} else {
-    Write-Host '  SKIP: TenantId (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
+# Value source: from-intake-parameter
+Write-Host '  SKIP: TenantId (value_source=from-intake-parameter; written by H4 from the intake value)' -ForegroundColor Gray
 
 Write-Host ''
 Write-Host '=================================================================='

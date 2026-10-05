@@ -13,8 +13,8 @@
 //
 // See `platform.bicep` header + `notes/task-031-topology-decision.md` for the
 // full rationale on why the pre-shrink BFF App Service + per-customer AI stack
-// moved out. TL;DR: BFF now lives in `stacks/model1-shared.bicep` (Model 1) or
-// `stacks/model2-full.bicep` (Model 2); L2 orchestrator lives in
+// moved out. TL;DR: the BFF now lives in each customer stamp (`customer.bicep`, both
+// models — D-12; the Model 1 shared stack was retired by task 225a); L2 orchestrator lives in
 // `platform-controlplane.bicep`; per-customer resources live in `customer.bicep`.
 //
 // Usage:

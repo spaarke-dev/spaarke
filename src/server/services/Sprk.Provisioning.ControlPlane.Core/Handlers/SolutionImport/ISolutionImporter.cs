@@ -40,7 +40,7 @@
 //
 // LONG-RUNNING SEMANTICS (design.md § 4.2 fire-and-forget):
 //   The PS script blocks synchronously until Dataverse acknowledges each
-//   tier + all rollup verification passes. 8 solutions × up to 5 min per
+//   tier + all rollup verification passes. 9 solutions × up to 5 min per
 //   large solution = up to 40 min per import. The handler's CancellationToken
 //   threads through the shell-out timeout so the outer polling / timeout
 //   window is authoritative. The pwsh process MUST honor the token
@@ -76,21 +76,28 @@ public interface ISolutionImporter
 /// record; the caller (<see cref="H6SolutionImportHandler"/>) constructs one
 /// per run.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — MUST be explicit, never default).</param>
 /// <param name="ClientId">BFF Entra app registration id (H3 output — populated by upstream H3 into InterStepState.BffAppRegId).</param>
-/// <param name="ClientSecret">Resolved client secret. NEVER logged; passed via env var to the pwsh child process.</param>
+/// <param name="ClientSecret">
+/// Resolved client secret. NEVER logged; passed via env var to the pwsh child
+/// process (retired script path). A44.5 (task 205i): MAY be <c>null</c>/empty
+/// on secret-free environments — <see cref="DataverseWebApiSolutionImporter"/>
+/// then resolves its credential from the FR-39 ordered chain
+/// (<see cref="Credentials.WorkerDataverseCredentialFactory"/>, MI-FIC first).
+/// Empty is the SIGNAL (auth-v4 §9.1); never pass a sentinel value.
+/// </param>
 /// <param name="TargetDataverseUrl">Target customer Dataverse env URL (H5 output — populated by upstream H5 into InterStepState.DataverseEnvUrl).</param>
 public sealed record SolutionImportRequest(
     string CustomerId,
     string TenantId,
     string ClientId,
-    string ClientSecret,
+    string? ClientSecret,
     string TargetDataverseUrl);
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionImporter.ImportAsync"/>. Success
-/// on exit 0 (all 8 solutions imported + per-tier verified); Failure carries a
+/// on exit 0 (all 9 solutions imported + per-tier verified); Failure carries a
 /// classified <see cref="SolutionImportFailureKind"/> the handler maps to a
 /// §4C class + <see cref="SolutionImportRejectionCodes"/> value.
 /// </summary>
@@ -98,7 +105,7 @@ public abstract record SolutionImportOutcome
 {
     private SolutionImportOutcome() { }
 
-    /// <summary>PS script exited 0 — all 8 solutions imported + per-tier verification passed.</summary>
+    /// <summary>PS script exited 0 — all 9 solutions imported + per-tier verification passed.</summary>
     public sealed record Success() : SolutionImportOutcome;
 
     /// <summary>

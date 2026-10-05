@@ -1,10 +1,34 @@
 <#
 .SYNOPSIS
-H0 preflight: verify SPE (SharePoint Embedded) confidential-client certificate
-is bootstrapped in Key Vault AND is old enough for the 24h Microsoft-side
-replication to have completed (per FR-11 T6 lead-time item).
+RETIRED 2026-10-03 (customer-provisioning-orchestration-r1 task 248) - do not run;
+it throws immediately. Formerly: H0 preflight verifying that the SPE owning-app
+certificate was bootstrapped in Key Vault and at least 24h old.
 
 .DESCRIPTION
+============================================================================
+RETIRED 2026-10-03 (customer-provisioning-orchestration-r1 task 248)
+============================================================================
+This script checks a certificate that no longer exists in the design. Do not
+run it - it throws immediately.
+
+The L2 control plane no longer signs in as an SPE container type's owning app
+with a certificate. Owner decision D16 (2026-10-02): it uses a managed-identity
+federated identity credential (MI-FIC, ADR-028 A4) - the owning app trusts the
+L2 Worker's user-assigned managed identity, and nothing is stored in Key Vault.
+The `SPE-OwnerCert-Pfx` secret this script looked for was never created and is
+no longer part of the design, and there is nothing to bootstrap or age.
+
+H0 now runs `SpeOwnerCredentialProbe` (check name `SpeOwnerCredential`): owner
+entry configured -> owning-app token obtained through the federated credential
+-> container type registration GET. Rejection codes `spe-owner-not-configured`,
+`spe-owner-token-failed`, `spe-container-type-not-registered`. The former
+`spe-cert-bootstrap-missing` code and the 24h age gate no longer exist.
+
+Set-up procedure: docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
+The description and body below are preserved for provenance only.
+============================================================================
+
+Former description:
 Queries `az keyvault secret show --vault-name <vault> --name <secret>` and
 confirms:
   (1) The secret EXISTS (returns 200 / non-null).
@@ -24,7 +48,7 @@ KV that holds the SPE cert secret (PFX-encoded base64, per
 scripts/common/Get-SpeConfidentialClientToken.ps1 convention).
 
 .PARAMETER CertSecretName
-Name of the secret in KV. Default 'spe-owner-cert-pfx' matches the T6 helper
+Name of the secret in KV. Default 'SPE-OwnerCert-Pfx' matches the T6 helper
 convention.
 
 .PARAMETER MinAgeHours
@@ -59,14 +83,31 @@ STOP and escalate per root CLAUDE.md §6.
 [CmdletBinding()]
 [OutputType([PSCustomObject])]
 param(
-    [Parameter(Mandatory=$true)][string]$KeyVaultName,
+    # Was Mandatory; made optional when the script was retired (task 248) so that
+    # invoking it reaches the RETIRED throw below instead of prompting for a vault.
+    [Parameter()][string]$KeyVaultName,
 
-    [Parameter()][string]$CertSecretName = 'spe-owner-cert-pfx',
+    [Parameter()][string]$CertSecretName = 'SPE-OwnerCert-Pfx',
 
     [Parameter()][int]$MinAgeHours = 24,
 
     [Parameter()][string]$SecretShowJsonPath
 )
+
+throw @"
+
+RETIRED (2026-10-03 task 248): Test-SpeCertBootstrap checks an owning-app
+certificate that no longer exists in the design. The L2 control plane signs in
+as the SPE container type's owning app through a managed-identity federated
+identity credential (MI-FIC) trusting the L2 Worker UAMI — there is no
+certificate, no Key Vault secret and nothing to bootstrap.
+
+H0 now runs SpeOwnerCredentialProbe (check 'SpeOwnerCredential'). To verify the
+setup, dispatch a provisioning run and read its H0 result, or follow:
+    docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md (Step 8)
+
+The script body below is preserved for provenance only.
+"@
 
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'

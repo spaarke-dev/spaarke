@@ -16,40 +16,47 @@
 //       - Search Index Data Contributor    (8ebe5a00-799e-43f5-93ac-243d3dce84a7)
 //       - Search Service Contributor       (7ca78c08-252a-4471-8644-bb5ff32d4ba0)
 //
-// CRITICAL DISTINCTION vs. model1-shared-l2-rbac.bicep (A20)
-//   A20 grants the *L2 PROVISIONING UAMI* (sprk-controlplane-{env}-uami) roles
-//   on shared source services -- so the L2 control-plane can EXTRACT keys /
-//   CREATE indexes during provisioning. This module grants the *BFF RUNTIME
-//   UAMI* (sprk-{env}-shared-bff-uami for Model 1; mi-spaarke-{customerId}-{env}
-//   for Model 2) roles for RUNTIME queue enqueue/dequeue + index CRUD from BFF
-//   request handlers. DIFFERENT PRINCIPAL. SAME `Search Service Contributor`
-//   role name intentionally re-applied for a different principal.
+// CRITICAL DISTINCTION — which principal
+//   This module grants the stamp's *BFF RUNTIME UAMI* (mi-spaarke-{customerId}-{env})
+//   roles for RUNTIME queue enqueue/dequeue + index CRUD from BFF request handlers.
+//   The *L2 PROVISIONING UAMI* (sprk-controlplane-{env}-uami) is granted by
+//   customer-l2-bff-rbac.bicep (A21: Website Contributor on the BFF App Service).
+//   The retired A20 module (model1-shared-l2-rbac.bicep) granted the L2 UAMI the
+//   same `Search Service Contributor` role on the old shared services — which is
+//   why the role-assignment description below still cites A20. That description
+//   is a DEPLOYED property: it is kept verbatim so an existing stamp's upgrade
+//   what-if shows no Modify (ArmWhatIfDriftDetector treats Modify as drift).
+//
+//   ONE principal per stamp, in both tenancy models (D-12, 2026-09-28): there is
+//   no shared Model 1 BFF identity. The former `sprk-{env}-shared-bff-uami`
+//   caller (stacks/model1-shared.bicep) and the A20 module were retired by
+//   task 225a (2026-10-01).
 //
 // SCOPE
-//   Resource-group scoped -- invoked from the parent stack (stacks/model1-shared.bicep
-//   for Model 1 shared tier; customer.bicep for Model 2 per-customer stamps)
-//   with `scope: <rg>`. Both target resources live in the parent stack's RG.
+//   Resource-group scoped -- invoked from customer.bicep (every customer stamp,
+//   Model 1 and Model 2) with `scope: <rg>`. Both target resources live in the
+//   stamp's RG.
 //
 // WHY A MODULE (BCP139 forces the split)
-//   Both stacks use `targetScope = 'subscription'`. A role assignment whose
+//   customer.bicep uses `targetScope = 'subscription'`. A role assignment whose
 //   `scope` symbol resolves to a RG-nested resource (Microsoft.ServiceBus/
 //   namespaces, Microsoft.Search/searchServices) cannot be declared inline at
 //   subscription scope -- Bicep rejects with BCP139. Same mechanism-forced
-//   pattern as model1-shared-l2-rbac.bicep (A20) + customer-l2-bff-rbac.bicep
-//   (A21).
+//   pattern as customer-l2-bff-rbac.bicep (A21).
 //
 // §11 COMPONENT JUSTIFICATION (root CLAUDE.md, three-question test)
-//   1. Existing:  model1-shared-l2-rbac.bicep + customer-l2-bff-rbac.bicep
-//                 grant the L2 control-plane UAMI; NO existing module grants
+//   (Recorded 2026-08-25, when the module was added; A20 has since been retired by task 225a.)
+//   1. Existing:  model1-shared-l2-rbac.bicep (A20) + customer-l2-bff-rbac.bicep
+//                 granted the L2 control-plane UAMI; NO module granted
 //                 the *BFF runtime UAMI* Service Bus or Search data-plane
 //                 roles (grep-verified 2026-08-25).
-//   2. Extension: The A20 module is L2-UAMI-only by its type discriminator
-//                 (`controlPlaneUamiPrincipalId` param + descriptions cite
+//   2. Extension: The A20 module was L2-UAMI-only by its type discriminator
+//                 (`controlPlaneUamiPrincipalId` param + descriptions cited
 //                 "H4-shared handler"). Adding a second principal to that
-//                 module would violate its single-purpose design (one UAMI /
-//                 one lifecycle owner per module) and destabilize the audit
-//                 trail (A20 rows would take on Δ1/Δ2 semantics). A new
-//                 sibling module is the clean split.
+//                 module would have violated its single-purpose design (one UAMI /
+//                 one lifecycle owner per module) and destabilized the audit
+//                 trail (A20 rows would have taken on Δ1/Δ2 semantics). A new
+//                 sibling module was the clean split.
 //   3. Cost-of-doing-nothing (concrete failure modes):
 //        - BFF running under `AiSearch__ManagedIdentity__Enabled=true`
 //          (A39 setting) gets 403 on every search query -> matter-search /
@@ -64,13 +71,13 @@
 //   existing manual grants (same principal+role+scope tuple yields the same
 //   guid; re-deploy is a no-op create).
 
-@description('Principal ID of the BFF RUNTIME UAMI (Model 1: sharedBffUami.outputs.principalId; Model 2: uami.outputs.principalId). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function).')
+@description('Principal ID of the stamp\'s BFF RUNTIME UAMI (customer.bicep: uami.outputs.principalId — the only principal, both tenancy models). Empty skips ALL grants (what-if isolation only -- a real deploy always needs it for BFF MI-only Service Bus + AI Search to function).')
 param bffUamiPrincipalId string = ''
 
-@description('Name of the Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from. Model 1: sharedServiceBusName; Model 2: per-customer serviceBusName.')
+@description('Name of the stamp\'s Service Bus namespace (Microsoft.ServiceBus/namespaces) the BFF sends to and receives from.')
 param serviceBusNamespaceName string
 
-@description('Name of the AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to. Model 1: sharedAiSearchName; Model 2: per-customer searchServiceName.')
+@description('Name of the stamp\'s AI Search service (Microsoft.Search/searchServices) the BFF queries + writes index docs to.')
 param searchServiceName string
 
 // ============================================================================

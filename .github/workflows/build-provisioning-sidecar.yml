@@ -103,6 +103,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      # Task 251: the sidecar's settings + sign-in rules (SidecarCore.psm1) are unit-tested
+      # with Pester before any image is built. ubuntu-latest ships PowerShell; Pester 5+ is
+      # installed explicitly so the result does not depend on the runner image's copy.
+      - name: Unit-test sidecar logic (Pester)
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5 -Scope CurrentUser -Force -SkipPublisherCheck
+          Import-Module Pester -MinimumVersion 5.5
+          $r = Invoke-Pester -Path src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Sidecar.Tests.ps1 -Output Detailed -PassThru
+          if ($r.FailedCount -gt 0 -or $r.PassedCount -eq 0) { throw "Sidecar Pester tests failed ($($r.FailedCount) failed, $($r.PassedCount) passed)." }
+
       - name: Compute image tags
         id: tags
         shell: bash

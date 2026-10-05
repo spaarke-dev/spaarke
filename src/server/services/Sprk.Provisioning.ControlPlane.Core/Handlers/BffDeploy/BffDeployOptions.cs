@@ -184,7 +184,8 @@ public sealed class BffDeployOptions
     public TimeSpan HealthProbeRequestTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
     /// <summary>
-    /// Default App Service staging slot name if the run parameter is absent.
+    /// Default App Service staging slot name if <c>run.InterStepState.AppServiceStagingSlotName</c>
+    /// (H2a's output) is blank.
     /// Defaults to <c>staging</c> (Deploy-BffApi.ps1 parity).
     /// </summary>
     public string DefaultStagingSlotName { get; set; } = "staging";

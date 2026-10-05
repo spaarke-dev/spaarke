@@ -1,6 +1,8 @@
 # Spaarke SPE Container-Type Topology — how to create container types and containers
 
 > **Created**: 2026-08-28 by `sdap-SPE-admin-app-r2` (UAT round 2 follow-up)
+> **Updated**: 2026-10-03 by `customer-provisioning-orchestration-r1` task 248 — owning-app credential is MI-FIC
+> (no certificate); `Spaarke Model 1` recorded (§3, §3A).
 > **Status**: Authoritative for container-type topology decisions.
 > **Audience**: anyone standing up a Spaarke environment, or adding an SPE surface.
 >
@@ -102,7 +104,7 @@ choice means creating a replacement, and (R3) the mistake stays on the books for
 |---|---|---|---|---|---|
 | Development | `Spaarke PAYGO 1` (existing, `8a6ce34c…`) | `170c98e1…` | as-is | Spaarke | internal |
 | Customer trials | `Spaarke Trial 1` | **new** | `standard` | Spaarke | 1 container per prospect |
-| Model 1 (customer's Azure subscription inside **Spaarke's** tenant) | `Spaarke Model 1` | **new** | `standard` | Spaarke | 1 container per customer |
+| Model 1 (customer's Azure subscription inside **Spaarke's** tenant) | `Spaarke Model 1` (**created 2026-10-03**, `fb3817a8…`) | `Spaarke SPE Model 1 Owner` (`bfac7f6e…`) | `standard` | Spaarke | 1 container per customer |
 | Model 2 (customer's Azure subscription inside the **customer's own** tenant) | `Spaarke Model 2` | **new** | `directToCustomer` | **Customer tenants** | **ALL** Model 2 customers |
 
 **Budget**: the four types in the inventory above already existed; `Spaarke Model 1` was created
@@ -174,8 +176,9 @@ Three further reasons, all pointing the same way:
 - **Consent surface.** Model 2 customers consent to the *owning* app. Merged, they are consenting to
   something that also carries the BFF's API scopes, redirect URIs, and Dataverse/Mail permissions.
 - **Auth v4.** The BFF identity is deliberately secret-free ([ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) A4).
-  Owning apps are exception **E-1** and may carry secrets (SPE Admin no longer uses any — §6B). Merging drags that exception back onto the
-  identity auth-v4 worked to clean.
+  Owning apps are exception **E-1** and may carry secrets (SPE Admin no longer uses any — §6B). Merging drags that
+  exception back onto the identity auth-v4 worked to clean. Since task 248 the L2 control plane needs no owning-app
+  secret or certificate either — see "Owning-app credential" below.
 
 > ⚠️ **The existing app is the merged shape.** `170c98e1…` is named **`SDAP-PCF-CLIENT`** while being
 > the container type's owning app. That is the artifact to unwind, not the pattern to extend — and
@@ -240,7 +243,47 @@ this does **and does not** say: Model 1 customers share a *container-type regist
 settings baseline. They do **not** share a container, a BFF, or any Azure resource — those are dedicated
 per customer in both models (D-12).
 
-Grant the BFF app what it needs on the relevant registration; **do not make it an owner.**
+Grant the BFF app what it needs on the relevant registration; **do not make it an owner.** The per-app
+grant API is v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{appId}`
+(`PATCH` to update, `DELETE` to remove), called as the owning app; per-customer BFF grants are T227 (G9).
+
+### Owning-app credential — managed-identity federated credential (task 248, 2026-10-03)
+
+Owner decision **D16** (2026-10-02): the L2 control plane signs in as an owning app through a
+**managed-identity federated identity credential (MI-FIC)** — ADR-028 A4's default for confidential
+clients — not with a certificate. No ADR amendment was needed. **An owning app set up this way has no
+certificate and no client secret**; nothing is stored in any Key Vault.
+
+- The owning app carries one federated identity credential per L2 Worker UAMI that must act as it
+  (issuer `https://login.microsoftonline.com/{tenantId}/v2.0`, subject = the UAMI's **principal** id,
+  audience `api://AzureADTokenExchange`; at most 20 per app). MI-as-FIC needs a **user-assigned** managed
+  identity in the **same tenant** as the app — which is why this works for Model 1's single-tenant owning
+  app.
+- The Worker UAMI requests a token for `api://AzureADTokenExchange` and presents it as the client assertion
+  in a client-credentials request for the owning app (`ClientAssertionCredential`). The Worker's
+  configuration names only `ContainerTypeId` + `OwnerAppId` per container type.
+- **Evidence (live probe 2026-10-03)**, from a throwaway Azure Container Instance carrying the dev Worker
+  UAMI: the exchange returned an owning-app Graph token with **`appidacr` = `2`** (client-assertion class —
+  the same class a certificate produces), `idtyp` = `app`, roles `FileStorageContainerTypeReg.Selected` +
+  `FileStorageContainer.Selected`. The container-type registration GET and the container list for the type
+  both returned 200 as that token.
+- The 24 h "certificate replication" wait that an earlier design gated on (H0 `SpeCertBootstrap`) is gone;
+  H0 now checks the owner entry, the token and the registration (`SpeOwnerCredential`).
+
+**`Spaarke Model 1` — recorded state (2026-10-03)**
+
+| Item | Value |
+|---|---|
+| Container type | `Spaarke Model 1`, id `fb3817a8-5a55-42ba-8cc9-12cf055168b8`, `standard`; created by the owner in the SharePoint admin center |
+| Owning app | `Spaarke SPE Model 1 Owner`, appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`, single-tenant, no secret, no certificate; Graph application permissions `FileStorageContainer.Selected` + `FileStorageContainerTypeReg.Selected`, admin-consented via `appRoleAssignedTo` |
+| Federated credential | `sprk-controlplane-dev-uami-assertion` → dev Worker UAMI `sprk-controlplane-dev-uami` (principal `38f7693f-e6e2-4a3e-9acf-7f9e29dd4044`) |
+| Billing | `Microsoft.Syntex/accounts` `dc4749c2-ca04-4b38-b6c2-e38dc3eec72b` in `rg-spaarke-shared-prod` — the binding is permanent; never delete that resource group or account |
+| Registration in Spaarke's tenant | registered at creation (2026-10-03T22:54:58Z); `owningAppId` = the owning app; `billingStatus` `valid` |
+| Grants on the registration | the owning app (delegated `full` / application `full`); **known extra grant**: Microsoft Graph Explorer `de8bc8b5-d9f9-48b1-a8ad-b748da725064` (delegated `full` / application `none`) — added during creation, not by L2; owner decision 2026-10-03: **keep** |
+| Containers | none yet (list returned empty) |
+
+The admin-center creation flow prompts for a client secret on the owning app; none was added, and none
+should be. Setup procedure: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](../guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).
 
 > ⚠️ **Grant the identity the BFF actually authenticates as.** With `Graph:ManagedIdentity:Enabled=true`
 > (every Azure environment), the BFF's app-only Graph client is its **user-assigned managed identity**, not
@@ -259,6 +302,9 @@ Grant the BFF app what it needs on the relevant registration; **do not make it a
   - `FileStorageContainer.Selected` (application)
   - `FileStorageContainerTypeReg.Selected` (application) — required to register on consuming tenants
   - `signInAudience = AzureADMultipleOrgs` **if it will ever serve a consuming tenant** (Model 2)
+  - **No certificate and no client secret.** Its credential is a federated identity credential trusting
+    the L2 Worker's user-assigned managed identity (§3A "Owning-app credential"). If the SharePoint admin
+    center asks for a client secret during creation, do not add one
 - A **non-guest member account in the owning tenant**. No admin role is required — the Graph create
   API is callable by any non-guest owning-tenant user, who is auto-assigned as an owner
 - For `standard`: an Azure subscription + resource group, with owner/contributor to attach billing
@@ -327,7 +373,9 @@ Per customer, once:
    Model 2 customer (R4). Do not create a new one.
 2. **Customer admin grants admin consent** to the owning app (this is why it must be multi-tenant).
 3. **Register container-type application permissions** in the consuming tenant —
-   `POST /storage/fileStorage/containerTypeRegistrations`. Spaarke exposes this as
+   v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}`, called as the owning app
+   (`FileStorageContainerTypeReg.Selected`; create-or-replace, so a later PUT must keep the owning-app
+   grant). Spaarke exposes this as
    `POST /api/spe/containertypes/{typeId}/register` and the `/consumers` routes.
 4. **Configure pass-through billing** — the customer activates pay-as-you-go (§4).
 5. **Validate** container creation and access.
@@ -520,6 +568,10 @@ provisioning flow is treated as correct:
 
 1. **Handler H8 is unproven** — it inherits the `Create-NewContainerType.ps1` defect (§7). Container-type
    creation cannot be automated with an app-only token.
+   *Update 2026-10-03 (tasks 213.2 / 248):* H8 no longer creates container types — the operator creates the
+   type once (runbook). H8 creates, activates and verifies the customer's **container**, app-only as the
+   type's owning app through the Worker UAMI's federated credential (§3A). Owning-app sign-in and the
+   registration were proven live 2026-10-03; H8's container create has not yet run against `Spaarke Model 1`.
 2. **The app registration set (§3A) is a provisioning input**, not an afterthought. **Every** customer —
    Model 1 and Model 2 alike — needs **its own BFF app registration** and a grant on the relevant
    container-type registration (its own under Model 2; Spaarke's single Model 1 registration under Model 1)

@@ -4,7 +4,7 @@
     <title>Implement H2a Bicep Infra Deploy Handler (Cosmos + OpenAI + AI Search + Doc Intel + App Insights + optional SignalR; Redis excluded)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','azure-deployment'; wraps hardened Provision-Customer.ps1 with 6 new Bicep module invocations; owns T1 keyVaultReferenceIdentity trap; long-running (10–20 min).</rigor-reason>
     <model-tier>sonnet</model-tier>

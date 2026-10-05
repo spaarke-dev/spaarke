@@ -69,7 +69,7 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
         // Warm-up so JIT + DI compilation is out of the timed window.
         for (var i = 0; i < WarmupN; i++)
         {
-            using var warmup = BuildRequest($"warmup-{i}");
+            using var warmup = BuildRequest($"warm{i}");
             using var warmupResponse = await client.SendAsync(warmup);
             warmupResponse.EnsureSuccessStatusCode();
         }
@@ -93,7 +93,7 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
             async (i, ct) =>
             {
                 var sw = Stopwatch.StartNew();
-                using var request = BuildRequest($"customer-load-{i}");
+                using var request = BuildRequest($"load{i}");
                 using var response = await client.SendAsync(request, ct);
                 sw.Stop();
                 samples[i] = sw.ElapsedMilliseconds;
@@ -158,11 +158,20 @@ public sealed class EnqueueLatencyScenario : IClassFixture<L2LoadTestFactory>
             {
                 customerId,
                 environmentId = "env-1",
-                tenancyModel = "Model1Shared",
-                profile = "spaarke-hosted-model1-trial",
+                // T224 renamed the tenancy values (Model1Shared → Model1); CreateRun requires tenantId,
+                // and since T245a accepts only IntakeParameterCatalog keys (the old "display-name"
+                // key was read by no handler). T225b (D-12): Model1 pairs with spaarke-hosted-model2.
+                tenancyModel = "Model1",
+                profile = "spaarke-hosted-model2",
                 nonSecretParameters = new Dictionary<string, string>
                 {
-                    ["display-name"] = $"LoadTest-{customerId}",
+                    ["tenantId"] = "11111111-2222-3333-4444-555555555555",
+                    // T245c: the operator intake H11 / H14 / H4 need — POST /api/runs refuses a run without it.
+                    ["identityPreset"] = "NativeAccount",
+                    ["usersJson"] = "[{\"firstName\":\"Load\",\"lastName\":\"Test\"}]",
+                    ["exchangePolicyScopeGroupId"] = "load-scope@contoso.example",
+                    ["communicationGraphResource"] = "users/load@contoso.example/messages",
+                    ["communicationDefaultMailbox"] = "load@contoso.example",
                 },
             }),
         };

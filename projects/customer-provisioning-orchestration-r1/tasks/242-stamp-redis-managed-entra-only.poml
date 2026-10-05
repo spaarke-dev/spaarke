@@ -1,0 +1,246 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="242" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Per-customer Redis → Azure Managed Redis B0, Entra-only (owner D12) — stamp module, H2a→H4b endpoint setting, no connection-string secret, BFF + Worker connect with their managed identity</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T242 (owner decision D12); code only — the live dev recreation is T242b</phase>
+    <gate>startable (T249 ✅ removed the other `redis.bicep` consumer in stacks/; T226 ✅)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF DI (`CacheModule.cs`, `Sprk.Bff.Api.csproj`), control-plane handlers and models (.cs), Bicep deployed by H2a, the canonical secret catalog and its generated files; auth (managed identity) change.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting (Bicep, BFF, control plane, catalog, docs), auth-sensitive (Entra-only data plane, MI token refresh on pub/sub) and BFF hot path (§10 publish-size + CVE).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (ADR-009 concise, caching patterns, constraints, CHANGELOG) — main-session-only; BFF hot path</parallel-reason>
+    <tags>provisioning, bicep, bff-api, redis, caching, auth, l2-controlplane, testing, model1-dedicated</tags>
+    <deps>249, 226</deps>
+  </metadata>
+
+  <prompt>
+    Move every customer stamp's Redis from Azure Cache for Redis with an access key to Azure Managed Redis Balanced_B0
+    (high availability on, Microsoft Entra only), and make the BFF and the L2 Worker able to connect to an Entra-only cache
+    with their user-assigned managed identity, so no Redis key or connection string exists for a stamp.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer (Bicep, .NET 10 BFF + L2 control plane, StackExchange.Redis). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    `customer.bicep` deploys a `Microsoft.Cache/redisEnterprise` Balanced_B0 cluster with HA, one database with access keys
+    disabled and an access-policy assignment for the stamp UAMI, and outputs its endpoint (host:10000) — no key, no
+    connection string, no Key Vault secret. H2a carries the endpoint to H4b, which sets it as a plain BFF app setting. The
+    BFF (and the L2 Worker's idempotency cache) connect with `Microsoft.Azure.StackExchangeRedis`
+    `ConfigureForAzureWithUserAssignedManagedIdentityAsync(clientId)` over RESP3 whenever an endpoint is configured; a
+    connection string is accepted only outside Azure (Development/Testing). H1 registers `Microsoft.Cache`.
+  </goal>
+
+  <context>
+    <background>
+      Owner D12 (2026-09-30, researcher `redis-per-customer-stamp-amr-decision-2026-09-30.md`): Azure Cache for Redis
+      Basic/Standard/Premium retires 2028-09-30 and new-customer creation is blocked since 2026-04-01; per-customer Redis is
+      Azure Managed Redis `Balanced_B0`, HA on, Entra only, stamp UAMI via access-policy assignment (API 2025-07-01, OSS
+      clustering, AllKeysLRU). D13: keyless stamps. Today (inventory 2026-10-04): `modules/redis.bicep:72`
+      `Microsoft.Cache/redis@2023-08-01`, outputs `redisPrimaryKey` (:98) and `redisConnectionString` (:100) from
+      `listKeys()`; `customer.bicep:472-482` calls it without the UAMI, `:638-641` sets `Redis__ConnectionString` as a KV
+      reference, `:781` puts the connection string into `kvSecretValues`; manifest `Redis-ConnectionString` (:244-263,
+      from-bicep-output, app settings `ConnectionStrings__Redis` + `Redis__ConnectionString`). BFF `CacheModule.cs:59-97`
+      reads only a connection string and connects synchronously; pub/sub users (`JobStatusService`,
+      `MembershipCacheInvalidator/Subscriber`) need RESP3 so the token refresh can re-AUTH the subscription connection;
+      SCAN loops over `GetEndPoints()` (`ChatContextMappingService.cs:154-174`, `MembershipCacheInvalidationSubscriber.cs:280-294`)
+      must stay cluster-safe under OSS clustering. Resolved StackExchange.Redis is 2.7.27; `Microsoft.Azure.StackExchangeRedis`
+      3.3.1 needs ≥ 2.10.1. The Worker (`Dispatch/DispatchModule.cs:156-165`) uses the per-env platform cache with a connection
+      string — T242b recreates the dev one Entra-only, so the Worker needs the same managed-identity path. H1's default
+      provider list (`SubscriptionReadinessOptions.cs:33-64`) omits `Microsoft.Cache`.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/modules/redis.bicep (replace in place with the Managed Redis module)</file>
+      <file>infrastructure/bicep/customer.bicep (+ customer.json); infrastructure/bicep/parameters/redis-{dev,staging,prod}.bicepparam (move to the new parameter shape)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml + generated/* (via Invoke-CatalogGenerator.ps1)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core: Handlers/BicepInfraDeploy/{BicepDeployOutputs,ArmDeploymentRunner,H2aBicepInfraDeployHandler}.cs, Models/InterStepState.cs, Reconciler/HandlerRunInputs.cs, Handlers/BulkAppSettings/PerEnvSourceCatalog.cs, Handlers/SubscriptionReadiness/SubscriptionReadinessOptions.cs, Dispatch/DispatchModule.cs, stale comments (BicepDeployRejectionCodes.cs:19, ArmTemplateInspector.cs:21-23, H2aBicepInfraDeployHandler.cs:9)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests: RunContextContractTests, FileKvSecretManifestTests, DispatchModuleTests, ArmDeploymentRunner/H2a/H4b/H1 tests as affected</file>
+      <file>src/server/api/Sprk.Bff.Api: Infrastructure/DI/CacheModule.cs, Configuration/RedisOptions.cs, Sprk.Bff.Api.csproj, appsettings.template.json, Infrastructure/Startup/StartupValidationService.cs; Directory.Packages.props</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CacheModuleTests.cs</file>
+      <file>scripts/provisioning-prereqs/prereqs.yaml (PRQ-S-03), scripts/Rotate-Secrets.ps1 (customer-scope Redis rotation), scripts/Decommission-Customer.ps1 (cache name)</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md, docs/architecture/caching-architecture.md, docs/adr/ADR-009-caching-redis-first.md, docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md, docs/guides/CONFIGURATION-MATRIX.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md, .claude/patterns/caching/{distributed-cache,INDEX}.md, .claude/patterns/provisioning/manifest-driven-secret-catalog.md, .claude/constraints/azure-deployment.md, .claude/CHANGELOG.md (main session)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md (D12, D13, T242)</file>
+      <file>.claude/agent-memory/researcher/redis-per-customer-stamp-amr-decision-2026-09-30.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/patterns/caching/distributed-cache.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Bicep output → H4b plain app setting" location="ServiceBus__FullyQualifiedNamespace path: BicepDeployOutputs.cs:69, ArmDeploymentRunner.cs:508-509, H2aBicepInfraDeployHandler.cs:704,813, InterStepState.cs:148-154, HandlerRunInputs.cs:151, PerEnvSourceCatalog.cs:53, manifest per_env_settings">
+        Copy this path for the Redis endpoint; RunContextContractTests enforce the declared inputs.
+      </pattern>
+      <pattern name="Upgrade what-if drift" location="T249 POML constraints; ArmWhatIfDriftDetector">
+        No value that changes on every deploy; no rewritten role-assignment descriptions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner D12">
+      Stamp cache: `Microsoft.Cache/redisEnterprise@2025-07-01`, sku `Balanced_B0`, `highAvailability: 'Enabled'`,
+      `minimumTlsVersion: '1.2'`, `publicNetworkAccess` set explicitly; one database `default`: `clusteringPolicy:
+      'OSSCluster'`, `evictionPolicy: 'AllKeysLRU'`, `accessKeysAuthentication: 'Disabled'` (explicit), port 10000;
+      `databases/accessPolicyAssignments` with `accessPolicyName: 'default'` and `user.objectId` = the stamp UAMI
+      principalId. HA and SKU become parameters (dev T242b uses B0 non-HA through the per-env bicepparam), defaults = D12.
+    </constraint>
+    <constraint source="D13 + ADR-028 A4">
+      No `listKeys()`, no key or connection-string output, no `Redis-ConnectionString` secret for stamps, no
+      `Redis__ConnectionString` / `ConnectionStrings__Redis` stamp app setting. The endpoint is a plain app setting
+      (`Redis__Endpoint` = `{host}:10000`). In the BFF and the Worker, when `Redis:Endpoint` is set the client authenticates
+      only with its user-assigned managed identity (client id from the existing `ManagedIdentity:ClientId` /
+      `AZURE_CLIENT_ID` setting — no new identity setting) over RESP3; a connection string is used only when no endpoint is
+      set AND the environment is Development or Testing. Outside Development/Testing a connection string without an endpoint
+      fails at startup with a message naming `Redis__Endpoint`.
+    </constraint>
+    <constraint source="CLAUDE.md §10 (BFF hot path)">
+      Placement Justification in the POML notes; publish size measured against a FRESH master build from short paths
+      (Compress-Archive, both file counts reported); `dotnet list package --vulnerable --include-transitive` shows no new
+      HIGH; `CacheModuleTests` updated; ADR-032 symmetric registration kept (the Redis-off branches unchanged).
+      `/conflict-check` at start (BFF entry/DI hot path).
+    </constraint>
+    <constraint source="ADR-010 / CLAUDE.md §11">
+      No new interface, no new options class: extend `RedisOptions` with `Endpoint`. One shared helper for "build an
+      Entra-authenticated multiplexer" is allowed only if BFF and Worker can both reference it without a new project
+      reference; otherwise each module configures its own.
+    </constraint>
+    <constraint source="scope">
+      Per-env platform caches are NOT recreated here (T242b, live, owner approval). `infrastructure/byok/main.bicep`,
+      `vnet.bicep`'s `snet-redis`, `alerts.bicep`, `Rotate-RedisKey.ps1`, `redis-key-rotation.yml`, `Deploy-RedisCache.ps1`
+      and `Seed-PlatformKeyVault.ps1` are untouched (they serve the per-env caches — T242b decides them); list them in the
+      notes. No change to cache keys, TTLs or the `spaarke:` instance prefix.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The `Microsoft.Cache/redisEnterprise` 2025-07-01 schema in the installed Bicep types lacks `accessKeysAuthentication` or `accessPolicyAssignments` → STOP and report (do not fall back to keys or a preview API without owner approval).</trigger>
+    <trigger>The package bump (StackExchange.Redis ≥ 2.10.1, `Microsoft.Azure.StackExchangeRedis`) adds a HIGH CVE, a pre-release dependency, or ≥ +5 MB publish size → STOP (CLAUDE.md §10).</trigger>
+    <trigger>A BFF Redis consumer relies on a command that is not cluster-safe under OSS clustering (multi-key across slots, KEYS on one node, keyspace notifications) → STOP and report; do not change its key design here.</trigger>
+    <trigger>Removing `Redis-ConnectionString` breaks a consumer other than the stamp BFF (e.g. the Worker's platform vault entry) → STOP; the platform vault entry stays until T242b.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="0">0 behind origin/master; `/conflict-check`; confirm the inventory (grep `Redis-ConnectionString|redisConnectionString|listKeys|Microsoft.Cache`) → categorized hit list in notes.</step>
+    <step order="1">`modules/redis.bicep` → Managed Redis (cluster + database + access-policy assignment; outputs `redisId`, `redisName`, `redisHostName`, `redisPort` = 10000, `redisEndpoint`); parameters sku/highAvailability/principalIds; `redis-{env}.bicepparam` to the new shape; `customer.bicep` passes the UAMI principal, drops the KV secret + connection-string app settings, sets `Redis__Endpoint`; outputs; recompile `customer.json` (`--outfile`); lint.</step>
+    <step order="2">Catalog: remove the stamp `Redis-ConnectionString` from-bicep-output entry (keep any platform-scoped entry the Worker needs until T242b); add `Redis__Endpoint` to per_env_settings sourced from H2a; regenerate; H2a → InterStepState → HandlerRunInputs → PerEnvSourceCatalog for the endpoint (Service Bus pattern).</step>
+    <step order="3">BFF: packages (StackExchange.Redis ≥ 2.10.1 via `Microsoft.Azure.StackExchangeRedis` 3.3.x; align `Directory.Packages.props`); `RedisOptions.Endpoint`; `CacheModule` Entra branch (async configure, `Protocol = RedisProtocol.Resp3`, same timeouts and AbortOnConnectFail, same `ConnectionMultiplexerFactory` reuse); connection-string branch limited as constrained; startup validation log shows which mode, never a secret; `appsettings.template.json`.</step>
+    <step order="4">Worker `DispatchModule`: same endpoint/managed-identity rule for its idempotency cache (`provisioning:` prefix kept); DispatchModuleTests.</step>
+    <step order="5">H1 default providers + `Microsoft.Cache`; stale comments; prereqs PRQ-S-03 text; `Rotate-Secrets.ps1` drops customer-scope Redis key rotation; `Decommission-Customer.ps1` uses `sprk-{cid}-{env}-redis` and the redisEnterprise type.</step>
+    <step order="6">Tests (scope below); BFF §10 checks; docs + `.claude` (main session) + CHANGELOG.</step>
+    <step order="7">Verify: Bicep compiles/lints, JSON = fresh compile; catalog `-Verify`; prereqs validate; BFF builds 0 warnings, BFF unit tests no new failures; ControlPlane 0/0 + tests no failures beyond the T221 baseline; ArchTests pass. Step 9.5 gates. Close + commit + push.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">`az bicep build --outfile`, `az bicep lint`</tool>
+    <tool name="dotnet">build, test, publish, list package --vulnerable</tool>
+    <tool name="pwsh">Invoke-CatalogGenerator.ps1, prereqs validate.ps1, check-task-status-drift.ps1, Compress-Archive</tool>
+  </tools>
+
+  <outputs>
+    <output type="file-modified">redis.bicep, redis-{env}.bicepparam, customer.bicep (+ json), manifest + generated, control-plane handlers/models/options/DispatchModule (+ tests), BFF CacheModule/RedisOptions/csproj/template (+ tests), Directory.Packages.props, prereqs.yaml, Rotate-Secrets.ps1, Decommission-Customer.ps1, docs, .claude</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`customer.json` contains a `Microsoft.Cache/redisEnterprise` Balanced_B0 cluster with HA enabled, a database with `accessKeysAuthentication: Disabled`, OSSCluster, AllKeysLRU, and an access-policy assignment for the stamp UAMI principal; it contains no `listKeys`, no `Microsoft.Cache/redis` resource, no `Redis-ConnectionString` secret and no `Redis__ConnectionString` / `ConnectionStrings__Redis` setting; it sets `Redis__Endpoint` and outputs the endpoint.</criterion>
+    <criterion testable="true">The manifest and every generated file have no stamp `Redis-ConnectionString`; `Redis__Endpoint` flows H2a output → InterStepState → H4b setting; RunContextContractTests pass.</criterion>
+    <criterion testable="true">BFF: with `Redis:Endpoint` set, the multiplexer is configured through `ConfigureForAzureWithUserAssignedManagedIdentityAsync(the ManagedIdentity client id)` with RESP3 and no password; with only a connection string in Production the host fails at startup naming `Redis__Endpoint`; in Development/Testing the connection-string and in-memory branches behave as before; with Redis enabled, an endpoint and no managed-identity client id, startup fails naming the missing setting.</criterion>
+    <criterion testable="true">Worker `DispatchModule`: same three cases (endpoint → managed identity; connection string only outside Development/Testing → fails; neither → existing fallback rule unchanged).</criterion>
+    <criterion testable="true">H1 checks `Microsoft.Cache` registration by default; PRQ-S-03 text and validate.ps1 OK.</criterion>
+    <criterion testable="true">BFF §10: Placement Justification in notes; publish size master vs branch (both absolute, delta, zip tool, file counts); no new HIGH CVE; no pre-release package.</criterion>
+    <criterion testable="true">Bicep compiles and lints; checked-in JSON = fresh compile (after prettier); BFF build 0 warnings; BFF unit tests and ControlPlane.Tests no failures beyond baseline (T221's 6); ArchTests pass.</criterion>
+    <criterion testable="true">Test scope: CacheModule mode selection (endpoint / connection-string-outside-Development / missing client id), DispatchModule the same, the H2a→H4b endpoint contract, and H1's provider default. Anything beyond that needs a one-line justification in the notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Filed 2026-10-04 from plan §7 T242 (owner D12, D13), split into T242 (code) and T242b (live dev recreation) because the
+    dev per-env cache `spaarke-bff-redis-dev` serves both the dev BFF and the L2 Worker and its recreation is irreversible
+    and owner-gated. Inventory: Explore sweep 2026-10-04 (session 34). Researcher recommendation was B1 HA for customers;
+    the owner chose B0 HA (D12) — sizing to be confirmed on the first customer's memory metric.
+
+    COMPLETED 2026-10-04 (session 35). Commits `bc73844f9` + gate-fix commit.
+
+    What changed: modules/redis.bicep → Microsoft.Cache/redisEnterprise@2025-07-01 (Balanced_B0, HA param, database
+    `default`, accessKeysAuthentication Disabled, OSSCluster, AllKeysLRU, port 10000, access-policy assignments @batchSize(1),
+    `accessPolicyPrincipalIds` @minLength(1), outputs incl. `redisEndpoint`); customer.bicep (+json, = fresh compile after
+    prettier) — UAMI access policy, `Redis__Endpoint`, no KV secret, params `redisSkuName`/`redisHighAvailability`;
+    redis-{dev,staging,prod}.bicepparam (dev: mi-bff-api-dev + sprk-controlplane-dev-uami; staging/prod: non-GUID
+    placeholder that blocks deploy — CI compiles every parameters/*.bicepparam, so [] could not be used with minLength);
+    catalog (stamp Redis-ConnectionString removed; `Redis__Endpoint` per_env from `from-h2a-output:redis_endpoint`;
+    generator allow-list; regenerated, -Verify OK); control plane H2a output → InterStepState.RedisEndpoint → H4b
+    (HandlerRunInputs, PerEnvSourceCatalog); Worker DispatchModule; BFF CacheModule/RedisOptions/StartupValidationService/
+    template; H1 + Microsoft.Cache; PRQ-S-03; Rotate-Secrets.ps1 (Redis rotation removed); Decommission-Customer.ps1;
+    Deploy-RedisCache.ps1 (keyless: redisEnterprise detection, no KV step, -CutoverBffSettings sets Redis__Endpoint and
+    leaves ConnectionStrings__Redis for T242b) + tests/manual/RedisValidationTests.ps1; Configure-ProductionAppSettings.ps1
+    (-RedisEndpoint mandatory, host:port pattern) + Seed-ProductionKeyVault.ps1 (no Redis secret); ADR-009 amended (§6.5
+    Path B, owner D12/D13) concise + full; docs + .claude (provisioning.md BINDING section, azure-deployment row, caching
+    patterns, secret-catalog pattern, CHANGELOG).
+
+    Deviations (directional steps; recorded): (1) BFF authenticates with `ConfigureForAzureWithTokenCredentialAsync` +
+    the shared `ManagedIdentityCredentialFactory.Create` (UAMI- and tenant-pinned) instead of
+    `ConfigureForAzureWithUserAssignedManagedIdentityAsync(clientId)` — same identity (the configured UAMI; a client id is
+    still required, startup fails naming `Graph__ManagedIdentity__ClientId or ManagedIdentity__ClientId`), but ADR-028 A4's
+    single shared credential path (adr-check warning). The Worker keeps the clientId API, matching its Cosmos/ServiceBus
+    modules' `ManagedIdentity:ClientId` pattern. (2) StackExchange.Redis 2.13.17 (latest 2.x; OTel instrumentation caps
+    &lt; 3.0) instead of the 2.10.1 minimum. Its ~160 new IDatabase members broke the hand-written ADR-032 null object →
+    `NullDatabase` is now a DispatchProxy with the old contract kept exactly (identity props + inert wait helpers answer,
+    every command throws); `RedisScheduledJobLease` passes `keepTtl: false` (2.13 added an Expiration overload a bare
+    `expiry:` binds to). (3) Owner 2026-10-04 ("do not defer"): T242b extended — demo cache `spaarke-bff-redis-demo`,
+    no-outage dev cut-over (endpoint first; connection string + old cache removed only after master carries T242 +
+    INDEX.md note), ordering gates; plus the review follow-ups (Worker module `redisEndpoint`, alerts.bicep resource type,
+    live RESP3 / SCAN checks, Seed-PlatformKeyVault, spaarke-resources.yaml). (4) Master-merge fallout fixed:
+    `ContactAadObjectIdColumnGuardTests` (from master) flagged L2 systemuser code without a code-level `systemuser` marker
+    (IDataverseAppUserCreator record order, T2 probe log text, one test literal).
+
+    Inventory (Step 0) — T242: redis.bicep, customer.bicep/json, manifest + generated, H2a/InterStepState/H4b, H1 options,
+    DispatchModule, CacheModule, Rotate-Secrets, Decommission-Customer, prereqs, Configure-ProductionAppSettings,
+    Seed-ProductionKeyVault, Deploy-RedisCache (moved here from T242b — the module change broke it), RedisValidationTests.
+    T242b (per-env, untouched here): Seed-PlatformKeyVault, controlplane-worker-app-service.bicep + platform json,
+    Rotate-RedisKey.ps1, redis-key-rotation.yml, alerts.bicep, config/spaarke-resources.yaml, byok/main.bicep (unchanged),
+    vnet.bicep snet-redis (unchanged). Not Redis-owned: remaining customer.json listKeys are Storage/ServiceBus/OpenAI (T244).
+    Cluster safety (escalation trigger 3 not fired): both SCAN loops iterate primaries and delete single keys; no multi-key
+    commands, Lua, transactions or keyspace notifications outside the null object. Pre-T242 stamps: none (read-only listing
+    of all 5 subscriptions 2026-10-04: only spaarke-bff-redis-dev and sprksharedprod-redis [T241]).
+
+    Placement Justification (BFF §10): extends the existing CacheModule registration (auth mode of the BFF's own cache) —
+    no new endpoint/service/interface/options class; recorded in design.md §17. Publish (fresh short-path worktrees,
+    Compress-Archive, PDBs incl.): master 45.66 MB / 212 files vs branch 45.88 MB / 214 files = +0.22 MB. CVE: none
+    (BFF, ControlPlane.Core). No pre-release package added.
+
+    Verification: Bicep build + lint (pre-existing warnings only), customer.json = fresh compile; catalog -Verify OK;
+    prereqs validate OK (35); BFF build 0/0; BFF unit suite 14300 total — 14246 passed, 54 skipped, 0 failed (2nd full run, after gate fixes); ControlPlane
+    build 0/0, tests 2107/2114 (6 = T221 baseline, 1 skipped); ArchTests 349/349; task-status drift check.
+    Step 9.5: code-review (0 Critical, 5 Warning, 11 Suggestion) + adr-check (1 evidence item, 8 warnings) — fixed:
+    credential path, null-object contract, client-id message, minLength guard + placeholders, Deploy-RedisCache keyless,
+    prod script validation, ADR-009 leftovers (Development/Testing, Standard rationale marked historical, runbook/script
+    pointers, ADR-028 cite, platform prod row), caching-architecture scale path, BFF tests (Testing theory, endpoint wins
+    over a connection string, credential-in-endpoint refused without echo, null-database contract). Accepted: sync token
+    fetch at DI registration (startup-only, like the existing synchronous Connect); Worker factory re-runs configure after a
+    failed connect (lazy, per attempt); `Redis__Endpoint` written by both customer.bicep and H4b (same value, documented);
+    RedisOptions bound by hand (pre-existing); H1 default-provider test (named in this task's test scope).
+    Tests beyond the listed scope (justification): credential-in-endpoint refusal (security guard — a pasted connection
+    string must not be used or logged); endpoint-wins-over-connection-string (the T242b no-outage cut-over depends on it);
+    null-database contract (guards the DispatchProxy rewrite).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. FULL rigor; Step 9.5 gates mandatory; `/conflict-check` (BFF hot path).</protocol>
+  </execution>
+</task>

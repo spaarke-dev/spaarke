@@ -9,6 +9,7 @@
 //   missing per DataverseEnvironmentRegistryOptions.Validate / NFR-05).
 //   Discovered concurrently: the live-ceremony runbook was pointing at
 //   stacks/dev.bicepparam which actually targets model2-full.bicep -- wrong file.
+//   (Both since deleted by task 249, 2026-10-02.)
 //   This bicepparam is the correct one to pass to platform-controlplane.bicep.
 //
 // Usage:
@@ -65,15 +66,6 @@ param serviceBusResourceGroupName = 'SharePointEmbedded'
 param adminDataverseEnvironmentUrl = 'https://spaarkedev1.crm.dynamics.com'
 
 // ============================================================================
-// TASK 153 (Wave G-5): H12c SHARED-PLATFORM OPENAI ENDPOINT
-// ============================================================================
-
-// Stable canonical secret name (same value in every environment) -- the
-// module default already matches; stated explicitly here for clarity,
-// parity with bffApiClientSecretName below.
-param azureOpenAiEndpointSecretName = 'AzureOpenAI-Endpoint'
-
-// ============================================================================
 // TENANT + APP-REG (optional for dev logging surface)
 // ============================================================================
 
@@ -107,6 +99,33 @@ param controlPlaneAppRegClientId = '965a4a01-01e1-442b-97a6-6a98308018b3'
 // resource (controlplane-worker-app-service.bicep Wave H-3 fix-at-discovery)
 // resolves the ACR pull via the shared control-plane UAMI's AcrPull grant.
 param acrImageTag = 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest'
+
+// Task 251 (owner D24, 2026-10-04): 'Spaarke Exchange Admin' -- the Worker signs in as it through
+// the federated credential trusting sprk-controlplane-dev-uami (no certificate, no secret). Its
+// Exchange permission is the narrowed role 'Spaarke App RBAC Admin' (owner D25).
+param exchangeAdminAppId = '46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7'
+
+// Task 242b (owner D12/D13, 2026-10-04): the dev Azure Managed Redis (parameters/redis-dev.bicepparam,
+// output `redisEndpoint`). Microsoft Entra only -- the Worker signs in with sprk-controlplane-dev-uami,
+// which holds an access-policy assignment on it. Not a secret.
+param redisEndpoint = 'spaarke-bff-redis-dev.westus2.redis.azure.net:10000'
+
+// ============================================================================
+// SPE OWNING APPS (task 245b; task 248 — MI-FIC, owner decision D16)
+// ============================================================================
+// The SPE container types this L2 provisions into and the owning app of each. L2
+// signs in as the owning app through the federated identity credential on it whose
+// subject is sprk-controlplane-dev-uami (FIC `sprk-controlplane-dev-uami-assertion`)
+// — nothing is stored. `Spaarke Model 1` (standard billing, created 2026-10-03,
+// registered in Spaarke's tenant) is owned by `Spaarke SPE Model 1 Owner`. Verified
+// live 2026-10-03 from compute carrying the Worker UAMI (T248 notes). Must match
+// scripts/provisioning-prereqs/spaarke-constants.yaml.
+param speContainerTypeOwners = [
+  {
+    containerTypeId: 'fb3817a8-5a55-42ba-8cc9-12cf055168b8'
+    ownerAppId: 'bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e'
+  }
+]
 
 // ============================================================================
 // TAGS (defaults are fine for dev)

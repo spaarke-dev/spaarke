@@ -19,7 +19,7 @@ public sealed class HmacSignatureVerifierTests
 {
     private const string ValidKey = "test-signing-key-42-chars-of-shared-secret";
     private static readonly byte[] BodyBytes = Encoding.UTF8.GetBytes(
-        "{\"customerId\":\"acme-corp\",\"tid\":\"11111111-1111-1111-1111-111111111111\"}");
+        "{\"customerId\":\"acme\",\"tid\":\"11111111-1111-1111-1111-111111111111\"}");
 
     [Fact]
     public void Verify_ValidHexSignature_ReturnsValid()

@@ -14,7 +14,7 @@
 | [token-cache.md](token-cache.md) | Caching OBO Graph tokens | 2026-04-05 | Verified |
 
 ## Architecture
-- **Production**: Redis (`ADR-009`) — `AbortOnConnectFail = false` for graceful degradation
+- **Production**: Azure Managed Redis (`ADR-009`), Microsoft Entra only — `AbortOnConnectFail = true` (fail fast at startup); runtime cache errors degrade per call
 - **Development**: In-memory fallback (`AddDistributedMemoryCache`) — same interface
 - **Per-Request**: `RequestCache` (Scoped) — collapses duplicate loads within one HTTP request
 
