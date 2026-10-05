@@ -66,6 +66,11 @@ This is the running list of obligations the main session takes on while integrat
 **After the deploy:**
 - [ ] Run each task's manual live gate, using `uac.child.user@demo.spaarke.com` where it needs a child-BU user.
 - [ ] Ship gate (owner round 11 item 3): no record is unsecured in a shared environment until 148 is deployed.
+- [ ] **Peer dependency: word-add-in-r1 task 097** (`work/spaarkeai-word-add-in-r1:projects/spaarkeai-word-add-in-r1/notes/097-communications-send-authorization.md` §6; owner decision 2026-10-04). The Word Email tab (096) stays OFF (`ADDIN_EMAIL_TAB_ENABLED`) until 161's `/api/communications/send` and `/send-bulk` authorization is on master AND deployed. 161 is the ONE implementation; word-add-in-r1 builds no second one.
+  - **When the UAC PR merges and the dev BFF is deployed with 161:** tell word-add-in-r1. Post on their 097 issue or PR, and add a line to their note's §6 order table. Name the master merge commit and the deploy date.
+  - **Live gate for 161 (with ours):** a Word-tab-shaped send passes. That is the user's own saved document as the attachment, plus an association to the record the save filed it under (AppendTo already held). A foreign document id is refused with `sdap.access.deny.communication.send`.
+  - **Archive bug (`ArchiveOutboundAttachmentsAsync`):** `sprk_document` ids are written into `sprk_graphitemid`, and the archive container into `sprk_graphdriveid`. word-add-in-r1 owns this fix, on master AFTER our merge, so it builds on 146's owner changes on the same lines. Do not fix it here (two edits would collide). Do not let 146/166 change that method's inputs further without telling them.
+  - **166's `DocumentContainerRelocator`** (round 37 re-keys every old-item reference) must not treat the archive rows' broken `sprk_graphitemid` (a document GUID) as a real item. Check this at the 166 merge.
 
 ## PR text obligations
 
