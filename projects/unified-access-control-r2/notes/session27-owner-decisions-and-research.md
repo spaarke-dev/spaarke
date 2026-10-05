@@ -665,6 +665,24 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Accepting this as a documented edge is rejected.
 5. **The untested fail-open branch:** the RESUME's unverifiable No Access refusal gets a test that bites when seeded.
 
+## Round 47 (2026-10-05). BINDING. Main-session decisions under round 15. Task 158, from its re-verification of `task/uac-r2-158-r1c-v1`.
+
+0. **Round 39 is still owed in full by task 158's next fix round.** That round's code predated it, so the verifier found round 39 not implemented. Correct the I-11 registry row and note §6 xiii to match it.
+1. **E-158-v1-1: the complete fix in note §15.1 is applied, in task 158's lane.** 142 is merged into 158's branch and into the integration branch, and the change is small and local.
+   - **(1)** 158's reverse rule counts an Assigned-To row as justification ONLY when it is `Shared` or `Adopted`, never `CoveredByExisting`.
+   - **(2)** When 158 then removes the share:
+     - 142's `CoveredByExisting` row becomes `Skipped`, with reason `covering-share-ended`.
+     - 142's materializer runs at once. On a secure record, the assignee is suggested, not shared (owner rules).
+   - **(3)** 142's `EndAssignmentAsync` calls the inheritance's sharee-only pass for a filed secure root.
+   - Tests and seeds per step. Accepting the over-retention is rejected.
+2. **E-158-v1-2: the operator-unshare race is closed.**
+   - **Now, in task 158:** the `Declined` marker is written BEFORE the revoke.
+   - **At integration, after 140 merges:** every pass's ledger update sends `If-Match`, with the ETag it decided on. A mismatch re-reads and re-decides; there is no blind write.
+     - Use task 140's `If-Match` support on the Dataverse client (round 42). Never a second mechanism.
+     - It is an integration-checklist item with tests and seeds.
+3. **Seeding claims must be accurate.** The verifier's seeds X03, X07, X09 and X17 survived; X09 is confirmed over-retention. Each gets a test that bites.
+4. **The copy defect** (a doubled period in the Office "removed" refusal) is fixed.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
