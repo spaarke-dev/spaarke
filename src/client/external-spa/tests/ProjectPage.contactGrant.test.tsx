@@ -260,6 +260,42 @@ describe('Issued grants list', () => {
 
     expect(await screen.findByText('No access that you granted was found with this id.')).toBeTruthy();
   });
+
+  it('after a revoke refused because someone else took the grant over, shows the message and re-reads the list', async () => {
+    // Session 27 round 42 item 1: an internal user took the row over while the contact was revoking — 409
+    // managed_elsewhere. The row is no longer the caller's, so the re-read list no longer shows it.
+    listContactGrants
+      .mockResolvedValueOnce({
+        grants: [
+          {
+            accessRecordId: 'g-7',
+            contactId: 'c-colleague',
+            fullName: 'Casey Colleague',
+            email: 'colleague@firm-a.example',
+            accessLevel: AccessLevel.ViewOnly,
+            expiryDate: '2027-01-02',
+          },
+        ],
+      })
+      .mockResolvedValue({ grants: [] });
+    const managedElsewhere =
+      "This person already has access to this record that was granted by someone else; ask them or the record's team " +
+      'to change it. Nothing was changed.';
+    revokeContactGrant.mockRejectedValue(
+      new ApiError(
+        409,
+        JSON.stringify({ detail: managedElsewhere, reasonCode: 'sdap.access.contact_grant.managed_elsewhere' })
+      )
+    );
+    await openContactsTab('Collaborate');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Revoke access for Casey Colleague/ }));
+
+    expect(await screen.findByText(managedElsewhere)).toBeTruthy();
+    await waitFor(() => expect(listContactGrants).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText('You have not given anyone access to this project.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Revoke access for Casey Colleague/ })).toBeNull();
+  });
 });
 
 describe('No call to the internal Manage Access group', () => {

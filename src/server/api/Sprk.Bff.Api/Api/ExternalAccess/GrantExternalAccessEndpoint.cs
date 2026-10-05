@@ -415,7 +415,24 @@ public static class GrantExternalAccessEndpoint
                         survivor.Id, survivor.GrantedByContactId, takeOverBy ?? "(unresolved)");
                 }
 
-                await dataverseClient.UpdateAsync(EntitySet, survivor.Id, update, ct);
+                if (contactIssuer is null)
+                {
+                    await dataverseClient.UpdateAsync(EntitySet, survivor.Id, update, ct);
+                }
+                else
+                {
+                    // Session 27 round 42 item 1: the contact's write is CONDITIONAL on the version CheckGrantAsync read when it
+                    // decided "every row on this key is mine" (step 3a). An internal user who took the row over after that read
+                    // (round 34 item 3) makes this write fail instead of lengthening or raising a decision they just made.
+                    try
+                    {
+                        await dataverseClient.UpdateIfMatchAsync(EntitySet, survivor.Id, update, survivor.ETag ?? string.Empty, ct);
+                    }
+                    catch (System.Data.DBConcurrencyException)
+                    {
+                        return await ConcurrentChangeRefusalAsync(dataverseClient, survivor, key, contactIssuer, logger, ct);
+                    }
+                }
 
                 logger.LogInformation(
                     "[EXT-GRANT] Grant {Key} updated in place on record {AccessRecordId}: " +
@@ -486,7 +503,7 @@ public static class GrantExternalAccessEndpoint
                 };
             }
 
-            await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, logger, ct);
+            await CollapseDuplicatesAsync(dataverseClient, existing, survivor.Id, key, conditional: contactIssuer is not null, logger, ct);
             await InvalidateGranteeCacheAsync(key, participations);
 
             return new GrantUpsertOutcome(survivor.Id, null)
@@ -552,7 +569,7 @@ public static class GrantExternalAccessEndpoint
                 // even two date-less racers straddling a UTC midnight get DefaultExpiry values a day
                 // apart. This path needed no pre-existing duplicates to hit the mutual-deactivation bug.
                 var survivor = ExternalGrantLifecycle.ElectSurvivor(afterCreate, today);
-                await CollapseDuplicatesAsync(dataverseClient, afterCreate, survivor.Id, key, logger, ct);
+                await CollapseDuplicatesAsync(dataverseClient, afterCreate, survivor.Id, key, conditional: contactIssuer is not null, logger, ct);
                 accessRecordId = survivor.Id;
             }
         }
@@ -757,10 +774,49 @@ public static class GrantExternalAccessEndpoint
         public bool ExpiryNarrowed { get; init; }
 
         /// <summary>
+        /// Task 140 (session 27 round 42 item 1): the contact-issuer write was refused because the row changed after the
+        /// "every row on this key is mine" check — this is the row as RE-READ after the refused write (<c>null</c> when the
+        /// re-read failed or the row is gone). Set only on that refusal.
+        /// </summary>
+        public ExternalGrantRow? ChangedRowNow { get; init; }
+
+        /// <summary>The contact-issuer write was refused because the row changed after the issuer check (round 42 item 1).</summary>
+        public bool ChangedConcurrently { get; init; }
+
+        /// <summary>
         /// The record's access policy refused the grant (task 138): nothing was queried or written, and there is
         /// no row id. A typed value, never an exception — see <see cref="CreateGrantAsync"/>.
         /// </summary>
         public static GrantUpsertOutcome Refused(GrantPolicyDecision refusal) => new(Guid.Empty, null, refusal);
+    }
+
+    /// <summary>
+    /// The contact-issuer mode's answer when its conditional write found the row CHANGED since CheckGrantAsync read it
+    /// (HTTP 412; session 27 round 42 item 1): 409 managed_elsewhere with the existing copy. The row is re-read for the
+    /// response — the record of what it now is — and is NOT written again (no blind retry). Re-applying the contact's
+    /// request over a row an internal user just took over is exactly the proxy extension managed_elsewhere refuses.
+    /// </summary>
+    private static async Task<GrantUpsertOutcome> ConcurrentChangeRefusalAsync(
+        DataverseWebApiClient dataverseClient,
+        ExternalGrantRow survivor,
+        ExternalGrantKey key,
+        ContactGrantIssuer contactIssuer,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        logger.LogWarning(
+            "[EXT-GRANT] Refused: {Key} row {AccessRecordId} changed after contact {IssuerContactId} checked it was theirs " +
+            "(If-Match {ETag} failed); nothing was written and the write is not retried.",
+            key, survivor.Id, contactIssuer.ContactId, survivor.ETag);
+
+        var now = await ExternalGrantLifecycle.ReReadChangedRowsAsync(
+            dataverseClient, new[] { survivor.Id }, contactIssuer.ContactId, logger, ct);
+
+        return GrantUpsertOutcome.Refused(GrantPolicyDecision.ManagedElsewhere) with
+        {
+            ChangedConcurrently = true,
+            ChangedRowNow = now[0],
+        };
     }
 
     /// <summary>
@@ -787,7 +843,9 @@ public static class GrantExternalAccessEndpoint
 
         return Results.Problem(
             statusCode: refusal.StatusCode,
-            title: refusal.StatusCode switch
+            title: refusal.ReasonCode == ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode
+                ? "Access is managed by someone else" // task 140: a 409 that is not about a higher level
+                : refusal.StatusCode switch
             {
                 StatusCodes.Status503ServiceUnavailable => "Access settings unavailable",
                 StatusCodes.Status409Conflict => "Existing access is higher",
@@ -860,16 +918,21 @@ public static class GrantExternalAccessEndpoint
     /// Non-fatal by design: the caller's grant has already been applied to the survivor, and a surviving
     /// duplicate is swept by the next grant or revoke on this key (both sweep by key, not by id). Failing
     /// the grant here would be worse — the caller's intent was satisfied.
+    /// <para><b><paramref name="conditional"/> — the contact-issuer mode (task 140, session 27 round 42 item 1).</b> A
+    /// contact collapses only rows it read as its own, so each deactivation is conditional on the version that read
+    /// returned (<see cref="ExternalGrantLifecycle.DeactivateIfUnchangedAsync"/>): a duplicate an internal user took over in
+    /// between is left exactly as it is — never ended by a contact's write.</para>
     /// </remarks>
     private static async Task CollapseDuplicatesAsync(
         DataverseWebApiClient dataverseClient,
         IReadOnlyList<ExternalGrantRow> rows,
         Guid survivorId,
         ExternalGrantKey key,
+        bool conditional,
         ILogger logger,
         CancellationToken ct)
     {
-        var duplicates = rows.Where(r => r.Id != survivorId).Select(r => r.Id).ToList();
+        var duplicates = rows.Where(r => r.Id != survivorId).ToList();
         if (duplicates.Count == 0)
             return;
 
@@ -880,7 +943,10 @@ public static class GrantExternalAccessEndpoint
 
         try
         {
-            await ExternalGrantLifecycle.DeactivateAsync(dataverseClient, duplicates, logger, ct);
+            if (conditional)
+                await ExternalGrantLifecycle.DeactivateIfUnchangedAsync(dataverseClient, duplicates, logger, ct);
+            else
+                await ExternalGrantLifecycle.DeactivateAsync(dataverseClient, duplicates.Select(r => r.Id), logger, ct);
         }
         catch (Exception ex)
         {

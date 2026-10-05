@@ -30,7 +30,15 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// <list type="number">
 ///   <item><b>R1</b> — an ACTIVE <c>sprk_externalrecordaccess</c> with no <c>sprk_expiresdate</c> is stamped
 ///     with <see cref="ExternalGrantLifecycle.DefaultExpiry"/>, the same value <c>/grant</c> writes. There is
-///     exactly ONE definition of the 90-day default and this job does not add a second.</item>
+///     exactly ONE definition of the 90-day default and this job does not add a second.
+///     <para><b>A CONTACT-issued row</b> (<c>sprk_grantedbycontact</c> set — task 140) may never outlive its issuer's own
+///     access (session 27 round 42 item 2), so it is not simply stamped: it gets the EARLIER of that default and the
+///     latest date the issuing contact's own grant on the same record lasts, at the row's level or above
+///     (<see cref="ExternalGrantLifecycle.ReadContactHeldGrantsAsync"/> — the same rule the contact-side route caps an
+///     issued expiry by). If the issuing contact no longer holds such a grant there, the row is DEACTIVATED. Either way
+///     the contact stays the issuer — no internal person acted, so nothing is taken over — and each such row is
+///     reported. An issuer whose own access could not be read leaves the row unchanged and the run reported partial.
+///     See <see cref="ResolveContactIssuedAsync"/>.</para></item>
 ///   <item><b>R2</b> — an ACTIVE grant whose <c>sprk_organization</c> points at an INACTIVE
 ///     <c>sprk_organization</c> is deactivated.</item>
 ///   <item><b>R3</b> — an ACTIVE <c>sprk_contactorganization</c> whose <c>sprk_enddate</c> has PASSED is
@@ -43,7 +51,8 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// a null <c>sprk_expiresdate</c> now confers NOTHING. So R1 is no longer a security fix — the exposure is
 /// already closed at read time — it is a DATA REPAIR that turns a row conferring nothing into a row conferring
 /// access for 90 more days. That makes R1 the one rule here that GRANTS rather than removes, which is why it is
-/// gated by the same owner switch as R2 and R3 rather than treated as harmless.</para>
+/// gated by the same owner switch as R2 and R3 rather than treated as harmless — and why, on a contact-issued row, the
+/// date it grants is bounded by the issuing contact's own (round 42 item 2).</para>
 ///
 /// <para><b>Runs on its schedule, and writes nothing until an owner says so</b> (owner decision D-2 part 3;
 /// posture decided in owner round 7 item 1, task 137, 2026-10-02: "enable the schedule in report-only mode now;
@@ -92,7 +101,9 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// <see cref="GrantExpiryReminderJob"/>. BFF domain code over BFF-owned tables, BFF identity, BFF release
 /// cadence, one scan a day (ADR-052 B2/B3); the one Functions-leaning signal — one dispatch per schedule — is
 /// already met in place by the host's lease. Moving it would cost a deployable per stamp and the extraction of
-/// <see cref="ExternalGrantLifecycle"/>, for two queries a day. No new scheduler, store, client or package.</para>
+/// <see cref="ExternalGrantLifecycle"/>, for two queries a day. No new scheduler, store, client or package: the
+/// contact-issued R1 rule resolves the already-registered <see cref="DataverseWebApiClient"/> and
+/// <see cref="ExternalParticipationService"/> from the run's scope, and only when such a row was found.</para>
 /// </remarks>
 public sealed class ExternalAccessReconciliationJob : IScheduledJob
 {
@@ -239,12 +250,16 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             // Two rules over the same table read once. That is not only cheaper — it is what makes R2's
             // precedence over R1 STRUCTURAL: a row is classified once, so it cannot end up in both rules'
             // change sets and put two updates for one id into one transaction.
+            var services = scope.ServiceProvider;
             await ReconcileAsync(
                 entityService, idempotency, context, mode,
                 page => BuildGrantScanFetchXml(page.Page, page.Cookie),
                 row => PlanGrantChange(row, today),
                 new[] { grantStamp, grantDeactivate },
-                writesEnabled, cancellationToken).ConfigureAwait(false);
+                writesEnabled, cancellationToken,
+                // R1's contact-issued rows are decided after the scan, once every other row's planned change is known
+                // (round 42 item 2) — so an issuer's own undated row is judged at the date this same run gives it.
+                resolve: (planned, ct) => ResolveContactIssuedAsync(services, planned, today, grantStamp, context, ct)).ConfigureAwait(false);
 
             // ── Memberships: R3 ────────────────────────────────────────────────────────────────────────
             await ReconcileAsync(
@@ -295,6 +310,13 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             if (rule.ClaimHeld > 0)
             {
                 problems.Add($"{rule.Rule}: {rule.ClaimHeld} row(s) were skipped because a chunk claim was still held.");
+            }
+
+            if (rule.ContactIssued is { Unresolved: > 0 } unresolved)
+            {
+                problems.Add(
+                    $"{rule.Rule}: {unresolved.Unresolved} contact-issued row(s) were left unchanged because their issuing " +
+                    "contact's own access could not be read; see the per-row errors.");
             }
         }
 
@@ -347,12 +369,16 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             status == StatusOk ? LogLevel.Information : LogLevel.Warning,
             "[EXT-ACCESS-RECON] heartbeat status={Status} mode={Mode} today={Today} attempt={Attempt} " +
             "r1Scanned={R1Scanned} r1Planned={R1Planned} r1Changed={R1Changed} r1Failed={R1Failed} r1Truncated={R1Truncated} r1ScanFailed={R1ScanFailed} " +
+            "r1ContactIssuedDefault={R1ContactIssuedDefault} r1ContactIssuedCapped={R1ContactIssuedCapped} " +
+            "r1ContactIssuedDeactivated={R1ContactIssuedDeactivated} r1ContactIssuedUnresolved={R1ContactIssuedUnresolved} " +
             "r2Scanned={R2Scanned} r2Planned={R2Planned} r2Changed={R2Changed} r2Failed={R2Failed} r2Truncated={R2Truncated} r2ScanFailed={R2ScanFailed} " +
             "r3Scanned={R3Scanned} r3Planned={R3Planned} r3Changed={R3Changed} r3Failed={R3Failed} r3Truncated={R3Truncated} r3ScanFailed={R3ScanFailed} " +
             "claimHeld={ClaimHeld} alreadyApplied={AlreadyApplied} markFailed={MarkFailed} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             status, mode, today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), context.Attempt,
             grantStamp.Scanned, grantStamp.Planned, grantStamp.Changed, grantStamp.Failed, grantStamp.Truncated, grantStamp.ScanFailed,
+            grantStamp.ContactIssued?.StampedDefault ?? 0, grantStamp.ContactIssued?.CappedByIssuer ?? 0,
+            grantStamp.ContactIssued?.Deactivated ?? 0, grantStamp.ContactIssued?.Unresolved ?? 0,
             grantDeactivate.Scanned, grantDeactivate.Planned, grantDeactivate.Changed, grantDeactivate.Failed, grantDeactivate.Truncated, grantDeactivate.ScanFailed,
             membershipDeactivate.Scanned, membershipDeactivate.Planned, membershipDeactivate.Changed, membershipDeactivate.Failed, membershipDeactivate.Truncated, membershipDeactivate.ScanFailed,
             rules.Sum(r => r.ClaimHeld), rules.Sum(r => r.AlreadyApplied), rules.Sum(r => r.MarkFailed),
@@ -372,7 +398,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         Func<Entity, PlannedChange?> plan,
         IReadOnlyList<RuleCounts> rules,
         bool writesEnabled,
-        CancellationToken ct)
+        CancellationToken ct,
+        Func<Dictionary<string, List<PlannedChange>>, CancellationToken, Task>? resolve = null)
     {
         var planned = new Dictionary<string, List<PlannedChange>>(StringComparer.Ordinal);
         foreach (var rule in rules)
@@ -438,6 +465,13 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             }
 
             cookie = result.PagingCookie;
+        }
+
+        // Changes a row cannot be decided by on its own (R1's contact-issued rows) are decided now, with the whole
+        // scan's plan in hand — in BOTH modes, so the report is the same evidence the write pass acts on. It only reads.
+        if (resolve is not null)
+        {
+            await resolve(planned, ct).ConfigureAwait(false);
         }
 
         // The before-state, recorded for EVERY row this run would change, in BOTH modes and BEFORE anything
@@ -629,6 +663,24 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         // /grant writes, never a re-derived 90.
         if (row.GetAttributeValue<DateTime?>(ExpiresDateAttribute) is null)
         {
+            // A CONTACT-issued row may never outlive its issuer's own access (session 27 round 42 item 2): its date — or
+            // its end — depends on the issuing contact's own grant on the record, which a row cannot tell on its own. It is
+            // planned here and DECIDED after the scan (ResolveContactIssuedAsync). Nothing is written for it until then.
+            if (row.GetAttributeValue<EntityReference>(GrantedByContactAttribute) is { } issuer && issuer.Id != Guid.Empty)
+            {
+                var pending = new ContactIssuedUndated(issuer.Id, RootOf(row), LevelOf(row));
+                return new PlannedChange(
+                    RuleStampDefaultExpiry,
+                    ExternalGrantLifecycle.EntityLogicalName,
+                    row.Id,
+                    BeforeState: $"statecode={Describe(StateCodeOf(row))} expiresDate=(null) grantedByContact={issuer.Id}",
+                    AfterState: "(decided by the issuing contact's own grant)",
+                    Fields: new Dictionary<string, object>())
+                {
+                    ContactIssued = pending,
+                };
+            }
+
             var expiry = ExternalGrantLifecycle.DefaultExpiry(today);
             return new PlannedChange(
                 RuleStampDefaultExpiry,
@@ -644,6 +696,312 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
 
         return null;
     }
+
+    /// <summary>
+    /// Decides R1 for the CONTACT-issued undated rows the scan planned (session 27 round 42 item 2), replacing each pending
+    /// change with its real one — or leaving the row out of the write when its issuer's access could not be read.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The rule.</b> A contact-issued grant may never outlive the issuing contact's own access (task 140: capped at
+    /// its level and its own expiry). So the row's new expiry is the EARLIER of <see cref="ExternalGrantLifecycle.DefaultExpiry"/>
+    /// and the latest date the issuing contact's own grant on the SAME record confers, at the row's level or above —
+    /// <see cref="ExternalGrantLifecycle.ReadContactHeldGrantsAsync"/>, the one definition the contact-side route caps an
+    /// issued expiry by (the contact's own rows, and on a Standard record its conferring organizations' org-wide rows). When
+    /// the issuing contact holds no such grant there any more, the row is DEACTIVATED. Either way the contact stays the
+    /// issuer: no internal person acted, so nothing is taken over and no issuer column is written.</para>
+    /// <para><b>Judged as this run leaves the table.</b> The issuer's own row may itself be undated: one plain R1 is about to
+    /// stamp counts at the default date; one R2 is about to deactivate counts for nothing; one that is itself
+    /// contact-issued is decided first, in dependency order. Rows that only vouch for each other (a cycle, with no outside
+    /// source) are decided together, each counting the others for nothing — the fail-closed reading, which can end a row
+    /// early but never lets one outlive its issuer.</para>
+    /// <para><b>"Holds a grant there" means a grant ROW.</b> Access that rests only on an undated term — a workforce
+    /// contact's standing-grant or organization-expansion composition — is not a grant on the record and carries no date;
+    /// such an issuer's undated row is ended (the safe direction; the issuer can grant again from the SPA, where the route
+    /// evaluates the term).</para>
+    /// <para><b>Faults never write.</b> An issuer whose memberships or grant rows could not be read — or whose own undated
+    /// row this run did not plan, or depends on such a row — leaves the row UNCHANGED (never stamped on a guess, never ended
+    /// on a fault), and the run is reported partial so tomorrow's tick retries it. Each contact-issued row is reported:
+    /// a per-row log line, and the R1 entry's <c>contactIssued</c> block in <see cref="JobRunResult.ResultJson"/>.</para>
+    /// </remarks>
+    private async Task ResolveContactIssuedAsync(
+        IServiceProvider services,
+        Dictionary<string, List<PlannedChange>> planned,
+        DateOnly today,
+        RuleCounts r1,
+        JobRunContext context,
+        CancellationToken ct)
+    {
+        var report = r1.ContactIssued = new ContactIssuedReport();
+        var stamps = planned[RuleStampDefaultExpiry];
+        var pending = stamps.Where(c => c.ContactIssued is not null).ToList();
+        if (pending.Count == 0)
+        {
+            return;
+        }
+
+        var defaultExpiry = ExternalGrantLifecycle.DefaultExpiry(today);
+
+        // What this run does to every OTHER grant row, so an issuer's own row is judged as the run will leave it.
+        var stampedByDefault = stamps.Where(c => c.ContactIssued is null).Select(c => c.RowId).ToHashSet();
+        var endedByR2 = planned.TryGetValue(RuleDeactivateOrphanedOrgGrant, out var r2)
+            ? r2.Select(c => c.RowId).ToHashSet()
+            : new HashSet<Guid>();
+        var pendingIds = pending.Select(c => c.RowId).ToHashSet();
+
+        // ── Read each issuer's own grant rows on the record (null = could not be read) ──
+        var held = new Dictionary<Guid, IReadOnlyList<ExternalGrantRow>?>();
+        var why = new Dictionary<Guid, string>();
+        DataverseWebApiClient? dataverseClient = null;
+        ExternalParticipationService? participations = null;
+        try
+        {
+            dataverseClient = services.GetRequiredService<DataverseWebApiClient>();
+            participations = services.GetRequiredService<ExternalParticipationService>();
+        }
+        // A missing read service is a fault for every pending row — reported, never a write.
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[EXT-ACCESS-RECON] The readers for contact-issued rows could not be resolved; {Count} row(s) are left unchanged. correlationId={CorrelationId}",
+                pending.Count, context.CorrelationId);
+        }
+
+        var memberships = new Dictionary<Guid, ActiveOrgMemberships>();
+        foreach (var change in pending)
+        {
+            ct.ThrowIfCancellationRequested();
+            var issued = change.ContactIssued!;
+
+            if (dataverseClient is null || participations is null)
+            {
+                held[change.RowId] = null;
+                why[change.RowId] = "the readers could not be resolved";
+                continue;
+            }
+
+            if (issued.Root is not { } root)
+            {
+                // A row naming no record: its issuer holds no grant "there", whatever else it holds.
+                held[change.RowId] = Array.Empty<ExternalGrantRow>();
+                continue;
+            }
+
+            try
+            {
+                if (!memberships.TryGetValue(issued.IssuerContactId, out var issuerMemberships))
+                {
+                    issuerMemberships = await participations
+                        .ReadOrganizationMembershipsAsync(issued.IssuerContactId, ct).ConfigureAwait(false);
+                    memberships[issued.IssuerContactId] = issuerMemberships;
+                }
+
+                if (issuerMemberships.Unreadable)
+                {
+                    held[change.RowId] = null;
+                    why[change.RowId] = "the issuing contact's organization memberships could not be read";
+                    continue;
+                }
+
+                var issuerGrants = await ExternalGrantLifecycle.ReadContactHeldGrantsAsync(
+                    issued.IssuerContactId, issuerMemberships.ConferringOrganizationIds, root.Type, root.Id, issued.Level,
+                    // Undated rows are kept: this run may be about to stamp them.
+                    row => row.ExpiresDate is null || ExternalParticipationService.ConfersAccessOn(row.ExpiresDate, today),
+                    dataverseClient, participations, ct).ConfigureAwait(false);
+                held[change.RowId] = issuerGrants.Rows;
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            // One issuer's read failing leaves that row unchanged; the others are still decided.
+            catch (Exception ex)
+            {
+                held[change.RowId] = null;
+                why[change.RowId] = $"the issuing contact's own grants could not be read ({ex.Message})";
+                _logger.LogError(ex,
+                    "[EXT-ACCESS-RECON] contact-issued row {RowId}: the own grants of issuing contact {IssuerContactId} could not be read; the row is left unchanged. correlationId={CorrelationId}",
+                    change.RowId, issued.IssuerContactId, context.CorrelationId);
+            }
+        }
+
+        // ── Decide, in dependency order ──
+        var issuerUntil = new Dictionary<Guid, DateOnly?>(); // row → the latest date its issuer's own grant confers (null = none)
+        var faulted = held.Where(h => h.Value is null).Select(h => h.Key).ToHashSet();
+
+        // What a held row confers until, as this run leaves it: R2 ends it; a contact-issued row decided here carries its
+        // decision; a dated row its date; a row plain R1 stamps the default. Anything else undated confers nothing.
+        DateOnly? Effective(ExternalGrantRow row)
+        {
+            if (endedByR2.Contains(row.Id))
+            {
+                return null;
+            }
+
+            if (issuerUntil.TryGetValue(row.Id, out var latest))
+            {
+                return latest is { } l ? Min(defaultExpiry, l) : null;
+            }
+
+            if (row.ExpiresDate is { } expiry)
+            {
+                return expiry;
+            }
+
+            return stampedByDefault.Contains(row.Id) ? defaultExpiry : null;
+        }
+
+        DateOnly? LatestConferring(IReadOnlyList<ExternalGrantRow> rows)
+        {
+            DateOnly? latest = null;
+            foreach (var row in rows)
+            {
+                var until = Effective(row);
+                if (ExternalParticipationService.ConfersAccessOn(until, today) && (latest is null || until > latest))
+                {
+                    latest = until;
+                }
+            }
+
+            return latest;
+        }
+
+        // An undated row of the issuer that this run neither planned nor is deciding (it appeared after the scan, or lies
+        // beyond a truncated one) — its fate is unknown, so the row depending on it is not decided on a guess.
+        bool Unknown(ExternalGrantRow row) => row.ExpiresDate is null
+            && !stampedByDefault.Contains(row.Id) && !endedByR2.Contains(row.Id) && !pendingIds.Contains(row.Id);
+
+        bool progress;
+        do
+        {
+            progress = false;
+            foreach (var change in pending)
+            {
+                if (issuerUntil.ContainsKey(change.RowId) || faulted.Contains(change.RowId))
+                {
+                    continue;
+                }
+
+                var rows = held[change.RowId]!;
+                if (rows.Any(r => r.ExpiresDate is null && (faulted.Contains(r.Id) || Unknown(r))))
+                {
+                    faulted.Add(change.RowId);
+                    why[change.RowId] = "it depends on an undated row of the issuing contact whose own date could not be decided";
+                    progress = true;
+                    continue;
+                }
+
+                if (rows.Any(r => r.ExpiresDate is null && pendingIds.Contains(r.Id) && !issuerUntil.ContainsKey(r.Id)))
+                {
+                    continue; // waits for the issuer's own contact-issued row
+                }
+
+                issuerUntil[change.RowId] = LatestConferring(rows);
+                progress = true;
+            }
+        }
+        while (progress);
+
+        // A cycle — rows that only vouch for each other: decided together, each counting the others for nothing.
+        var cycle = pending
+            .Where(c => !issuerUntil.ContainsKey(c.RowId) && !faulted.Contains(c.RowId))
+            .Select(c => c.RowId)
+            .ToList();
+        var cycleUntil = cycle.ToDictionary(id => id, id => LatestConferring(held[id]!));
+        foreach (var (id, latest) in cycleUntil)
+        {
+            issuerUntil[id] = latest;
+        }
+
+        // ── Materialize the decisions; report every contact-issued row ──
+        var resolved = new List<PlannedChange>(stamps.Count);
+        foreach (var change in stamps)
+        {
+            if (change.ContactIssued is not { } issued)
+            {
+                resolved.Add(change);
+                continue;
+            }
+
+            if (faulted.Contains(change.RowId))
+            {
+                report.Unresolved++;
+                report.Add(change.RowId, issued, ContactIssuedOutcome.Unresolved, null, null);
+                _logger.LogError(
+                    "[EXT-ACCESS-RECON] contact-issued row {RowId} (issuing contact {IssuerContactId}) left UNCHANGED: {Why}. It is retried on the next run. correlationId={CorrelationId}",
+                    change.RowId, issued.IssuerContactId, why.GetValueOrDefault(change.RowId, "its issuer's access could not be decided"),
+                    context.CorrelationId);
+                continue;
+            }
+
+            var issuerLatest = issuerUntil[change.RowId];
+            if (issuerLatest is not { } until)
+            {
+                report.Deactivated++;
+                report.Add(change.RowId, issued, ContactIssuedOutcome.Deactivated, null, null);
+                resolved.Add(change with
+                {
+                    AfterState = $"statecode={StateCodeInactive} statuscode={StatusCodeInactive} (issuing contact {issued.IssuerContactId} " +
+                                 "holds no active grant on the record at this row's level; grantedByContact kept)",
+                    Fields = DeactivationFields(),
+                });
+                continue;
+            }
+
+            var expiry = Min(defaultExpiry, until);
+            var capped = until < defaultExpiry;
+            if (capped)
+            {
+                report.CappedByIssuer++;
+            }
+            else
+            {
+                report.StampedDefault++;
+            }
+
+            report.Add(change.RowId, issued, capped ? ContactIssuedOutcome.CappedByIssuer : ContactIssuedOutcome.StampedDefault, expiry, until);
+            resolved.Add(change with
+            {
+                AfterState = $"expiresDate={expiry.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)} (" +
+                             (capped
+                                 ? $"capped by issuing contact {issued.IssuerContactId}'s own grant, which lasts until {until.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture)}"
+                                 : "the default; the issuing contact's own grant lasts at least as long") +
+                             "; grantedByContact kept)",
+                Fields = new Dictionary<string, object> { [ExpiresDateAttribute] = ExternalGrantLifecycle.ToSdkDateOnly(expiry) },
+            });
+        }
+
+        foreach (var row in report.Rows)
+        {
+            _logger.LogInformation(
+                "[EXT-ACCESS-RECON] contact-issued rowId={RowId} issuerContactId={IssuerContactId} outcome={Outcome} expiresDate={Expiry} issuerHeldUntil={IssuerUntil} correlationId={CorrelationId}",
+                row.RowId, row.IssuerContactId, row.Outcome, row.ExpiresDate, row.IssuerHeldUntil, context.CorrelationId);
+        }
+
+        planned[RuleStampDefaultExpiry] = resolved;
+
+        static DateOnly Min(DateOnly a, DateOnly b) => a <= b ? a : b;
+    }
+
+    /// <summary>The record a grant row names — project, matter or work assignment, in <c>DeriveKey</c>'s order.</summary>
+    private static (ExternalGrantRootType Type, Guid Id)? RootOf(Entity row)
+    {
+        foreach (var (attribute, type) in RootLookupAttributes)
+        {
+            if (row.GetAttributeValue<EntityReference>(attribute) is { } root && root.Id != Guid.Empty)
+            {
+                return (type, root.Id);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>A row's level; one with no (or an unknown) level counts at the lowest, so any grant of its issuer qualifies.</summary>
+    private static ExternalAccessLevel LevelOf(Entity row)
+        => row.GetAttributeValue<OptionSetValue>(AccessLevelAttribute) is { } level
+           && Enum.IsDefined(typeof(ExternalAccessLevel), level.Value)
+            ? (ExternalAccessLevel)level.Value
+            : ExternalAccessLevel.ViewOnly;
 
     /// <summary>
     /// Classifies one membership row: deactivate when its end date has PASSED. Access holds THROUGH the end
@@ -713,8 +1071,11 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     /// </remarks>
     internal static string BuildGrantScanFetchXml(int page, string? pagingCookie)
     {
+        // The issuer, level and record are read for R1's contact-issued rule (round 42 item 2); nothing else uses them.
         var entity = new XElement("entity", new XAttribute("name", ExternalGrantLifecycle.EntityLogicalName),
-            Attributes("sprk_externalrecordaccessid", ExpiresDateAttribute, OrganizationLookupAttribute, "statecode"),
+            Attributes(new[] { "sprk_externalrecordaccessid", ExpiresDateAttribute, OrganizationLookupAttribute, "statecode",
+                    GrantedByContactAttribute, AccessLevelAttribute }
+                .Concat(RootLookupAttributes.Select(r => r.Attribute)).ToArray()),
             new XElement("order", new XAttribute("attribute", "sprk_externalrecordaccessid")),
             new XElement("filter", new XAttribute("type", "and"),
                 ActiveOrNullStateFilter(),
@@ -770,6 +1131,19 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
 
     internal const string ExpiresDateAttribute = "sprk_expiresdate";
     internal const string EndDateAttribute = "sprk_enddate";
+
+    /// <summary>The contact-typed issuer lookup (task 140) — the SDK attribute name of <see cref="ExternalGrantLifecycle.GrantedByContactAttribute"/>.</summary>
+    internal const string GrantedByContactAttribute = ExternalGrantLifecycle.GrantedByContactAttribute;
+
+    internal const string AccessLevelAttribute = "sprk_accesslevel";
+
+    /// <summary>The grant row's typed record lookups (SDK attribute names), in <c>ExternalGrantLifecycle.DeriveKey</c>'s order.</summary>
+    internal static readonly IReadOnlyList<(string Attribute, ExternalGrantRootType Type)> RootLookupAttributes = new[]
+    {
+        ("sprk_project", ExternalGrantRootType.Project),
+        ("sprk_matter", ExternalGrantRootType.Matter),
+        ("sprk_workassignment", ExternalGrantRootType.WorkAssignment),
+    };
 
     private static string Fetch(int page, string? pagingCookie, XElement entity)
     {
@@ -830,7 +1204,71 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         Guid RowId,
         string BeforeState,
         string AfterState,
-        Dictionary<string, object> Fields);
+        Dictionary<string, object> Fields)
+    {
+        /// <summary>
+        /// Set on an R1 change for a CONTACT-issued undated row, which is decided after the scan
+        /// (<see cref="ResolveContactIssuedAsync"/>) — until then it carries no fields and is never written.
+        /// </summary>
+        public ContactIssuedUndated? ContactIssued { get; init; }
+    }
+
+    /// <summary>A contact-issued undated grant row awaiting its R1 decision (session 27 round 42 item 2).</summary>
+    /// <param name="IssuerContactId">The issuing contact (<c>sprk_grantedbycontact</c>).</param>
+    /// <param name="Root">The record the row grants, or <c>null</c> when it names none.</param>
+    /// <param name="Level">The row's level — the issuer's own grant must be at it or above.</param>
+    internal sealed record ContactIssuedUndated(
+        Guid IssuerContactId, (ExternalGrantRootType Type, Guid Id)? Root, ExternalAccessLevel Level);
+
+    /// <summary>What R1 did with one contact-issued undated row.</summary>
+    internal enum ContactIssuedOutcome
+    {
+        /// <summary>Stamped with the default; the issuer's own grant lasts at least as long.</summary>
+        StampedDefault,
+
+        /// <summary>Stamped with the issuer's own (earlier) expiry.</summary>
+        CappedByIssuer,
+
+        /// <summary>Deactivated: the issuer holds no active grant on the record at the row's level.</summary>
+        Deactivated,
+
+        /// <summary>Left unchanged: the issuer's access could not be read or decided.</summary>
+        Unresolved,
+    }
+
+    /// <summary>R1's report on the contact-issued undated rows of one run — every such row, bounded in the result JSON.</summary>
+    internal sealed class ContactIssuedReport
+    {
+        public int StampedDefault;
+        public int CappedByIssuer;
+        public int Deactivated;
+        public int Unresolved;
+        public readonly List<ContactIssuedRow> Rows = new();
+
+        public void Add(Guid rowId, ContactIssuedUndated issued, ContactIssuedOutcome outcome, DateOnly? expiresDate, DateOnly? issuerHeldUntil)
+            => Rows.Add(new ContactIssuedRow(rowId, issued.IssuerContactId, outcome, expiresDate, issuerHeldUntil));
+
+        public object ToReport() => new
+        {
+            stampedDefault = StampedDefault,
+            cappedByIssuer = CappedByIssuer,
+            deactivated = Deactivated,
+            unresolved = Unresolved,
+            rows = Rows.Take(MaxSampledIdsPerRule).Select(r => new
+            {
+                rowId = r.RowId.ToString("D", CultureInfo.InvariantCulture),
+                issuerContactId = r.IssuerContactId.ToString("D", CultureInfo.InvariantCulture),
+                outcome = r.Outcome.ToString(),
+                expiresDate = r.ExpiresDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                issuerHeldUntil = r.IssuerHeldUntil?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            }).ToArray(),
+            rowsTruncated = Rows.Count > MaxSampledIdsPerRule,
+        };
+    }
+
+    /// <summary>One reported contact-issued row.</summary>
+    internal sealed record ContactIssuedRow(
+        Guid RowId, Guid IssuerContactId, ContactIssuedOutcome Outcome, DateOnly? ExpiresDate, DateOnly? IssuerHeldUntil);
 
     /// <summary>Per-rule outcome, reported in the heartbeat and in <see cref="JobRunResult.ResultJson"/>.</summary>
     internal sealed class RuleCounts(string rule, string entityLogicalName)
@@ -850,8 +1288,12 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         public string? ScanError;
         public IReadOnlyList<Guid> SampleIds = Array.Empty<Guid>();
 
+        /// <summary>R1 only: the contact-issued undated rows of this run (round 42 item 2); null on the other rules.</summary>
+        public ContactIssuedReport? ContactIssued;
+
         public object ToReport() => new
         {
+            contactIssued = ContactIssued?.ToReport(),
             rule = Rule,
             entity = EntityLogicalName,
             Scanned,

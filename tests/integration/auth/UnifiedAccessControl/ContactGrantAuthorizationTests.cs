@@ -976,6 +976,225 @@ public class ContactGrantAuthorizationTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Session 27 round 42 item 1 — the race between a contact's write and an internal take-over is CLOSED: every
+    // contact-path write to a row it checked was its own is conditional on the version that check read (If-Match). A take-
+    // over that commits in between makes the write fail: 409 managed_elsewhere with the existing copy, the row re-read,
+    // and no retry. Each case's twin differs in ONE input — whether the internal change landed in the window.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The contact asks to raise and lengthen its own grant; an internal Write holder sets the record's Expiration (a
+    /// take-over, round 34 item 3) AFTER the contact's issuer check read the row and BEFORE its PATCH.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Grant_WhenAnInternalTakeOverLandsBetweenTheIssuerCheckAndTheWrite_Is409ManagedElsewhere_AndTheTakeOverStands(
+        bool takeOverInTheWindow)
+    {
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        if (takeOverInTheWindow)
+        {
+            _dataverse.BeforeConditionalWrite = async () =>
+                Ok<SetRecordShareExpiryResponse>(await SetRecordShareExpiryAsInternalUser(Today.AddDays(10)));
+        }
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate, expiry: Today.AddDays(60)), Ciam(ExternalAccessLevel.Collaborate));
+
+        var write = _dataverse.ConditionalWrites.Should().ContainSingle("one conditional write; a refused one is never retried").Subject;
+        if (takeOverInTheWindow)
+        {
+            Problem(result).Should().Be((409, ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode));
+            Detail(result).Should().Be(
+                $"{ColleagueEmail} already has access to this record that was granted by someone else; ask them or the record's " +
+                "team to change it. Nothing was changed.", "the existing managed_elsewhere copy");
+            write.Applied.Should().BeFalse();
+            Snapshot(row).Should().Be(((int?)ExternalAccessLevel.ViewOnly, (DateOnly?)Today.AddDays(10), (Guid?)null, (Guid?)SystemUserId, (int?)0),
+                "the internal user's decision stands: their date, their stamp, the level the contact did not raise");
+            AssertReReadAndNothingAfter(row.Id);
+        }
+        else
+        {
+            Ok<ContactGrantResponse>(result).ExpiryDate.Should().Be(Today.AddDays(60));
+            write.Applied.Should().BeTrue();
+            Snapshot(row).Should().Be(((int?)ExternalAccessLevel.Collaborate, (DateOnly?)Today.AddDays(60), (Guid?)Grantor, (Guid?)null, (int?)0));
+        }
+    }
+
+    /// <summary>
+    /// The contact revokes its own grant; an internal take-over lands after the revoke's "issued by me" read and before
+    /// its deactivation.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Revoke_WhenAnInternalTakeOverLandsBetweenTheIssuerCheckAndTheDeactivation_Is409ManagedElsewhere_AndTheRowStays(
+        bool takeOverInTheWindow)
+    {
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        if (takeOverInTheWindow)
+        {
+            _dataverse.BeforeConditionalWrite = async () =>
+                Ok<SetRecordShareExpiryResponse>(await SetRecordShareExpiryAsInternalUser(Today.AddDays(10)));
+        }
+
+        var result = await Revoke(row.Id, Ciam(ExternalAccessLevel.Collaborate));
+
+        var write = _dataverse.ConditionalWrites.Should().ContainSingle().Subject;
+        if (takeOverInTheWindow)
+        {
+            Problem(result).Should().Be((409, ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode));
+            Detail(result).Should().Be(GrantPolicyDecision.ManagedElsewhere.Detail, "the existing managed_elsewhere copy");
+            write.Applied.Should().BeFalse();
+            row.IsActive.Should().BeTrue("a contact never ends a decision an internal user just made");
+            row.GrantedBySystemUserId.Should().Be(SystemUserId);
+            row.GrantedByContactId.Should().BeNull();
+            AssertReReadAndNothingAfter(row.Id);
+        }
+        else
+        {
+            Ok<ContactGrantRevokeResponse>(result).DeactivatedCount.Should().Be(1);
+            write.Applied.Should().BeTrue();
+            row.IsActive.Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// Two rows of the caller's on one grant (a duplicate pair): the take-over lands on the SECOND before the first is
+    /// deactivated. The first — still the caller's — is ended; the second is left; the answer is still 409 managed_elsewhere,
+    /// with a detail that does not claim "nothing was changed".
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Revoke_OfADuplicatePair_WhenOneIsTakenOverInTheWindow_EndsOnlyTheOneStillTheirs_AndSaysSo(bool takeOverInTheWindow)
+    {
+        var first = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        var second = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(20), issuedByContact: Grantor);
+        if (takeOverInTheWindow)
+        {
+            _dataverse.BeforeConditionalWrite = () =>
+            {
+                TakeOverAsInternalUser(second);
+                return Task.CompletedTask;
+            };
+        }
+
+        var result = await Revoke(first.Id, Ciam(ExternalAccessLevel.Collaborate));
+
+        first.IsActive.Should().BeFalse("the row still the caller's is ended either way");
+        _participations.Invalidations.Should().Contain(i => i.Contacts.Contains(Colleague), "a deactivation committed");
+        if (takeOverInTheWindow)
+        {
+            Problem(result).Should().Be((409, ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode));
+            Detail(result).Should().Be(ContactGrantEndpoints.PartlyManagedElsewhereDetail);
+            second.IsActive.Should().BeTrue();
+            second.GrantedBySystemUserId.Should().Be(SystemUserId);
+            AssertReReadAndNothingAfter(second.Id);
+        }
+        else
+        {
+            Ok<ContactGrantRevokeResponse>(result).DeactivatedCount.Should().Be(2);
+            second.IsActive.Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// The contact-issuer mode's duplicate collapse (match path) deactivates only rows still at the version it read: a
+    /// duplicate taken over in the window is left, and the caller's own grant still succeeds on the survivor.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Grant_CollapsingTheCallersDuplicate_LeavesOneTakenOverInTheWindow(bool takeOverInTheWindow)
+    {
+        var survivor = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        var duplicate = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(10), issuedByContact: Grantor);
+        if (takeOverInTheWindow)
+        {
+            _dataverse.BeforeConditionalWrite = () =>
+            {
+                TakeOverAsInternalUser(duplicate);
+                return Task.CompletedTask;
+            };
+        }
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        Ok<ContactGrantResponse>(result).AccessRecordId.Should().Be(survivor.Id);
+        survivor.AccessLevel.Should().Be((int)ExternalAccessLevel.Collaborate);
+        duplicate.IsActive.Should().Be(takeOverInTheWindow, "only a duplicate still at the version read is collapsed");
+        if (takeOverInTheWindow)
+            duplicate.GrantedBySystemUserId.Should().Be(SystemUserId);
+    }
+
+    /// <summary>
+    /// The post-create race collapse: a row of the caller's raced onto the key (a double submit) is collapsed only if it is
+    /// still at the version the post-create read returned — one taken over in the window is left.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Grant_PostCreateCollapse_LeavesARacedRowTakenOverInTheWindow(bool takeOverInTheWindow)
+    {
+        ExternalGrantRow? raced = null;
+        _dataverse.BeforeCreate = () => raced = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly,
+            Today.AddDays(10), issuedByContact: Grantor);
+        if (takeOverInTheWindow)
+        {
+            _dataverse.BeforeConditionalWrite = () =>
+            {
+                TakeOverAsInternalUser(raced!);
+                return Task.CompletedTask;
+            };
+        }
+
+        var result = await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate));
+
+        Ok<ContactGrantResponse>(result);
+        _dataverse.ConditionalWrites.Should().ContainSingle(w => w.Id == raced!.Id, "the collapse of the raced row is conditional");
+        raced!.IsActive.Should().Be(takeOverInTheWindow);
+    }
+
+    /// <summary>A row read without a version cannot be written conditionally — nothing is sent, and the caller gets a message.</summary>
+    [Theory]
+    [InlineData("grant")]
+    [InlineData("revoke")]
+    public async Task AContactWrite_ToARowReadWithoutAVersion_SendsNothing_AndIsAProblemWithAMessage(string route)
+    {
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+        row.ETag = null;
+        var before = Snapshot(row);
+
+        var result = route == "grant"
+            ? await Grant(Request(ExternalAccessLevel.Collaborate), Ciam(ExternalAccessLevel.Collaborate))
+            : await Revoke(row.Id, Ciam(ExternalAccessLevel.Collaborate));
+
+        Problem(result).Should().Be(route == "grant"
+            ? (500, ContactGrantEndpoints.GrantFailedReasonCode)
+            : (500, ContactGrantorAuthorizationFilter.RevokeFailedReasonCode));
+        Snapshot(row).Should().Be(before);
+        _dataverse.Updates.Should().BeEmpty();
+    }
+
+    /// <summary>After a refused conditional write on <paramref name="rowId"/>: the row is re-read, and nothing is written again.</summary>
+    private void AssertReReadAndNothingAfter(Guid rowId)
+    {
+        var after = _dataverse.Trail.SkipWhile(e => e != $"if-match:{rowId}:changed").Skip(1).ToList();
+        after.Should().Contain($"read:{rowId}", "the row is re-read for the response");
+        after.Should().NotContain(e => e.StartsWith("write:", StringComparison.Ordinal) || e.StartsWith("if-match:", StringComparison.Ordinal),
+            "there is no blind retry");
+    }
+
+    /// <summary>An internal user's take-over of one row (round 34 item 3), through the real helper set-record-share-expiry uses.</summary>
+    private void TakeOverAsInternalUser(ExternalGrantRow row)
+    {
+        var fields = new Dictionary<string, object>();
+        ExternalGrantLifecycle.AddInternalTakeOverFields(fields, SystemUserId);
+        _dataverse.ApplyBulkUpdate("sprk_externalrecordaccess", new List<(Guid, Dictionary<string, object>)> { (row.Id, fields) });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // A matter root goes through the same rights dispatch
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1273,6 +1492,32 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
     /// <summary>Every <c>IGenericEntityService.BulkUpdateAsync</c> applied through <see cref="ApplyBulkUpdate"/>.</summary>
     public List<(string Entity, List<(Guid Id, Dictionary<string, object> Fields)> Updates)> BulkUpdates { get; } = new();
 
+    /// <summary>
+    /// Every conditional write (<see cref="UpdateIfMatchAsync"/>): the row, the version sent as <c>If-Match</c>, and whether
+    /// it applied (false = the row had changed, HTTP 412 in production). Also recorded in <see cref="Updates"/> when applied.
+    /// </summary>
+    public List<(Guid Id, string ETag, bool Applied)> ConditionalWrites { get; } = new();
+
+    /// <summary>Every grant row read by id (<see cref="RetrieveAsync{T}"/>) — the re-read after a refused write shows here.</summary>
+    public List<Guid> GrantReadsById { get; } = new();
+
+    /// <summary>
+    /// The ordered trail of grant-row I/O by id: <c>read:{id}</c>, <c>write:{id}</c> (unconditional), <c>if-match:{id}:applied</c>
+    /// / <c>if-match:{id}:changed</c> — so a test can assert what happened AFTER a refused conditional write.
+    /// </summary>
+    public List<string> Trail { get; } = new();
+
+    /// <summary>
+    /// Runs ONCE, just before the next conditional write is judged — to stage a concurrent writer (an internal take-over)
+    /// committing in the window between a contact's "is this row mine?" read and its write (session 27 round 42 item 1).
+    /// </summary>
+    public Func<Task>? BeforeConditionalWrite { get; set; }
+
+    private long _version;
+
+    /// <summary>A fresh row version, <c>W/"n"</c> — what Dataverse returns as <c>@odata.etag</c> and bumps on every write.</summary>
+    private string NextVersion() => $"W/\"{++_version}\"";
+
     public IReadOnlyList<ExternalGrantRow> RowsFor(Guid contactId)
         => _rows.Where(r => r.ContactId == contactId && r.IsActive).ToList();
 
@@ -1288,8 +1533,12 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         OrganizationStates.Clear();
         SystemUsersByOid.Clear();
         BulkUpdates.Clear();
+        ConditionalWrites.Clear();
+        GrantReadsById.Clear();
+        Trail.Clear();
         FailUpdates = FailRetrieve = false;
         BeforeCreate = null;
+        BeforeConditionalWrite = null;
     }
 
     /// <summary>
@@ -1307,6 +1556,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         foreach (var (id, fields) in updates)
         {
             var row = _rows.Single(r => r.Id == id);
+            row.ETag = NextVersion();
             foreach (var (column, value) in fields)
             {
                 switch (column)
@@ -1328,11 +1578,11 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
     }
 
     public ExternalGrantRow Seed(Guid contactId, Guid rootId, int level, DateOnly expiry,
-        Guid? issuedByContact, Guid? issuedBySystemUser = null, bool onMatter = false)
+        Guid? issuedByContact, Guid? issuedBySystemUser = null, bool onMatter = false, Guid? id = null)
     {
         var row = new ExternalGrantRow
         {
-            Id = NextId(),
+            Id = id ?? NextId(),
             ContactId = contactId,
             ProjectId = onMatter ? null : rootId,
             MatterId = onMatter ? rootId : null,
@@ -1341,6 +1591,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             StateCode = 0,
             GrantedByContactId = issuedByContact,
             GrantedBySystemUserId = issuedBySystemUser,
+            ETag = NextVersion(),
         };
         _rows.Add(row);
         return row;
@@ -1356,6 +1607,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             AccessLevel = level,
             ExpiresDate = expiry,
             StateCode = 0,
+            ETag = NextVersion(),
         };
         _rows.Add(row);
         return row;
@@ -1389,6 +1641,12 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
     {
         if (FailRetrieve)
             throw new HttpRequestException("Simulated Dataverse read failure.", null, HttpStatusCode.ServiceUnavailable);
+
+        if (entitySetName == GrantSet)
+        {
+            GrantReadsById.Add(id);
+            Trail.Add($"read:{id}");
+        }
 
         object? row = entitySetName switch
         {
@@ -1430,6 +1688,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             AccessLevel = (int?)payload["sprk_accesslevel"],
             ExpiresDate = payload.TryGetValue("sprk_expiresdate", out var e) && e is string s ? DateOnly.Parse(s) : null,
             StateCode = 0,
+            ETag = NextVersion(),
         };
         _rows.Add(row);
         return Task.FromResult(row.Id);
@@ -1442,10 +1701,55 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
 
         var json = JsonSerializer.Serialize(entity);
         Updates.Add((entitySetName, id, json));
+        Trail.Add($"write:{id}");
+        Apply(id, json);
+        return Task.CompletedTask;
+    }
 
+    /// <summary>
+    /// The production contract of <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>: no version → nothing sent
+    /// (<see cref="ArgumentException"/>); a missing row → <see cref="KeyNotFoundException"/>; a version that no longer
+    /// matches → <see cref="System.Data.DBConcurrencyException"/> and nothing written; otherwise applied, and the row's
+    /// version moves on.
+    /// </summary>
+    public override async Task UpdateIfMatchAsync(string entitySetName, Guid id, object entity, string etag,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(etag))
+            throw new ArgumentException("A conditional update needs the row's ETag as it was read; nothing was sent.", nameof(etag));
+
+        if (BeforeConditionalWrite is { } concurrentWriter)
+        {
+            BeforeConditionalWrite = null;
+            await concurrentWriter();
+        }
+
+        if (FailUpdates)
+            throw new HttpRequestException("Simulated Dataverse write failure.", null, HttpStatusCode.ServiceUnavailable);
+
+        var row = _rows.FirstOrDefault(r => r.Id == id)
+            ?? throw new KeyNotFoundException($"{entitySetName}({id}) was not found; nothing was created.");
+
+        if (row.ETag != etag)
+        {
+            ConditionalWrites.Add((id, etag, false));
+            Trail.Add($"if-match:{id}:changed");
+            throw new System.Data.DBConcurrencyException($"{entitySetName}({id}) changed since it was read; the update was not applied.");
+        }
+
+        ConditionalWrites.Add((id, etag, true));
+        Trail.Add($"if-match:{id}:applied");
+        var json = JsonSerializer.Serialize(entity);
+        Updates.Add((entitySetName, id, json));
+        Apply(id, json);
+    }
+
+    private void Apply(Guid id, string json)
+    {
         var row = _rows.FirstOrDefault(r => r.Id == id);
         if (row is not null)
         {
+            row.ETag = NextVersion();
             using var doc = JsonDocument.Parse(json);
             foreach (var p in doc.RootElement.EnumerateObject())
             {
@@ -1463,8 +1767,6 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
                 }
             }
         }
-
-        return Task.CompletedTask;
     }
 
     private IEnumerable<ExternalGrantRow> MatchGrants(string filter)

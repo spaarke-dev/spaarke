@@ -181,9 +181,14 @@ public static class ContactGrantEndpoints
                 };
             }
 
+            // Round 42 item 1: a row that changed after the issuer check gets the same managed_elsewhere answer; what the
+            // re-read found is recorded with it.
             logger.LogWarning(
-                "[EXT-CONTACT-GRANT] Refused: contact {GrantorContactId} → {GranteeContactId} on {RootType} {RootId}: {ReasonCode}.",
-                g.ContactId, grantee, g.RootType, g.RootId, refusal.ReasonCode);
+                "[EXT-CONTACT-GRANT] Refused: contact {GrantorContactId} → {GranteeContactId} on {RootType} {RootId}: {ReasonCode} " +
+                "(changed after the check: {ChangedConcurrently}; now issued by contact {NowIssuerContactId} / systemuser " +
+                "{NowIssuerSystemUserId}).",
+                g.ContactId, grantee, g.RootType, g.RootId, refusal.ReasonCode, outcome.ChangedConcurrently,
+                outcome.ChangedRowNow?.GrantedByContactId, outcome.ChangedRowNow?.GrantedBySystemUserId);
             return GrantExternalAccessEndpoint.PolicyRefusalProblem(refusal, httpContext);
         }
 
@@ -377,11 +382,12 @@ public static class ContactGrantEndpoints
     /// hand out time they do not hold).
     /// </summary>
     /// <remarks>
-    /// <para><b>Which rows count</b> — exactly the rows the read path lets confer (<c>ExternalParticipationService</c>):
-    /// the grantor's own active, unexpired rows on the record; and, unless the record is Secure or Limited (direct grants
-    /// only, FR-22), the active, unexpired organization-wide rows of the grantor's CONFERRING organizations. A row
-    /// counts only at <paramref name="grantedLevel"/> or above. A direct row carrying a firm organization confers only
-    /// while that organization is active (ISS-026), so such a row is checked; a firm that cannot be read is a fault.</para>
+    /// <para><b>Which rows count</b> — <see cref="ExternalGrantLifecycle.ReadContactHeldGrantsAsync"/>, the ONE definition
+    /// of a contact's own grant on a record (shared with the reconciliation job's contact-issued R1 rule, session 27 round
+    /// 42 item 2): the grantor's own active rows on the record and, unless it is Secure or Limited, the organization-wide
+    /// rows of their CONFERRING organizations, at <paramref name="grantedLevel"/> or above, with a direct row naming an
+    /// inactive firm excluded (ISS-026; a firm that cannot be read is a fault). Here only rows that confer TODAY count —
+    /// a dated, unexpired row.</para>
     /// <para><b>No qualifying dated row</b> means the grantor's level rests on an UNDATED term — standing-grant
     /// membership or organization expansion — which only a workforce contact's composition carries, and never on a
     /// direct-only record. Then there is nothing to cap at (NoCap). Anywhere else, the live rows contradict the
@@ -399,55 +405,13 @@ public static class ContactGrantEndpoints
         CancellationToken ct)
     {
         var logicalName = ExternalGrantRoot.LogicalNameFor(grantor.RootType);
-        bool directOnly;
-        var rows = new List<ExternalGrantRow>();
+        ContactHeldGrants held;
         try
         {
-            var flags = await participations.GetRootRecordFlagsAsync(logicalName, new[] { grantor.RootId }, ct);
-            // Unknown or unreadable flags: direct grants only (the fail-closed reading — fewer sources, so an earlier cap).
-            directOnly = !flags.TryGetValue(grantor.RootId, out var f) || f.IsUnreadable || f.IsDirectOnly;
-
-            rows.AddRange(await ExternalGrantLifecycle.QueryActiveRowsAsync(
-                dataverseClient, ExternalGrantKey.ForContact(grantor.RootType, grantor.RootId, grantor.ContactId), ct));
-
-            if (!directOnly)
-            {
-                foreach (var organizationId in grantor.OrganizationIds)
-                {
-                    rows.AddRange(await ExternalGrantLifecycle.QueryActiveRowsAsync(
-                        dataverseClient, ExternalGrantKey.ForOrganization(grantor.RootType, grantor.RootId, organizationId), ct));
-                }
-            }
-
-            // ISS-026: a direct row naming a firm confers only while the firm is active. A firm that IS one of the grantor's
-            // conferring organizations is active by construction; any other is read.
-            var qualifying = new List<ExternalGrantRow>();
-            foreach (var row in rows.Where(r => (r.AccessLevel ?? 0) >= (int)grantedLevel
-                                                && ExternalParticipationService.ConfersAccessOn(r.ExpiresDate, today)))
-            {
-                if (row.ContactId is not null && row.OrganizationId is { } firm && firm != Guid.Empty
-                    && !grantor.OrganizationIds.Contains(firm))
-                {
-                    OrganizationStateRow? organization;
-                    try
-                    {
-                        organization = await dataverseClient.RetrieveAsync<OrganizationStateRow>(
-                            "sprk_organizations", firm, "statecode", ct);
-                    }
-                    catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-                    {
-                        organization = null; // a deleted firm confers nothing — the row does not count
-                    }
-
-                    if (organization is null || organization.StateCode is not (null or 0))
-                        continue;
-                }
-
-                qualifying.Add(row);
-            }
-
-            if (qualifying.Count > 0)
-                return new GrantorExpiryCap(GrantorExpiryCapKind.Cap, qualifying.Max(r => r.ExpiresDate!.Value));
+            held = await ExternalGrantLifecycle.ReadContactHeldGrantsAsync(
+                grantor.ContactId, grantor.OrganizationIds, grantor.RootType, grantor.RootId, grantedLevel,
+                row => ExternalParticipationService.ConfersAccessOn(row.ExpiresDate, today),
+                dataverseClient, participations, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -457,7 +421,10 @@ public static class ContactGrantEndpoints
             return new GrantorExpiryCap(GrantorExpiryCapKind.Fault, null);
         }
 
-        if (!directOnly && grantor.Principal.UndatedAccessTermEntityTypes.Contains(logicalName))
+        if (held.Rows.Count > 0)
+            return new GrantorExpiryCap(GrantorExpiryCapKind.Cap, held.Rows.Max(r => r.ExpiresDate!.Value));
+
+        if (!held.DirectOnly && grantor.Principal.UndatedAccessTermEntityTypes.Contains(logicalName))
             return new GrantorExpiryCap(GrantorExpiryCapKind.NoCap, null);
 
         logger.LogWarning(
@@ -465,12 +432,6 @@ public static class ContactGrantEndpoints
             "at {Granted} or above confers it now and no undated term applies; treating the level as not held.",
             grantor.ContactId, grantor.Level, grantor.RootType, grantor.RootId, grantedLevel);
         return new GrantorExpiryCap(GrantorExpiryCapKind.Refuse, null);
-    }
-
-    private sealed class OrganizationStateRow
-    {
-        [JsonPropertyName("statecode")]
-        public int? StateCode { get; set; }
     }
 
     // =========================================================================================
@@ -606,13 +567,16 @@ public static class ContactGrantEndpoints
                 "The access could not be revoked just now. Nothing was changed; try again in a moment.");
         }
 
-        var mine = activeRows.Where(r => r.GrantedByContactId == g.ContactId).Select(r => r.Id).ToList();
+        // "Issued by me" is decided from THIS read, and each deactivation is conditional on the version this read returned
+        // (session 27 round 42 item 1): an internal user who takes a row over after this read (round 34 item 3) makes the
+        // write fail rather than be overwritten.
+        var mine = activeRows.Where(r => r.GrantedByContactId == g.ContactId).ToList();
         var othersRemain = activeRows.Any(r => r.GrantedByContactId != g.ContactId);
 
-        int deactivated;
+        ConditionalDeactivation outcome;
         try
         {
-            deactivated = await ExternalGrantLifecycle.DeactivateAsync(dataverseClient, mine, logger, ct);
+            outcome = await ExternalGrantLifecycle.DeactivateIfUnchangedAsync(dataverseClient, mine, logger, ct);
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -627,16 +591,36 @@ public static class ContactGrantEndpoints
 
         // The grant cache of the colleague — the ONE invalidation routine (task 137): every tenant a grant set is cached
         // under. Non-fatal by construction; the write has committed.
-        if (key.ContactId is { } colleague)
+        if (outcome.Deactivated.Count > 0 && key.ContactId is { } colleague)
             await participations.InvalidateGrantSetsAsync(new[] { colleague }, Array.Empty<Guid>(), CancellationToken.None);
+
+        if (outcome.ChangedSinceRead.Count > 0)
+        {
+            // Round 42 item 1: a row changed between the "issued by me" read and the write — 409 managed_elsewhere, with the
+            // existing copy; the row is re-read for the record of what it now is, and never written again (no blind retry).
+            await ExternalGrantLifecycle.ReReadChangedRowsAsync(dataverseClient, outcome.ChangedSinceRead, g.ContactId, logger, ct);
+
+            var refusal = outcome.Deactivated.Count == 0
+                ? GrantPolicyDecision.ManagedElsewhere
+                : GrantPolicyDecision.ManagedElsewhere with { Detail = PartlyManagedElsewhereDetail };
+            return GrantExternalAccessEndpoint.PolicyRefusalProblem(refusal, httpContext);
+        }
 
         logger.LogInformation(
             "[EXT-CONTACT-GRANT] Contact {GrantorContactId} revoked grant {Key} ({AccessRecordId}): {Count} of their row(s) " +
             "deactivated; access issued by others remains: {OthersRemain}.",
-            g.ContactId, key, request.AccessRecordId, deactivated, othersRemain);
+            g.ContactId, key, request.AccessRecordId, outcome.Deactivated.Count, othersRemain);
 
-        return TypedResults.Ok(new ContactGrantRevokeResponse(request.AccessRecordId, deactivated, othersRemain));
+        return TypedResults.Ok(new ContactGrantRevokeResponse(request.AccessRecordId, outcome.Deactivated.Count, othersRemain));
     }
+
+    /// <summary>
+    /// The 409 managed_elsewhere detail when a revoke DID end some of the caller's rows on the grant before another of them
+    /// turned out to have changed since the read (duplicate rows — rare, but "Nothing was changed" would then be untrue).
+    /// </summary>
+    internal const string PartlyManagedElsewhereDetail =
+        "This person also has access to this record that someone else changed while you were revoking it; ask them or " +
+        "the record's team to change it. The access you granted was ended.";
 
     private static IResult Validation(HttpContext httpContext, string detail)
         => ContactGrantorAuthorizationFilter.Problem(httpContext, StatusCodes.Status400BadRequest, "Validation Error",

@@ -109,6 +109,10 @@ export const IssuedGrantsList: React.FC<IssuedGrantsListProps> = ({
       setReload(n => n + 1);
     } catch (err: unknown) {
       setNotice({ intent: 'error', text: problemMessage(err, 'The access could not be revoked. Please try again.') });
+      // A refusal can mean the grant changed hands meanwhile (409 managed_elsewhere — an internal user took it over while
+      // you were revoking, session 27 round 42 item 1) or that part of it was ended: re-read the list, so it shows what
+      // is still yours rather than a row Revoke can no longer act on.
+      setReload(n => n + 1);
     } finally {
       setRevoking(null);
     }

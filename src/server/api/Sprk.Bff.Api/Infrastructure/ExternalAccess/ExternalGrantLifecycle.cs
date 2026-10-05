@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
 
@@ -98,9 +100,26 @@ internal sealed class ExternalGrantRow
     /// <para><c>sprk_expiresdate</c> is <b>Date Only</b> in live metadata, which is why this is
     /// <see cref="DateOnly"/> and not <see cref="DateTime"/> — and why the expiry read filter compares
     /// with bare <c>yyyy-MM-dd</c> (task 007's <c>ExpiryPredicate</c>).</para>
+    /// <para><b>⚠️ Its WIRE shape is not <c>yyyy-MM-dd</c></b> (task 140, read live 2026-10-05). The column's
+    /// <i>format</i> is DateOnly but its <i>behaviour</i> is <b>TimeZoneIndependent</b> (task 098 §2.3), and the Web API
+    /// returns a TimeZoneIndependent value as a full timestamp — <c>"2026-12-10T00:00:00Z"</c>. System.Text.Json's own
+    /// <see cref="DateOnly"/> converter accepts only <c>yyyy-MM-dd</c> and THROWS on that, so every read of a row carrying
+    /// an expiry (which, since task 097, is every row the BFF writes) failed with a <see cref="JsonException"/>: the grant
+    /// core's re-grant and every contact-side grant (its expiry-cap read), <c>/revoke</c>, the contact revoke and list,
+    /// and <c>set-record-share-expiry</c>. <see cref="DataverseDateOnlyJsonConverter"/> reads both shapes.</para>
     /// </remarks>
     [JsonPropertyName("sprk_expiresdate")]
+    [JsonConverter(typeof(DataverseDateOnlyJsonConverter))]
     public DateOnly? ExpiresDate { get; set; }
+
+    /// <summary>
+    /// The row's version as it was read — <c>@odata.etag</c>, <c>W/"&lt;versionnumber&gt;"</c>, which the Web API returns on
+    /// every row of a read without being asked (live-verified 2026-10-05). A write that must not land over a change made
+    /// since the read sends it as <c>If-Match</c> (<see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>): the contact-side
+    /// grant's PATCH and the contact revoke's deactivation (task 140, session 27 round 42 item 1).
+    /// </summary>
+    [JsonPropertyName("@odata.etag")]
+    public string? ETag { get; set; }
 
     [JsonPropertyName("_sprk_contact_value")]
     public Guid? ContactId { get; set; }
@@ -133,6 +152,58 @@ internal sealed class ExternalGrantRow
 
     /// <summary>Dataverse active state for this table.</summary>
     public bool IsActive => StateCode is null or 0;
+}
+
+/// <summary>
+/// Reads a Dataverse date-only column in BOTH shapes the Web API returns: <c>yyyy-MM-dd</c> (a column whose behaviour is
+/// DateOnly) and <c>yyyy-MM-ddT00:00:00Z</c> (a DateOnly-FORMAT column whose behaviour is TimeZoneIndependent —
+/// <c>sprk_externalrecordaccess.sprk_expiresdate</c>, live-verified 2026-10-05). Writes <c>yyyy-MM-dd</c>.
+/// </summary>
+/// <remarks>
+/// <para><b>The calendar date is the leading ten characters, as written.</b> A TimeZoneIndependent value is stored and
+/// returned with no time-zone conversion — the <c>Z</c> is how the Web API renders it, not an instant to convert — so the
+/// stored date is exactly the date part. Converting to a local date would move a midnight value to the previous day
+/// anywhere west of UTC. The SDK path reads the same column as a <see cref="DateTime"/> and takes its date the same
+/// way (<c>ExternalAccessReconciliationJob</c>).</para>
+/// <para>Anything else — a number, a malformed string — is a <see cref="JsonException"/>, never a guessed date.</para>
+/// <para>§11: <i>Existing</i> — System.Text.Json's own <see cref="DateOnly"/> converter, which reads only
+/// <c>yyyy-MM-dd</c> and is the defect. <i>Extension</i> — it cannot be configured to accept the timestamp shape, and
+/// changing the property to <see cref="DateTime"/> would change every consumer of a value that is a date. <i>Cost of doing
+/// nothing</i> — every read of a dated grant row throws (task 140 note §12).</para>
+/// </remarks>
+internal sealed class DataverseDateOnlyJsonConverter : JsonConverter<DateOnly?>
+{
+    /// <inheritdoc />
+    public override bool HandleNull => true;
+
+    /// <inheritdoc />
+    public override DateOnly? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+    {
+        if (reader.TokenType == JsonTokenType.Null)
+            return null;
+
+        if (reader.TokenType != JsonTokenType.String)
+            throw new JsonException($"A Dataverse date must be a JSON string, not {reader.TokenType}.");
+
+        var text = reader.GetString() ?? string.Empty;
+        if (text.Length >= 10
+            && (text.Length == 10 || text[10] == 'T')
+            && DateOnly.TryParseExact(text.AsSpan(0, 10), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+        {
+            return date;
+        }
+
+        throw new JsonException($"'{text}' is not a Dataverse date (yyyy-MM-dd, or yyyy-MM-ddT… from a TimeZoneIndependent column).");
+    }
+
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, DateOnly? value, JsonSerializerOptions options)
+    {
+        if (value is { } date)
+            writer.WriteStringValue(date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        else
+            writer.WriteNullValue();
+    }
 }
 
 /// <summary>
@@ -632,7 +703,184 @@ internal static class ExternalGrantLifecycle
 
         return deactivated;
     }
+
+    /// <summary>
+    /// Deactivates rows ONLY IF each is still at the version it was read with (<see cref="ExternalGrantRow.ETag"/> as
+    /// <c>If-Match</c>, <see cref="DataverseWebApiClient.UpdateIfMatchAsync"/>). A row that changed since the read is NOT
+    /// deactivated: it is returned in <see cref="ConditionalDeactivation.ChangedSinceRead"/>, and what that means is the
+    /// caller's decision — there is no retry.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why (session 27 round 42 item 1).</b> A CONTACT may deactivate only rows it issued, and decides "issued by
+    /// me" from a read. An internal user can take such a row over (round 34 item 3) between that read and the write; an
+    /// unconditional write would then end a decision the internal user just made. Every contact-path deactivation — the
+    /// contact revoke and the contact-issuer mode's duplicate collapses — goes through here.</para>
+    /// <para>Every other fault propagates exactly as in <see cref="DeactivateAsync"/> (a partial sweep surfaces as a
+    /// failure, never as success), including a row with no version (nothing is sent for it) and a row that no longer
+    /// exists.</para>
+    /// </remarks>
+    internal static async Task<ConditionalDeactivation> DeactivateIfUnchangedAsync(
+        DataverseWebApiClient dataverseClient,
+        IEnumerable<ExternalGrantRow> rows,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var deactivated = new List<Guid>();
+        var changed = new List<Guid>();
+
+        foreach (var row in rows)
+        {
+            try
+            {
+                await dataverseClient.UpdateIfMatchAsync(EntitySet, row.Id, new { statecode = 1, statuscode = 2 }, row.ETag ?? string.Empty, ct);
+            }
+            catch (System.Data.DBConcurrencyException)
+            {
+                changed.Add(row.Id);
+                logger.LogWarning(
+                    "[EXT-GRANT-LIFECYCLE] Access record {AccessRecordId} changed since it was read ({ETag}); it was NOT " +
+                    "deactivated — it is no longer certainly the reader's to end.", row.Id, row.ETag);
+                continue;
+            }
+
+            deactivated.Add(row.Id);
+            logger.LogInformation("[EXT-GRANT-LIFECYCLE] Deactivated access record {AccessRecordId} (If-Match {ETag})", row.Id, row.ETag);
+        }
+
+        return new ConditionalDeactivation(deactivated, changed);
+    }
+
+    /// <summary>
+    /// Re-reads each row that changed between a contact's "issued by me" read and its conditional write (session 27 round
+    /// 42 item 1: "the row is re-read for the response") and logs what it now is — never writing it again (no blind
+    /// retry). A re-read that fails is logged and yields <c>null</c> for that row; the caller's answer does not depend on it.
+    /// </summary>
+    /// <returns>The rows as they are now, in <paramref name="rowIds"/> order (<c>null</c> where the re-read failed or the row
+    /// is gone).</returns>
+    internal static async Task<IReadOnlyList<ExternalGrantRow?>> ReReadChangedRowsAsync(
+        DataverseWebApiClient dataverseClient,
+        IEnumerable<Guid> rowIds,
+        Guid callerContactId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var current = new List<ExternalGrantRow?>();
+        foreach (var rowId in rowIds)
+        {
+            ExternalGrantRow? row;
+            try
+            {
+                row = await RetrieveRowAsync(dataverseClient, rowId, ct);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogWarning(ex,
+                    "[EXT-GRANT-LIFECYCLE] Access record {AccessRecordId} changed after contact {ContactId} checked it was " +
+                    "theirs, and could not be re-read; nothing was written over it.", rowId, callerContactId);
+                current.Add(null);
+                continue;
+            }
+
+            logger.LogWarning(
+                "[EXT-GRANT-LIFECYCLE] Access record {AccessRecordId} changed after contact {ContactId} checked it was theirs; " +
+                "nothing was written over it. Now: active {Active}, level {Level}, expiry {Expiry}, issued by contact " +
+                "{IssuerContactId} / systemuser {IssuerSystemUserId}.",
+                rowId, callerContactId, row?.IsActive, row?.AccessLevel, row?.ExpiresDate,
+                row?.GrantedByContactId, row?.GrantedBySystemUserId);
+            current.Add(row);
+        }
+
+        return current;
+    }
+
+    // ── A contact's own access on one record (task 140 · owner G2 (i); session 27 round 42 item 2) ────────────
+
+    /// <summary>
+    /// The grant rows that can carry a CONTACT's own access to one record at <paramref name="minimumLevel"/> or above — the
+    /// ONE definition of "the contact's own grant" behind task 140's expiry rule. The contact-side grant route caps the
+    /// expiry a contact may issue at the latest of them (owner decision G2 (i): a grantor cannot hand out time they do not
+    /// hold), and the reconciliation job caps — or ends — a contact-issued row that carries no expiry by the same rows
+    /// (session 27 round 42 item 2: a contact-issued grant may never outlive its issuer's own access).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Which rows</b> — exactly the rows the read path lets confer (<c>ExternalParticipationService</c>): the
+    /// contact's own active rows on the record; and, unless the record is Secure or Limited (direct grants only, FR-22),
+    /// the active organization-wide rows of its CONFERRING organizations (<paramref name="conferringOrganizationIds"/> —
+    /// task 109's conferring set). Flags that are absent or unreadable read as direct-only: the fail-closed reading, with
+    /// fewer sources and so an earlier date. Only rows at <paramref name="minimumLevel"/> or above count, and only rows
+    /// <paramref name="mayConfer"/> keeps. A direct row naming a firm confers only while that firm is active (ISS-026): a
+    /// firm that is one of the contact's conferring organizations is active by construction; any other is read, and one
+    /// that no longer exists (404) means the row does not count.</para>
+    /// <para><b>Faults propagate</b> — a read that could not be completed is never "no rows".</para>
+    /// </remarks>
+    /// <param name="mayConfer">Rows it rejects are dropped BEFORE any firm is read. The route keeps only rows that confer
+    /// today; the job also keeps undated rows, whose date the same run may be about to stamp.</param>
+    internal static async Task<ContactHeldGrants> ReadContactHeldGrantsAsync(
+        Guid contactId,
+        IReadOnlyCollection<Guid> conferringOrganizationIds,
+        ExternalGrantRootType rootType,
+        Guid rootId,
+        ExternalAccessLevel minimumLevel,
+        Func<ExternalGrantRow, bool> mayConfer,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(mayConfer);
+
+        var flags = await participations.GetRootRecordFlagsAsync(ExternalGrantRoot.LogicalNameFor(rootType), new[] { rootId }, ct);
+        var directOnly = !flags.TryGetValue(rootId, out var f) || f.IsUnreadable || f.IsDirectOnly;
+
+        var rows = new List<ExternalGrantRow>(
+            await QueryActiveRowsAsync(dataverseClient, ExternalGrantKey.ForContact(rootType, rootId, contactId), ct));
+
+        if (!directOnly)
+        {
+            foreach (var organizationId in conferringOrganizationIds)
+            {
+                rows.AddRange(await QueryActiveRowsAsync(
+                    dataverseClient, ExternalGrantKey.ForOrganization(rootType, rootId, organizationId), ct));
+            }
+        }
+
+        var held = new List<ExternalGrantRow>();
+        foreach (var row in rows.Where(r => (r.AccessLevel ?? 0) >= (int)minimumLevel && mayConfer(r)))
+        {
+            if (row.ContactId is not null && row.OrganizationId is { } firm && firm != Guid.Empty
+                && !conferringOrganizationIds.Contains(firm))
+            {
+                ExternalParticipationService.OrganizationStateRow? organization;
+                try
+                {
+                    organization = await dataverseClient.RetrieveAsync<ExternalParticipationService.OrganizationStateRow>(
+                        "sprk_organizations", firm, "statecode", ct);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+                {
+                    organization = null; // a deleted firm confers nothing — the row does not count
+                }
+
+                if (!ExternalParticipationService.OrganizationIsActive(organization))
+                    continue;
+            }
+
+            held.Add(row);
+        }
+
+        return new ContactHeldGrants(directOnly, held);
+    }
 }
+
+/// <summary>What <see cref="ExternalGrantLifecycle.DeactivateIfUnchangedAsync"/> did.</summary>
+/// <param name="Deactivated">Rows that were still at their read version and are now inactive.</param>
+/// <param name="ChangedSinceRead">Rows that changed since they were read (HTTP 412) and were left exactly as they are.</param>
+internal sealed record ConditionalDeactivation(IReadOnlyList<Guid> Deactivated, IReadOnlyList<Guid> ChangedSinceRead);
+
+/// <summary>What <see cref="ExternalGrantLifecycle.ReadContactHeldGrantsAsync"/> found.</summary>
+/// <param name="DirectOnly">The record admits only direct grants for contacts (Secure, Limited, or flags that could not be
+/// read), so organization-wide rows were not read.</param>
+/// <param name="Rows">The rows that can carry the contact's access, as read — each with its own expiry, possibly none.</param>
+internal sealed record ContactHeldGrants(bool DirectOnly, IReadOnlyList<ExternalGrantRow> Rows);
 
 /// <summary>Who a grant would give access to — the input the write-time policy needs (task 138).</summary>
 internal enum GrantGranteeKind
