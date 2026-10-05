@@ -691,6 +691,31 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - **(c) The doc comments, the guard header and note §16.6/16.7** are rewritten to state exactly what is enforced: every compiled call path, plus a ban on `UnsafeAccessor` and on reflection over those types. Never "by construction" beyond that.
    - **(d) The gate script's `ReassignMatter -Apply`** never overwrites a recorded `OriginalOwner`: a second run keeps the first original. Tested.
 
+## Round 49 (2026-10-05). BINDING. Main-session decisions under round 15. Task 165, from its re-verification of `task/uac-r2-165-f2-v1`.
+
+1. **Routes that reach the whole tenant or the whole container type are for Spaarke's own operator environment only (option a).**
+   - **Which routes:**
+     - security alerts and secure score (round 35 item 4);
+     - container-type permissions and consumers (round 35 item 5);
+     - any other route whose answer spans the shared SPE tenant or a shared container type.
+   - **Why:** under Model 1, every customer environment's root admin is a "platform operator" in their own environment (round 41 item 2). A root-unit check judged against one environment's own hierarchy therefore cannot confine these routes.
+   - **The marker is a BFF DEPLOYMENT setting,** for example `SpeAdmin:PlatformOperatorEnvironment`. It is not a Dataverse column, because a customer admin can edit a column.
+     - It is validated at startup, and its default is `false`, so a missing setting fails closed.
+     - It is set `true` only for Spaarke-operated environments (dev, and Spaarke's own operator environment), in their App Service configuration through the deployment scripts and Bicep.
+   - **Who may call them:** only a root-unit admin in an environment with the marker. Every other caller gets the uniform 403/404.
+   - **Docs:** the topology doc and the customer deployment guide record that customer environments never carry the marker.
+   - **Rejected:**
+     - (b) needs a per-config "shared" column that a customer admin could clear;
+     - (c) relies on an operational promise that cannot be enforced.
+   - Tests and seeds: the marker off with a root admin; the marker on with a leaf admin; the marker missing.
+2. **The verifier's criteria are owed in the same round:**
+   - **H8 resume must survive the production Cosmos serializer.**
+     - The resume record (root container id, container type id) is persisted as typed fields. Never as `JsonElement` evidence: Newtonsoft writes that as `{"valueKind":1}`.
+     - The fake repository round-trips through the production serializer, so the tests see what production sees.
+   - **A non-OData fault after the container type exists** still reports and records the type and any root container (no orphan type, no unbound root).
+   - **The docs that claim "never creates a second container"** are corrected to match the fixed code.
+   - **The creation guard's five surviving shapes** each get a bite: an absolute-URL raw POST, a class-level constant URL, a generic `PostAsJsonAsync<T>`, a cross-file PowerShell URL variable, and `-Meth Post`. D30's "fails closed on what it cannot judge" is made true, or it is reworded to exactly what is enforced.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
