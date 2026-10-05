@@ -288,7 +288,9 @@ Fixes:
         IGenericEntityService.BulkUpdateAsync now clears on DBNull.Value (UpdateAsync's convention). The core's take-over
         stamp is now under test. Writers enumerated: core + set-record-share-expiry change active rows (both take over);
         /revoke, project closure and the reconciliation job deactivate (out of every contact path); no Spaarke role holds
-        prvWrite on sprk_externalrecordaccess (live read-only).
+        prvWrite on sprk_externalrecordaccess (live read-only). [CORRECTED in round v1c-v1, see the next outcome: the
+        reconciliation job does not only deactivate - its R1 stamps an expiry onto an ACTIVE undated row and keeps
+        sprk_grantedbycontact; session 27 round 42 item 2 decides what it does to a contact-issued row.]
       - G-140-1 false negative closed: the script's step (d) uses scripts/common/DataverseSolutionMembership.ps1 with the
         table's MetadataId (live read-only probe: a column of sprk_externalrecordaccess has no own solutioncomponents row and
         reads ViaTable); pinned by a new ContactGrantGuardTests fact. .NOTES test reference corrected.
@@ -321,6 +323,58 @@ Fixes:
       Tests (KEEP paths): ContactGrantAuthorizationTests +3 (core stamp; cross-surface share-expiry theory x2) and the by-id
       theory extended; RecordShareExpiryTests +3; ColleagueByEmailWireTests +3; ContactGrantGuardTests +1 fact; the task-109
       junction guard extended; SPA vitest +1. 17 BFF + 5 ArchTests + 1 SPA seeded violations each went red, each restored.
+    </outcome>
+    <outcome date="2026-10-05" round="v1c-v1 (verifier v1c; session 27 round 42)" branch="task/uac-r2-140-x1-v1c-v1" base="task/uac-r2-140-x1-v1c @ 2c2bcb232" status="code-complete; verifier v1c items 1-14 closed in code, tests and docs (round 42 items 1 and 2 implemented); G-140-1 (operator schema -Apply then -Verify) and G-140-2 (criterion 21 manual live gate) remain the pending manual gates (main session; task note sections 5, 6 and 12).">
+      Full record: projects/unified-access-control-r2/notes/task-140-contact-side-grant.md section 12.
+      - Round 42 item 1 (BINDING, option A): every contact-path write to a row the contact checked was its own is
+        CONDITIONAL on the version that read returned (@odata.etag as If-Match, new DataverseWebApiClient.UpdateIfMatchAsync):
+        the core's contact-issuer PATCH, the contact revoke's deactivation, and both contact-issuer duplicate collapses
+        (ExternalGrantLifecycle.DeactivateIfUnchangedAsync). HTTP 412 -&gt; 409 managed_elsewhere with the existing copy, the
+        row re-read (logged; GrantUpsertOutcome.ChangedRowNow), no retry. A revoke that had already ended another of the
+        caller's rows says so (PartlyManagedElsewhereDetail); a collapse leaves a taken-over duplicate; a row read without a
+        version is never written unconditionally. managed_elsewhere's ProblemDetails title corrected; the SPA's issued-grants
+        list re-reads after a refused revoke.
+      - Round 42 item 2 (BINDING): reconciliation R1 on a CONTACT-issued row with no expiry stamps the EARLIER of +90 and the
+        issuing contact's own grant on the record (at the row's level or above), DEACTIVATES it when the issuer holds none
+        there, keeps sprk_grantedbycontact, and reports each such row; judged as the run leaves the table (plain-R1 stamps,
+        R2 ends, contact-issued chains in dependency order, cycles fail closed); a fault leaves the row unchanged (run
+        partial). "The issuer's own grant" is ONE definition shared with the contact route's expiry cap
+        (ExternalGrantLifecycle.ReadContactHeldGrantsAsync, extracted from ContactGrantEndpoints).
+      - The three statements that said the job only deactivates are corrected (uac-access-control.md, note section 11
+        item 2, the previous outcome), and entity-schema.md + the job's class doc now say what R1 does.
+      - DISCOVERED and FIXED (pre-existing since task 023, on master too): sprk_expiresdate is DateOnly-format but
+        TimeZoneIndependent, so the Web API returns "2026-12-10T00:00:00Z" (read live, read-only); ExternalGrantRow's
+        DateOnly property threw on it, so every read of a dated grant row failed (/grant re-grant, /revoke,
+        set-record-share-expiry, and every contact grant/list/revoke). DataverseDateOnlyJsonConverter reads both shapes;
+        pinned by GrantRowWireTests over the real client. FAILURE-MODES entry recommended (exact text in note 12.7).
+      Placement (CLAUDE.md section 10): BFF + one method on the shared Spaarke.Dataverse client the grant code already uses.
+      No new endpoint, DI registration, option, job, column, PCF or package; the job resolves the already-registered
+      DataverseWebApiClient and ExternalParticipationService from its run scope, only when a contact-issued undated row exists.
+      Justification (CLAUDE.md section 11) for the new surface — full table in note 12.2:
+      (a) DataverseWebApiClient.UpdateIfMatchAsync. Existing: UpdateAsync (unconditional, upserts),
+          DataverseWebApiService.UpdateRecordFieldsIfUnchangedAsync (another client, logical-name keyed, long version).
+          Extension: UpdateAsync cannot gain a parameter without breaking every overriding double; same exception contract as
+          the existing conditional method. Cost of doing nothing: round 42 item 1 cannot be implemented.
+      (b) DataverseDateOnlyJsonConverter. Existing: System.Text.Json's DateOnly converter (the defect). Cost: every dated
+          grant-row read throws.
+      (c) ExternalGrantRow.ETag; ExternalGrantLifecycle.DeactivateIfUnchangedAsync + ConditionalDeactivation +
+          ReReadChangedRowsAsync. Existing: DeactivateAsync, whose callers are internal decisions and stay unconditional.
+          Cost: the revoke/collapse race stays open.
+      (d) ExternalGrantLifecycle.ReadContactHeldGrantsAsync + ContactHeldGrants: extracted, not new logic. Cost: two
+          definitions of "the contact's own grant" would drift.
+      (e) R1's contact-issued resolution and report types inside ExternalAccessReconciliationJob: it IS R1 (no new rule,
+          schedule or job). Cost: round 42 item 2 unimplemented.
+      Tests (KEEP paths): ContactGrantAuthorizationTests +12 (six one-input twin pairs), GrantRowWireTests 10 (new),
+      ExternalAccessReconciliationTests +16, ContactGrantGuardTests +2 (one theory), SPA vitest +1.
+      Seeds (each alone, restored and touched): 13 BFF race seeds + 1 ArchTest + 1 SPA, 10 R1 seeds (J2 re-seeded once after a
+      compile error), 2 shared-reader seeds, 1 wire-shape seed (the converter removed reproduces the production JsonException
+      through the real client) - every one went red (note 12.4).
+      Suites (final code, once): BFF unit 15536 passed / 0 failed / 54 skipped (15590); ArchTests 605/605;
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed / 25 skipped / 0 failed (428); external SPA
+      typecheck 0 errors, vitest 14/14, lint 0 problems, vite build green.
+      Publish (CLAUDE.md section 10, fresh exported trees at short paths, Compress-Archive Optimal incl. PDBs): task base
+      6b685f0d4 46.00 MB, round base 2c2bcb232 46.03 MB, this round 46.05 MB - +0.01 MB this round, +0.04 MB for the task,
+      212 = 212 = 212 files; no package change; no vulnerable BFF package.
     </outcome>
   </execution>
   <ui-tests>

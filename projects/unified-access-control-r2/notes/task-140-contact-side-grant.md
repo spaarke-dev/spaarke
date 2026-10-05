@@ -175,7 +175,8 @@ organization, project, recordtype, workassignment (+ system) — no contact-type
 (`EntityDefinitions(LogicalName='sprk_externalrecordaccess')/Attributes(LogicalName='sprk_grantedbycontact')`): prefix `sprk_`,
 target `contact`, `IsSecured` true, in SpaarkeCore. ⚠️ **Merge gate:** this code selects the column on EVERY grant-row read —
 it must not deploy to an environment where (a) has not run (POML step 1: "code that binds the new lookup must not merge before
-(c) passes").
+(c) passes"). Since round v1c-v1 the reconciliation job's grant scan also selects the column (R1's contact-issued rule, §12.1):
+before (a) runs, that scan fails every tick — fail-safe (the run is recorded failed and writes nothing) — the same gate.
 
 ## 6. Manual live gate G-140-2 (PENDING — main session; criterion 20)
 
@@ -233,7 +234,7 @@ Branch `task/uac-r2-140-x1-v1c`, created from `wip/uac-r2-140-x1-v1-restart` @ `
 | # | Item | Outcome |
 |---|---|---|
 | 1 | The WIP commit | **Kept in full, after review.** It built clean, and its affected tests were green (252/252 over ContactGrant / RecordShareExpiry / BulkUpdateTransaction / GrantPolicy / GrantorCeiling / GrantLifecycle) before any change. What it carried: the scoped colleague-by-email read (items 5/13), the no-disclosure by-id path (items 4/14), the schema script on the shared membership helper (items 3/12), the `.NOTES` fix (item 7), the set-record-share-expiry take-over code (items 2/6) and `IGenericEntityService.BulkUpdateAsync` clearing a column on `DBNull.Value` (UpdateAsync's convention). What it lacked, added here: tests + seeds for the take-over, the core's systemuser stamp under test, the script pin, the by-id equal-reads rule, the SPA type errors, docs, this record. |
-| 2 | Round 34 item 3 (BINDING) — internal take-over outside the core | **Closed.** `SetRecordShareExpiryEndpoint` adds, for every share whose `sprk_grantedbycontact` is set, `sprk_grantedbycontact = DBNull.Value` (clear) and `sprk_grantedby = EntityReference(systemuser, caller)` to that share's fields in the ONE `ExecuteTransactionRequest` (`ExternalGrantLifecycle.AddInternalTakeOverFields`); the caller's systemuser is read only when such a share exists; an unresolvable caller still clears the contact issuer (the core's "an audit field never blocks the write" rule). Writers enumerated (every BFF write to `sprk_externalrecordaccesses`): the core (take-over existed; its stamp now under test), set-record-share-expiry (added), and the DEACTIVATING writers `/revoke`, project closure and the reconciliation job — an inactive row is outside every contact path (the contact's grant, list and revoke change only ACTIVE rows it issued), so nothing there can be re-lengthened or revoked by the contact. Non-product writes: live read-only 2026-10-04, `prvWritesprk_ExternalRecordAccess` is held by System Administrator, System Customizer and Service Writer only — no Spaarke role — so no ordinary internal Write holder can change a grant row outside the BFF. Docs: uac-access-control.md, entity-schema.md (writer row + column note). |
+| 2 | Round 34 item 3 (BINDING) — internal take-over outside the core | **Closed.** `SetRecordShareExpiryEndpoint` adds, for every share whose `sprk_grantedbycontact` is set, `sprk_grantedbycontact = DBNull.Value` (clear) and `sprk_grantedby = EntityReference(systemuser, caller)` to that share's fields in the ONE `ExecuteTransactionRequest` (`ExternalGrantLifecycle.AddInternalTakeOverFields`); the caller's systemuser is read only when such a share exists; an unresolvable caller still clears the contact issuer (the core's "an audit field never blocks the write" rule). Writers enumerated (every BFF write to `sprk_externalrecordaccesses`): the core (take-over existed; its stamp now under test), set-record-share-expiry (added), and the DEACTIVATING writers `/revoke`, project closure and the reconciliation job — an inactive row is outside every contact path (the contact's grant, list and revoke change only ACTIVE rows it issued), so nothing there can be re-lengthened or revoked by the contact. ⚠️ **Corrected in §12 (round v1c-v1):** the reconciliation job does NOT only deactivate — its rule R1 writes `sprk_expiresdate` onto an ACTIVE row that has none and leaves `sprk_grantedbycontact` in place (verifier v1c item 2). R1 is not an internal Write holder (round 34 item 3 is not engaged), and session 27 round 42 item 2 now decides what R1 does to a contact-issued row (§12). Non-product writes: live read-only 2026-10-04, `prvWritesprk_ExternalRecordAccess` is held by System Administrator, System Customizer and Service Writer only — no Spaarke role — so no ordinary internal Write holder can change a grant row outside the BFF. Docs: uac-access-control.md, entity-schema.md (writer row + column note). |
 | 3 | `-Verify` false negative (G-140-1 could never pass) | **Closed.** Step (d) decides through `scripts/common/DataverseSolutionMembership.ps1` (`Get-DvSolutionMembership` paged, `Test-DvInSolution -TableMetadataId`); the column and relationship carry their table's MetadataId. Live read-only probe (2026-10-04): SpaarkeCore 374 components over all pages, 87 tables with subcomponents; `sprk_externalrecordaccess` (fbeb1369-…) is a Direct row; a column of that table (the existing `sprk_grantedby`, f23aba4f-…) has NO own row and reads `ViaTable` — exactly the shape the new column will have. Dry run (read-only) re-run green on the helper: (b) OK, (d) both profiles OK. Pinned by `SchemaScriptSolutionMembershipGuardTests` (helper use) and the new `ContactGrantGuardTests.TheSchemaScriptCountsTheColumnAndRelationshipThroughTheirTable` (each type-2/10 component carries `TableId`, the call passes `-TableMetadataId`, no own `solutioncomponents` read). Also: a comma-joined `-BffApplicationIds` (pwsh `-File`) is split. |
 | 4 | By-id path leaked another organization's contact email; existence oracle | **Closed.** Every by-id refusal (unknown id, inactive contact, active contact of another organization) is ONE 422 worded "This person …"; the stored email is never read into a message (only a VERIFIED colleague's address may label a later managed_elsewhere message). This round also makes the WORK identical: the contact lookup AND the membership read run for every id, so the reads done do not tell the caller whether the id names a contact. Tests: the 2-shape theory (other-organization, inactive) compares status, code and detail with an unknown id and asserts the secret email never appears and the same reads ran. |
 | 5 | Email lookup was system-wide | **Closed.** `ExternalParticipationService.FindConferringMembersByEmailAsync`: ONE read of the `sprk_contactorganization` rows of the grantor's conferring organizations (chunks of 25, every chunk read, `@odata.nextLink` followed) whose expanded contact is active and uses the email; re-decided in code by `ProjectColleaguesByEmail` (the task-109 conferring rule, active contact, case-insensitive trimmed email). >1 COLLEAGUE → 409 "more than one person in your organization"; an outsider is never counted or mentioned. Query live-verified read-only on spaarkedev1 (the production `$filter`/`$select`/`$expand`, incl. an escaped quote). The DTO and bff-client comments now say what the code does. **On the wire**: new `ColleagueByEmailWireTests` (3) run the REAL service over an in-memory ASP.NET Core server (ADR-038 §7's B1 replacement, as `OrganizationMembershipReadTests` does): the server receives EXACTLY the builder's `$filter` (a term appended at the call site goes red), its `$select`/`$expand`/page-size preference, every page is read, the live row shape is projected, a faulted page is `Failed` (never "nobody"), and chunks carry their own exact filters. **The full ArchTests run found the WIP's new junction read tripping task 109's guard** (`ExternalAccessQueryIntegrityGuardTests.MembershipJunctionQueriesUseTheWallSafeFilterBuilder`: "a sprk_contactorganizations query builds its $filter inline"). Not an inline filter — a third direction the guard did not know — so the guard was EXTENDED, not bypassed: `BuildColleagueByEmailFilter` is accepted as the (organizations, email) → colleagues builder, must be found (not vacuous), and its body is held to the wall rule (names `WallMembershipStateClause`, no `sprk_startdate`/`sprk_enddate`). |
@@ -298,3 +299,216 @@ Full runs, once, at the end (other agents were running suites concurrently):
 Live (read-only) this round: the colleague-by-email query run against spaarkedev1 with the production filter/select/expand; the
 SpaarkeCore membership probe (§11 item 3); the privilege read on `prvWritesprk_ExternalRecordAccess`; the schema script's dry run.
 No live write. The column is still absent live (dry run: "WOULD create").
+
+## 12. Fix round v1c-v1 (2026-10-05) — verifier v1c items 1–16, session 27 round 42
+
+Branch `task/uac-r2-140-x1-v1c-v1`, created from `task/uac-r2-140-x1-v1c` @ `2c2bcb232`. Binding decisions read from
+`work/unified-access-control-r2` @ `83460442d` (rounds 1–43); **round 42 is task 140's own** (the main session's answers to
+this verification's two open findings, under the owner's round-15 standing directive) and decides items 2 and 3 below.
+
+| # | Item | Outcome |
+|---|---|---|
+| 1 | Summary | Both LOW findings closed in code, tests and docs (items 2, 3). A third, pre-existing defect on the same read path was found and fixed (below: **the TZI wire shape**). |
+| 2 / 14 | The take-over writer list said the reconciliation job only DEACTIVATES grant rows | **Closed, both halves.** (a) The three statements are corrected — `docs/architecture/uac-access-control.md` (the take-over bullet now names R1 as the one writer that changes an ACTIVE contact-issued row and keeps the contact issuer), §11 item 2 above (correction note) and the POML's second `<outcome>` (bracketed correction) — and the same fact is now in `entity-schema.md` (writer table + the `sprk_grantedbycontact` column note) and the job's class doc. (b) **Round 42 item 2 implemented** (neither skip, take-over nor plain stamp): R1, on a CONTACT-issued row with no expiry, stamps the EARLIER of today + 90 and the latest date the issuing contact's own grant on the same record lasts at the row's level or above, DEACTIVATES the row when the issuer holds no such grant there, keeps `sprk_grantedbycontact` (no issuer column is written — no internal person acted), and reports each such row (per-row log line + `contactIssued` block in the R1 entry of `ResultJson` + heartbeat counts). Details below. |
+| 3 | Race between the contact-mode check and its write | **Closed per round 42 item 1 (option A).** Every contact-path write to a row it checked was its own is CONDITIONAL on the version that check read: `@odata.etag` (now read on `ExternalGrantRow.ETag`) sent as `If-Match` through the new `DataverseWebApiClient.UpdateIfMatchAsync`. Sites: the core's contact-issuer PATCH of the caller's own row; the contact revoke's deactivation; and — the same race class, closed with it — the contact-issuer mode's two duplicate collapses (match path and post-create), via `ExternalGrantLifecycle.DeactivateIfUnchangedAsync`. A 412 → **409 `managed_elsewhere` with the existing copy**; the row is re-read (`ReReadChangedRowsAsync`, logged; carried on `GrantUpsertOutcome.ChangedRowNow`); **no retry**. A revoke that had already ended another of the caller's own rows on the grant (a duplicate pair) answers the same 409 with a detail that does not claim "Nothing was changed" (`PartlyManagedElsewhereDetail`). A collapse leaves a taken-over duplicate in place (the caller's grant still succeeds on the survivor). A row read without a version is never written unconditionally (`ArgumentException` → the route's 500 with its message). The 409's ProblemDetails title for `managed_elsewhere` is now "Access is managed by someone else" (it read "Existing access is higher", which is the would-lower title). The SPA's issued-grants list re-reads after any refused revoke, so a row that changed hands drops out instead of offering a Revoke that can only 404. |
+| 4–13 | Verifier confirmations (WIP commit, round 34 item 3, `-Verify`, by-id, email scope, `.NOTES`, SPA, suites, seeds, compliance) | Re-verified by re-running every suite on the final code (below); no behaviour they describe was changed except where items 2/3 required. Item 13's publish size is RE-MEASURED below because this round changes BFF source. |
+| 15 | G-140-1 (operator schema `-Apply` / `-Verify` / read-back) | **Pending manual gate — unchanged** (§5, exact commands). |
+| 16 | G-140-2 (criterion 21 live gate) | **Pending manual gate.** Prerequisites now also include this branch's BFF: without the TZI fix below, steps (b), (e), (f) and (h) fail live (every read of a dated grant row threw). |
+
+### Discovered: every read of a dated grant row threw (the TZI wire shape) — fixed
+
+- **Fact (read-only, live, spaarkedev1, 2026-10-05).** `sprk_externalrecordaccess.sprk_expiresdate` is `Format = DateOnly`,
+  `DateTimeBehavior = TimeZoneIndependent` (metadata read; task 098 §2.3 had it), and the Web API returns a TZI value as a
+  timestamp: `"sprk_expiresdate":"2026-12-10T00:00:00Z"` (row read). Every row also carries `"@odata.etag":"W/\"25734128\""`.
+  `sprk_contactorganization.sprk_startdate/sprk_enddate` are DateOnly BEHAVIOUR (`"yyyy-MM-dd"`) — unaffected; task 142's ledger
+  column `sprk_grantedexpiry` is DateOnly behaviour in its schema script — unaffected.
+- **Defect.** `ExternalGrantRow.ExpiresDate` is `DateOnly?`; System.Text.Json's DateOnly converter accepts only `yyyy-MM-dd`
+  and throws `JsonException: The JSON value could not be converted to System.Nullable[DateOnly]. Path:
+  $.value[0].sprk_expiresdate` — reproduced through the REAL `DataverseWebApiClient` over the wire (seed X1 below). Since task
+  023 (2026-09-08; on master too) every read of a row carrying an expiry — i.e. every row the BFF has written since task 097 —
+  failed: `/grant` re-grant (match path) 500; `/revoke` (reads the row by id) 500; `set-record-share-expiry`; the Assigned-To
+  materializer's reads; and on this task's routes the grantor's expiry-cap read (so EVERY contact grant answered 503
+  `grantor_access_unreadable`), the list (503) and the revoke (503). A new grant's create path survived only because its
+  post-create duplicate check swallows the throw. No offline test could see it: every double serialized rows in a shape the
+  test chose (`yyyy-MM-dd`).
+- **Fix.** `DataverseDateOnlyJsonConverter` on `ExternalGrantRow.ExpiresDate`: reads `yyyy-MM-dd` and `yyyy-MM-ddT…` (the
+  calendar date is the leading ten characters as written — a TZI value is not converted), writes `yyyy-MM-dd`, throws on anything
+  else. Pinned by `GrantRowWireTests`, which serve the live response verbatim (ids aside) to the real client.
+- **Escalation note for the main session.** This is a production defect on master, independent of task 140; it ships with this
+  branch. A FAILURE-MODES entry is recommended (`.claude/**` is main-session-only — exact text in §12.7).
+
+### 12.1 R1 on a contact-issued undated row — the rule as built (`ExternalAccessReconciliationJob.ResolveContactIssuedAsync`)
+
+- **One definition of "the issuer's own grant".** The contact route's expiry-cap read was extracted (moved, not rewritten) into
+  `ExternalGrantLifecycle.ReadContactHeldGrantsAsync`: the contact's own active rows on the record and, unless the record is
+  Secure/Limited (or its flags are unreadable — fail closed), the org-wide rows of its CONFERRING organizations (task 109's
+  set), at the given level or above, a direct row naming an inactive or deleted firm excluded (ISS-026). The route calls it with
+  "confers today"; R1 calls it with the row's own level and also keeps undated rows (this run may stamp them).
+- **Judged as this run leaves the table.** An issuer's own undated row that plain R1 stamps counts at the default date; one R2
+  ends this run counts for nothing; one that is itself contact-issued and undated is decided first (dependency order); rows that
+  only vouch for each other (a cycle with no outside source) are decided together, each counting the others for nothing — the
+  fail-closed reading, which can end a row early but never lets one outlive its issuer.
+- **"Holds an active grant there" = a grant ROW** (round 42's words). Access resting only on an undated term (a workforce
+  contact's standing-grant / organization-expansion composition) is not a grant on the record and carries no date; such an
+  issuer's undated row is ended — the safe direction; the issuer can grant again from the SPA, where the route evaluates the
+  term. A row naming no record is ended (its issuer holds no grant "there").
+- **Faults never write.** Unreadable memberships, a failed grant read, an issuer undated row this run did not plan (appeared
+  after the scan / beyond a truncated one) or a dependency on such a row → the row is LEFT UNCHANGED, reported `Unresolved`, and
+  the run is reported partial (`Success = false`) so tomorrow's tick retries it.
+- **Report-only mode** decides and reports exactly what a write pass would do (it only reads); writes still wait for the owner
+  switch. Nothing else in R1–R3 changed; a run with no contact-issued row resolves nothing and reads nothing extra.
+
+### 12.2 Placement + justification (CLAUDE.md §10 / §11) — new surface this round
+
+Placement: BFF (+ one method on the shared `Spaarke.Dataverse` client the BFF's grant code already uses). **No new endpoint, DI
+registration, option, job, column, PCF or package.** The job resolves the already-registered `DataverseWebApiClient` and
+`ExternalParticipationService` from its run scope, only when a contact-issued undated row exists.
+
+| New surface | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `DataverseWebApiClient.UpdateIfMatchAsync` | `UpdateAsync` (unconditional; a PATCH without If-Match UPSERTS); `DataverseWebApiService.UpdateRecordFieldsIfUnchangedAsync` (conditional, but on another client keyed by logical name + a metadata lookup, with a `long` version); `ContactIdentityStore`'s private If-Match writer (contacts only) | `UpdateAsync` cannot gain a parameter without breaking every test double that overrides it, and its upsert default is relied on; the grant code reads and writes through this client and holds the exact ETag string it read. Same exception contract as `UpdateRecordFieldsIfUnchangedAsync` (412 → `DBConcurrencyException`, 404 → `KeyNotFoundException`) | Round 42 item 1 unimplementable: a contact's write lands over an internal take-over |
+| `DataverseDateOnlyJsonConverter` | System.Text.Json's DateOnly converter (the defect) | Not configurable for the timestamp shape; `DateTime` would change every consumer of a date | Every read of a dated grant row throws (above) |
+| `ExternalGrantRow.ETag` | the one row shape | extended | No version to send |
+| `ExternalGrantLifecycle.DeactivateIfUnchangedAsync` + `ConditionalDeactivation`; `ReReadChangedRowsAsync` | `DeactivateAsync` (unconditional) | `DeactivateAsync`'s callers (`/revoke`, the default-mode collapse, the materializer, closure) are internal decisions and stay unconditional; a flag would mix two contracts; one sibling beside it | The contact revoke / collapse race stays open |
+| `ExternalGrantLifecycle.ReadContactHeldGrantsAsync` + `ContactHeldGrants` | `ContactGrantEndpoints.ResolveGrantorExpiryCapAsync`'s inline read | EXTRACTED from it (the route now calls it) | Two definitions of "the contact's own grant" (route vs job) would drift |
+| R1's contact-issued resolution (`ResolveContactIssuedAsync`, `ContactIssuedUndated`/`Outcome`/`Report`/`Row`, `PlannedChange.ContactIssued`, `RuleCounts.ContactIssued`, three attribute constants) | R1 in the same job | It IS R1 (no new rule entry, schedule or job) | Round 42 item 2: an R1 write would let a contact-issued grant outlive its issuer |
+| `GrantUpsertOutcome.ChangedConcurrently` / `ChangedRowNow`, `ConcurrentChangeRefusalAsync`, `ContactGrantEndpoints.PartlyManagedElsewhereDetail` | the managed_elsewhere refusal | reused (same code, same copy) | — (the refusal path of item 3) |
+
+§11.5 (complexity, not LOC): `ExternalAccessReconciliationJob.cs` grows 871 → 1313 lines (≈45 % doc comments). The addition is
+R1's own decision for one row class, behind the job's one reason to change (a grant row's own state as the truth) — cohesive, not
+a second responsibility; its I/O is the shared reader. It would be extracted if a second consumer of the decision appeared.
+
+### 12.3 Tests (KEEP paths) and what each pins
+- `ContactGrantAuthorizationTests` +12 (each a one-input twin pair: the internal change landed in the window or not):
+  grant PATCH race (409, existing copy, the take-over's date/stamp/level stand, one refused conditional write, re-read, nothing
+  after); revoke race (409, existing copy, row stays active and the internal user's); revoke of a duplicate pair with one taken
+  over (the other ended, invalidation, partial copy); match-path collapse leaves a taken-over duplicate; post-create collapse leaves
+  a taken-over raced row; a row read without a version sends nothing (grant / revoke → 500 with message). The in-memory table now
+  versions every row (`@odata.etag` bumps on every write) and judges `If-Match` like Dataverse.
+- `GrantRowWireTests` (new, 10): the REAL `DataverseWebApiClient` over a loopback server (it builds its own `HttpClient`, so a
+  loopback port, not a TestServer — ADR-038 §7's B1 replacement): the live grant-row response decodes (TZI expiry, ETag) for a
+  query and a by-id read; a bare date and a null still read; `If-Match` carries the version verbatim; 412 → `DBConcurrencyException`
+  with no retry; 404 → `KeyNotFoundException`; no version → nothing sent; `DeactivateIfUnchangedAsync` sends each row's own version
+  and reports the changed one.
+- `ExternalAccessReconciliationTests` +16: +90 when the issuer holds longer; capped at the issuer's date; deactivated for five
+  "holds no grant there" shapes (revoked, expired, lower level, none, another record) — issuer kept and only the state columns
+  written in every case; unresolved on unreadable memberships / grants (row unchanged, run partial); the issuer's own undated row
+  judged as this run leaves it (plain R1 → +90 / R2 → ended); a chain decided in dependency order; a cycle ended; the issuer's
+  firm's org-wide grant counts on a Standard record and not on a Secure one; report-only decides and reports, writes nothing.
+- `ContactGrantGuardTests` +1 theory (2): the contact-side surface sends no unconditional grant-row write.
+- External SPA vitest +1: a refused revoke shows the message verbatim and re-reads the list.
+
+### 12.4 Perturbation record (each seed alone, affected tests run, file restored and touched)
+
+Seeds that change logic use a runtime-opaque condition (`Environment.GetEnvironmentVariable("SEED_NEVER_SET_140") is null`).
+Filters: CG = `ContactGrant*` + `GrantRowWireTests` (107 tests); RJ = `ExternalAccessReconciliationTests` (53); both (160).
+Every seed went red; every file was restored and touched; the tree was verified identical to the commit afterwards.
+
+Item 3 — the race (CG):
+- **S1** the contact-issuer PATCH unconditional again (`UpdateAsync`) → 3 red: the grant race theory (both twins — the
+  conditional write is asserted in each) and the no-version grant case.
+- **S2** no re-read after the refused PATCH → 1 red (grant race, take-over twin).
+- **S3** a blind retry (unconditional PATCH) after the 412 → 1 red (grant race, take-over twin).
+- **S4** the revoke deactivates unconditionally (`DeactivateAsync`) → 4 red (revoke race both twins, duplicate pair, no-version
+  revoke). **A1** the same seed against the ArchTests → 1 red (`TheContactSideSurfaceWritesGrantRowsOnlyConditionally`, the
+  endpoints file).
+- **S5** the revoke ignores a changed row (answers 200) → 2 red (revoke race, duplicate pair).
+- **S6** the partial-revoke detail replaced by the "Nothing was changed" copy → 1 red (duplicate pair).
+- **S7** the revoke's re-read skipped → 2 red (revoke race, duplicate pair).
+- **S8** the contact-issuer collapses unconditional → 3 red (match-path collapse; post-create collapse, both twins).
+- **S9** `DeactivateIfUnchangedAsync` counts a changed row as deactivated → 3 red (revoke race, duplicate pair, the wire test).
+- **S10** `UpdateIfMatchAsync` sends no `If-Match` → 2 red (wire: the header test and `DeactivateIfUnchanged…`).
+- **S11** 412 not mapped to `DBConcurrencyException` → 2 red (wire: the 412 test and `DeactivateIfUnchanged…`).
+- **S12** an empty / whitespace version still sent → 2 red (wire: both no-version cases).
+- **S14** the colleague's cache not invalidated when a deactivation committed beside a conflict → 1 red (duplicate pair).
+- **S13** (SPA vitest) the issued-grants list not re-read after a refused revoke → 1 red (the new vitest).
+
+Item 2 — R1 on a contact-issued undated row (RJ):
+- **J1** no cap (always +90) → 4 red (capped, chain, firm's org-wide grant on a Standard record, report-only).
+- **J2** (re-seeded as **J2b** after the first form failed to compile on definite assignment) stamp the default instead of
+  deactivating → 9 red (all five "holds no grant there" shapes, the Secure firm case, the R2 twin, the cycle, report-only).
+- **J3** the contact issuer cleared in the same write → 5 red (every stamping case asserts the issuer kept and only
+  `sprk_expiresdate` written).
+- **J4** plain-R1 stamps not anticipated → 1 red (the issuer's own undated row twin).
+- **J5** R2 deactivations not anticipated → 1 red (the R2 twin — the issuer's row reaches the decision as unknown).
+- **J6** no dependency order (a contact-issued issuer row decided as "nothing") → 1 red (chain).
+- **J7** a read fault treated as "no grant" (ended) → 2 red (both unreadable cases).
+- **J8** the row's level ignored → 1 red ("lower-level").
+- **J9** resolution skipped in report-only mode → 1 red (report-only).
+- **J10** contact-issued rows planned as plain R1 → 16 red (every new R1 test).
+
+The shared reader (both):
+- **R1** a direct row naming an inactive firm counted → 1 red (the route's firm theory) — the extraction kept the guard.
+- **R2** Secure/Limited ignored (org-wide rows read) → 2 red (the route's Secure cap test AND the job's Secure firm case — one
+  definition, both consumers).
+
+The wire shape (CG):
+- **X1** the converter removed → 3 red (both live-shape reads and `DeactivateIfUnchanged…`): the REAL client throws
+  `JsonException: The JSON value could not be converted to System.Nullable[DateOnly]. Path: $.value[0].sprk_expiresdate` on the
+  live response — the production defect, reproduced offline.
+
+### 12.4b Suite results (the final code; full runs once, at the end; other agents were running suites concurrently)
+
+Affected first (each green before the full runs): `ContactGrant*` + `RecordShareExpiry*` + `BulkUpdateTransaction*` +
+`ColleagueByEmail*` **134/134**; `GrantRowWireTests` **10/10**; `ExternalAccessReconciliationTests` **53/53**; the whole
+access-control / external-access / grant set (`Sprk.Bff.Api.Tests.AccessControl` + `ExternalAccess` + `Grant`) **3059/3059**;
+`ContactGrantGuardTests` **6/6**.
+
+Full runs, once, on the final code (BFF source = `ddef8dd04`; the final commit adds only the note and the POML):
+- **BFF unit suite** (`tests/unit/Sprk.Bff.Api.Tests`, which compiles `tests/integration/auth/**`): **15536 passed, 0 failed,
+  54 skipped (15590)** — +38 over r-final's 15552, exactly this round's new tests (12 + 10 + 16).
+- **ArchTests** (`tests/Spaarke.ArchTests`): **605/605** (+2: the new theory).
+- **Sprk.Bff.Api.IntegrationTests**: **104/104**. **Spe.Integration.Tests**: **403 passed, 25 skipped, 0 failed (428)**.
+- **External SPA**: `npm install --legacy-peer-deps --no-audit --no-fund` OK; `npm run typecheck` (tsc --noEmit) **0 errors**;
+  `npx vitest run` **14/14**; `npm run lint` **0 problems**; `npm run build` (vite) green (the pre-existing >500 kB chunk
+  warning only).
+
+### 12.5 Publish size (CLAUDE.md §10 item 4) and CVE
+
+Fresh trees exported from the commits (BFF + shared + config + root build files) to SHORT paths, each `dotnet publish -c
+Release`, zipped with PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy\api-publish\*` (incl. PDBs):
+
+| Tree | Commit | Files (PDBs) | Bytes | MB |
+|---|---|---|---|---|
+| `C:\wt140m3` — task base | `6b685f0d4` (integ/uac-r2-batch4) | 212 (4) | 48,236,151 | 46.00 |
+| `C:\wt140p3` — this round's base | `2c2bcb232` | 212 (4) | 48,270,036 | 46.03 |
+| `C:\wt140b3` — this round | `ddef8dd04` (the BFF source of the final commit) | 212 (4) | 48,282,230 | 46.05 |
+
+This round: **+0.01 MB** (+12,194 bytes); the whole task: **+0.04 MB** (+46,079 bytes); 212 = 212 = 212 files. ≤ 60 MB. No
+package added or changed (no `*.csproj` / `Directory.Packages.props` change this round). `dotnet list package --vulnerable
+--include-transitive` (BFF): **no vulnerable packages**. The task base matches the earlier rounds' measurement (46.00 MB).
+
+### 12.6 Quality gates (Step 9.5, FULL rigor) — this round's diff
+
+- **code-review** — no Critical. W1: `ExternalAccessReconciliationJob.cs` 871 → 1313 lines — evaluated per §11.5 (12.2): one
+  rule's decision, cohesive; noted for the PR. W2: R1's contact-issued reads run per such row (memberships cached per issuer);
+  the population is admin-cleared contact-issued rows only. W3: an issuer with a long dated grant AND an undated row the run did
+  not plan is reported `Unresolved` although the answer could not change — the conservative direction (unchanged, retried
+  tomorrow). W4 (**deploy order, extends §5's merge gate**): the job's grant scan now selects `sprk_grantedbycontact`, so in an
+  environment where G-140-1 has not run the scan fails every tick — fail-safe (the run is recorded failed, nothing is written),
+  and the same gate as the BFF's `RowSelect`. W5: the contact writes depend on `@odata.etag` being present — pinned by the live
+  shape in `GrantRowWireTests`; a missing version fails closed (500 with a message), never an unconditional write.
+- **adr-check** — compliant: ADR-001 (no new route), 002 (no plugin), 003 (fail closed: a 412 refuses, a missing version
+  refuses, a read fault never writes, report-only by default), 007 (no Graph), 008 (filters unchanged; the handler still
+  re-validates), 009 (the ONE invalidation routine, also after a partial revoke), 010 (no new registration), 013 (no AI), 028
+  (no plane branching, no secret), 036 (the job still never throws from `ExecuteAsync`; per-row faults are reported, not
+  swallowed — Error log + partial status), 038 (no `Mock<HttpMessageHandler>`: a loopback server for the client that builds its
+  own `HttpClient`; no DI or ctor tests; one-input twins), 052 (the job's placement is unchanged).
+
+### 12.7 `.claude/` edit recommended (main session only)
+
+Add to `.claude/FAILURE-MODES.md` (next free AP number), verbatim:
+
+> **AP-xx: A Dataverse DateOnly-FORMAT column with TimeZoneIndependent BEHAVIOUR comes back from the Web API as a timestamp.**
+> `"sprk_expiresdate":"2026-12-10T00:00:00Z"`, not `"2026-12-10"` (only DateOnly *behaviour* returns a bare date).
+> System.Text.Json's `DateOnly` converter throws on the timestamp, so a `DateOnly?` property bound to such a column fails every
+> read that carries a value — and in-memory doubles that serialize the shape the test chose never show it. Before typing a
+> Web API row property as `DateOnly`, read the column's `DateTimeBehavior`; for TimeZoneIndependent use a converter that takes the
+> leading `yyyy-MM-dd` as written (`DataverseDateOnlyJsonConverter`, task 140), and pin it with a wire test that serves the live
+> response. Found by unified-access-control-r2 task 140 (round v1c-v1, 2026-10-05) after it had broken every dated grant-row read
+> since task 023.
+
+Live (read-only) this round: the `sprk_externalrecordaccesses` row read (wire shape + ETag, with and without the BFF's
+formatted-value Prefer header), three attribute-metadata reads (`sprk_expiresdate`; `sprk_contactorganization.sprk_startdate/
+sprk_enddate`), and an attempted metadata read of task 142's `sprk_assignedaccess.sprk_grantedexpiry` (the table does not exist
+live yet; its schema script declares DateOnly behaviour). No live write.
