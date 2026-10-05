@@ -770,6 +770,25 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
 4. **Presence evidence:** an `Authorization = null` assignment never counts as a bearer. Better still, presence is judged at run time from `EndpointDataSource` where the rule allows it. State the remaining heuristic's limits exactly.
 5. Note 19.2 and the guard headers state exactly what is enforced at run time and what by text.
 
+## Round 53 (2026-10-05). BINDING. Main-session decisions under round 15. Task 150's integration lane, from its second re-verification of `task/uac-r2-150-integ-c-v2`.
+
+1. **The caller-rights read fault gets a provisioning code (option b).**
+   - The code is `500 sdap.provision.caller_rights_unverifiable`, retryable, with the detail the worker wrote: "Which access you hold on this {record} could not be read, so securing it could not make sure you keep that access. Nothing was changed; you may try again."
+   - It is added to `provisioningService.ts` and to the emitted-codes list, pinned verbatim. The ribbon gets the same copy with `{record}`.
+   - **Why:** round 26 item 1 keeps codes namespaced by endpoint. F3's `sdap.unsecure.permission_unverifiable` belongs to the unsecure endpoint.
+2. **A flagged root with a container, owned by another team INSIDE the Secure Record business unit, is already isolated (option b).**
+   - Example: the retired default team, before task 144's migration.
+   - **The behaviour:**
+     - `can-manage-access` (`includeOwner`) reports it as owned by "another team inside the Secure business unit".
+     - The ribbon HIDES Make Secure there: the record is secure and isolated, and the user has nothing to finish.
+     - Moving the record to the named team is task 144's migration (script/job), which stays out of provisioning, as 144 decided.
+     - The server's 409 `owned_by_other_secure_team` stays as the API answer.
+   - **Integration checklist:** 144's migration `-Apply`/`-Verify` is a live gate before 150's ribbon ships.
+   - Tests: the ribbon is hidden for that case; the server refusal is unchanged.
+3. **The test gaps are closed:**
+   - The ribbon's "who owns it cannot be told" table uses a fetch mock that returns a real Promise, so each case runs the guard it names: record-echo, null answer, and the others. Seeds C2 and C4 bite.
+   - The ownership-held and role-held Full Access cases run DIFFERENT fixture paths, so a fake can tell them apart.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
