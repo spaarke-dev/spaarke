@@ -265,7 +265,7 @@ round 33 item 2's copy.
 | G-8 | a user in each populated BU (root `Spaarke`, `Spaarke Business Unit 1`) reads the true value | escalation trigger 1's live check |
 | G-9 | Unsecure F3 live: a Collaborate-level colleague → 403 `not_permitted`; the creator and a Full Access holder → 200 | through the API until the ribbon ships |
 | G-10 | Wizard: secure + attached file with provisioning forced to fail — a LOCAL BFF pointed at dev with a misconfigured `SecureRecord:OwnerTeamName`, never the shared dev BFF | no `sprk_document`, no file in any container, the held-back warning |
-| G-11 | Access ribbon (§21, §22, §23, §24): after G-1 (BFF with 148 + 150 — including round 46's `can-manage-access` `includeOwner` answer — and, for Make Secure, round 26 item 3's relocation wired at integration with its scheduled backstop: 147's `SecureChildReconciliationJob` settling pending Make Secure relocations, writes on — §22.4, §24.2) and the web resources (`sprk_/scripts/access_ribbon.js` **1.4.0**, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the amendment ui-tests pass, plus round 40's "Make Secure finishes an unfinished transition" ui-test (§23.1) and round 46's "Make Secure finishes a secure record not owned by the Secure Record Owners team" ui-test (§24.4 — also the G-11 check of legacy secure records still user-owned, the verifier's item 8). Omit `-SecureTransitionDeployed` where the BFF lacks task 148's transition, the wired relocation or its backstop |
+| G-11 | Access ribbon (§21, §22, §23, §24, §25): after G-1 (BFF with 148 + 150 — including round 46's and round 53's `can-manage-access` `includeOwner` answer with `owningTeamInSecureBusinessUnit`, and round 53's `caller_rights_unverifiable` — and, for Make Secure, round 26 item 3's relocation wired at integration with its scheduled backstop: 147's `SecureChildReconciliationJob` settling pending Make Secure relocations, writes on — §22.4, §24.2); after **task 144's migration in that environment** (round 53 item 2, a live gate before the ribbon ships: `pwsh scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl …` dry run, then `-Apply -AcceptedAssignCascade <what the dry run reported>`, then `-Verify` exit 0 — §25.2); and the web resources (`sprk_/scripts/access_ribbon.js` **1.5.0**, `assignedaccess_postsave.js`, `bff_auth.js`): `pwsh infrastructure/dataverse/ribbon/AccessRibbons/Set-AccessRibbon.ps1 -SecureTransitionDeployed` (dry run), then `-EnvironmentUrl … -SolutionName <ribbon solution> -SecureTransitionDeployed -Apply` (exports, checks in the work-assignment ribbon — commit it — merges, imports, verifies), then the POML ui-tests | `-Verify` exit 0; the amendment ui-tests pass, plus round 40's "Make Secure finishes an unfinished transition" ui-test (§23.1), round 46's "Make Secure finishes a secure record not owned by the Secure Record Owners team" ui-test (§24.4 — also the G-11 check of legacy secure records still user-owned, the verifier's item 8; since round 53 it includes the hidden case for another team inside the Secure Record business unit), and round 53's "Make Secure run by the record's owner" and "Make Secure run by an administrator" ui-tests (§25.3 — the only proof of a REAL ownership-held or role-held Delete; the code delegates to `RetrievePrincipalAccess`). Omit `-SecureTransitionDeployed` where the BFF lacks task 148's transition, the wired relocation or its backstop |
 
 **Merge gates (all hold before task 150 reaches master):**
 1. **F6: MET.** Rows 1-6 closed by owner round 10 item 9 (c1, §15); rows 7-11 closed by owner round 13 item 10
@@ -1422,7 +1422,9 @@ made (Dataverse, Azure, Entra, SPE: none, not even a read).
   (the probe's "could not answer" is `AccessRights.None`, deliberately indistinguishable from "no rights"), refuses before
   any write: 500, the detail "Which access you hold on this {record} could not be read, so securing it could not make
   sure you keep that access. Nothing was changed; you may try again."
-- **Interpretation recorded — "the existing unverifiable code".** `sdap.unsecure.permission_unverifiable`
+- ~~**Interpretation recorded — "the existing unverifiable code".**~~ **Superseded by round 53 item 1 (§25.1):** the
+  refusal is now provisioning's own `500 sdap.provision.caller_rights_unverifiable` (codes are namespaced by endpoint,
+  round 26 item 1), the detail unchanged. The original text: `sdap.unsecure.permission_unverifiable`
   (`SecureDesignationRemoval.PermissionUnverifiableReasonCode`): it is the one code that already means "the caller's rights
   on this secure record could not be read" (F3's `RightsUnreadable` basis), and the floor exists to keep exactly the right
   F3 decides from them. Every provisioning "unverifiable" code names a different fact — `creator_no_access_unverifiable`
@@ -1435,10 +1437,12 @@ made (Dataverse, Azure, Entra, SPE: none, not even a read).
   still gets EXACTLY Collaborate (no transition, no floor read).
 - **Tests** (`SecureFlagEndpointWriteTests`):
   - ownership-held, role-held (forward) and role-held (resume) Full Access → an explicit Full Access share; the creator at
-    Collaborate; exactly two rights probes (the gate, then the floor) — theory ×3;
+    Collaborate; exactly two rights probes (the gate, then the floor) — theory ×3 **[the ownership and role rows ran the
+    SAME fixture path here — corrected in §25.3: they now run different ones]**;
   - Collaborate-only (no Delete held, even as owner) → exactly Collaborate, forward and resume — theory ×2;
   - the floor read fails — the probe throws, or answers without Write — forward and resume: 500
-    `sdap.unsecure.permission_unverifiable`, the detail verbatim, nothing written — theory ×4 (fixture switch
+    `sdap.unsecure.permission_unverifiable` **[since round 53: `sdap.provision.caller_rights_unverifiable`, §25.1]**, the
+    detail verbatim, nothing written — theory ×4 (fixture switch
     `FollowUpRightsProbeAnswersNone`, beside `FullAccessProbeThrows`);
   - the wizards' path reads no floor: a caller holding Delete and a probe that would throw after the gate → 200, exactly
     Collaborate, one probe;
@@ -1463,7 +1467,8 @@ made (Dataverse, Azure, Entra, SPE: none, not even a read).
   is gated on that job being registered with its writes on.
 - **Why it is not built on this branch.** It is wired at integration "after 147, 150 and 166 are all on the integration
   branch" (round 46). Checked at `integ/uac-r2-batch4` @ `bc6bc6c6d`: `git merge-base --is-ancestor` is false for
-  `task/uac-r2-147-r1c-v1`, `task/uac-r2-166-f1-v2` and `task/uac-r2-140-x1-v1c-v1`. The relocator and the job's
+  `task/uac-r2-147-r1c-v1`, `task/uac-r2-166-f1-v2` and `task/uac-r2-140-x1-v1c-v1`. **[Stale — corrected in §25.5:** at
+  `a8b811e66` 147 IS on `integ` (merge `13af65efe`); the wiring now waits only on 166 (and 150) being there.**]** The relocator and the job's
   relocation ledger exist only on 166's branch; a second relocator is forbidden (round 26 item 3).
 - **The integration step, complete** (with §22.4's wiring, in one change, by the main session):
   1. §22.4: `DocumentContainerRelocator.RelocateDocumentsAsync` (purpose `MakeSecure`) wired into provisioning's Make
@@ -1519,12 +1524,16 @@ API call with no `transition` keeps the creator rule (F8 — pinned since c-v1).
   container is classified as its own and kept (no second container, the value not rewritten), the flag is not written
   again, the record is re-owned to the Secure Record Owners team, the caller and the creator are shared. Pinned for both
   shapes. (A root owned by ANOTHER team INSIDE the Secure Record business unit — the retired default team before task
-  144's migration — is still refused 409 `owned_by_other_secure_team`, whose detail names the migration script; the ribbon
-  offers Make Secure there too, and the refusal is shown, never silent.)
+  144's migration — is still refused 409 `owned_by_other_secure_team`, whose detail names the migration script; ~~the
+  ribbon offers Make Secure there too, and the refusal is shown, never silent~~ — **superseded by round 53 item 2
+  (§25.2):** such a record is already isolated, the server reports it as inside the Secure Record business unit, and the
+  ribbon HIDES Make Secure on it.)
 - **Tests.** `RecordAccessGateTests` +8: user / Secure team / other team (theory ×3); owner read fails / no owner /
   Secure team ambiguous → null (theory ×3); not asked → no owner read; no Write → 403 and no owner read. Ribbon jest +13:
   another team ×3 tables (both commands, one owner request, the exact URL with `includeOwner=true` and the bearer token);
-  the Secure team → hidden; unknown ×4 (null, non-200, another record, a failed request); no token → not asked, hidden;
+  the Secure team → hidden; unknown ×4 (null, non-200, another record, a failed request — **[overstated; corrected in
+  §25.3:** three of the four used a synchronous mock, so they reached only the catch, never the guard they named**]**);
+  no token → not asked, hidden;
   the read decides ×3 (not secure, no container, legacy user-owned) → not asked; after Make Secure asked again.
   `SecureFlagEndpointWriteTests` +2 (legacy user-owned; other-team-owned).
 - **Seeds.** Server (890-test filter): SG5 any team counted as the Secure team — 1 fail; SG6 an unidentifiable Secure team
@@ -1645,5 +1654,246 @@ constructor tests; every new guard was seeded.
   `-SecureTransitionDeployed` check. Until then the release gate withholds Make Secure.
 - **§23.7** when 140 and 150-integ-c meet: the two external-spa conflicts' resolution, then tsc, lint and vitest.
 - **Live gates** G-0 (every environment other than dev) and G-1…G-11 (G-11 with access_ribbon.js 1.4.0 and round 46's
-  ui-test), §9. No live write was made here.
+  ui-test — **since §25: 1.5.0**, and task 144's migration before the ribbon), §9. No live write was made here.
 - **`C:\wvf150`** (the c-v1 verifier's worktree): remove the junction first, then the worktree (§24.7 item 10).
+
+## 25. Integration round d (2026-10-05, `task/uac-r2-150-integ-d` from `task/uac-r2-150-integ-c-v2` @ `ba3e315ce`) — round 53, the verifier's 12 items
+
+**Binding input:** round 53 (main session under round 15, `work/unified-access-control-r2` @ `4b9139b74`) and round 46,
+read in full; re-read at `6532bb494`, whose newer rounds are other tasks' (54: 166; 55: 132; 57: 165; 58: 158) except
+**owner round 56** — the finishing bar from now on: classify every finding (fix (a) runtime, (b) compounding
+maintainability, (c) measurable performance; record (d) adversarial-only bypasses, (e) rare fail-closed edges, (f) minor
+seeding requests as **known limits**), the over-engineering check, and at most one more fix round per lane. Every change
+here is a round-53 decision of class (a) or (b) (§25.1–§25.3); the new members pass §11's three questions (§25.6) and none
+is bigger than its problem; this round's known limits are §25.7. A `NOTE-FROM-MAIN.md` arrived mid-round restating owner
+round 56 and making this the lane's last fix round: read, applied (§25.4 classifies every item), never committed. No live call of any kind
+was made (Dataverse, Azure, Entra, SPE: none, not even a read). Code-final commit `aea926764`.
+
+### 25.1 Round 53 item 1 — provisioning's own code for the floor-read fault (supersedes §24.1's interpretation)
+
+- **Server.** `ProvisionProjectEndpoint.ReasonCallerRightsUnverifiable = "sdap.provision.caller_rights_unverifiable"`;
+  `CallerAccessUnverifiable` answers it (500) with the detail unchanged — "Which access you hold on this {record} could
+  not be read, so securing it could not make sure you keep that access. Nothing was changed; you may try again." ({record}
+  = the root's lower-cased display label). F3's `sdap.unsecure.permission_unverifiable` is no longer used by
+  provisioning (round 26 item 1: codes are namespaced by endpoint). The method docs and the resume's order remarks name
+  the new code.
+- **Wizard client** (`provisioningService.ts`): a `REASON_STATES` entry — `not-started`, `retryable: true` — and the
+  `EMITTED` row (the list is now 39; the old carve-out comment is gone), pinned verbatim by its own test.
+  **Interpretation recorded (one sentence of copy):** the wizard's message is round 53's sentence with `{record}` =
+  project **without its closing "; you may try again"**: "Which access you hold on this project could not be read, so
+  securing it could not make sure you keep that access. Nothing was changed." The client's copy rule — binding since task
+  068/133 (FR-31) and pinned for EVERY code by "never advises trying again in the message" — puts the retry in the host's
+  action keyed on `retryable` ("Try securing again"), never in words, so advice and button cannot come apart. With
+  `retryable: true` that action is exactly the ratified "you may try again". The ribbon and the server carry the sentence
+  whole. (The wizards send no transition, so they never receive this code — `Provision_TheWizardsPath_ReadsNoFloor_…`.)
+- **Ribbon** (`sprk_access_ribbon.js` 1.5.0): `REFUSAL_COPY` (ONE frozen constant) holds the ratified copy with
+  `{record}`; `refusalFor` shows it, `{record}` filled per table, for that code (else the server's message, as before).
+  It is an ALERT, not one of `MAKE_SECURE_RETRY_IN_PLACE`: a pre-write refusal leaves the record unchanged, so the enable
+  rule still offers Make Secure — that is the ribbon's "you may try again" (pinned: after the refusal `canMakeSecure` is
+  true). The in-place list stays the failures AFTER the flag write (round 40 item 1's definition).
+- **Tests:** `SecureFlagEndpointWriteTests` read-fault theory ×4 now pins the wire code literally; ribbon +4 (×3 tables,
+  the constant); wizard +2 (the `EMITTED` row, the verbatim pin).
+- **Seeds:** SC1 (the old F3 code restored in `CallerAccessUnverifiable`) — 4 of 895 fail (the read-fault theory). C10
+  (the `REFUSAL_COPY` lookup disabled) — 3 of 95 ribbon fail (the three tables). CW4 (the wizard entry renamed away) —
+  3 of 98 fail; CW5 (not retryable) — 2 fail.
+
+### 25.2 Round 53 item 2 — another team INSIDE the Secure Record business unit is already isolated: Make Secure hidden
+
+- **Server.** `GET can-manage-access?…&includeOwner=true` answers a third fact, `owningTeamInSecureBusinessUnit`: for a
+  TEAM owner, `true` when the record's owning business unit is the Secure Record business unit (the Secure Record Owners
+  team, or ANOTHER team there), `false` when it is another business unit; `null` for a user owner (no team to place), or
+  when it cannot be told (identification refused, or the record read without its owning business unit — logged). The
+  owner read now selects `_owningbusinessunit_value`. "Inside" is ONE predicate,
+  `SecureRecordOwnerTeam.IsInSecureBusinessUnit(owningBusinessUnitId, secureBusinessUnitId)` (`bool?`), which
+  provisioning's `RootRow.IsOwnedInBusinessUnitByAnotherTeam` — the 409 `owned_by_other_secure_team` rule — now calls too
+  (`== true`, so its old null/empty handling is unchanged). So the ribbon hides Make Secure on exactly the records that
+  refusal answers.
+- **Ribbon 1.5.0.** `OWNER_PLACEMENT` (ONE frozen constant: `secure-owner-team`, `other-team-inside`,
+  `other-team-outside`); `ownerPlacementOf(body, record)` reads the three facts in ONE place; `queryOwnerPlacement`
+  (was `queryOwnedBySecureOwnerTeam`) asks. A flagged, team-owned record with a container is **unfinished only when its
+  team is OUTSIDE** the Secure Record business unit; the Secure Record Owners team → finished; another team inside →
+  isolated already, Make Secure hidden, Remove Secure shown (logged as an explanation, not a warning); anything not
+  definite → hidden.
+- **The server's refusal is unchanged:** `Provision_MakeSecure_OnAFlaggedRecordOwnedByAnotherTeamInsideTheSecureBusinessUnit_IsStillRefused409`
+  — on the make-secure path, 409 naming `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1`, nothing written, and
+  refused before the caller's rights are read (one probe: the gate).
+- **Integration checklist — task 144's migration `-Apply`/`-Verify` is a live gate before this ribbon ships.** Written
+  into the AccessRibbons README (Deployment step **1a**, the exact dry run / `-Apply -AcceptedAssignCascade …` / `-Verify`
+  commands; steps 4–6 require 1a's `-Verify` to have passed), guide §7d.1 (the hidden case, and the deploy order),
+  `Set-AccessRibbon.ps1`'s help (order), §9 G-11. Moving the record stays out of provisioning (task 144's decision).
+- **Brief item 7** (the edge documented in §24.4) is closed by this: the ribbon no longer offers Make Secure there.
+- **Scope as decided — "with a container".** A flagged root with NO container that another team inside the Secure
+  Record business unit owns is still read as unfinished by the one `Xrm.WebApi` read (round 40 item 1: no container →
+  unfinished, no owner question), so the ribbon offers Make Secure and the server answers its unchanged 409 with the
+  migration script named — shown, never silent. The migration gate above empties that set before the ribbon ships: task
+  144's `-Verify` passes only when no secure row is owned by any team but the named one, container or not. Recorded as a
+  known limit (§25.7).
+- **Tests:** `RecordAccessGateTests` — the owner theory gains `other-team-inside` (false / true) and `other-team-outside`
+  (false / false), `secure-team` (true / true), `user` (false / null); a team owner read without its business unit →
+  `null`; the unknown theory also asserts the new fact null; the owner read is answered only when it selects all three
+  owner columns. Ribbon: inside ×3 tables (hidden, Remove Secure shown, one request, no warning) and the constant.
+- **Seeds** (server: of 895; ribbon: of 95): SG9 the gate's inside fact always "outside" — 3 fail; SG10 an unread owning
+  business unit read as "outside" — 1 fail; SG11 the owner read stops selecting `_owningbusinessunit_value` — 5 fail;
+  SP1 provisioning's inside-another-team refusal disabled — 2 fail (the new make-secure 409 and the existing wizard-path
+  one); C9 the inside placement read as unfinished — 3 fail; C8 an unknown inside fact read as outside — 2 fail.
+
+### 25.3 Round 53 item 3 — the test gaps (the verifier's items 2 and 6)
+
+- **The ribbon's "cannot be told" table (verifier item 2 — confirmed).** With `gateFetch.mockImplementation(() =>
+  answer())` three of the four cases returned a plain object, so `fetch(...).then` threw and only the `.catch` ever made
+  them "hidden"; §24.4's "unknown ×4" overstated the coverage (corrected there). Now: `mockImplementation(async () =>
+  answer())` — a real Promise — and each case is a DEFINITE "another team, outside" answer except for the one fact its
+  name says, so only that guard can stop it: `ownedBySecureOwnerTeam` null / omitted, a non-200 whose body still reads
+  like an answer, an answer about another record, an answer that is not a delegation yes, `owningTeamInSecureBusinessUnit`
+  null / omitted, a non-JSON body, a failed request (9). A positive twin (the same answer, unaltered) offers Make Secure.
+  Each case also asserts the gate was asked once.
+- **Seeds, each failing exactly the case it names** (of 95): **C2** (the record-echo check removed) — 1; **C4**
+  (`ownedBySecureOwnerTeam: null` read as false) — 1; C4b (omitted read as false) — 1; **C6** (the owner query's
+  status check removed) — 1; C7 (the `canManageAccess` check removed) — 1; C8 — 2 (the null and omitted inside cases).
+- **The ownership-held and role-held floor cases (verifier item 6).** They ran the same fixture path (`CallerHoldsDelete`
+  answered Delete whoever owned the record). Now `ProvisionProjectTestFixture.CallerDeletesWhatTheyOwn` models Delete
+  held by OWNERSHIP (a user-depth role: the probe answers Delete only while the seeded record's CURRENT owning user is the
+  caller, read at the moment of the probe), and `CallerHoldsDelete` stays Delete held by a ROLE (business-unit or
+  organization depth). The "ownership" row uses the first, "role" and "role-resume" the second; a twin
+  (`Provision_MakeSecure_DeleteHeldOnlyOnOwnedRecords_IsNotKept_OnARecordTheCallerDoesNotOwn`, forward and resume) pins
+  that Delete-on-owned gives nothing on a record someone else owns. **Seed SO1** — the forward path reads the floor AFTER
+  the owner move — fails the `ownership` row and NOT the `role` rows (plus the read-fault and fallback tests the moved
+  read also breaks: 4 of 895), so the fake now tells the two apart.
+- **Live proof (verifier item 6):** the code rightly delegates to `RetrievePrincipalAccess`, so a REAL ownership-held or
+  role-held Delete is provable only live — two G-11 ui-tests are added to the POML: "Make Secure run by the record's
+  OWNER keeps their Full Access" (a user-depth Delete role, owner but not creator, no share; RetrievePrincipalAccess read
+  before; afterwards an explicit share of mask 327703 — never Assign — and Remove Secure succeeds for them) and "Make
+  Secure run by an ADMINISTRATOR keeps their Full Access" (no owner, no creator, no share; afterwards 327703; the creator
+  262167).
+
+### 25.4 The verifier's 12 items
+
+Each item's class under owner round 56 (the main session's `NOTE-FROM-MAIN.md`, received mid-round, asks for it: read,
+binding, never committed — it says this is the lane's LAST fix round):
+
+| # | Class | Disposition |
+|---|---|---|
+| 1 | (a)/(b) — round 53's items | Round 46 and round 53 read in full on `work/unified-access-control-r2` (4b9139b74; re-read at 6532bb494); every round 53 item closed — item 1 (b) a mislabelled refusal code, §25.1; item 2 (a) the ribbon offered a command the server always refuses, §25.2; item 3 (b) important fail-closed behaviour without a test that bites, §25.3 |
+| 2 | (b) | **Fixed** — §25.3 (a real Promise; the omitted-field case and more; C2 and C4 re-seeded: each 1 fail; C6 too) |
+| 3, 4, 5 | — (verified) | Verified by the verifier; re-held — the affected filter 895/895 includes every pinned case, and SR9's test is unchanged |
+| 6 | (b) — decided by round 53 item 3 | **Fixed** — §25.3 (different fixture paths, the twin, seed SO1; the two live ui-tests) |
+| 7 | (a) — decided by round 53 item 2 | **Fixed** — §25.2: the ribbon hides Make Secure there; the 409 is unchanged and pinned. The no-container variant is a known limit (e), §25.7 |
+| 8 | — (information) | Superseded by this round's own runs (§25.5) |
+| 9 | (b) — a doc that contradicted the state | POML parses (§25.5); no live write; §24.2's stale ancestry statement corrected (147 — and now 140 — are on `integ`; the backstop wiring waits on 166). `NOTE-FROM-MAIN.md` arrived during this round: read, never staged |
+| 10 | (b) | **Fixed** — §25.3 (the record-echo and null-answer guards are pinned; C2 and C4 fail) |
+| 11 | — (live gate) | Live gate G-11 (manual, main session; §9 row updated: access_ribbon.js 1.5.0, task 144's migration first, round 53's two ui-tests) |
+| 12 | — (live gates) | Live gates G-0 (every environment other than dev) and G-1…G-10 — manual, main session (§9) |
+
+### 25.5 Tests, publish size, CVE, merge (this round)
+
+**Affected first** (§24.8's filter): **895/895** (890 + 5: `SecureFlagEndpointWriteTests` +3, `RecordAccessGateTests`
++2), before the seeds, after restoring each, and on the committed code after the pre-commit hook's `dotnet format` /
+prettier pass.
+
+**Once at the end** (code-final `aea926764`; this box, other agents active):
+- **Full BFF unit suite:** first run **15600 passed, 65 failed, 54 skipped (15719 = 15714 + 5)** in 36 m 48 s under heavy
+  contention (CPU 99–100 %, other agents' test hosts running beside it). All 65 failures are ONE signature —
+  `TaskCanceledException` / "Error while copying content to a stream" / "The client aborted the request": the test
+  `HttpClient`'s timeout on in-memory host requests that took minutes (e.g. `HealthAndHeadersTests.SecurityHeaders_Present`,
+  3 m 22 s) — in 48 classes across Office, Compose, Insights, Workspace, SpeAdmin, Documents and others, none touched by
+  this round. **Isolated re-run of those 48 classes: 561/561 passed, 0 failed.** **A second full run on the same commit:
+  15665 passed, 0 failed, 54 skipped (15719)** in 32 m 51 s (the box still loaded) — the clean full run;
+- **Spaarke.ArchTests: 600/600**;
+- **Sprk.Bff.Api.IntegrationTests: 104/104**;
+- **Spe.Integration.Tests: 403 passed, 25 skipped, 0 failed (428)**.
+
+**Client** (`@spaarke/ui-components` in THIS worktree: `npm install --legacy-peer-deps --no-audit --no-fund` for
+`Spaarke.Auth` and `Spaarke.SdapClient`, each then `npm run build`, and for the library; no lockfile changed): jest **10
+suites 259/259** (243 + 16: ribbon 95 = 81 + 14, `provisioningService` 98 = 96 + 2), before and after the hook's
+prettier pass; `tsc --noEmit -p tsconfig.json` exit 0; `npm run build` exit 0; eslint on the changed files 0 errors (the
+pre-existing unused-`eslint-disable` warning in the ribbon test); `node --check sprk_access_ribbon.js` OK. Client seeds
+each restored from a backup, touched, hash re-checked (ribbon `53c608a6…`, wizard `3f2f2b61…`). Server seeds restored the
+same way (`8f31d4c0…` provisioning, `7a6ad35e…` gate, `85b57843…` owner team) and the test project rebuilt clean.
+
+**Ribbon scripts:** `Set-AccessRibbon.ps1` and `Merge-AccessRibbon.ps1` parse with 0 errors;
+`Set-AccessRibbon.ps1 -SecureTransitionDeployed` dry run (no Dataverse call) PASSED.
+
+**Publish size** (CLAUDE.md §10, NFR-01). Each tree extracted fresh with `git archive` into a SHORT path (`C:\p150dm`,
+`C:\p150da`, `C:\p150db`; removed afterwards) and published with `dotnet publish -c Release -o <root>\deploy\api-publish
+-nodeReuse:false` from the csproj (framework-dependent linux-x64; the first master attempt died with MSB4166 — an MSBuild
+child node exiting on this loaded box — and was re-run clean); each zipped with `Compress-Archive -CompressionLevel
+Optimal` over `api-publish\*`, **PDBs included** (4). No MSB3030 and no error on any side; 212 files each.
+
+| Tree | Commit | Files | Zip |
+|---|---|---|---|
+| `origin/master` | `b4b58a361` | 212 | **45.65 MB** (47,864,547 B) |
+| this round's base | `ba3e315ce` | 212 | 46.06 MB (48,298,386 B) |
+| this round (code-final) | `aea926764` | 212 | **46.06 MB** (48,299,093 B) |
+
+This round adds **+707 B**; the integration tree is +0.41 MB over master (batch 4's tasks together). Far under the 60 MB
+ceiling and the +5 MB escalation.
+
+**CVE:** `dotnet list package --vulnerable --include-transitive` on `Sprk.Bff.Api`: "no vulnerable packages". This round
+adds no package.
+
+**Hygiene:** POML parses (`xml.dom.minidom`; 13 outcomes, 5 amendments — R3b, UX, R40, R46, R53 — 12 ui-tests). Status
+stays `completed-with-escalation`. `git merge-tree --write-tree`:
+- against `work/unified-access-control-r2` @ `6532bb494`: **clean** (and the code commit `aea926764` against `0caca7e3e`);
+- against `integ/uac-r2-batch4` @ `a8b811e66`: **clean** (the code commit);
+- against `integ/uac-r2-batch4` @ **`b4be59c93`** — which since then has taken master (`e172b3a01`) and **task 140**
+  (`task/uac-r2-140-x1-v1c-v2`, merge `b4be59c93`): **exactly §23.7's two conflicts, now live** —
+  `src/client/external-spa/src/pages/OutsideCounselDashboard.tsx` (content) and
+  `src/client/external-spa/src/types/sdap-client.d.ts` (modify/delete); everything else merges cleanly (the guide
+  auto-merges). They are not this round's: they are task 150's external-spa work (round 26/33) meeting 140's, recorded in
+  §23.7 with their resolution. **The resolution still applies unchanged:** between `task/uac-r2-140-x1-v1c` @ `2c2bcb232`
+  (against which §23.7 verified it: tsc 0, lint 0, vitest 13/13, a seed that bit) and `b4be59c93`, both conflicted files,
+  the dashboard tests, `eslint.config.js`, `package.json` and `tsconfig.json` of external-spa are byte-identical
+  (`git diff --stat` empty); 140's only later external-spa changes are `IssuedGrantsList.tsx` (+4) and a new
+  `tests/ProjectPage.contactGrant.test.tsx`, which merge without conflict. The definitive tsc / lint / vitest run is the
+  integration merge's, with that resolution (§25.8).
+- Ancestry: 147 (`task/uac-r2-147-r1c-v1`) and 140 are on `integ`; 166 (`task/uac-r2-166-f1-v2`) is not. 166 conflicts
+  with this branch in the same 66 paths as with this round's base `ba3e315ce` (none a file this round touches), so this
+  round adds no conflict to 166's integration.
+
+### 25.6 Placement and justification (CLAUDE.md §10 / §11)
+
+No new endpoint, service, DI registration, option, job, column, package or PCF. **One new reason code** (round 53 item 1
+decided it) and extensions of existing surface. Hot path: BFF = Y (already declared). bff-extensions.md: modification of
+existing surface — one existing route's opt-in answer gains one optional field; one existing endpoint's refusal gets its
+own code; one existing predicate is extracted, not forked.
+
+| New member | Existing | Extension | Cost of doing nothing |
+|---|---|---|---|
+| `ReasonCallerRightsUnverifiable` (`sdap.provision.caller_rights_unverifiable`) | F3's `sdap.unsecure.permission_unverifiable` (the unsecure endpoint's), the provisioning `*_unverifiable` codes (other facts) | Round 53 item 1 decided a new provisioning code (codes namespaced by endpoint, round 26 item 1); same refusal, same detail | A provisioning refusal labelled with the unsecure endpoint's code — mislabelled in logs and client mappings (round 53 item 1) |
+| `RecordAccessGateResponse.OwningTeamInSecureBusinessUnit`, `RecordOwnerFacts`' third member, `OwnerRow._owningbusinessunit_value` | round 46's opt-in owner facts on `can-manage-access`; provisioning's root read of the same column | One optional field on the existing opt-in answer; one more column on the existing owner read | The ribbon offers Make Secure on an already-isolated record that the server always refuses 409 (round 53 item 2) |
+| `SecureRecordOwnerTeam.IsInSecureBusinessUnit` | `RootRow.IsOwnedInBusinessUnitByAnotherTeam` (provisioning's inline comparison) | Extracted; provisioning calls it — ONE predicate | The gate and the 409 decide "inside" twice and can drift: the ribbon would hide or offer Make Secure on records the server answers otherwise |
+| Ribbon `OWNER_PLACEMENT`, `ownerPlacementOf`, `queryOwnerPlacement` (renamed), `REFUSAL_COPY`, `refusalFor` | `queryOwnedBySecureOwnerTeam` (two-state), `refusalText` | The same request; one reader of the facts; one copy table beside `SKIPPED_PRINCIPAL_COPY` | The inside case cannot be told apart; the ratified copy is not the ribbon's |
+| Wizard `REASON_STATES['sdap.provision.caller_rights_unverifiable']` | `REASON_STATES` | One row | A provisioning code the client lands on the generic copy (the `EMITTED` guard's own rule) |
+| Fixture switch `CallerDeletesWhatTheyOwn` | `CallerHoldsDelete` | The same probe override, keyed on the seeded owner | Ownership-held and role-held Delete stay indistinguishable in tests (verifier item 6) |
+
+ADR-002: no plugin. ADR-003: the new refusal is before any write; every owner fact that cannot be had is `null` and
+offers nothing; the ribbon hides Make Secure on anything not definite. ADR-006: the ribbon stays a thin command script.
+ADR-008: `can-manage-access` is still decided by the group filter alone; the owner facts decide nothing server-side.
+ADR-028: unchanged (the ribbon's token is `Spaarke.BffAuth`'s). ADR-038: no `Mock<HttpMessageHandler>` (the gate tests
+answer `DataverseWebApiClient`'s virtual `QueryAsync` seam), no DI or constructor tests; every new guard was seeded. No
+`.claude/**` edit needed.
+
+### 25.7 Known limits (owner round 56: recorded, no fix round)
+
+- **(e)** A flagged root with NO container owned by another team INSIDE the Secure Record business unit: the ribbon's one
+  read calls it unfinished, so Make Secure is offered and the server answers its unchanged 409
+  `owned_by_other_secure_team` (the detail names the migration script) — fails closed, shown, never silent. No realistic
+  trigger once task 144's migration `-Verify` has passed, which the ribbon's release now requires (§25.2).
+
+### 25.8 Open — integration steps and manual gates (main session)
+
+- **§22.4 + §24.2 in one integration change**, once 166 (and 150) are on `integ` (147 already is): the relocation wired
+  into Make Secure (`files_incomplete`), the `SecureChildReconciliationJob` settle pass, and the mechanical
+  `-SecureTransitionDeployed` check. Until then the release gate withholds Make Secure.
+- **Task 144's migration before the ribbon ships** (round 53 item 2): in each environment,
+  `pwsh scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com` (dry run), then
+  `… -Apply -AcceptedAssignCascade <what the dry run reported>`, then `… -Verify` (exit 0) — AccessRibbons README step 1a.
+- **§23.7, now due**: 140 is on `integ` (`b4be59c93`), so merging this branch meets the two external-spa conflicts. Take
+  150's `OutsideCounselDashboard.tsx` whole; keep `src/types/sdap-client.d.ts` deleted (`git rm`); then in
+  `src/client/external-spa`: `npm install --legacy-peer-deps --no-audit --no-fund`, `npx tsc --noEmit -p tsconfig.json`,
+  `npm run lint`, `npx vitest run` (now including 140's `ProjectPage.contactGrant.test.tsx`).
+- **Live gates** G-0 (every environment other than dev) and G-1…G-11 (G-11 with access_ribbon.js **1.5.0**, round 40's,
+  round 46's and round 53's ui-tests), §9. No live write was made here.
+- **`C:\wvf150`** (the c-v1 verifier's worktree, still listed by `git worktree list`): remove its `node_modules` junction
+  first (`cmd /c rmdir C:\wvf150\src\client\shared\Spaarke.UI.Components\node_modules`), then
+  `git -C C:\code_files\spaarke worktree remove --force C:/wvf150`, then `git -C C:\code_files\spaarke worktree prune`.

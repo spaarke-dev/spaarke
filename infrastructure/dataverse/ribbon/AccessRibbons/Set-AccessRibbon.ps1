@@ -36,8 +36,11 @@
     -SecureTransitionDeployed only when the target environment's BFF carries all three. Without it Make Secure is
     withheld (and -Verify FAILS if it is present), while Update Access and Remove Secure ship.
 
-    Order (README "Deployment"): the BFF first, then the web resources (sprk_/scripts/access_ribbon.js 1.4.0,
-    assignedaccess_postsave.js, bff_auth.js), then this script.
+    Order (README "Deployment"): the BFF first; then task 144's migration of secure records still owned by the retired
+    default team (scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 dry run, -Apply, -Verify - a live gate before Make
+    Secure ships, task 150 round 53 item 2: access_ribbon.js 1.5.0 hides Make Secure on such a record, which is isolated
+    already, and only that migration moves it); then the web resources (sprk_/scripts/access_ribbon.js 1.5.0,
+    assignedaccess_postsave.js, bff_auth.js); then this script.
 
 .PARAMETER EnvironmentUrl
     The Dataverse org URL (https://<org>.crm.dynamics.com). Required for -Apply and -Verify.

@@ -642,8 +642,9 @@ row created before task 150) is provisioned exactly like an unflagged one.
 | `secure_bu_not_found`, `secure_bu_ambiguous`, `secure_owner_team_not_found`, `secure_owner_team_ambiguous`, `secure_owner_team_has_members`, `secure_owner_team_membership_unreadable`, `secure_bu_has_users`, `secure_bu_users_unreadable`, `container_type_not_configured` | Unchanged — refused before any write | Administrator fixes the environment (§3–§5, `SharePointEmbedded:ContainerTypeId`), then provisioning is called again |
 | `legacy_per_project_bu` | Unchanged | Administrator migrates the record off its per-project BU (manual) |
 | `already_provisioned` | Provisioned: owned by the team, container recorded, every existing related record already secured (task 148: when one is not, the call secures it and answers 200 `childrenOnly: true` instead). Nothing written | Nothing to provision. Who can open it is managed through Manage Access: an administrator shares it to anyone who should hold it but cannot open it (this is also the recovery for a record that kept its own container — `containerKept: true` below) |
-| `owned_by_other_secure_team` | Owned by the retired default team | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) |
+| `owned_by_other_secure_team` | Owned by the retired default team (another team inside the Secure Record business unit) — already isolated. The Access ribbon hides Make Secure on such a record (task 150 round 53 item 2) | Administrator runs `scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` (§4.3) — task 144's migration, never a provisioning call |
 | `creator_unresolved` | Unchanged — refused before any write | **The same caller** calls again (the wizard's "Try securing again") |
+| `caller_rights_unverifiable` (task 150 round 53 item 1, HTTP 500; the form's Make Secure command only) | Unchanged — refused before any write. Which access the caller holds on the record (their effective rights, the floor their share is kept at — round 46 item 1) could not be read | **The same caller** calls again (Make Secure stays offered on the unchanged record). The wizards' path makes no such read and never meets it |
 | `secure_flag_not_set` (task 150, HTTP 500) | Nothing else changed — the flag write is the first write. The flag itself may or may not be set (the write failed, or did not read back `true`) | **The same caller** calls again. If it repeats: an administrator runs `scripts/Set-SecureFlagFieldSecurity.ps1 -Verify` (§7d) — a refused write means the BFF application user is not in the writer profile; a read-back that comes back EMPTY means the BFF lost its field-level Read |
 | `record_owner_unreadable` | Unchanged — refused before any write. The row was read with no owning user or team, which is deterministic for that row | **An administrator** checks the record's owner in Dataverse; calling again before that repeats the refusal (not offered as a retry) |
 | `resume_colleagues_not_permitted` | Unchanged — refused before any write. A resume request named colleagues (`sharePrincipalIds`) and its caller is not the record's creator | The caller calls again **without** `sharePrincipalIds` (the resume then completes, sharing only to the creator), and adds people through Manage Access |
@@ -907,16 +908,22 @@ default team), then step 4's `-Verify` and step 5. The standing assertion fails 
 
 Users secure and unsecure an existing project, matter or work assignment from the main form's **Access** flyout (task
 142's ONE group, ONE ribbon source `infrastructure/dataverse/ribbon/AccessRibbons/`, ONE command script
-`sprk_/scripts/access_ribbon.js` 1.4.0) — never by editing the field, which no form shows and FLS locks.
+`sprk_/scripts/access_ribbon.js` 1.5.0) — never by editing the field, which no form shows and FLS locks.
 
 - **Make Secure** — shown on a record that is NOT secure, and on one flagged secure whose secure transition did not
-  finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team OTHER than the
-  Secure Record Owners team — a PROVISIONED secure record is owned by the Secure Record Owners team and records its own
-  container, and hides it), to a caller with Write. Which team is the Secure Record Owners team is the server's
-  configuration, so for a flagged, team-owned record with a container the ribbon asks `can-manage-access` with
-  `includeOwner=true`; an answer it cannot get keeps Make Secure hidden on that record. A record reassigned outside
-  Spaarke to another team, or a legacy one provisioned before task 133's owner move (still user-owned), is finished by
-  the call: its forward path re-owns it to the Secure Record Owners team and keeps its own container. It confirms with the
+  finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team in ANOTHER
+  business unit — a PROVISIONED secure record is owned by the Secure Record Owners team and records its own
+  container, and hides it), to a caller with Write. **Hidden too on a flagged record with a container owned by ANOTHER
+  team INSIDE the Secure Record business unit** (round 53 item 2 — in practice the retired default team, before task
+  144's migration): it is secure and isolated already, so there is nothing to finish; moving it onto the named team is
+  task 144's migration (`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -Apply` / `-Verify`, §4.3), and a direct API
+  call still answers 409 `owned_by_other_secure_team`. Which team and business unit are the Secure Record ones is the
+  server's configuration, so for a flagged, team-owned record with a container the ribbon asks `can-manage-access` with
+  `includeOwner=true` (the owning team, whether it is the Secure Record Owners team, and whether that team owns the record
+  inside the Secure Record business unit); an answer it cannot get keeps Make Secure hidden on that record. A record
+  reassigned outside Spaarke to a team in another business unit, or a legacy one provisioned before task 133's owner move
+  (still user-owned), is finished by the call: its forward path re-owns it to the Secure Record Owners team and keeps its
+  own container. It confirms with the
   owner-authored copy (owner round 27), then calls `/provision-project` with `transition: "make-secure"` (round 33 item 1; the exact
   token — any other value is refused 400, and so is a Make Secure request naming `sharePrincipalIds`): the server holds
   that path to the Write gate (owner R3b) — the creator rule is the wizards' path only — and the access afterwards is
@@ -935,7 +942,9 @@ Users secure and unsecure an existing project, matter or work assignment from th
   owning the record, or through a security role is shared at **Full Access** and keeps the right to remove the
   designation; anyone else is shared at **Collaborate**. Never less than Collaborate, never more than Full Access, never
   Assign. If those rights cannot be read, the call is refused before any change (500
-  `sdap.unsecure.permission_unverifiable`, the same caller may retry). **A Make Secure that fails after its first write
+  `sdap.provision.caller_rights_unverifiable` — provisioning's own code, round 53 item 1; the same caller may retry, and
+  the ribbon shows "Which access you hold on this {record} could not be read, so securing it could not make sure you keep
+  that access. Nothing was changed; you may try again."). **A Make Secure that fails after its first write
   can always be finished from the same command** (round 40 item 1): a failure the server answers as "the same caller may
   call again" offers that call in place (a confirm dialog with the server's message, Make Secure / Cancel), and the
   command stays offered on the unfinished record; the per-code closure table is task 150's note §23.2. A Make Secure
@@ -959,9 +968,11 @@ Users secure and unsecure an existing project, matter or work assignment from th
   (every user's reader-profile Read, step 3); a failed or masked read hides BOTH. Only a flagged, team-owned record
   with a container adds the server's owner answer (above).
 
-Order: the BFF (tasks 148 + 150) → web resources (`access_ribbon.js` 1.4.0, `assignedaccess_postsave.js`,
-`bff_auth.js`) → `Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150
-POML ui-tests on the three forms.
+Order: the BFF (tasks 148 + 150) → task 144's migration of records still owned by the retired default team
+(`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` dry run, `-Apply`, `-Verify`, §4.3 — a live gate before Make Secure
+ships, round 53 item 2) → web resources (`access_ribbon.js` 1.5.0, `assignedaccess_postsave.js`, `bff_auth.js`) →
+`Set-AccessRibbon.ps1` dry run, `-Apply`, `-Verify` (its README has the exact commands) → the task 150 POML ui-tests on
+the three forms.
 
 ---
 

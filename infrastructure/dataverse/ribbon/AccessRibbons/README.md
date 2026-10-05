@@ -35,15 +35,19 @@ missing command is the safe default.
 
 **Who may use them.** Both commands are enabled only for a caller with Write (the cached can-manage-access verdict — the
 same rule as Update Access). Make Secure needs the record NOT secure — or flagged secure with a transition that did not
-finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team OTHER than the
-Secure Record Owners team; a PROVISIONED record is owned by the Secure Record Owners team and records its own container,
-and hides it) — and Remove Secure needs it secure; `sprk_issecure`, `sprk_containerid` and `_owninguser_value` are read
-in ONE `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty) flag hides both. For a flagged, team-owned record with
-a container the script asks the server which team that is (`can-manage-access?…&includeOwner=true`: the owning team and
-whether it is the Secure Record Owners team, the server's configuration); an answer it cannot get keeps Make Secure
-hidden on that record. A Make Secure failure after the flag write that the server answers as "the same caller may call
-again" (`MAKE_SECURE_RETRY_IN_PLACE`) offers that call in place: a confirm dialog with the server's message, Make
-Secure / Cancel (round 40 item 1). Who may REMOVE the designation is
+finish (round 40 item 1, round 46 item 4: no container recorded, or owned by a user, or owned by a team in ANOTHER
+business unit; a PROVISIONED record is owned by the Secure Record Owners team and records its own container, and hides
+it; so does a record owned by another team INSIDE the Secure Record business unit — the retired default team before task
+144's migration, already isolated: round 53 item 2) — and Remove Secure needs it secure; `sprk_issecure`,
+`sprk_containerid` and `_owninguser_value` are read in ONE `Xrm.WebApi.retrieveRecord`, and a failed or masked (empty)
+flag hides both. For a flagged, team-owned record with a container the script asks the server where that team sits
+(`can-manage-access?…&includeOwner=true`: the owning team, whether it is the Secure Record Owners team, and whether it
+owns the record inside the Secure Record business unit — the server's configuration); an answer it cannot get keeps
+Make Secure hidden on that record. A Make Secure failure after the flag write that the server answers as "the same
+caller may call again" (`MAKE_SECURE_RETRY_IN_PLACE`) offers that call in place: a confirm dialog with the server's
+message, Make Secure / Cancel (round 40 item 1). Any other refusal is an alert with the server's message, except
+`sdap.provision.caller_rights_unverifiable` (round 53 item 1), shown in the script's own words (`REFUSAL_COPY`).
+Who may REMOVE the designation is
 the server's decision (owner F3: Full Access holders and the record's creator); a refusal shows the endpoint's
 ProblemDetails message. Make Secure confirms first with the owner-authored copy (owner round 27, the
 `MAKE_SECURE_CONFIRMATION` constant in the script) and sends `transition: "make-secure"` (exactly; it names no
@@ -104,6 +108,18 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    for Make Secure, tasks 148 + 150, the Make Secure file relocation (task 166's `DocumentContainerRelocator`, wired
    at integration) and its scheduled backstop (task 147's `SecureChildReconciliationJob` settling pending Make Secure
    relocations, registered with its writes on — round 46 item 2) in the same release.
+1a. **Task 144's migration, before Make Secure ships** (task 150 round 53 item 2 — a LIVE GATE): a secure record still
+   owned by the retired default team (another team inside the Secure Record business unit) is isolated already, so
+   `access_ribbon.js` 1.5.0 hides Make Secure on it, and only task 144's migration moves it onto the named team. Run, in
+   order, from the repository root, and keep the reports:
+   ```powershell
+   pwsh ./scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com            # dry run
+   pwsh ./scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Apply `
+       -AcceptedAssignCascade team,sharepointdocumentlocation,sharepointdocument                                       # LIVE
+   pwsh ./scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -Verify    # exit 0 = PASS
+   ```
+   (the dry run lists the rows and any STOP; `-AcceptedAssignCascade` names the cascade the dry run reported — see the
+   script's help and guide §4.3).
 2. **Web resources** (dataverse-deploy skill), published:
    `sprk_/scripts/assignedaccess_postsave.js` ← `src/solutions/webresources/sprk_assignedaccess_postsave.js`;
    `sprk_/scripts/access_ribbon.js` ← `src/client/webresources/js/sprk_access_ribbon.js`.
@@ -112,10 +128,12 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    matter — Push Updates, Create Project, Create Event, Create To Do, Upload Documents, Summarize Files, Find Similar,
    Playbook Library; work assignment — Create To Do, Dark Mode.
 4–6. **Since task 150 these three steps are ONE script** (`Set-AccessRibbon.ps1`; the BFF must carry tasks 148 + 150,
-   the wired relocation and its backstop for `-SecureTransitionDeployed`, and the web resources must be
-   `access_ribbon.js` 1.4.0 — task 150 round 40: Make Secure offered on an unfinished secure transition, and its
-   in-place retry; round 46 item 4: a flagged record owned by a team other than the Secure Record Owners team is
-   unfinished too, which needs the BFF's `can-manage-access` `includeOwner` answer):
+   the wired relocation and its backstop for `-SecureTransitionDeployed`, step 1a must have passed `-Verify`, and the
+   web resources must be `access_ribbon.js` 1.5.0 — task 150 round 40: Make Secure offered on an unfinished secure
+   transition, and its in-place retry; round 46 item 4: a flagged record owned by a team in another business unit is
+   unfinished too; round 53: one owned by another team inside the Secure Record business unit is isolated already
+   (hidden), and `caller_rights_unverifiable` in the script's words — which needs the BFF's `can-manage-access`
+   `includeOwner` answer with `owningTeamInSecureBusinessUnit`):
    ```powershell
    pwsh ./Set-AccessRibbon.ps1 -SecureTransitionDeployed                                    # dry run (no Dataverse call)
    pwsh ./Set-AccessRibbon.ps1 -EnvironmentUrl https://<org>.crm.dynamics.com -SolutionName <ribbon solution> `
@@ -134,8 +152,8 @@ Order matters: the BFF route and the web resources must exist before a ribbon th
    shows "Update Access" to a Write-holder (cold cache too — first open after a sign-in) and is hidden for a Read-only
    user, whose direct call to the sync route still gets 403; Make Secure / Remove Secure follow the secure state (Make
    Secure also on a record flagged secure whose transition did not finish — no container recorded, user-owned, or
-   owned by a team other than the Secure Record Owners team; hidden on a PROVISIONED one: acceptance (e) as amended by
-   round 40, and round 46 item 4).
+   owned by a team in another business unit; hidden on a PROVISIONED one and on one owned by another team inside the
+   Secure Record business unit: acceptance (e) as amended by round 40, round 46 item 4 and round 53 item 2).
 7. **Form libraries** (task 142's post-save call, separate from the ribbon): on the three main forms, register
    `sprk_/scripts/bff_auth.js` FIRST, then `sprk_/scripts/assignedaccess_postsave.js`, with OnLoad handler
    `Spaarke.AssignedAccess.onLoad` (pass execution context).
