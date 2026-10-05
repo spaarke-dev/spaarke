@@ -484,6 +484,27 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - **Base:** 147 merges `integ/uac-r2-batch4`, which now carries 159–164, before it builds the route.
 2. **Communications** keep 161's routes. If 161's family lacks a re-file route, the same rule applies.
 
+## Round 37 (2026-10-04). BINDING. Main-session decisions under round 15. Task 166's relocation questions (verify of `task/uac-r2-166-f1`).
+
+1. **A relocated file is re-indexed as part of the relocation (option a).**
+   - After each re-point, `DocumentContainerRelocator` calls ONE `Services/Ai/PublicContracts` facade method, which:
+     - enqueues RAG indexing for the new item;
+     - deletes the old item's chunks.
+   - **No new facade if one fits:** extend an existing PublicContracts indexing facade if there is one (CLAUDE.md §11). Add a new method only if none fits; never inject AI internals (ADR-013).
+   - **Failure:** an indexing failure does not undo the move. It is reported per file in the relocation report as `index-pending` and counts as incomplete, so the repeat call retries it.
+   - **Every reference to the old item is re-keyed in the same step** (finding F4). Examples: a child attachment's `sprk_parentgraphitemid`, and any other column or index that holds the drive/item id. The note lists each one.
+   - The "interim alternative" (re-index by hand after gate 24) is rejected.
+2. **Several `sprk_document` rows pointing at the file being moved (option b, refined):**
+   - Every referencing row inside the secure record's subtree is re-pointed to the copy, through the pointer-attach path.
+   - A row OUTSIDE that subtree keeps the source. The source is then that other record's file, not the secure record's, so the secure record's transition is COMPLETE.
+   - The report lists each source kept for another record (`SourceKeptForOtherRecords`, with the row ids). The source is deleted only when no row references it any more.
+   - **Re-entry (F2):** a repeat call must recognise a row that is already re-pointed and settle it. It never loops on, and never reports incomplete for, a source that is kept for another record.
+   - Option (c), delete anyway, is rejected.
+3. **Interim pointer rule versus relocation (option a, F1):**
+   - The interim rule ALSO accepts an item uploaded by the BFF identity, but only when its pointer passes the strict derived-container test. That keeps the interim rule never weaker than the strict rule.
+   - Relocated files are therefore served before the strict flip (gate 25).
+   - Tests: a relocated file is served under the interim rule; a BFF-identity item in the wrong container is refused. Seeded.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
