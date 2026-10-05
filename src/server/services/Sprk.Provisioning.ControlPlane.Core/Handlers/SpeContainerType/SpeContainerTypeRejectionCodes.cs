@@ -132,6 +132,15 @@ public static class SpeContainerTypeRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H8 was in flight.</summary>
     public const string RunDeletedDuringProvisioning = "spe-run-deleted-during-provisioning";
+
+    /// <summary>
+    /// The container-type POST got no authoritative answer (a client timeout, a dropped connection, a 2xx without an
+    /// id): a container type may exist that the run does not name — and a container type cannot be deleted and is
+    /// capped per tenant. QuarantineRequired; H8 creates NO type until an operator has checked with a delegated
+    /// SharePoint Embedded admin token, recorded the type in the run if one exists, and cleared the quarantine
+    /// (unified-access-control-r2 task 165, owner round 49 item 2).
+    /// </summary>
+    public const string ContainerTypeCreationInDoubt = "spe-container-type-creation-in-doubt";
 }
 
 /// <summary>

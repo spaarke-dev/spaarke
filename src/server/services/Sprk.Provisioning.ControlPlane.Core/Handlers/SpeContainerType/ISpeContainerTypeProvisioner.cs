@@ -16,10 +16,14 @@
 //   bound to the ROOT business unit of the customer's Dataverse environment
 //   (H8 therefore runs after H5 — DagAdvancer.HandlerDependencies) through
 //   BindRootContainerAsync, once the container is verified readable.
-//   RESUME (owner round 41 item 1): H8 records what it created in the run
+//   RESUME (owner rounds 41 + 49): H8 records what it created in the run's TYPED
+//   creation record (InterStepState.ContainerTypeId + SpeContainerCreation)
 //   immediately; a re-entry never calls ProvisionAsync for a recorded root
 //   container, and when only the type is recorded it passes
-//   ExistingContainerTypeId so no second (undeletable) container type is made.
+//   ExistingContainerTypeId so no second (undeletable) container type is made —
+//   the type's containers are listed and an existing one ADOPTED before any new
+//   root container is created. Every fault after a Graph write was sent is a
+//   Failure that says what may exist (ContainerTypeInDoubt / RootContainerInDoubt).
 //
 // WHY -CreateTestContainer FOR THE "ROOT CONTAINER" (deviation from the POML's
 // literal "invoke New-BusinessUnitContainer.ps1" wording — Path C pivot):
@@ -133,9 +137,15 @@ public abstract record SpeContainerBindOutcome
 /// <param name="DisplayName">Container-type display name.</param>
 /// <param name="ExistingContainerTypeId">
 /// The container type THIS run's H8 already created (recorded in the run — unified-access-control-r2 task 165, owner
-/// round 41 item 1), or null. When set, NO container type is created: only a new root container is created in it (the
-/// recorded root container was removed after a failed bind, or creation stopped after the type). A container type is
-/// durable customer data that cannot be deleted, so a resume never creates a second one.
+/// rounds 41 + 49), or null. When set, NO container type is created. The type's containers are LISTED first: a
+/// container already in it (one an earlier creation made — e.g. a POST whose answer was lost) is ADOPTED as the root
+/// container instead of creating another; only when the type holds none is a new root container created in it. A
+/// container type is durable customer data that cannot be deleted, so a resume never creates a second one.
+/// </param>
+/// <param name="RootContainerCreationInDoubt">
+/// True when an earlier root-container POST into <paramref name="ExistingContainerTypeId"/> got no authoritative answer
+/// and the replication window has not passed: the container may exist but not be listed yet. If the type then lists no
+/// container, nothing is created — the outcome is <see cref="SpeContainerTypeProvisionOutcome.RootContainerNotYetVisible"/>.
 /// </param>
 public sealed record SpeContainerTypeProvisionRequest(
     string CustomerId,
@@ -145,7 +155,8 @@ public sealed record SpeContainerTypeProvisionRequest(
     string VaultName,
     string CertSecretName,
     string DisplayName,
-    string? ExistingContainerTypeId = null);
+    string? ExistingContainerTypeId = null,
+    bool RootContainerCreationInDoubt = false);
 
 /// <summary>
 /// Outputs H8 needs to (a) populate <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.ContainerTypeId"/>,
@@ -154,9 +165,16 @@ public sealed record SpeContainerTypeProvisionRequest(
 /// </summary>
 /// <param name="ContainerTypeId">SPE container-type id (GUID) created + registered to the owning app.</param>
 /// <param name="RootContainerId">SPE container id (GUID) of the root container created within the container type.</param>
+/// <param name="AdditionalContainerIds">
+/// When a root container was ADOPTED from the run's own type and the type held more than one container: the others
+/// (the oldest is the root). H8 binds each to the root business unit (or removes it) before completing.
+/// </param>
+/// <param name="Adopted">True when the root container already existed in the type (listed), false when created now.</param>
 public sealed record SpeContainerTypeProvisionOutputs(
     string ContainerTypeId,
-    string RootContainerId);
+    string RootContainerId,
+    IReadOnlyList<string>? AdditionalContainerIds = null,
+    bool Adopted = false);
 
 /// <summary>
 /// Discriminated result of <see cref="ISpeContainerTypeProvisioner.ProvisionAsync"/>.
@@ -179,6 +197,25 @@ public abstract record SpeContainerTypeProvisionOutcome
     /// reused) before it failed, so the handler records it and a resume creates only the root container in it
     /// (task 165, owner round 41 item 1) — null when no container type exists yet.
     /// </summary>
-    public sealed record Failure(string Diagnostic, bool IsDelegatedTokenTrap, string? CreatedContainerTypeId = null)
+    /// <remarks>
+    /// Owner round 49 item 2: EVERY fault after a Graph write was sent becomes a Failure — never an exception — so the
+    /// handler records what may exist. <paramref name="ContainerTypeInDoubt"/>: the container-type POST got no
+    /// authoritative answer (a client timeout, a dropped connection, a 2xx without an id), so a type may exist that no
+    /// one names. <paramref name="RootContainerInDoubt"/>: the same for the root-container POST into
+    /// <paramref name="CreatedContainerTypeId"/>. An <c>ODataError</c> is Graph's own answer — nothing in doubt.
+    /// </remarks>
+    public sealed record Failure(
+        string Diagnostic,
+        bool IsDelegatedTokenTrap,
+        string? CreatedContainerTypeId = null,
+        bool ContainerTypeInDoubt = false,
+        bool RootContainerInDoubt = false)
         : SpeContainerTypeProvisionOutcome;
+
+    /// <summary>
+    /// The request said a root container may exist unseen (<see cref="SpeContainerTypeProvisionRequest.RootContainerCreationInDoubt"/>)
+    /// and the type lists none yet — nothing was created; the handler waits (owner round 49 item 2: no second root
+    /// container while the first may exist).
+    /// </summary>
+    public sealed record RootContainerNotYetVisible(string ContainerTypeId, string Diagnostic) : SpeContainerTypeProvisionOutcome;
 }

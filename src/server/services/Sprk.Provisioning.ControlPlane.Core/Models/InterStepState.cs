@@ -159,6 +159,24 @@ public sealed class InterStepState
     public string? SpeContainerId { get; set; }
 
     /// <summary>
+    /// H8's CREATION RECORD (H8 output; read only by H8): the root container H8 created and has not finished binding,
+    /// the further containers it must bind, and whether a container-type or root-container creation got no
+    /// authoritative answer. Every H8 re-entry resumes from it, so nothing is created twice and nothing is left
+    /// unbound. The container type itself is <see cref="ContainerTypeId"/>.
+    /// </summary>
+    /// <remarks>
+    /// CONTROLLED SCHEMA EXTENSION (unified-access-control-r2 task 165, owner round 49 item 2: "the resume record is
+    /// persisted as typed fields — never as JsonElement evidence"). Round 41 kept the root container in the
+    /// <c>h8-t6-verified</c> gate's evidence, which the Cosmos SDK's Newtonsoft serializer wrote as
+    /// <c>{"valueKind":1}</c>; every resume then created a second root container. Same enumerated-keys discipline as
+    /// <see cref="ImportedSolutions"/> / <see cref="SpeContainerId"/>: a deliberate type extension, not a dictionary
+    /// insert.
+    /// </remarks>
+    [JsonPropertyName("speContainerCreation")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public SpeContainerCreationRecord? SpeContainerCreation { get; set; }
+
+    /// <summary>
     /// H11-authored list of provisioned user identities (H11 output). One
     /// entry per user in run.Parameters.NonSecret["usersJson"], recording
     /// the Graph user object id + UPN (NativeAccount) or invited-guest
