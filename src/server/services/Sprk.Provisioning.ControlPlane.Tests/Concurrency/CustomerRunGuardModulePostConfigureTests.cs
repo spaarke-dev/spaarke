@@ -181,6 +181,43 @@ public class CustomerRunGuardModulePostConfigureTests
         options.TargetDataverseUrl.Should().BeNull();
     }
 
+    /// <summary>
+    /// Kill-switch: with Enabled=false the REG-05 host cross-check is skipped like the rest of Validate() —
+    /// a disabled guard writes no rows, so two disagreeing URLs must not stop the host.
+    /// </summary>
+    [Fact]
+    public void PostConfigure_EnabledFalse_Skips_The_Host_CrossCheck()
+    {
+        var config = Build(
+            (RegistrySection, "https://envA.crm.dynamics.com"),
+            ("CustomerRunGuard:TargetDataverseUrl", "https://envB.crm.dynamics.com"),
+            ("CustomerRunGuard:Enabled", "false"));
+
+        var act = () => ResolveOptions(config);
+
+        act.Should().NotThrow();
+    }
+
+    /// <summary>
+    /// The module validates at host start (ValidateOnStart), not at the first resolve of the guard: the
+    /// startup validator the host runs in StartAsync surfaces a misconfiguration before any request.
+    /// </summary>
+    [Fact]
+    public void StartupValidation_Fails_When_Enabled_And_No_Admin_Url_Is_Configured()
+    {
+        var config = Build(
+            (ManagedIdentityClientIdKey, UamiId),
+            ("CustomerRunGuard:Enabled", "true"));
+        var services = new ServiceCollection();
+        services.AddSingleton<IConfiguration>(config);
+        services.AddCustomerRunGuard(config);
+        using var provider = services.BuildServiceProvider();
+
+        var act = () => provider.GetRequiredService<IStartupValidator>().Validate();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*TargetDataverseUrl*");
+    }
+
     // -----------------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------------
