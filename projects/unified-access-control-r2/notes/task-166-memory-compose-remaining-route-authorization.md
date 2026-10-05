@@ -1002,7 +1002,9 @@ pointer outside a path that uploads the bytes itself; both of its writes go thro
   Counts, Incomplete, Complete)`: the reusable entry point for task 150 (inputs: document ids + the target container;
   outputs: per-file outcomes, counts, and the incomplete ids). Resumable: a moved file is `InPlace` next time.
   `RelocatedSourceKept` is settled for the migration and NOT for Make Secure (a secure record's bytes must not stay in
-  the shared container).
+  the shared container). **Superseded by f1-v1 §21.4 (owner round 37 item 2):** a source kept for rows of OTHER records
+  is complete for both purposes (`RelocatedSourceKeptForOtherRecords`); anything still owed is `RelocationPending`,
+  recorded in the row's relocation ledger and settled by the repeat call.
 
 **The job** `DocumentContainerMigrationJob` (`IScheduledJob` `document-container-migration`, ADR-036; ADR-052: a
 bounded batch inside the BFF that composes BFF-only services). Registered DISABLED (`AddScheduledJob(…, enabled:
@@ -1204,9 +1206,11 @@ too weak (its fallback also refused) and was replaced by S16b in B. No `SEED-166
     `-Verify` (exit 0).
 24. **Legacy migration**: `pwsh scripts/Invoke-DocumentContainerMigration.ps1 -BffBaseUrl https://spe-api-dev-67e2xz.azurewebsites.net -ApiScope api://1e40baad-e065-4aea-a8d4-4b7ab273458c/.default`
     (dry run; the reports are the census of gate 22 — review `SourceUnverified` / `Undecidable` rows) → the same with
-    `-Apply -ResourceGroup spe-infrastructure-westus2 -AppName spe-api-dev-67e2xz` (FIRST decide §20.12's RAG item —
-    or re-index the relocated ids afterwards) → the same with `-Verify` (exit 0 only when nothing would move, nothing
-    failed and the strict rule would newly refuse nothing). Single instance only.
+    `-Apply -ResourceGroup spe-infrastructure-westus2 -AppName spe-api-dev-67e2xz` (~~FIRST decide §20.12's RAG item —
+    or re-index the relocated ids afterwards~~ decided by round 37 item 1 and built in f1-v1, §21.5.2: the relocation
+    re-indexes itself; run gate 23a of §21.11 first) → the same with `-Verify` (exit 0 only when nothing would move,
+    nothing failed and the strict rule would newly refuse nothing — f1-v1 adds: nothing owed, no relocated file refused).
+    Single instance only.
 25. **Strict rule ON** (only after gate 24's `-Verify` exits 0): `az webapp config appsettings set -g spe-infrastructure-westus2 -n spe-api-dev-67e2xz --settings DocumentPointer__StrictDerivedContainer=true`;
     re-download one document per class (all served from their derived containers).
 26. **Report catalog FLS** (after gate 20): `pwsh scripts/Set-ReportCatalogFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
@@ -1220,7 +1224,7 @@ too weak (its fallback also refused) and was replaced by S16b in B. No `SEED-166
 
 **Found, not owned by 166 (round 15: never dropped):**
 - **🔔 RAG index entries of a relocated file keep the OLD item id — needs a main-session decision before gate 24's
-  `-Apply`.** `FileIndexingService` keys chunks `{speFileId}_{index}` and stores `SpeFileId`; after a move the
+  `-Apply`.** *(Decided by owner round 37 item 1 and BUILT in f1-v1 — §21.5.2; kept below as found.)* `FileIndexingService` keys chunks `{speFileId}_{index}` and stores `SpeFileId`; after a move the
   document's chunks still name the deleted source item, and `SemanticSearchService` (line ~591) returns
   `SpeFileId = result.SpeFileId ?? doc.GraphItemId` — the stale index value — next to the row's NEW `DriveId`, so a
   per-result AI action on a relocated document asks for an item that is not in that drive (the pointer check refuses
@@ -1237,7 +1241,8 @@ too weak (its fallback also refused) and was replaced by S16b in B. No `SEED-166
   run reports through the existing "send to index" path. The same stale-chunk gap already exists for a document DELETE
   (pre-existing, not 166's).
 - **SPE version history is not carried by a relocation copy** (Graph has no cross-container move for SPE; the copy is
-  the current version). Recorded as the documented residual of round 26 item 3.
+  the current version). Recorded as the documented residual of round 26 item 3. *(f1-v1 §21.12 raises it as a decision
+  request with the complete fix proposed.)*
 - **The Communication* PCFs stub `@spaarke/sdap-client`** (pre-existing `false` alias), so any local-upload path inside
   those controls cannot work; they never call `attachDocumentFile`. No pointer write remains in them.
 
@@ -1263,7 +1268,340 @@ too weak (its fallback also refused) and was replaced by S16b in B. No `SEED-166
 - **Live writes (by design, main session):** gates 20–27 (§20.11) — deploys, app settings, the two FLS `-Apply` /
   `-Verify` runs, the migration `-Apply` / `-Verify`, the strict-rule flag. Nothing was written live; the only live
   access this round was the read-only FLS dry run against dev (p4a evidence, §20.2 item 1 (iii)).
-- **🔔 Escalated (found, not one of the 21 items):** the RAG re-key of a relocated file (§20.12) — the complete fix is new
-  AI-hot-path surface (a `Services/Ai/PublicContracts/` facade), so it needs the main session's decision; proposed
-  in full above. Decide before gate 24's `-Apply`, or re-index the relocated ids afterwards.
+- ~~**🔔 Escalated (found, not one of the 21 items):** the RAG re-key of a relocated file (§20.12)~~ — decided by owner
+  round 37 item 1 and built in f1-v1 (§21.5.2).
+- Nothing else is owed by task 166.
+
+# f1-v1 (2026-10-05): the f1 verification's findings F1–F4 closed; owner round 37 implemented
+
+> **Branch**: `task/uac-r2-166-f1-v1` from `task/uac-r2-166-f1` @ `ca8291442`
+> **Inputs (BINDING)**: rounds 1–39 on `work/unified-access-control-r2` (`notes/session27-owner-decisions-and-research.md`).
+> **Round 37 is this verification's answer**: item 1 (a relocated file is re-indexed through ONE `Services/Ai/PublicContracts`
+> facade and every reference to the old item is re-keyed — F4), item 2 (several rows naming the moved file; a source kept
+> for another record is complete; re-entry settles — F2), item 3 (the interim rule also serves a BFF-identity item that
+> passes the strict derived-container test — F1). The verifier's 11-item list is §21.2.
+> **Outcome**: every item is closed in code, tests, scripts and docs. What is left is LIVE writes only — a schema script, the
+> FLS script (now also covering the ledger column) and the migration, each dry run / `-Apply` / `-Verify` with its exact
+> command in §21.11. Two things FOUND while doing it are recorded for the main session in §21.12, one with a 🔔 decision
+> request (SPE version history of a relocated file) and its complete fix proposed. Status `completed-with-escalation`
+> for that one decision; every listed item is closed.
+> `NOTE-FROM-MAIN.md`: none in the worktree.
+
+## 21.1 Binding inputs as applied
+
+| Decision | Implemented |
+|---|---|
+| Round 37 item 3 — the interim rule ALSO accepts an item uploaded by the BFF identity, only when its pointer passes the strict derived-container test; tests: a relocated file is served under the interim rule, a BFF-identity item in the wrong container is refused; seeded | §21.3 |
+| Round 37 item 2 — every referencing row inside the secure record's subtree re-pointed to the copy through the pointer-attach path; a row outside keeps the source and the transition is COMPLETE; `SourceKeptForOtherRecords` with the row ids; the source deleted only when no row references it; re-entry recognises an already re-pointed row and settles it, never loops on and never reports incomplete for a source kept for another record | §21.4 (each moved row gets its OWN copy — the live unique key `sprk_graphitemid_uk` forbids a shared one; §21.4.3) |
+| Round 37 item 1 — after each re-point, ONE PublicContracts facade method enqueues RAG indexing for the new item and deletes the old item's chunks; failure = `index-pending`, incomplete, retried by the repeat call; every reference to the old item re-keyed in the same step; the note lists each one | §21.5 (the inventory is §21.5.1) |
+| The verifier's F3 (client guard completeness) | §21.6 |
+
+## 21.2 The 11 items — what changed per item
+
+| # | Item | Closure |
+|---|---|---|
+| 1 | **F1** — the interim rule refused every relocated file (BFF-identity copy on a person's row) | `RecordContainerResolver.IsAllowedUnderInterimRuleAsync`: when the round-23 halves refuse an item the BFF identity uploaded app-only, it is served only if `StrictRefusalAsync` (the derived-container test) passes. Effects (a)–(c) are gone: a migrated file, a Make Secure move and the -Verify gate are tested (§21.3). The job report no longer hides an interim/strict disagreement: `servedOnlyAfterFlip` (interim refuses, strict serves) is counted and listed, and `relocatedButRefused` (a moved file the rule IN FORCE refuses) makes the run unclean and fails `-Verify`. `Strict_DecidesByContainer_NotByUploader_…` now pins the round-37 behaviour (interim serves); the §20.5 census and the §21.11 gates say so |
+| 2 | **F2** — re-entry reported Complete with the secure file's source still in the shared container | The row's relocation ledger `sprk_relocationpending`, written in the SAME update as the re-point; every call settles it first (§21.4). Probes P2 and P3 are now tests: `MakeSecure_ASourceKeptForAnotherRecord_IsComplete_AndARepeatCallDeletesItOnceThatRowIsGone`, `MakeSecure_WhenTheSourceDeleteFails_IsIncomplete_AndARepeatCallDeletesIt` — each makes the repeat call its name claims. `RelocateDocuments_CountsEveryOutcome_…` (which never made its repeat call) is replaced by them. The migration-purpose untracked duplicate is tracked the same way (the next pass deletes it) |
+| 3 | **F3** — the guard missed bracket, dotted, computed-key and constant-through writes; InlineData #3 proved less than it appeared | `ClientDocumentPointerWriteGuardTests` and the FLS script's p4a (`Find-PointerWrite`) detect every static shape, directly or through a constant (§21.6). Case #3 split into single-shape cases; 20 write cases, 14 read cases. Seeded six ways (the finding's own `EntityCreationService.ts` bracket write first) — each red |
+| 4 | **F4** — a relocation re-keyed only the four pointer columns | Every reference re-keyed in the same step (§21.5.1 lists each one, with its live count), and the index re-keyed through `IRelocatedFileIndexing` (§21.5.2). SPE version history: §21.12 🔔 |
+| 5 | Verified MET (attach route, relocator order, job, strict flag, allowed workspaces, export builder, dead code) | Unchanged and still MET. The relocator's order is copy → verify → re-point (now with the row's re-keyed own columns and its ledger entry in that one update) → settle (re-key, source, index). It still never deletes before verifying, never copies a forged pointer, and keeps the MakeSecure exemption bounded to a secure derivation |
+| 6 | The verifier's seeding (15 seeds) | Recorded. This round's own seeding: §21.8 |
+| 7 | The verifier's full runs | Recorded. This round's: §21.9 |
+| 8 | Hygiene | Holds: the POML parses as XML; no `NOTE-FROM-MAIN.md`; no `.claude/` file in the diff; the TASK-INDEX row is untouched; no script was run against a live environment (read-only metadata/SQL only, §21.5.1) |
+| 9 | Criterion — round 26 item 3 "a repeat call completes it" | **Met.** §21.4 |
+| 10 | Criterion — round 21 item 1 (ii)/(iii) + round 26 item 3 "moved files remain servable" | **Met.** §21.3 |
+| 11 | Criterion — client pointer-write guard completeness | **Met for every statically writable shape** (§21.6). A key computed at run time (string concatenation, a loop over names, a value from another module's function) cannot be detected statically; the field-level-security lock is the control for it, and the guard's remarks say so |
+
+## 21.3 F1 / round 37 item 3 — the interim rule serves what the BFF placed
+
+- **The rule.** `IsAllowedUnderInterimRuleAsync` = (the round-23 container half AND item half) OR (the item was uploaded
+  app-only by the BFF identity — no user, an application id under `BffApplicationIdKeys` — AND `StrictRefusalAsync` passes:
+  the drive is a container derived for this document and the item is in it). The second disjunct admits nothing the strict
+  rule refuses, so the interim rule is never weaker than the strict rule; its residual is the strict rule's (a pre-lock
+  forged pointer to another BFF-placed item of the SAME derived container). The halves were refactored into
+  `InterimRefusalAsync` / `StrictRefusalAsync` (reason-returning, no logging), so a served BFF item logs one INFORMATION
+  line and a refused one exactly one REFUSED line naming both reasons. `IsAllowedUnderStrictRuleAsync` is unchanged in
+  behaviour (it now calls `StrictRefusalAsync`).
+- **Tests** (all on the REAL resolver): `ARelocatedFile_IsServedUnderTheInterimRule_BeforeTheStrictFlip` (probe P1 —
+  precondition: the interim rule serves the file before the move; after it, the copy), `AMakeSecureRelocation_IsServedUnderTheInterimRule`,
+  `Strict_DecidesByContainer_NotByUploader_…` (interim now serves), `Interim_ABffIdentityItemOutsideTheDerivedContainer_IsRefused`
+  (the owner's own customer container AND another customer's), `Interim_AnAppOnlyItemOfAnotherApplication_InTheDerivedContainer_IsRefused`,
+  `Interim_ABffIdentityItemOfAnUndecidableDocument_IsRefused`, `APersonsRow_WhoseItemTheBffUploadedAppOnly_IsServedOnlyInItsDerivedContainer`
+  (2 cases; replaces r2's `…_IsRefused`, which pinned the pre-round-37 answer); job: `AWriteRun_RelocatesTheMisplacedFile_AndTheNextRunIsClean`
+  asserts `interim = true`, `relocatedButRefused = 0`; `ARelocatedFileTheRuleInForceRefuses_MakesTheRunUnclean`;
+  `TheReport_CountsAndListsADocumentOnlyTheStrictRuleWouldServe`.
+- **Census (§20.5) as it now reads.** Row 2 of the census ("BFF-created row, BFF upload") is unchanged; a NEW served class:
+  **a person's row whose file the BFF placed in its derived container (every relocation copy) — interim: served (round 37
+  item 3); strict: served.** The other expected-refusal classes are unchanged, and each is now counted in the report as
+  `servedOnlyAfterFlip` when the strict rule would serve it.
+
+## 21.4 F2 / round 37 item 2 — the relocation ledger, re-entry, and several rows
+
+### 21.4.1 The ledger
+
+`sprk_document.sprk_relocationpending` (Multiple lines of text, 4000; created by `scripts/Set-DocumentRelocationSchema.ps1`;
+field-secured with the pointer columns). JSON `{ "v": 1, "entries": [ { sourceDrive, sourceItem, source: pending |
+keptForOtherRecords | removed | delegated, rekeyPending, indexed: none | own | all, at } ] }` — one entry per OLD item
+whose move still owes something. It is written by the re-point itself (`WritePointerAsync`, the one pointer writer, now
+carrying the ledger and the re-keyed own columns in the SAME Dataverse update), so no crash can leave a re-pointed row that
+forgot its debt. An entry is dropped when it is complete (source removed or delegated, re-key done, index re-keyed to the
+scope the source state requires); a `keptForOtherRecords` entry stays — settled, never incomplete — so a later pass can
+delete the source once nothing references it (round 37: "the source is deleted only when no row references it any more").
+
+### 21.4.2 Settling (every call, before anything else)
+
+`RelocateIfMisplacedAsync` reads the row (pointer + ledger), SETTLES the ledger against the row's current file, then
+derives and moves as before. Per entry: (a) **re-key** the rows that hold the old item for this document (§21.5.1);
+(b) **source**: gone → removed; still used by a row whose derived container is NOT where this document's file now is →
+kept for that record (listed); used by a row that belongs WITH the moved file → moved along (§21.4.3); unreadable /
+undecidable / a move-along that failed → pending; unreferenced → deleted — on a REPEAT call only when the source is
+byte-identical to the document's current file (size AND `quickXorHash`, both present), because the ledger is then the only
+witness and a ledger entry must never become a delete of an unrelated file (`ARepeatCall_NeverDeletesASourceThatIsNotByteIdenticalToTheDocumentsFile`,
+`ARepeatCall_WhenGraphReturnsNoHash_DoesNotDeleteTheSource`); (c) **index** (§21.5.2). The ledger is written back only
+when it changed; a failed write is reported pending (every step is idempotent, the next call redoes only what it finds owed).
+An UNREADABLE ledger is never acted on, and the file is not moved (moving would overwrite it): `ledger-unreadable`, Failed.
+Report-only reports the ledger's debt without settling it. Without the column the row read fails, so nothing moves (fail
+closed; `WithoutTheLedgerColumn_NothingIsMoved_FailClosed`).
+
+**Outcomes.** `RelocatedSourceKept` is replaced by **`RelocatedSourceKeptForOtherRecords`** (settled, for BOTH purposes —
+round 37) and a new **`RelocationPending`** (re-pointed now or earlier, something still owed; incomplete). Every outcome
+carries `Pending` (`source-pending: …`, `rekey-pending: …`, `index-pending: …`, `ledger-unreadable: …`),
+`KeptForOtherRecords` and `MovedAlong`. `DocumentRelocationBatchResult` gains `SourceKeptForOtherRecords`; an outcome is
+settled only when its state is settled AND it owes nothing; a moved-along row that owes something is listed in
+`Incomplete` too.
+
+### 21.4.3 Several rows naming the moved file — one copy per row
+
+Round 37 item 2 says the in-subtree rows are "re-pointed to the copy". **`sprk_graphitemid_uk` is a UNIQUE key on
+`sprk_graphitemid` alone, `Active` on spaarkedev1 (read 2026-10-05: `EntityDefinitions(…)/Keys`), and no two dev rows share
+an item (SQL `GROUP BY sprk_graphitemid`, max 1).** So while the key is Active the multi-row case cannot occur at all, and
+where it does occur (a degraded environment whose key build failed over duplicates) re-pointing several rows to ONE copy
+would recreate exactly the duplicate set that blocks the key — and `scripts/Repair-ComposeIdentityKey.ps1` would then clear
+the pointer on all but the oldest row. Each in-subtree row is therefore moved with its OWN copy (`MoveAlongAsync`: the same
+legitimacy rules, its ledger entry `delegated` — one owner of the source delete). The intent of the decision is unchanged:
+every in-subtree row ends in the secure container, through the pointer-attach path; out-of-subtree rows keep the source.
+Recorded here as the decision the live key forces, not a deviation of intent.
+
+### 21.4.4 One writer per document
+
+Two concurrent relocations of the same row (a double-clicked Make Secure, or Make Secure meeting the migration pass) would
+each copy and re-point, and the loser's copy and ledger entry would be lost. `RelocateIfMisplacedAsync` (write mode) and the
+move-along take the EXISTING ADR-004 processing lock (`IIdempotencyService`, key `document-relocate-{id:N}`, 10 minutes,
+released in `finally`); a held lock is reported (Failed, incomplete — the repeat call settles), never waited on; a lock that
+cannot be taken is treated as held (fail closed). Tests: `ARelocationOfADocumentAnotherRelocationHolds_MovesNothing_AndIsIncomplete`,
+`TheRelocationLock_IsReleased_EvenWhenTheMoveFails`, `ARowThatCannotBeMovedAlong_BecauseAnotherRelocationHoldsIt_KeepsTheSourcePending`.
+
+### 21.4.5 The job and the driver
+
+`DocumentContainerMigrationJob` is a repeat caller too (each document's ledger is settled when the pass reaches it, write
+mode). Report: `servedOnlyAfterFlip`, `relocatedButRefused`, `pending`, `movedAlong`, `sourceKeptForOtherRecords`; listed
+rows carry `pending` / `movedAlong`. Clean = no `wouldNewlyRefuse`, no `relocatedButRefused`, no `pending`, no `Failed`, no
+`WouldRelocate`. `scripts/Invoke-DocumentContainerMigration.ps1` totals and prints them and `-Verify` exits 0 only when
+`WouldRelocate`, `Failed`, `RelocationPending`, `pending`, `relocatedButRefused` and `wouldNewlyRefuse` are all 0.
+
+## 21.5 F4 / round 37 item 1 — every reference re-keyed; the index follows the move
+
+### 21.5.1 The inventory (read-only on spaarkedev1, 2026-10-05: Dataverse metadata of every entity's string columns whose name holds an SPE id, SQL counts; and the code that writes or reads each)
+
+| Where | Holds | Live (dev) | Writer / reader in code | Re-keyed |
+|---|---|---|---|---|
+| `sprk_document.sprk_graphdriveid` / `sprk_graphitemid` / `sprk_filepath` / `sprk_hasfile` | the pointer | 530 pointered | the BFF (FLS) | yes — the re-point (f1) |
+| `sprk_document.sprk_driveitemid` | the item id (legacy) | 9 | no writer; READ by the Insights observation mirror (`DataverseObservationMirror`, lookup by item) | yes, when it holds the old item → the copy, in the re-point update |
+| `sprk_document.spk_fileviewerid` | an item-keyed viewer id | 0 | none (listed in `ExternalModuleRegistry.PointerColumns`) | yes, when it holds the old item → the copy |
+| `sprk_document.sprk_containerid` | the drive id (legacy; design keeps it null) | 28 | read by `DataverseServiceClientImpl` (document DTO, container list) | yes, when it holds the old drive → the target |
+| `sprk_document.sprk_parentfolderid` | the folder the item sat in | 0 | none | yes, when set → the copy's parent (cleared if Graph returns none) |
+| `sprk_document.sprk_etag` | the item's eTag | 1 | none | yes, when set → the copy's eTag (cleared if none) |
+| CHILD `sprk_document.sprk_parentgraphitemid` (`sprk_parentdocument` = the moved row) | the parent's item id | 102 | `UploadFinalizationWorker` (email attachments) | yes — rows with `sprk_parentdocument` = the document AND the old item → the copy (another parent's child is untouched) |
+| `sprk_communicationattachment.sprk_graphdriveid` / `sprk_graphitemid` (`sprk_document` = the moved row) | the attachment's own pointer (mirrors its document's) | 78 with an item, 77 equal to a document's | written by the communication pipeline; READ app-only by the `.eml` embed (`CommunicationService.FetchEmlAttachmentsForEmbedAsync`) and by archive (`ArchiveExistingAttachmentsAsync`) | yes — rows linked to the document AND naming the old item → (target, copy). An UNLINKED attachment row naming the source is a communication's own record of that file: it keeps the source (listed `sprk_communicationattachment:{id}`) |
+| RAG knowledge index (chunk id `{speFileId}_{i}`, field `speFileId`, `documentId`; no drive field — `KnowledgeDocument`) | the item id | — | `FileIndexingService` | yes — §21.5.2 |
+| Insights observations (`spe://drive/{d}/item/{i}` evidence) | drive + item, IF the files-index chunk carries `driveId`/`itemId` | — | `FilesIndexIngestDocumentSource` | not stored by the file pipeline (`KnowledgeDocument` has no such fields), so production refs are `file://{documentId}` — stable across a move. Nothing to re-key |
+| Session-files index (`{documentId}_s_{i}`) | the chat-document GUID as `speFileId` | — | `ChatDocumentEndpoints` | not an SPE item id; not a `sprk_document`'s file. Nothing to re-key |
+| `sprk_fileversion` | version metadata (number, comment, dates) | — | `DocumentCheckoutService` | holds no SPE id (live schema). Nothing to re-key |
+| `sprk_analysisworkingversion.sprk_driveid` / `sprk_itemid` | its own working files | 0 equal to a document's item | none in `src` | not a document's file |
+| `sprk_analysis.sprk_containerid` (and other tables' `sprk_containerid`) | a RECORD's container (business unit / secure record) | — | wizards / provisioning | record-level, not a file reference |
+| `sprk_document.sprk_attachments` | email attachment metadata | 0 | none | empty; holds no item id |
+| Compose sessions (`documentSpeId`, Redis) | the open item | transient | `ComposeService` | an open session on the old item resolves its drive through the `sprk_document` row by item (`TryResolveRecordedDriveIdAsync`): no row names the old item after the move, so the save is REFUSED (fail closed) and the user reopens the document. No write can reach the old item |
+| RAG idempotency keys `rag-index-{drive}-{item}` (Redis, 7 days) | drive + item | transient | `RagIndexingJobHandler` | keyed by the NEW item for the copy; the old key expires. Nothing to re-key |
+| SPE version history of the item | content of older versions | — | `GET /api/documents/{id}/versions` | **not carried by a copy — §21.12 🔔** |
+
+Tests: `Relocate_ReKeysTheRowsOwnColumnsThatHeldTheOldIds_InTheSameUpdateAsThePointer`, `Relocate_LeavesAnOwnColumnThatHeldSomethingElse`,
+`Relocate_ReKeysAChildAttachmentsParentItem_AndTheCommunicationAttachmentRow` (another parent's child untouched),
+`ACommunicationsOwnAttachmentRecord_KeepsTheSource_ForThatCommunication`, `Relocate_WhenAReKeyFails_IsPending_AndARepeatCallCompletesIt`.
+The legacy own columns are read BEFORE any byte moves; an environment without one of them ("doesn't contain attribute")
+simply has no reference there.
+
+### 21.5.2 The index — ONE PublicContracts facade method
+
+No existing `Services/Ai/PublicContracts` facade indexes or un-indexes a file (checked: none of the 63 files declares an
+indexing method), so — as round 37 allows — ONE new interface with ONE method: `IRelocatedFileIndexing.ReindexRelocatedFileAsync(RelocatedFileIndexRequest)`
+(`Services/Ai/PublicContracts/IRelocatedFileIndexing.cs`), implemented by `RelocatedFileIndexing` over the EXISTING seams:
+(1) `IPostUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync` for the new item (the app-only `RagIndexing` job — the
+copy is BFF-written, that path's precondition; tenant from `TENANT_ID` / `AzureAd:TenantId` like every app-only producer);
+then (2) the old item's chunks removed by the new `IRagService.DeleteSupersededFileChunksAsync` (all of them once the old
+item is gone; only those attributed to THIS document while it is another record's file), from the index the document was
+last stamped into (`sprk_searchindexname`) and the tenant default. The old chunks are removed only after the enqueue
+succeeded; a failed or switched-off enqueue (`FeatureFlagDisabled`, `MissingTenantId`, `MissingSpeIdentifiers`) leaves
+them and answers pending, so a document is never made unsearchable by a re-index that will not come; a non-indexable file
+still has its old chunks removed; an index the allow-list no longer admits is skipped (unreachable for search too); AI off
+(`NullRagService`) = nothing was ever indexed = settled. `DeleteSupersededFileChunksAsync` shares ONE deletion core with
+`DeleteChunksBeyondCountAsync` (the trim's structural rule — never below chunk 1 — is unchanged; its message is unchanged).
+The relocator (CRUD code) injects only the facade (ADR-013). Failure → `index-pending`, incomplete, retried by the repeat
+call (round 37). Tests: `RelocatedFileIndexingTests` (8 methods, 10 cases), `RagServiceChunkTrimTests` (+3), `Relocate_ReindexesTheNewItem_AndRemovesAllTheOldItemsChunks_OnceTheSourceIsGone`,
+`Relocate_WhenTheIndexStepFails_IsIndexPending_Incomplete_AndARepeatCallRetries`; the P2 test pins the scope sequence
+(this document's chunks while the source is kept, all once it is deleted).
+
+## 21.6 F3 — the client pointer-write guard
+
+The columns: `sprk_graphdriveid`, `sprk_graphitemid` and now `sprk_relocationpending`. Shapes (C# guard and the FLS
+script's `Find-PointerWrite`, kept identical — a 34-case harness ran both): object key; computed literal key
+`{ ["…"]: v }`; bracket assignment `x['…'] = v` (incl. `??=`, `||=`, `&&=`); dotted assignment `e.sprk_graphdriveid=t`;
+`getAttribute(…)` / `attributes.get(…)` `.setValue` / `?.setValue`; and the computed-key, bracket and setValue shapes
+THROUGH a name bound to a column string (`const F = "…"` / `{ ITEM: '…' }`) — bound in the same file, or (source files)
+in any other client source file (an exported constant). A minified bundle's one-letter names count only inside that
+bundle. Reads never match: `$select`, property access, bracket lookups incl. a ternary arm, `===`/`==`/`!==`, a live
+minified read (`(t=e.sprk_graphitemid)`), a read through a constant. The repo scan stays green (no client write exists).
+The FLS script also gains (p7): every column to lock exists (the ledger column after the schema script), and the
+DocumentPointers target locks the ledger column with the pointer.
+
+## 21.7 Placement (CLAUDE.md §10) and component justification (§11)
+
+**Placement: in BFF**, and in the existing types except where round 37 names a facade. ADR-002: no plugin. ADR-003: every
+new decision fails closed (an unreadable ledger is never acted on and blocks the move; an unreadable reference keeps the
+source; a repeat-call delete needs byte identity; a lock that cannot be taken is held; no tenant / a failed enqueue keeps
+the old chunks). ADR-007: no new Graph surface. ADR-010: one new 1:1 interface (below; `ADR010_DITests` documents it).
+ADR-013: CRUD code reaches AI only through the PublicContracts facade. ADR-038: no `Mock<HttpMessageHandler>`, no
+DI-registration or ctor-null tests. No new package, endpoint, option, job, PCF or plugin.
+
+- **`IRelocatedFileIndexing` + `RelocatedFileIndexing` (Scoped, `AnalysisServicesModule`, UNCONDITIONAL next to the enqueuer)** —
+  Existing: no PublicContracts facade indexes a file; `IPostUploadIndexingEnqueuer` and `IRagService` are AI internals.
+  Extension: round 37 says extend a facade if one fits — none does; the implementation EXTENDS the existing seams (no new
+  pipeline). Cost of nothing: a relocated file stays searchable only under the deleted item id (§20.12), and per-result AI
+  actions on it fail.
+- **`IRagService.DeleteSupersededFileChunksAsync`** (+ `RagService`, `NullRagService`, the seam test's in-memory index) —
+  Existing: `DeleteChunksBeyondCountAsync` refuses to remove chunk 0 by design (a version re-index must never leave a file
+  without chunks); `DeleteBySourceDocumentAsync` targets only the tenant default and keys by document. Extension: ONE shared
+  private deletion core; the trim's rule and message are unchanged. Cost of nothing: the old item's chunks cannot be removed.
+- **Column `sprk_document.sprk_relocationpending` + `scripts/Set-DocumentRelocationSchema.ps1`** — Existing: no column
+  records what a move owes; `sprk_processingjob` is the Office job ledger (a separate write, not atomic with the re-point; a
+  job type option it lacks). Extension: nothing on the row can hold it without misusing a column of another meaning. Cost
+  of nothing: F2 — a re-pointed row forgets its source, its re-key and its index step, and a repeat call reports Complete.
+- **Relocator members** — `RelocationLedgerColumn`, `ReKeyedOwnColumns`, the ledger types, `SettleOrReportAsync`,
+  `ReKeyReferencesAsync`, `SettleSourceAsync`, `MoveAlongAsync`, `IsByteIdentical`, `RelocationLockKey`: extensions of the
+  ONE relocation service (round 26 item 3: never two mechanisms). New constructor dependencies: `IRelocatedFileIndexing`
+  (above) and `IIdempotencyService` (EXISTING, unconditional Scoped — the ADR-004 lock; §21.4.4).
+- **Job report fields** and **driver script totals** — extensions of the existing report and `-Verify`.
+- **Guard / FLS script patterns** — extensions of the existing guard and p4a; (p7) is one existence check.
+- **`RelocationState.RelocationPending`**, **`RelocatedSourceKeptForOtherRecords`** (renamed from `RelocatedSourceKept`;
+  no other branch references it — checked `task/uac-r2-150-integ`, `-integ-c`, `wip/uac-r2-150-integ-restart`,
+  `work/unified-access-control-r2`), **`KeptSource`**, **`DocumentRelocationBatchResult.SourceKeptForOtherRecords`** —
+  the round-37 report vocabulary.
+
+## 21.8 Seeding (five seeded builds, 2026-10-05; restored from byte copies, files touched)
+
+Targeted set: the relocator, migration job, facade, RAG trim, pointer-check and attach tests (167). Build A (10 seeds):
+**26 of 167** red. Build B (7): **22 of 167**. Build C (2): **13 of 167**. Build D (S9 alone): **16 of 167**. Build E (S18
+alone): **1 of 167**. S4 and S9 also sat in build A; their bite is proven alone in B / D. Every seed bit, each with a test
+no other seed of its build turns red. No `SEED-166V1` marker remains (Grep, `src` and `scripts`).
+
+| Seed | What it breaks | Red (examples) |
+|---|---|---|
+| S1 (A) | interim: the BFF-identity disjunct removed (F1 as found) | `ARelocatedFile_IsServedUnderTheInterimRule_BeforeTheStrictFlip`, `AMakeSecureRelocation_IsServed…`, `Strict_DecidesByContainer…`, `APersonsRow_…(A, True)`, `AWriteRun_Relocates…` |
+| S2 (B) | interim: the disjunct without the strict test (too wide) | `Interim_ABffIdentityItemOutsideTheDerivedContainer_IsRefused` (2), `APersonsRow_…(A1, False)`, `Interim_ABffIdentityItemOfAnUndecidableDocument…`, `PointerIntoTheArchive_…` (2) |
+| S3 (B) | re-entry ignores the ledger (F2 as found) | `MakeSecure_WhenTheSourceDeleteFails_…`, `AWriteRun_WhoseMoveStillOwesAStep_…`, `ReportOnly_WithALedgerStillOwing_…`, `Relocate_WhenTheIndexStepFails_…` |
+| S4 (B) | a source kept for another record reported pending | `Relocate_WhenARowOfAnotherRecordStillUsesTheSource_…_IsComplete`, `ASourceKeptForAnotherRecord_IsNeverReportedIncomplete…`, `ACommunicationsOwnAttachmentRecord_…` |
+| S5 (A) | repeat-call delete without the byte-identity test | `ARepeatCall_NeverDeletesASourceThatIsNotByteIdentical…`, `ARepeatCall_WhenGraphReturnsNoHash…` |
+| S6 (B) | in-subtree rows not moved along | `MakeSecure_ARowInTheSecureSubtreeNamingTheSameFile_IsMovedAlong_WithItsOwnCopy` |
+| S7 (A) | the row's own columns not re-keyed | `Relocate_ReKeysTheRowsOwnColumnsThatHeldTheOldIds_…` |
+| S8 (B) | children / attachment rows not re-keyed | `Relocate_ReKeysAChildAttachmentsParentItem_AndTheCommunicationAttachmentRow` |
+| S9 (D) | the index step skipped | `Relocate_ReindexesTheNewItem_…`, `Relocate_WhenTheIndexStepFails_…` |
+| S10 (A) | facade: old chunks removed although the enqueue failed | `WhenTheNewItemIsNotEnqueued_NoOldChunkIsRemoved_AndItIsPending(failed)` |
+| S11 (B) | facade: all chunks removed while the source is another record's | `WhileTheOldItemIsAnotherRecordsFile_OnlyThisDocumentsChunksOfItAreRemoved` |
+| S12 (A) | RAG: the document filter dropped | `DeleteSupersededFileChunks_ForOneDocument_FiltersOnThatDocument_InLowerCase` |
+| S13 (A) | job: `relocatedButRefused` not counted | `ARelocatedFileTheRuleInForceRefuses_MakesTheRunUnclean` |
+| S14 (B) | job: `servedOnlyAfterFlip` not counted | `TheReport_CountsAndListsADocumentOnlyTheStrictRuleWouldServe` |
+| S15 (A) | the per-document lock ignored | `ARelocationOfADocumentAnotherRelocationHolds_MovesNothing_AndIsIncomplete` |
+| S16 (A) | an unreadable ledger overwritten by a move | `AnUnreadableLedger_IsNeverActedOn_AndTheFileIsNotMoved` |
+| S17 (C) | the ledger not written with the re-point | `Relocate_CopiesThenVerifiesThenRepoints_…` (+ every re-entry test) |
+| S18 (E) | job: a pending relocation counted clean | `AWriteRun_WhoseMoveStillOwesAStep_IsNotClean_…` |
+| G1–G6 | client guard, one seed per run (`NoClientWritesADocumentPointer`): G1 the finding's bracket write in `EntityCreationService.ts`; G2 a dotted write in a committed bundle; G3 a computed key through a same-file constant; G4 a bracket write through a constant bound in ANOTHER file; G5 a form `setValue` through a constant; G6 a client write of the ledger | each **red**, naming the shape (`['sprk_graphitemid'] =`, `.sprk_graphdriveid=`, `{ [SEED_G3_FIELD]:`, `[F.SEED_G4_ITEM] =`, `getAttribute(SEED_G5).setValue`, `sprk_relocationpending:`); restored |
+| P1 | FLS script `Find-PointerWrite`: the bracket pattern removed and the through-a-constant pass disabled | the 34-case harness: **7 missed writes**; restored, harness 0 failures |
+
+## 21.9 Gates (this round, final code)
+
+| Gate | Result |
+|---|---|
+| Affected tests (before the final runs) | relocator + migration job + facade + RAG trim + pointer check + attach: **167 passed, 0 failed**; every test class that runs on the pointer world (21 classes incl. FileIndexing, ChatDocument, Revoke, Reporting, VersionSave seam): **500 passed, 5 skipped, 0 failed** (before the lock tests were added; the 167 set re-ran green after them); `ClientDocumentPointerWriteGuardTests` **37 passed** |
+| Full BFF unit suite (`tests/unit/Sprk.Bff.Api.Tests`) | **14,651 total: 14,597 passed, 54 skipped, 0 failed** (20 m 27 s; +45 cases vs f1's 14,606) |
+| NetArchTest (`tests/Spaarke.ArchTests`) | **383 passed, 0 failed** (f1: 359; +24 guard cases) |
+| Sprk.Bff.Api.IntegrationTests (full) | **104 passed, 0 failed** |
+| Spe.Integration.Tests (full) | **405 total: 380 passed, 25 skipped (environment-gated `SkippableFact`s), 0 failed** |
+| BFF build | Debug (tests) and Release succeeded, 0 errors (warnings as errors) |
+| `dotnet format whitespace --verify-no-changes` (the changed BFF files) | clean; every changed `.cs` file is CRLF (`.gitattributes *.cs eol=crlf`) |
+| `dotnet list package --vulnerable --include-transitive` | `Sprk.Bff.Api` has no vulnerable packages |
+| PowerShell | `Set-DocumentRelocationSchema.ps1`, `Set-DocumentPointerFieldSecurity.ps1`, `Invoke-DocumentContainerMigration.ps1` parse with 0 errors; the C# guard and the script's `Find-PointerWrite` agree on all 34 harness cases |
+| Publish size (CLAUDE.md §10) | Base ca8291442 45.710 MB (47,930,449 bytes) vs branch ba81ea003 45.737 MB (47,959,058 bytes) = +0.027 MB (+28,609 bytes); 212/212 files; both from FRESH short-path trees (git archive into C:\wt166vm / C:\wt166vb, removed afterwards), dotnet publish -c Release, PowerShell Compress-Archive Optimal, PDBs included. No package; one interface, one service, one IRagService method. Ceiling 60 MB; far below the +5 MB escalation threshold. |
+| Client builds | none needed: no client source changed (the guard and the FLS script scan clients; no `.ts`/`.tsx`/`.js` or PCF bundle is edited) |
+
+## 21.10 Route authorization ledger input — f1-v1
+
+No route is added, deleted or re-gated in this round. The §20.10 rows stand.
+
+## 21.11 Manual live gates — f1-v1 (main session, dev; in THIS order; supersedes §20.11 gates 23–25 where they differ)
+
+20–22 as §20.11 (deploy the BFF — it carries this round; set the allowed workspaces; redeploy the clients; census).
+**23a (NEW) Relocation ledger column**: `pwsh scripts/Set-DocumentRelocationSchema.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com`
+(dry run) → the same with `-Apply` → the same with `-Verify` (exit 0). Before gate 24 and before task 150's Make Secure is
+used: every relocation fails closed until the column exists.
+**23 Document pointers FLS** — as §20.11, now ALSO locking `sprk_relocationpending` (p7 refuses until 23a ran):
+`pwsh scripts/Set-DocumentPointerFieldSecurity.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -BffApplicationIds 5967251e-171c-46fe-a6c2-ef843c90309d,1e40baad-e065-4aea-a8d4-4b7ab273458c`
+(dry run: p4a and p7 OK) → `-ClientNoLongerWritesPointers -Apply` → `-Verify` (exit 0).
+**24 Legacy migration** — as §20.11; the RAG decision §20.12 asked for is made (round 37 item 1) and built: every
+relocated file is re-indexed by the relocation itself (one app-only `RagIndexing` job per moved file — up to 447 on dev;
+the BFF's Service Bus job processor must be running). `-Verify` now also requires `RelocationPending 0`, `pending 0`,
+`relocatedButRefused 0`. A run that ends with `pending > 0` is re-run with `-Apply` (it settles what is owed).
+Read-only cross-check after `-Verify`: `SELECT COUNT(sprk_documentid) FROM sprk_document WHERE sprk_relocationpending IS NOT NULL`
+— only rows whose source is kept for another record may remain (each listed under `sourceKeptForOtherRecords`).
+**25 Strict rule ON** — as §20.11 (only after gate 24's `-Verify`). Before AND after it, a relocated file downloads
+(round 37 item 3; gate 22's census class "a person's row whose file the BFF placed" is served by both rules).
+26–27 as §20.11.
+
+## 21.12 Found, decisions recorded, integration notes, `.claude`
+
+- **🔔 Decision requested — SPE version history of a relocated file.** A relocation copies the CURRENT version (round 26
+  item 3: "copy … verify … delete the source"); deleting the source deletes its older versions, and
+  `GET /api/documents/{documentId}/versions` (re-keyed by document id; it lists the item's SPE versions) then shows one
+  version for every relocated document (up to 447 on dev, and every Make Secure move). f1 recorded this as a documented
+  residual; it is not one of the round-37 references (it is content, not an id) and no round decides it, while it changes
+  what round 26 item 3's "copy" means — so it is asked, not assumed. **Proposed complete fix:** the relocator replays the
+  source's history into the copy through the BFF identity: list the versions app-only (`SpeFileStore.ListFileVersionsAsync`
+  EXISTS), upload the oldest prior version with `ConflictBehavior.Rename`, every later prior version to the same path with
+  `Replace` (each becomes a new version of the same item), and the current content last; each upload's size is checked
+  against the listed version, and the final one is verified against the source exactly as today; a failed replay deletes
+  the copy and leaves the row and the source untouched (Failed, retried). It needs ONE new app-only Graph facade method
+  (`DownloadFileVersionAsync`; its OBO twin `DownloadFileVersionAsUserAsync` exists). Facts the decision needs: Graph cannot
+  set a version's author or date, so replayed versions show the BFF identity and the replay time; each version is one more
+  download and upload (a Make Secure request's duration grows with the history it carries); the target container's
+  version limit applies.
+- **Found, not owned (round 15: never dropped):** `AnalysisChatContextResolver` retrieves `sprk_analysisoutput.sprk_analysisplaybookid`,
+  `sprk_analysistype`, `sprk_spefileid`, `sprk_containerid`; none exists on spaarkedev1 (live metadata 2026-10-05:
+  `sprk_analysisid`, `sprk_name`, `sprk_outputcode`, `sprk_outputtypeid`, `sprk_tags`, `sprk_value`, `sprk_availableadhoc`),
+  so the retrieve throws, is caught, and the resolver returns null — analysis chat context never resolves from Dataverse
+  on dev. Unrelated to access control; for the main session to file.
+- **Decision recorded (forced by the live key):** one copy per moved row (§21.4.3).
+- **Integration notes — task 150's lane:** `RelocateDocumentsAsync(ids, recordContainerId, RelocationPurpose.MakeSecure, apply: true)`
+  unchanged; `Complete == false` → 500 `sdap.provision.files_incomplete` with `Counts` / `Incomplete` — now also for
+  `RelocationPending` (`index-pending`, `rekey-pending`, `source-pending`) and a held lock; add `SourceKeptForOtherRecords`
+  to that report (round 37). A repeat call settles. **Pass the record's CHILD attachment documents too** (`sprk_parentdocument`
+  of the record's documents): their derived container follows the parent, they are separate files, and the relocator moves
+  only the ids it is given (plus rows naming the SAME file). The relocator's new constructor dependencies are DI-registered
+  (no change for a caller that resolves it).
+- **Task 167's guard:** no new route.
+- **`.claude` edit (main session only):** none new; §12's `bff-deploy/SKILL.md:50` edit still stands.
+
+## 21.13 Not closed
+
+- **Live writes (by design, main session):** gates 23a, 23, 24, 25 (§21.11) and §20.11's others. Nothing was written live;
+  this round's live access was read-only (Dataverse metadata and SQL counts, §21.4.3 / §21.5.1).
+- **🔔 One decision requested** (found, not one of the 11 items): SPE version history of a relocated file — complete fix
+  proposed in §21.12.
 - Nothing else is owed by task 166.
