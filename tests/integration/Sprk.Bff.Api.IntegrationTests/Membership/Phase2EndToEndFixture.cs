@@ -886,7 +886,7 @@ public sealed class SpyMembershipCacheInvalidator : IMembershipCacheInvalidator
         => Task.CompletedTask;
 
     /// <inheritdoc />
-    /// <remarks>The POA seam's share-change eviction (task 132 batch 4 residual); no Phase 2 path shares, so it is not recorded.</remarks>
+    /// <remarks>The share-change eviction DataverseWebApiService's share writes trigger (task 132); no Phase 2 path shares, so it is not recorded.</remarks>
     public Task InvalidateRecordShareChangeAsync(
         string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
         => Task.CompletedTask;

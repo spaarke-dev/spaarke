@@ -141,7 +141,8 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
 
     /// <summary>
     /// The root type whose entity SET is <paramref name="entitySetName"/> (<c>sprk_projects</c> → <c>sprk_project</c>), for
-    /// the share-change eviction, whose writer (the POA seam) knows only the set. False for any non-root set.
+    /// the share-change eviction, whose caller (a share write of <c>DataverseWebApiService</c>, through
+    /// <c>IRecordShareWriteObserver</c>) knows only the set. False for any non-root set.
     /// </summary>
     internal static bool TryGetEntityTypeForSet(string entitySetName, out string entityType)
     {

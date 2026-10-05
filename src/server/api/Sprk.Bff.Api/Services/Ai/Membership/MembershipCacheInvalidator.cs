@@ -12,7 +12,8 @@
 //
 // unified-access-control-r2 task 132 (defect C12) adds the BFF write-path access-cache evictions
 // (InvalidateUserAccessAsync / InvalidateRecordOwnerChangeAsync; InvalidateRecordShareChangeAsync since the batch 4
-// integration residual — called by the one POA seam on every share write). They delete keys in the SHARED Redis directly
+// integration residual — called, through IRecordShareWriteObserver, by DataverseWebApiService on every share write it
+// makes, since round 55). They delete keys in the SHARED Redis directly
 // (SCAN + DEL, the same mechanism MembershipCacheInvalidationSubscriber already uses), so every BFF instance sees
 // the eviction at once with no pub/sub hop, and they run whether or not the junction channel switch
 // (Membership:CacheInvalidator:Enabled) is on. That switch now gates the junction PUBLISH only.

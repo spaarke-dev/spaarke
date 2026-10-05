@@ -20,9 +20,9 @@ namespace Sprk.Bff.Api.Infrastructure.Caching;
 /// - Record access:   <c>tenant:{tid}:auth-record-access:{entitySet}:{userOid}:{recordId}:v2</c> TTL 60 s
 ///
 /// Both are evicted for EVERY user of a record by <c>IMembershipCacheInvalidator</c> on the BFF's owner changes
-/// (<c>InvalidateRecordOwnerChangeAsync</c>) and share changes (<c>InvalidateRecordShareChangeAsync</c>, called by the
-/// one POA seam on every grant / modify / revoke) — task 132. A table re-owned silently by an Assign cascade is never
-/// cached (<see cref="CachesRecordEntitySet"/>).
+/// (<c>InvalidateRecordOwnerChangeAsync</c>) and share changes (<c>InvalidateRecordShareChangeAsync</c>, called through
+/// <c>IRecordShareWriteObserver</c> by <c>DataverseWebApiService</c> on every grant / modify / revoke it makes, round 55)
+/// — task 132. A table re-owned silently by an Assign cascade is never cached (<see cref="CachesRecordEntitySet"/>).
 ///
 /// The former user-level role and team keys (<c>sdap:</c>-prefixed, 2-minute) are GONE: they were written on every
 /// miss and read by nothing in the repo (task 132 removed them with their TTLs).

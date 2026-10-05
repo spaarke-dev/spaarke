@@ -29,12 +29,13 @@ namespace Spaarke.ArchTests;
 ///
 /// <para><b>Not a method reference</b>: a <c>dynamic</c> call — its member name is a binder STRING, which
 /// <see cref="StringLoads"/> does see. <b>Not visible to a reference scan</b>: a method chosen at RUN time — found by
-/// reflection (by a name, a signature or a position), reached through an <c>[UnsafeAccessor]</c> extern declared on the
-/// caller's own type, or run from code the scan cannot read (emitted IL, an assembly loaded at run time). The POA guard
-/// does not leave those to this scan: it BANS the mechanisms themselves — the reflection, UnsafeAccessor and run-time-code
-/// APIs, through this scan's references and the assemblies' metadata (task 132, owner round 48) — and reads metadata,
-/// constant data and configuration by other means. An action URL assembled from variables at run time is beyond any
-/// static scan.</para>
+/// reflection (by a name, a signature, a position or a metadata token), bound by a late binder, reached through an
+/// <c>[UnsafeAccessor]</c> extern declared on the caller's own type, or run from code the scan cannot read (emitted IL, an
+/// assembly loaded at run time). The POA guard bans a LIST of such APIs through this scan's references (C7) and the
+/// <c>[UnsafeAccessor]</c> attribute through the assemblies' metadata (C8) — not every way to choose a method at run time
+/// (task 132, owner rounds 48 / 55 / 56). That is why the share-write eviction does not depend on this scan: since round 55
+/// it is made by the client's own share writes, however they are called. An action URL assembled from variables at run
+/// time is beyond any static scan.</para>
 /// </remarks>
 internal static class IlCallScan
 {
