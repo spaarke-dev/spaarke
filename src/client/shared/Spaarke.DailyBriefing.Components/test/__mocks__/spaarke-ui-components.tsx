@@ -17,6 +17,7 @@
  *   factory has a non-empty catalog to compare against.
  */
 import * as React from 'react';
+import { getXrm as realGetXrm } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const MicrosoftToDoIcon: React.FC<any> = props => (
@@ -177,8 +178,9 @@ export const createXrmEmailComposeHandlers: (...args: any[]) => any = () => ({})
 export const resolveCurrentUserEmail: (...args: unknown[]) => Promise<string> = async () => '';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const searchUsersAndContacts: (...args: any[]) => Promise<any[]> = async () => [];
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-export const getXrm: (...args: any[]) => any = () => undefined;
+// `getXrm` is the REAL shared walker (task 081 — see the note further down);
+// bound here so the `_driftGuard` object below can reference it.
+export const getXrm = realGetXrm;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const getXrmForPicker: (...args: any[]) => any = () => undefined;
 export interface RecordTypeCatalogEntry {
@@ -282,7 +284,6 @@ export const OOB_MODAL_SIZES = {
 // copy from the sibling package's node_modules).
 // ---------------------------------------------------------------------------
 
-export { getXrm } from '../../../Spaarke.UI.Components/src/utils/xrmContext';
 export { formatRelativeTime } from '../../../Spaarke.UI.Components/src/utils/relativeTime';
 export { parseDueDate, daysBetweenLocalMidnight } from '../../../Spaarke.UI.Components/src/utils/dateLocal';
 
@@ -293,6 +294,9 @@ export interface EmptyStateProps {
   footer?: React.ReactNode;
   ariaLabel?: string;
   size?: 'compact' | 'default';
+  className?: string;
+  headingClassName?: string;
+  descriptionClassName?: string;
 }
 
 export const EmptyState: React.FC<EmptyStateProps> = ({ heading, description, footer }) => (
