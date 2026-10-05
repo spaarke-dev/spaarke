@@ -505,6 +505,14 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Relocated files are therefore served before the strict flip (gate 25).
    - Tests: a relocated file is served under the interim rule; a BFF-identity item in the wrong container is refused. Seeded.
 
+## Round 38 (2026-10-04). BINDING. Main-session decision under round 15. Task 168, grid lock coverage (note §12.6).
+
+1. **The grid lock covers the same columns the forms hide.** Round 25 item 8 named only the four root columns for the grid. But a person can add the raw filing columns to the `sprk_event` and `sprk_analysis` grids with Edit columns: the ADR-024 pair and the non-root `sprk_regarding*` lookups. Those columns would then be inline-editable, which reopens the door the form lock closes.
+   - `SpaarkeGridCustomizer`'s RootColumnLock covers that full set, BY NAME and from ONE shared list. The list is the one the form scripts use, never a second copy.
+   - It uses the same cell editor and cell renderer overrides as the root columns.
+   - Version v1.1.1, bumped in all four places. Jest cases, plus a seed proving each override bites.
+   - The grid configuration script is unchanged.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
