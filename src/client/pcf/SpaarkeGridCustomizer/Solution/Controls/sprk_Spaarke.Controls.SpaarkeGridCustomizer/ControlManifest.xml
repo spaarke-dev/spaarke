@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="SpaarkeGridCustomizer" version="1.1.0" display-name-key="Spaarke Grid Customizer" description-key="Power Apps grid customizer: the four core-ancestor root columns are not editable; regarding links" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="SpaarkeGridCustomizer" version="1.1.1" display-name-key="Spaarke Grid Customizer" description-key="Power Apps grid customizer: the regarding filing columns (the core-ancestor roots, the regarding pair, the other regarding lookups) are not editable; regarding links" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="EventName" display-name-key="EventName" description-key="End point to communicate with the Power Apps grid" of-type="SingleLine.Text" usage="input" required="true"/>
     <resources>

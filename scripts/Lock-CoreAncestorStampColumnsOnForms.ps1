@@ -85,6 +85,11 @@
 .PARAMETER FixturePath
     -SelfTest only. Default: tests/fixtures/form-lock-core-ancestor next to this repository's scripts folder.
 
+.PARAMETER FilingColumnsPath
+    The ONE list of the regarding filing columns (owner round 38): its rootColumns are the locked columns.
+    Default: config/regarding-filing-columns.json at the repository root. Add-RegardingFilingPickerToForms.ps1 and
+    the SpaarkeGridCustomizer PCF read the same file; an unreadable or incomplete file stops the script.
+
 .EXAMPLE
     .\Lock-CoreAncestorStampColumnsOnForms.ps1                          # dry run: plan + refusals, no writes
     .\Lock-CoreAncestorStampColumnsOnForms.ps1 -SelfTest                # offline fixture run
@@ -135,7 +140,10 @@ param(
     [string[]]$Tables = @('sprk_todo', 'sprk_event', 'sprk_communication', 'sprk_analysis'),
 
     [Parameter(Mandatory = $false)]
-    [string]$FixturePath = (Join-Path $PSScriptRoot '..' 'tests' 'fixtures' 'form-lock-core-ancestor')
+    [string]$FixturePath = (Join-Path $PSScriptRoot '..' 'tests' 'fixtures' 'form-lock-core-ancestor'),
+
+    [Parameter(Mandatory = $false)]
+    [string]$FilingColumnsPath = (Join-Path $PSScriptRoot '..' 'config' 'regarding-filing-columns.json')
 )
 
 $ErrorActionPreference = "Stop"
@@ -151,8 +159,16 @@ if ($modeCount -gt 1) {
 # Constants
 # ============================================================================
 
-# CoreAncestorResolver.CoreAncestorLookups (task 156): the four core-ancestor lookups.
-$LockedColumns = @('sprk_regardingproject', 'sprk_regardingmatter', 'sprk_regardingworkassignment', 'sprk_regardingservicerequest')
+# CoreAncestorResolver.CoreAncestorLookups (task 156): the four core-ancestor lookups. Read from the ONE list of the
+# regarding filing columns (owner round 38), never a second copy here.
+function Read-FilingColumnRoots([string]$Path) {
+    try { $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { throw "FILING_COLUMNS: '$Path' could not be read as JSON: $($_.Exception.Message)" }
+    $roots = @($j.rootColumns | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+    if ($roots.Count -eq 0) { throw "FILING_COLUMNS: '$Path' names no rootColumns" }
+    return $roots
+}
+$LockedColumns = @(Read-FilingColumnRoots $FilingColumnsPath)
 # CoreAncestorResolver.StampSourceColumns: the only tables that carry a stamp copy.
 $ChildTables = @('sprk_todo', 'sprk_event', 'sprk_communication', 'sprk_analysis')
 $InScopeFormTypes = @(2, 7, 12)
@@ -756,7 +772,7 @@ try {
         $grid = Invoke-Dv -Endpoint "customcontroldefaultconfigs?`$select=controldescriptionxml&`$filter=primaryentitytypecode eq '$table'"
         foreach ($g in $grid.value) {
             if ("$($g.controldescriptionxml)" -match '<EnableEditing[^>]*>\s*yes\s*</EnableEditing>') {
-                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 25 item 8: Set-SpaarkeGridCustomizerOnChildGrids.ps1 sets the SpaarkeGridCustomizer (root columns not editable) on it, and its -Verify checks it; not changed by this script"
+                Write-Info "REPORT: the table's home grid is an EDITABLE grid (Power Apps grid, EnableEditing=yes) — task 168 trigger 5; owner round 25 item 8: Set-SpaarkeGridCustomizerOnChildGrids.ps1 sets the SpaarkeGridCustomizer (v1.1.1: the roots and the raw filing columns not editable, owner round 38) on it, and its -Verify checks it; not changed by this script"
             }
         }
     }

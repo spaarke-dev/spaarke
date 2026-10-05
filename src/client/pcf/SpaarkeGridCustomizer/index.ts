@@ -5,9 +5,11 @@
  * `sprk_Spaarke.Controls.SpaarkeGridCustomizer`). The grid instantiates it with an `EventName`;
  * `init` answers by firing that event with the customizer (Microsoft Learn, "Customize the editable
  * grid control"). The overrides are built in customizers/GridCustomizer.ts:
- *  - Root-column lock (unified-access-control-r2 task 168, owner round 25 item 8): the four
- *    core-ancestor root columns are not editable (editor cancelled, cell shown read-only). Set on
- *    the sprk_event and sprk_analysis home grids by scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1.
+ *  - Filing-column lock (unified-access-control-r2 task 168; owner round 25 item 8, widened by owner
+ *    round 38): the regarding filing columns (the four core-ancestor roots, the ADR-024 pair and the
+ *    non-root sprk_regarding* lookups, from config/regarding-filing-columns.json) are not editable
+ *    (editor cancelled, cell shown read-only). Set on the sprk_event and sprk_analysis home grids by
+ *    scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1.
  *  - Regarding links: regarding name / id cells link to the parent record when the row names it.
  *
  * ADR Compliance:
@@ -15,7 +17,7 @@
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs (platform-provided React)
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 import * as React from 'react';
@@ -46,7 +48,7 @@ export class SpaarkeGridCustomizer implements ComponentFramework.ReactControl<II
       return;
     }
     factory.fireEvent(eventName, createGridCustomizer());
-    console.log(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] customizer registered (root columns not editable)`);
+    console.log(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] customizer registered (filing columns not editable)`);
   }
 
   public updateView(_context: ComponentFramework.Context<IInputs>): React.ReactElement {

@@ -1,8 +1,9 @@
 <#
 .SYNOPSIS
-    Sets the SpaarkeGridCustomizer PCF (v1.1.0+) as the customizer control of the editable Power Apps home grids
-    of sprk_event and sprk_analysis, so the four sprk_regarding{core} root columns cannot be edited inline
-    (owner round 25 item 8). DRY RUN by default; -Verify checks the result at any time.
+    Sets the SpaarkeGridCustomizer PCF (v1.1.1+) as the customizer control of the editable Power Apps home grids
+    of sprk_event and sprk_analysis, so the regarding filing columns cannot be edited inline: the four
+    sprk_regarding{core} root columns (owner round 25 item 8) and the raw filing columns the forms hide (owner
+    round 38). DRY RUN by default; -Verify checks the result at any time.
 
 .DESCRIPTION
     Task 168 (unified-access-control-r2) locks the four root columns on the child FORMS (owner round 8 item 3,
@@ -11,7 +12,10 @@
     Owner round 25 item 8 (2026-10-04, binding): the grid lock EXTENDS the existing src/client/pcf/SpaarkeGridCustomizer
     (cellEditorOverrides cancel editing of the four root columns; cellRendererOverrides mark them read-only), set on
     the two grids' configuration by a dry-run / -Apply / -Verify script. No new PCF and no web-resource handler
-    (ADR-006). Every other column keeps inline editing.
+    (ADR-006). Every other column keeps inline editing. Owner round 38 widened the customizer's lock (v1.1.1) to the
+    same column set the forms hide, from the ONE list config/regarding-filing-columns.json; the configuration this
+    script writes is unchanged, and its prerequisite is v1.1.1 so -Verify cannot pass on a v1.1.0 customizer that
+    still lets a person type the pair or an intermediate lookup inline.
 
     The change is to the table's grid configuration (customcontroldefaultconfig.controldescriptionxml): in EVERY
     Microsoft.PowerApps.PowerAppsOneGrid customControl (each form factor) the parameter
@@ -20,7 +24,9 @@
     insertion (never a re-serialization), proven by a parsed comparison in which every original node is unchanged
     and the only new nodes are those parameters. controldescriptionjson is platform-derived (it also carries the
     manifest's default parameters), so it is not written; the read-back after -Apply and -Verify require it to carry
-    the customizer too.
+    the customizer too. A table whose XML already names the customizer but whose JSON does not (saved without a
+    publish) is PUBLISHED by -Apply (PublishXml regenerates the JSON) and read back; the dry run plans it. A run never
+    reports "nothing to do" while a gap remains: a gap no planned change closes stops it with exit 1 (UNRESOLVED).
 
     The customizer PCF must reach customers with the grid configuration: -Apply also adds the customcontrol to the
     SpaarkeMaster solution (AddSolutionComponent, componenttype 66, as Assemble-SpaarkeMasterSolution.ps1 does) when it
@@ -35,11 +41,12 @@
       TRANSFORM_PARSE         the configuration XML is not well-formed, or the result changed anything but the added
                               parameters, or still lacks the customizer on a PowerAppsOneGrid control;
       PREREQ_MISSING          (live) the customcontrol sprk_Spaarke.Controls.SpaarkeGridCustomizer is not in the
-                              environment, or its version is below 1.1.0 (v1.0.0 does not implement the grid's
-                              customizer contract: deploy the PCF first);
-      CONFIG_CHANGED          (-Apply) a configuration changed between the scan and its PATCH.
+                              environment, or its version is below 1.1.1 (v1.0.0 does not implement the grid's
+                              customizer contract; v1.1.0 locks the four roots only, not the raw filing columns of
+                              owner round 38: deploy the PCF first);
+      CONFIG_CHANGED          (-Apply) a configuration changed between the scan and its PATCH (or its publish).
 
-    ORDER (main-session live gate): deploy SpaarkeGridCustomizer v1.1.0 (pcf-deploy) -> this script dry run ->
+    ORDER (main-session live gate): deploy SpaarkeGridCustomizer v1.1.1 (pcf-deploy) -> this script dry run ->
     -Apply -> -Verify -> the grid checks in the task 168 note.
 
 .PARAMETER EnvironmentUrl
@@ -51,7 +58,7 @@
 .PARAMETER Verify
     Read-only. Exit 0 only when, for every table, every PowerAppsOneGrid control in BOTH controldescriptionxml and
     controldescriptionjson names sprk_Spaarke.Controls.SpaarkeGridCustomizer, the customcontrol is present at
-    version 1.1.0 or later and is a SpaarkeMaster component, and no refusal case is present. Otherwise exit 1 naming
+    version 1.1.1 or later and is a SpaarkeMaster component, and no refusal case is present. Otherwise exit 1 naming
     each gap. Any read fault is a FAILED check (exit 1).
 
 .PARAMETER RestoreFrom
@@ -82,7 +89,8 @@
 
 .NOTES
     Project : unified-access-control-r2
-    Task    : 168 (#1107) f1 — owner round 25 item 8 (the editable grids)
+    Task    : 168 (#1107) f1 — owner round 25 item 8 (the editable grids); v1 — owner round 38 (v1.1.1 prerequisite),
+              verifier items 3 (pinned no-grid gap) and 4 (publish-only plan; never "nothing to do" with a gap)
     Created : 2026-10-04
     Docs    : projects/unified-access-control-r2/notes/task-168-lock-root-columns-on-forms.md
 
@@ -136,7 +144,8 @@ $ChildTables = @('sprk_todo', 'sprk_event', 'sprk_communication', 'sprk_analysis
 $GridControlName = 'Microsoft.PowerApps.PowerAppsOneGrid'
 $CustomizerParam = 'GridCustomizerControlFullName'
 $CustomizerName = 'sprk_Spaarke.Controls.SpaarkeGridCustomizer'
-$MinCustomizerVersion = [version]'1.1.0'
+# v1.1.1 (owner round 38): the lock covers the raw filing columns too; v1.1.0 locked the four roots only.
+$MinCustomizerVersion = [version]'1.1.1'
 $MasterSolution = 'SpaarkeMaster'
 $CustomizerElement = "<$CustomizerParam static=""true"" type=""SingleLine.Text"">$CustomizerName</$CustomizerParam>"
 
@@ -343,6 +352,32 @@ function Get-GridGaps([string]$Xml, [string]$Json) {
     return $gaps
 }
 
+<#
+    What a dry run or -Apply does with one table's configuration (pure; task 168 v1, verifier item 4):
+      'edit'    the XML lacks the customizer on a PowerAppsOneGrid form factor (PATCH, then publish);
+      'publish' the XML names it everywhere but a gap remains: controldescriptionjson is platform-derived and is
+                regenerated only by a publish (an XML change saved without a publish, or one published before the
+                customizer was imported, reads this way), so the table is published and read back;
+      'none'    no gap.
+    Call only on a configuration with no refusal.
+#>
+function Get-GridTableAction([string]$Xml, [string]$Json) {
+    if (@((Set-GridCustomizerXml $Xml).Added).Count -gt 0) { return 'edit' }
+    if (@(Get-GridGaps $Xml $Json).Count -gt 0) { return 'publish' }
+    return 'none'
+}
+
+<#
+    The run's outcome (pure; verifier item 4): 'act' when anything is planned; 'unresolved' when nothing is planned
+    but a gap remains (never "nothing to do" while -Verify would fail: the run stops with exit 1); 'nothing' only
+    when there is no gap.
+#>
+function Get-GridRunOutcome([int]$Edits, [bool]$AddToMaster, [int]$Publishes, [int]$Gaps) {
+    if ($Edits -gt 0 -or $AddToMaster -or $Publishes -gt 0) { return 'act' }
+    if ($Gaps -gt 0) { return 'unresolved' }
+    return 'nothing'
+}
+
 # ============================================================================
 # -SelfTest (offline)
 # ============================================================================
@@ -421,15 +456,33 @@ if ($SelfTest) {
         @{ Name = 'verify: json names another customizer'; Xml = $good; Json = $jsonOther; Want = $true },
         @{ Name = 'verify: json does not parse'; Xml = $good; Json = '{"CustomControls":['; Want = $true },
         @{ Name = 'verify: json has no grid control'; Xml = $good; Json = '{"CustomControls":[]}'; Want = $true },
-        @{ Name = 'verify: xml form factor missing it'; Xml = $base; Json = $jsonOk; Want = $true }
+        @{ Name = 'verify: xml form factor missing it'; Xml = $base; Json = $jsonOk; Want = $true },
+        # Task 168 v1, verifier item 3: the XML half's "no grid control" gap on its own. The JSON is valid and complete,
+        # so this gap is the only thing that can fail the case (the -Apply read-back relies on Get-GridGaps alone).
+        @{ Name = 'verify: xml has no grid control (json valid)'; Xml = '<controlDescriptions><controlDescription><customControl id="{E7A81278-8635-4d9e-8D4D-59480B391C5B}"><parameters /></customControl></controlDescription></controlDescriptions>'; Json = $jsonOk; Want = $true }
     )
     foreach ($t in $verifyCases) {
         $gaps = @(Get-GridGaps $t.Xml $t.Json)
         if (($gaps.Count -gt 0) -eq $t.Want) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
         else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (gaps: {2})" -f 'inline', $t.Name, ($gaps -join '; ')) -ForegroundColor Red }
     }
+    # Task 168 v1, verifier item 4: a dry run / -Apply never says "nothing to do" while -Verify would fail.
+    $actions = @(
+        @{ Name = 'action: xml lacks it -> edit'; Got = (Get-GridTableAction $base $jsonMissing); Want = 'edit' },
+        @{ Name = 'action: xml has it, json does not -> publish'; Got = (Get-GridTableAction $good $jsonMissing); Want = 'publish' },
+        @{ Name = 'action: json names another -> publish'; Got = (Get-GridTableAction $good $jsonOther); Want = 'publish' },
+        @{ Name = 'action: xml and json have it -> none'; Got = (Get-GridTableAction $good $jsonOk); Want = 'none' },
+        @{ Name = 'outcome: only a publish planned -> act'; Got = (Get-GridRunOutcome 0 $false 1 2); Want = 'act' },
+        @{ Name = 'outcome: only master membership -> act'; Got = (Get-GridRunOutcome 0 $true 0 1); Want = 'act' },
+        @{ Name = 'outcome: a gap, nothing planned -> unresolved'; Got = (Get-GridRunOutcome 0 $false 0 1); Want = 'unresolved' },
+        @{ Name = 'outcome: no gap, nothing planned -> nothing'; Got = (Get-GridRunOutcome 0 $false 0 0); Want = 'nothing' }
+    )
+    foreach ($t in $actions) {
+        if ($t.Got -ceq $t.Want) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
+        else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got {2})" -f 'inline', $t.Name, $t.Got) -ForegroundColor Red }
+    }
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures case(s)." -ForegroundColor Red; exit 1 }
-    Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count + $verifyCases.Count) inline check(s)." -ForegroundColor Green
+    Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count + $verifyCases.Count + $actions.Count) inline check(s)." -ForegroundColor Green
     exit 0
 }
 
@@ -549,6 +602,7 @@ if ($Apply) {
 $refusals = [System.Collections.Generic.List[object]]::new()
 $gaps = [System.Collections.Generic.List[string]]::new()
 $edits = [System.Collections.Generic.List[object]]::new()
+$publishes = [System.Collections.Generic.List[object]]::new()   # XML complete, JSON not regenerated: publish only
 $addToMaster = $null
 
 try {
@@ -563,7 +617,7 @@ try {
         $ccRow = $cc.value[0]
         $ver = $null
         if (-not [version]::TryParse([string]$ccRow.version, [ref]$ver) -or $ver -lt $MinCustomizerVersion) {
-            $refusals.Add(@{ Code = 'PREREQ_MISSING'; Where = $BaseUrl; Detail = "customcontrol $CustomizerName is v$($ccRow.version); v$MinCustomizerVersion or later implements the grid's customizer contract (deploy it first)" })
+            $refusals.Add(@{ Code = 'PREREQ_MISSING'; Where = $BaseUrl; Detail = "customcontrol $CustomizerName is v$($ccRow.version); v$MinCustomizerVersion or later implements the grid's customizer contract and locks every filing column, not only the roots (deploy it first)" })
         }
         else { Write-Info "customcontrol $CustomizerName v$($ccRow.version) present" }
         $sol = Invoke-Dv -Endpoint "solutions?`$select=solutionid,uniquename,ismanaged&`$filter=uniquename eq '$MasterSolution'"
@@ -588,11 +642,19 @@ try {
         $r = @(Get-GridRefusals $xml ([bool]$row.ismanaged))
         foreach ($x in $r) { $refusals.Add(@{ Code = $x.Code; Where = $where; Detail = $x.Detail }) }
         if ($r.Count -gt 0) { continue }
-        foreach ($g in (Get-GridGaps $xml ([string]$row.controldescriptionjson))) { $gaps.Add("$where : $g") }
+        $json = [string]$row.controldescriptionjson
+        foreach ($g in (Get-GridGaps $xml $json)) { $gaps.Add("$where : $g") }
         $states = @(Get-GridXmlState (ConvertTo-ConfigDocument $xml))
         Write-Info "Power Apps grid form factors: $(($states | ForEach-Object { "$($_.FormFactor) (EnableEditing=$($_.Editing), customizer=$(if ($_.Customizer) { $_.Customizer } else { 'none' }))" }) -join '; ')"
+        $action = Get-GridTableAction $xml $json
+        if ($action -eq 'none') { Write-Info "the customizer is set on every form factor (XML and JSON)"; continue }
+        if ($action -eq 'publish') {
+            # The XML is complete but the platform-derived JSON is not: only a publish regenerates it (verifier item 4).
+            Write-Plan "publish $table : controldescriptionxml names $CustomizerName on every form factor but controldescriptionjson does not yet (the platform regenerates it on publish)"
+            $publishes.Add([pscustomobject]@{ ConfigId = [string]$row.customcontroldefaultconfigid; Table = $table; Xml = $xml })
+            continue
+        }
         $result = Set-GridCustomizerXml $xml
-        if ($result.Added.Count -eq 0) { Write-Info "the customizer is already set on every form factor"; continue }
         foreach ($p in (Test-GridTransform $xml $result.Xml)) { $refusals.Add(@{ Code = 'TRANSFORM_PARSE'; Where = $where; Detail = $p }) }
         Write-Plan "set $CustomizerName on $($result.Added -join ', ')"
         $edits.Add([pscustomobject]@{ ConfigId = [string]$row.customcontroldefaultconfigid; Table = $table; Before = $xml; After = $result.Xml })
@@ -621,9 +683,16 @@ if ($Verify) {
 }
 
 if ($refusals.Count -gt 0) { Stop-Refused "$($refusals.Count) refusal case(s), listed above." }
-if ($edits.Count -eq 0 -and $null -eq $addToMaster) { Write-Host "`nNothing to do: the customizer is set on every grid and ships in $MasterSolution." -ForegroundColor Green; exit 0 }
+$outcome = Get-GridRunOutcome $edits.Count ($null -ne $addToMaster) $publishes.Count $gaps.Count
+if ($outcome -eq 'unresolved') {
+    # Never "nothing to do" while -Verify would fail (task 168 v1, verifier item 4).
+    foreach ($g in $gaps) { Write-Host "   GAP $g" -ForegroundColor Red }
+    Write-Host "`nUNRESOLVED: $($gaps.Count) gap(s) remain and this script plans no change that closes them; -Verify fails. Nothing was written." -ForegroundColor Red
+    exit 1
+}
+if ($outcome -eq 'nothing') { Write-Host "`nNothing to do: the customizer is set on every grid (XML and JSON) and ships in $MasterSolution." -ForegroundColor Green; exit 0 }
 if (-not $Apply) {
-    Write-Host "`nDRY RUN complete — no writes were made. $($edits.Count) grid configuration(s) would change$(if ($addToMaster) { "; the customizer would be added to $MasterSolution" }). Re-run with -Apply." -ForegroundColor White
+    Write-Host "`nDRY RUN complete — no writes were made. $($edits.Count) grid configuration(s) would change$(if ($publishes.Count) { "; $($publishes.Count) table(s) would be published so the platform regenerates controldescriptionjson" })$(if ($addToMaster) { "; the customizer would be added to $MasterSolution" }). Re-run with -Apply." -ForegroundColor White
     exit 0
 }
 
@@ -641,6 +710,8 @@ $snapshot = [ordered]@{
     environmentUrl = $BaseUrl
     createdUtc     = (Get-Date).ToUniversalTime().ToString('o')
     addedToMaster  = $addToMaster
+    # Published only (XML unchanged, so nothing to restore): the platform regenerates controldescriptionjson.
+    publishedOnly  = @($publishes | ForEach-Object { [ordered]@{ configid = $_.ConfigId; table = $_.Table; sha256Xml = (Get-Sha256 $_.Xml) } })
     configs        = @($edits | ForEach-Object {
             [ordered]@{
                 configid = $_.ConfigId; table = $_.Table
@@ -670,11 +741,17 @@ foreach ($e in $edits) {
     $written++
     Write-Done "$($e.Table) grid configuration ($($e.ConfigId)) updated"
 }
+foreach ($p in $publishes) {
+    # A publish-only table: its XML must still be what the scan read (a later change would be published unseen).
+    if ([string](Get-ConfigNow $p.ConfigId).controldescriptionxml -cne $p.Xml) {
+        Stop-Refused "CONFIG_CHANGED: $($p.Table) grid configuration ($($p.ConfigId)) changed since the scan; $written configuration(s) were already written — restore them with -RestoreFrom '$SnapshotPath' if needed."
+    }
+}
 if ($addToMaster) {
     Invoke-Dv -Endpoint 'AddSolutionComponent' -Method POST -Body @{ ComponentId = $addToMaster; ComponentType = 66; SolutionUniqueName = $MasterSolution; AddRequiredComponents = $false } | Out-Null
     Write-Done "customcontrol $CustomizerName added to $MasterSolution"
 }
-foreach ($t in @($edits | ForEach-Object { $_.Table } | Sort-Object -Unique)) { Publish-Table $t; Write-Done "published $t" }
+foreach ($t in @(@($edits | ForEach-Object { $_.Table }) + @($publishes | ForEach-Object { $_.Table }) | Sort-Object -Unique)) { Publish-Table $t; Write-Done "published $t" }
 
 Write-Step "Read back"
 $still = @()
@@ -684,11 +761,15 @@ foreach ($c in $snapshot.configs) {
     $c['sha256Stored'] = Get-Sha256 ([string]$now.controldescriptionxml)
     foreach ($g in (Get-GridGaps ([string]$now.controldescriptionxml) ([string]$now.controldescriptionjson))) { $still += "$($c.table): $g" }
 }
+foreach ($p in $publishes) {
+    $now = Get-ConfigNow $p.ConfigId
+    foreach ($g in (Get-GridGaps ([string]$now.controldescriptionxml) ([string]$now.controldescriptionjson))) { $still += "$($p.Table) (published only): $g" }
+}
 $snapshot | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $SnapshotPath -Encoding utf8
 Write-Done "snapshot updated with the stored configuration XML: $SnapshotPath"
 if ($still.Count -gt 0) { throw "Read-back shows gap(s) after the apply: $($still -join '; '). Restore with -RestoreFrom '$SnapshotPath'." }
 
 Write-Host ""
-Write-Host "Updated $written grid configuration(s). Snapshot: $SnapshotPath" -ForegroundColor Green
+Write-Host "Updated $written grid configuration(s)$(if ($publishes.Count) { "; published $($publishes.Count) table(s) whose JSON had not been regenerated" }). Snapshot: $SnapshotPath" -ForegroundColor Green
 Write-Host "Next: -Verify (must exit 0), then the grid checks in the task 168 note." -ForegroundColor Green
 exit 0

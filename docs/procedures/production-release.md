@@ -154,7 +154,7 @@ These are built from source code and uploaded to dev before export.
 | ~~EmailProcessingMonitor~~ | Forms — **deleted 2026-09-25**; remove from forms/solution |
 | ThemeEnforcer | Forms |
 | RegardingLink | sprk_event views (dataset binding) |
-| SpaarkeGridCustomizer | sprk_event and sprk_analysis home grids, as their customizer control (v1.1.0+: the four `sprk_regarding{core}` root columns are not editable inline; set by `scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1`, unified-access-control-r2 task 168). The grid configuration names it, so it MUST ship with SpaarkeMaster |
+| SpaarkeGridCustomizer | sprk_event and sprk_analysis home grids, as their customizer control (v1.1.1+: the regarding filing columns — the four `sprk_regarding{core}` roots, the ADR-024 pair and the non-root `sprk_regarding*` lookups, from `config/regarding-filing-columns.json` — are not editable inline; set by `scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1`, unified-access-control-r2 task 168). The grid configuration names it, so it MUST ship with SpaarkeMaster |
 
 **Excluded PCFs**:
 AssociationResolver, EventAutoAssociate, UniversalDocumentUpload, ScopeConfigEditor, AnalysisBuilder, AnalysisWorkspace, DueDatesWidget, EventCalendarFilter, FieldMappingAdmin, PlaybookBuilderHost, LegalWorkspace (PCF), UniversalDatasetGrid (broken styles.css web resource reference).

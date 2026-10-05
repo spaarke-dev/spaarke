@@ -43,7 +43,13 @@
     already complete is left byte-identical ("nothing to do").
 
     The To Do main form (round 25 item 8) is a target too: it already hosts the picker and the presave, and gains
-    only its missing hidden sprk_regardingservicerequest cell.
+    only the hidden cells it lacks. On dev (2026-10-04) those are two: sprk_regardingservicerequest (the cell round 25
+    item 8 names) and sprk_regardingagreement (also a sprk_regarding* lookup of sprk_todo with no control; every
+    missing one is added, by design).
+
+    The column names come from the ONE list of the regarding filing columns, config/regarding-filing-columns.json
+    (owner round 38): its rootColumns, recordTypeColumn, pairTextColumns, lookupPrefix and lookupTypes.
+    Lock-CoreAncestorStampColumnsOnForms.ps1 and the SpaarkeGridCustomizer PCF read the same file.
 
     Fail closed (ADR-003). Each of these REFUSES (exit 2), names the form, and writes nothing:
       FORM_NOT_FOUND          a target form id is not in the environment, or belongs to another table;
@@ -60,6 +66,12 @@
       RAW_CONTROL_NOT_IN_CELL a visible raw filing control whose parent is not a <cell>;
       LIBRARY_SHOWS           (live) a library on the form (or the presave) names a raw filing column of the table
                               AND calls setVisible, so it could re-show a hidden control at runtime;
+      WORKFLOW_REFERENCE      (live) a business rule (workflow category 2) on the table, or a business process flow
+                              (category 4) on or naming the table, whose xaml or clientdata references a raw filing
+                              column of the table: a business rule can show a hidden raw control, and a process-flow
+                              step puts the column on the process bar as an editable input. Neither is in the form
+                              XML. The mirror of the lock script's WORKFLOW_REFERENCE over the raw filing columns
+                              (task 168 v1, verifier item 1); -Verify also names it as a gap;
       PREREQ_MISSING          (live) the web resource sprk_todo_regarding_presave or the customcontrol
                               sprk_Spaarke.Controls.RegardingResolver is not in the environment;
       TRANSFORM_PARSE         the result is not well-formed, removed or changed an original node, added anything
@@ -83,7 +95,8 @@
     Read-only. Exit 0 only when every target form hosts the RegardingResolver for its table, registers the
     enabled presave OnLoad handler and its library, carries a control for every pair column and every
     sprk_regarding* lookup of its table, shows NO raw filing control (each one's cell, section or tab is hidden; the
-    picker's host excepted), and no refusal case is present. Otherwise exit 1 naming each gap. Any read fault is a
+    picker's host excepted), no business rule or business process flow of its table references a raw filing column
+    (WORKFLOW_REFERENCE), and no refusal case is present. Otherwise exit 1 naming each gap. Any read fault is a
     FAILED check (exit 1).
 
 .PARAMETER RestoreFrom
@@ -99,10 +112,15 @@
     -Apply only. Default: filing-picker-snapshot-yyyyMMddHHmmss.json in the current directory.
 
 .PARAMETER Forms
-    Target form ids. Default: the five forms named by owner round 19.
+    Target form ids. Default: six forms: the five named by owner round 19 (event main, event modal, event Assign
+    Work, communication Message, analysis main) and the To Do main form (owner round 25 item 8).
 
 .PARAMETER FixturePath
     -SelfTest only. Default: tests/fixtures/form-filing-picker.
+
+.PARAMETER FilingColumnsPath
+    The ONE list of the regarding filing columns (owner round 38). Default: config/regarding-filing-columns.json at
+    the repository root. An unreadable or incomplete file stops the script.
 
 .EXAMPLE
     .\Add-RegardingFilingPickerToForms.ps1                 # dry run
@@ -113,7 +131,8 @@
 
 .NOTES
     Project : unified-access-control-r2
-    Task    : 168 (#1107) r1 — owner round 19 items 1, 2 and 4
+    Task    : 168 (#1107) r1 — owner round 19 items 1, 2 and 4; f1 — round 25 item 8 (a); v1 — WORKFLOW_REFERENCE
+              (verifier item 1) and the ONE shared list of filing columns (owner round 38)
     Created : 2026-10-04
     Docs    : projects/unified-access-control-r2/notes/task-168-lock-root-columns-on-forms.md
 
@@ -158,7 +177,10 @@ param(
     ),
 
     [Parameter(Mandatory = $false)]
-    [string]$FixturePath = (Join-Path $PSScriptRoot '..' 'tests' 'fixtures' 'form-filing-picker')
+    [string]$FixturePath = (Join-Path $PSScriptRoot '..' 'tests' 'fixtures' 'form-filing-picker'),
+
+    [Parameter(Mandatory = $false)]
+    [string]$FilingColumnsPath = (Join-Path $PSScriptRoot '..' 'config' 'regarding-filing-columns.json')
 )
 
 $ErrorActionPreference = "Stop"
@@ -174,15 +196,38 @@ if ($modeCount -gt 1) {
 # ============================================================================
 
 $ChildTables = @('sprk_todo', 'sprk_event', 'sprk_communication', 'sprk_analysis')
-$RecordTypeColumn = 'sprk_regardingrecordtype'
-# The ADR-024 pair the RegardingResolver writes on every pick and clear: a table missing any of these cannot host it.
-$RequiredPairColumns = @('sprk_regardingrecordtype', 'sprk_regardingrecordid', 'sprk_regardingrecordname', 'sprk_regardingrecordurl')
-$PairTextColumns = @('sprk_regardingrecordid', 'sprk_regardingrecordname', 'sprk_regardingrecordurl', 'sprk_regardingrecordnumber')
+
+# The ONE list of the regarding filing columns (owner round 38): config/regarding-filing-columns.json. This script,
+# Lock-CoreAncestorStampColumnsOnForms.ps1 and the SpaarkeGridCustomizer PCF all read it; never a second copy here.
+function Read-FilingColumns([string]$Path) {
+    try { $j = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json }
+    catch { throw "FILING_COLUMNS: '$Path' could not be read as JSON: $($_.Exception.Message)" }
+    $out = [pscustomobject]@{
+        RootColumns      = @($j.rootColumns | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+        RecordTypeColumn = "$($j.recordTypeColumn)".Trim().ToLowerInvariant()
+        PairTextColumns  = @($j.pairTextColumns | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+        LookupPrefix     = "$($j.lookupPrefix)".Trim().ToLowerInvariant()
+        LookupTypes      = @($j.lookupTypes | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+    }
+    if ($out.RootColumns.Count -eq 0 -or $out.PairTextColumns.Count -eq 0 -or -not $out.RecordTypeColumn -or -not $out.LookupPrefix -or $out.LookupTypes.Count -eq 0) {
+        throw "FILING_COLUMNS: '$Path' lacks rootColumns, recordTypeColumn, pairTextColumns, lookupPrefix or lookupTypes"
+    }
+    return $out
+}
+$FilingColumns = Read-FilingColumns $FilingColumnsPath
+$RecordTypeColumn = $FilingColumns.RecordTypeColumn
+$PairTextColumns = @($FilingColumns.PairTextColumns)
 # CoreAncestorResolver.CoreAncestorLookups: the four roots. Lock-CoreAncestorStampColumnsOnForms.ps1 DISABLES their
 # controls; this script never touches them. Every OTHER sprk_regarding* lookup and every pair column is a raw filing
 # input: typing a pair (or an intermediate on a row with no pair) re-files the row without the picker, so its
 # controls are HIDDEN (owner round 25 item 8 (a)), the picker's own host control excepted.
-$RootColumns = @('sprk_regardingproject', 'sprk_regardingmatter', 'sprk_regardingworkassignment', 'sprk_regardingservicerequest')
+$RootColumns = @($FilingColumns.RootColumns)
+$LookupPrefix = $FilingColumns.LookupPrefix
+$LookupTypes = @($FilingColumns.LookupTypes)
+# The ADR-024 pair the RegardingResolver WRITES on every pick and clear (ResolverWriteHandler): a table missing any of
+# these cannot host it. Its write contract, not the filing-column list: the record-type column and every pair text
+# column except sprk_regardingrecordnumber, which the picker writes only where the column exists.
+$RequiredPairColumns = @(@($RecordTypeColumn) + @($PairTextColumns | Where-Object { $_ -cne 'sprk_regardingrecordnumber' }))
 $PickerName = 'sprk_Spaarke.Controls.RegardingResolver'
 $PickerPattern = '(?i)(^|_)Spaarke\.Controls\.RegardingResolver$'
 $PresaveLibrary = 'sprk_todo_regarding_presave'
@@ -223,7 +268,7 @@ function ConvertTo-XmlAttributeText([string]$Text) {
 function Get-NeededColumns([object[]]$ColumnSpecs) {
     return @($ColumnSpecs | Where-Object {
             $_.Name -ine $RecordTypeColumn -and
-            (($PairTextColumns -contains $_.Name.ToLowerInvariant()) -or ($_.Kind -eq 'Lookup' -and $_.Name -like 'sprk_regarding*'))
+            (($PairTextColumns -contains $_.Name.ToLowerInvariant()) -or ($_.Kind -eq 'Lookup' -and $_.Name.ToLowerInvariant().StartsWith($LookupPrefix, [System.StringComparison]::Ordinal)))
         })
 }
 
@@ -237,7 +282,53 @@ function Test-IsRawFilingColumn([string]$Name, [object[]]$ColumnSpecs) {
     $n = $Name.Trim().ToLowerInvariant()
     if ($n -ceq $RecordTypeColumn -or $PairTextColumns -contains $n) { return $true }
     if ($RootColumns -contains $n) { return $false }
-    return @($ColumnSpecs | Where-Object { $_.Kind -eq 'Lookup' -and $_.Name.ToLowerInvariant() -ceq $n -and $n.StartsWith('sprk_regarding', [System.StringComparison]::Ordinal) }).Count -gt 0
+    return @($ColumnSpecs | Where-Object { $_.Kind -eq 'Lookup' -and $_.Name.ToLowerInvariant() -ceq $n -and $n.StartsWith($LookupPrefix, [System.StringComparison]::Ordinal) }).Count -gt 0
+}
+
+<#
+    Every raw filing column NAME of the table, whether or not the form has a control for it yet: the record-type
+    column, the pair text columns, and each non-root sprk_regarding* lookup of the table. What LIBRARY_SHOWS and
+    WORKFLOW_REFERENCE search for.
+#>
+function Get-RawFilingColumnNames([object[]]$ColumnSpecs) {
+    $lookups = @($ColumnSpecs | Where-Object { Test-IsRawFilingColumn $_.Name $ColumnSpecs } | ForEach-Object { $_.Name.ToLowerInvariant() })
+    return @(@($RecordTypeColumn) + $PairTextColumns + $lookups | Sort-Object -Unique)
+}
+
+<#
+    Business rules and business process flows that could show or expose a raw filing column of the table at runtime
+    (owner round 25 item 8 (a), "-Verify fails on a visible one"; task 168 v1, verifier item 1). Neither lives in the
+    form XML: a business rule (workflow category 2) can show a hidden raw control, and a business process flow step
+    (category 4) puts the column on the process bar as an editable input. The mirror of the lock script's
+    WORKFLOW_REFERENCE, over the raw filing columns:
+      - a business rule whose primaryentity is the table, or a business process flow whose primaryentity is the table
+        or whose xaml / clientdata names it (a flow can span tables);
+      - whose xaml or clientdata references a raw filing column (whole name, case-insensitive).
+    Every other category (a classic workflow, an action) is not a form input and is ignored. Pure; -SelfTest pins it.
+    $Workflows: rows with workflowid, name, category, primaryentity, xaml, clientdata.
+    Returns a list of @{ Code = 'WORKFLOW_REFERENCE'; Where; Detail; Columns }.
+#>
+function Get-WorkflowRefusals([object[]]$Workflows, [string]$Table, [string[]]$RawColumns) {
+    $out = @()
+    foreach ($w in @($Workflows)) {
+        if ($null -eq $w) { continue }
+        $text = "$($w.xaml)`n$($w.clientdata)"
+        $onTable = "$($w.primaryentity)".Trim() -ieq $Table
+        $kind = switch ([string]$w.category) { '2' { 'business rule' } '4' { 'business process flow' } default { $null } }
+        if ($null -eq $kind) { continue }
+        if ($kind -eq 'business rule' -and -not $onTable) { continue }
+        if ($kind -eq 'business process flow' -and -not $onTable -and
+            -not [regex]::IsMatch($text, "(?<![A-Za-z0-9_])$([regex]::Escape($Table))(?![A-Za-z0-9_])", 'IgnoreCase')) { continue }
+        $hits = @($RawColumns | Where-Object { [regex]::IsMatch($text, "(?<![A-Za-z0-9_])$([regex]::Escape($_))(?![A-Za-z0-9_])", 'IgnoreCase') } | Sort-Object -Unique)
+        if ($hits.Count -eq 0) { continue }
+        $out += @{
+            Code    = 'WORKFLOW_REFERENCE'
+            Where   = "$Table $kind '$($w.name)' ($($w.workflowid))"
+            Detail  = "references raw filing column(s) $($hits -join ', '): a business rule can show a hidden raw control and a process-flow step exposes the column on the process bar, neither in the form XML (owner decision)"
+            Columns = $hits
+        }
+    }
+    return $out
 }
 
 function Test-ElementHidden([System.Xml.XmlNode]$Node) {
@@ -767,6 +858,11 @@ if ($SelfTest) {
         $specs = ConvertTo-ColumnSpecs $meta.columns
         $in = [System.IO.File]::ReadAllText((Join-Path $case.FullName 'input.xml'))
         $refusals = @(Get-PickerRefusals $in $meta.table $specs ([bool]$meta.managed))
+        # A case may carry the table's business rules / process flows (rows as the live workflows query returns
+        # them): their refusals join the form's, exactly as in a live run.
+        if ($meta.PSObject.Properties.Name -contains 'workflows') {
+            $refusals += @(Get-WorkflowRefusals @($meta.workflows) $meta.table (Get-RawFilingColumnNames $specs))
+        }
         $ok = $true; $why = ''
         $refusalPath = Join-Path $case.FullName 'expected-refusal.txt'
         if (Test-Path -LiteralPath $refusalPath) {
@@ -843,8 +939,37 @@ if ($SelfTest) {
         if ($t.Got -eq $t.Want) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
         else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got {2})" -f 'inline', $t.Name, $t.Got) -ForegroundColor Red }
     }
+    # WORKFLOW_REFERENCE (live check, pure predicate; task 168 v1, verifier item 1). Fixtures 19 and 20 are the two
+    # positive shapes; these pin each filter of Get-WorkflowRefusals and the raw column set it searches for.
+    $wfSpecs = @($specs) + @([pscustomobject]@{ Name = 'sprk_regardingaccount'; Kind = 'Lookup'; Label = 'Regarding Account' })
+    $wfRaw = @(Get-RawFilingColumnNames $wfSpecs)
+    $wfRow = { param($category, $entity, $xaml, $clientdata) [pscustomobject]@{ workflowid = 'w1'; name = 'rule'; category = $category; primaryentity = $entity; xaml = $xaml; clientdata = $clientdata } }
+    $wfs = @(
+        @{ Name = 'workflow: rule on the table shows a pair column'; Rows = @(& $wfRow 2 'sprk_event' '<SetVisibility Field="sprk_regardingRecordId" IsVisible="True" />' ''); Want = $true },
+        @{ Name = 'workflow: flow on the table (primaryentity)'; Rows = @(& $wfRow 4 'sprk_event' '' '{"steps":[{"attribute":"sprk_regardingrecordname"}]}'); Want = $true },
+        @{ Name = 'workflow: flow naming the table, non-root lookup'; Rows = @(& $wfRow 4 'sprk_x_bpf' '' '{"entity":"sprk_event","attribute":"sprk_regardingaccount"}'); Want = $true },
+        @{ Name = 'workflow: rule of another table'; Rows = @(& $wfRow 2 'sprk_todo' '<SetVisibility Field="sprk_regardingrecordid" />' ''); Want = $false },
+        @{ Name = 'workflow: flow of another table only'; Rows = @(& $wfRow 4 'sprk_document' '' '{"entity":"sprk_document","attribute":"sprk_regardingrecordid"}'); Want = $false },
+        @{ Name = 'workflow: flow names the table only as a prefix'; Rows = @(& $wfRow 4 'sprk_x_bpf' '' '{"entity":"sprk_eventtype","attribute":"sprk_regardingrecordid"}'); Want = $false },
+        @{ Name = 'workflow: rule references only a root'; Rows = @(& $wfRow 2 'sprk_event' '<SetVisibility Field="sprk_regardingmatter" />' ''); Want = $false },
+        @{ Name = 'workflow: rule references a near-miss column'; Rows = @(& $wfRow 2 'sprk_event' '<SetVisibility Field="sprk_regardingrecordidx" />' ''); Want = $false },
+        @{ Name = 'workflow: a classic workflow (category 0)'; Rows = @(& $wfRow 0 'sprk_event' '<SetAttributeValue Field="sprk_regardingrecordid" />' ''); Want = $false }
+    )
+    foreach ($t in $wfs) {
+        $got = @(Get-WorkflowRefusals $t.Rows 'sprk_event' $wfRaw)
+        $bit = $got.Count -gt 0 -and @($got | Where-Object { $_.Code -cne 'WORKFLOW_REFERENCE' }).Count -eq 0
+        if ($bit -eq $t.Want -and ($t.Want -or $got.Count -eq 0)) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', $t.Name) -ForegroundColor Green }
+        else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got [{2}])" -f 'inline', $t.Name, (($got | ForEach-Object { $_.Detail }) -join '; ')) -ForegroundColor Red }
+    }
+    # The raw column set the live checks search for comes from the ONE shared list (owner round 38): the record-type
+    # column, every pair text column, and the table's non-root sprk_regarding* lookups; never a root.
+    $wantRaw = @(@($RecordTypeColumn) + $PairTextColumns + @('sprk_regardingaccount') | Sort-Object -Unique)
+    $rawOk = (($wfRaw -join ',') -ceq ($wantRaw -join ',')) -and @($wfRaw | Where-Object { $RootColumns -contains $_ }).Count -eq 0
+    $wfs += @{ Name = 'raw names: pair + non-root lookups, no root' }
+    if ($rawOk) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', 'raw names: pair + non-root lookups, no root') -ForegroundColor Green }
+    else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got [{2}])" -f 'inline', 'raw names: pair + non-root lookups, no root', ($wfRaw -join ', ')) -ForegroundColor Red }
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures case(s)." -ForegroundColor Red; exit 1 }
-    Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count + $libs.Count) inline check(s)." -ForegroundColor Green
+    Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count + $libs.Count + $wfs.Count) inline check(s)." -ForegroundColor Green
     exit 0
 }
 
@@ -909,10 +1034,12 @@ function Publish-Table([string]$Table) {
 
 function Get-LiveColumnSpecs([string]$Table) {
     $attrs = Invoke-Dv -Endpoint "EntityDefinitions(LogicalName='$Table')/Attributes?`$select=LogicalName,AttributeType,DisplayName"
+    # A lookup per the shared list's lookupTypes (the AttributeType names), as the grid customizer reads them.
     return @($attrs.value | Where-Object {
-            ($_.AttributeType -eq 'Lookup' -and $_.LogicalName -like 'sprk_regarding*') -or ($PairTextColumns -contains $_.LogicalName)
+            ($LookupTypes -ccontains [string]$_.AttributeType -and ([string]$_.LogicalName).ToLowerInvariant().StartsWith($LookupPrefix, [System.StringComparison]::Ordinal)) -or
+            ($PairTextColumns -contains ([string]$_.LogicalName).ToLowerInvariant())
         } | ForEach-Object {
-            $kind = if ($_.AttributeType -eq 'Lookup') { 'Lookup' } elseif ($_.LogicalName -eq 'sprk_regardingrecordurl') { 'Url' } else { 'Text' }
+            $kind = if ($LookupTypes -ccontains [string]$_.AttributeType) { 'Lookup' } elseif ($_.LogicalName -eq 'sprk_regardingrecordurl') { 'Url' } else { 'Text' }
             $label = [string]$_.DisplayName.UserLocalizedLabel.Label
             if ([string]::IsNullOrWhiteSpace($label)) { $label = $_.LogicalName }
             [pscustomobject]@{ Name = $_.LogicalName; Kind = $kind; Label = $label }
@@ -994,7 +1121,19 @@ try {
         $where = "$table form '$($f.name)' ($($f.formid)) type $($f.type)"
         Write-Step $where
         if ($ChildTables -notcontains $table) { $refusals.Add(@{ Code = 'FORM_NOT_FOUND'; Where = $where; Detail = "not a form of $($ChildTables -join ', ')" }); continue }
-        if (-not $specCache.ContainsKey($table)) { $specCache[$table] = Get-LiveColumnSpecs $table }
+        if (-not $specCache.ContainsKey($table)) {
+            $specCache[$table] = Get-LiveColumnSpecs $table
+            # Business rules and process flows that could show or expose a raw filing column (once per table,
+            # whatever the form's own state): WORKFLOW_REFERENCE is a refusal AND a -Verify gap (verifier item 1).
+            $wf = Invoke-Dv -Endpoint "workflows?`$select=workflowid,name,category,primaryentity,ismanaged,xaml,clientdata&`$filter=(category eq 2 and primaryentity eq '$table') or category eq 4"
+            $wfRows = @($wf.value)
+            $wfRefusals = @(Get-WorkflowRefusals $wfRows $table (Get-RawFilingColumnNames $specCache[$table]))
+            foreach ($r in $wfRefusals) {
+                $refusals.Add(@{ Code = $r.Code; Where = $r.Where; Detail = $r.Detail })
+                $gaps.Add("$($r.Where) : references raw filing column(s) $($r.Columns -join ', '), so it could show or expose a hidden raw control")
+            }
+            Write-Info "$table : read $($wfRows.Count) business rule(s) of the table and process flow(s) of the environment; WORKFLOW_REFERENCE: $($wfRefusals.Count)"
+        }
         $specs = $specCache[$table]
         $xml = [string]$f.formxml
         $formRefusals = @(Get-PickerRefusals $xml $table $specs ([bool]$f.ismanaged))
@@ -1011,7 +1150,7 @@ try {
 
         # Form libraries that could re-show a hidden raw control at runtime (the presave is scanned too: it is
         # added to every target form). The raw columns are this table's, whether or not the form has them yet.
-        $rawColumns = @(@($RecordTypeColumn) + $PairTextColumns + @($specs | Where-Object { Test-IsRawFilingColumn $_.Name $specs } | ForEach-Object { $_.Name }) | Sort-Object -Unique)
+        $rawColumns = @(Get-RawFilingColumnNames $specs)
         $libNames = @(@($doc.SelectNodes('/form/formLibraries/Library') | ForEach-Object { $_.GetAttribute('name') }) + @($PresaveLibrary) | Where-Object { $_ } | Sort-Object -Unique)
         foreach ($ln in $libNames) {
             if (-not $libCache.ContainsKey($ln)) {
@@ -1047,7 +1186,7 @@ foreach ($r in $refusals) { Write-Host ("   REFUSAL {0}: {1} — {2}" -f $r.Code
 
 if ($Verify) {
     if ($gaps.Count -eq 0 -and $refusals.Count -eq 0) {
-        Write-Host "`nVERIFY PASS: every target form hosts the RegardingResolver for its table, registers the presave, carries every pair and lookup column, and shows no raw filing control." -ForegroundColor Green
+        Write-Host "`nVERIFY PASS: every target form hosts the RegardingResolver for its table, registers the presave, carries every pair and lookup column, and shows no raw filing control; no business rule or process flow of its table references one." -ForegroundColor Green
         exit 0
     }
     foreach ($g in $gaps) { Write-Host "   GAP $g" -ForegroundColor Red }

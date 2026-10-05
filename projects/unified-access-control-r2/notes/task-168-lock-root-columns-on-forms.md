@@ -3,7 +3,8 @@
 > **Task**: 168 (#1107) · owner round 8 item 3 · amendments: owner rounds 9-10 (round 10 item 2 = add the picker to the analysis form, then lock)
 > **Branch**: `task/uac-r2-168`, from `task/uac-r2-156-c1-r2` with `work/unified-access-control-r2` merged in (clean merge, no conflicts). Base `144b36b51`.
 > **Rigor**: FULL (security edge, live form definitions, TEST-MODIFYING). Model tier sonnet @ high (run on Opus).
-> **Status (f1, 2026-10-04, branch `task/uac-r2-168-f1`)**: **completed-with-escalation.** Owner/main-session round 25 item 8 is built: the picker script hides every raw pair / non-root `sprk_regarding*` lookup control on its target forms and gives the To Do main form its missing hidden cells; the grid lock extends the existing `SpaarkeGridCustomizer` (v1.1.0) and is set on the two editable grids by the new `Set-SpaarkeGridCustomizerOnChildGrids.ps1`; the lock script's `PICKER_WITHOUT_PRESAVE` reads the form-level OnLoad only, and an unread in-scope form is `FORM_UNREADABLE`. §10.5's escalation text is corrected. Trigger 9 is unchanged (merge 156 first). One new first-class stop: the raw filing columns in the grids (§12.6). See **§12**.
+> **Status (v1, 2026-10-05, branch `task/uac-r2-168-f1-v1`)**: **completed-with-escalation** (trigger 9 and the live gate only). The f1 verifier's items are closed: the picker script's `-Verify` now also fails on a business rule or business process flow that references a raw filing column (`WORKFLOW_REFERENCE`, a refusal and a gap, fixtures 19-20 + 10 inline cases); the SpaarkeGridCustomizer jest suite runs on a clean checkout (`globalSetup` runs `pcf-scripts refreshTypes`; the stub and the false comment are gone); the grid script's "no grid control" gap is pinned and its dry run / `-Apply` plan a publish when only the JSON lags (never "nothing to do" while `-Verify` would fail). Owner round 38 is built: ONE list `config/regarding-filing-columns.json`, read by both form scripts and by `SpaarkeGridCustomizer` **v1.1.1**, which now locks the pair and the non-root regarding lookups in the grids as well. The f1 first-class stop (§12.6) is closed by round 38. Trigger 9 is unchanged (156 still unmerged). See **§13**.
+> **Status (f1, 2026-10-04, branch `task/uac-r2-168-f1`, superseded)**: **completed-with-escalation.** Owner/main-session round 25 item 8 is built: the picker script hides every raw pair / non-root `sprk_regarding*` lookup control on its target forms and gives the To Do main form its missing hidden cells; the grid lock extends the existing `SpaarkeGridCustomizer` (v1.1.0) and is set on the two editable grids by the new `Set-SpaarkeGridCustomizerOnChildGrids.ps1`; the lock script's `PICKER_WITHOUT_PRESAVE` reads the form-level OnLoad only, and an unread in-scope form is `FORM_UNREADABLE`. §10.5's escalation text is corrected. Trigger 9 is unchanged (merge 156 first). One new first-class stop: the raw filing columns in the grids (§12.6). See **§12**.
 > **Status (r2, 2026-10-04, branch `task/uac-r2-168-r2`, superseded)**: **completed-with-escalation.** The r1 verifier's two surviving seeds are pinned (picker fixture 14, inline "foreign section" case), the stale §3 line numbers, I-1 row, grid REPORT pointer and §10.7 jest wording are corrected, and a third first-class stop is raised: the raw pair and intermediate lookup controls that stay visible and editable after the picker (§11.2). Trigger 9 is unchanged: merge 156 first. See **§11**.
 > **Status (r1, 2026-10-04, superseded)**: **completed-with-escalation.** The verifier's findings are closed in code, and owner round 19 items 1, 2 and 4 are delivered as two new operator scripts. Two first-class stops are reported: **trigger 9** (built on 156's unmerged branch; merge 156 first) and **round 19 item 3** (the grid has no OnRowLoad event). Live runs are the main session's gate, §10.4. See **§10**.
 > **Status (2026-10-03, superseded)**: **completed-with-escalation.** The code, fixtures, presave, tests and docs are done and green. Three escalation triggers fired on live dev and one blocker was found in the analysis amendment (below). The live `-Apply` is the main session's manual gate. As the script stands it REFUSES the full four-table apply until the owner decides on trigger 1.
@@ -25,8 +26,9 @@
 | **Round 10 item 2 (add the RegardingResolver to the analysis form) BLOCKED**: `sprk_analysis` has no `sprk_regardingrecordurl`, and the picker writes it unconditionally | ✅ decided (round 19 item 4): `Add-AnalysisRegardingRecordUrlColumn.ps1`, then the picker script, then the lock (§10). Live gate pending. |
 | **Trigger 9** (r1): built on task 156's unmerged branch | 🔔 reported (§10.5): merge 156 first, then 168. Re-checked r2: still unmerged; both trial merges conflict-free. |
 | **r2 stop**: raw pair / intermediate lookup controls stay visible and editable on event `90d2eff7` / `835b8ee8` and message `b58ec3d8` after the picker | ✅ decided (round 25 item 8 (a)) and built in f1: the picker script hides them (picker host excepted); its `-Verify` fails on a visible one (§12). Live gate pending. |
-| **f1 stop**: the raw pair / non-root lookup COLUMNS stay inline-editable in the two editable grids (round 25 item 8 names the four roots for the grid) | 🔔 raised (§12.6) with the complete fix: the same customizer's locked set widens to the raw filing columns. |
-| Live `-Apply` | ⏳ manual gate (**§12.5**, which supersedes §10.4 and §8): presave → schema script → picker script → lock → customizer PCF deploy → grid script → checks. |
+| **f1 stop**: the raw pair / non-root lookup COLUMNS stay inline-editable in the two editable grids (round 25 item 8 names the four roots for the grid) | ✅ decided (round 38) and built in v1: `SpaarkeGridCustomizer` v1.1.1 locks every filing column, from the ONE list `config/regarding-filing-columns.json` the form scripts read (§13). Live gate pending. |
+| **v1**: f1 verifier items 1-5 (business rules / process flows in the picker's `-Verify`, the jest suite on a clean checkout, the unpinned grid gap, the grid's misleading "nothing to do", stale help text) | ✅ closed (§13.1) |
+| Live `-Apply` | ⏳ manual gate (**§12.5 as amended by §13.5**, which supersede §10.4 and §8): presave → schema script → picker script → lock → customizer PCF **v1.1.1** deploy → grid script → checks. |
 
 ---
 
@@ -692,3 +694,92 @@ Live gate results: _pending (main session)_.
 ### 12.7 `.claude/**` edits needed
 
 None.
+
+## 13. Round v1 (2026-10-05): the f1 verifier's items and owner round 38
+
+Branch `task/uac-r2-168-f1-v1`, from `task/uac-r2-168-f1` (`a61d6a356`). Binding inputs: the f1 verifier's 13 items; owner/main-session **round 38** (`notes/session27-owner-decisions-and-research.md` on `work/unified-access-control-r2` @ `59014238d`, which decides the f1 stop of §12.6; rounds 39-42 decide tasks 158, 150, 165 and 140 and name no 168 item). Round 38, in substance: the grid lock covers the same columns the forms hide (the ADR-024 pair and every non-root `sprk_regarding*` lookup), BY NAME and from ONE shared list, the list the form scripts use (never a second copy), with the same editor and renderer overrides; v1.1.1 bumped in all four places; jest cases and a seed per override; the grid configuration script unchanged. No `NOTE-FROM-MAIN.md` was present.
+
+### 13.1 What changed, per verifier item
+
+| # | Item | Closure |
+|---|---|---|
+| 1, 11 | MEDIUM fail-open: the picker's `-Verify` passed with a business rule or business process flow that shows or exposes a raw filing column | **Fixed.** New pure `Get-WorkflowRefusals` in `Add-RegardingFilingPickerToForms.ps1`, the mirror of the lock script's `WORKFLOW_REFERENCE` over the raw filing columns: a business rule (category 2) whose `primaryentity` is the table, or a business process flow (category 4) whose `primaryentity` is the table or whose xaml / clientdata names it as a whole word, whose xaml or clientdata references a raw filing column of the table (whole name, case-insensitive). Other categories are not form inputs and are ignored. The raw set is the new `Get-RawFilingColumnNames` (record-type column, pair text columns, the table's non-root `sprk_regarding*` lookups; never a root), also used by `LIBRARY_SHOWS` now. The live scan reads `workflows` once per table (`(category eq 2 and primaryentity eq '<table>') or category eq 4`), whatever the form's own state, and each hit is BOTH a refusal (`WORKFLOW_REFERENCE`: dry run / `-Apply` exit 2) AND a `-Verify` gap (exit 1). A read fault there is a `VERIFY FAIL` (the existing catch). Fixtures **19-refuse-business-rule-shows-raw-column** (a SetVisibility rule on `sprk_regardingRecordId`) and **20-refuse-process-flow-exposes-raw-lookup** (a flow naming `sprk_event` with a `sprk_regardingcommunication` step), each on fixture 03's complete form so the workflow is the only refusal; the self-test runner feeds a case's optional `workflows` rows through the same function. Nine inline cases pin each filter, plus one for the raw column set. Seeds W1-W8 and the live wiring proof W9 (§13.3). |
+| 2, 13 | The SpaarkeGridCustomizer jest suite failed on a clean checkout (TS2307), contradicting its config comment | **Fixed.** Reproduced first in this worktree (no `generated/`: TS2307 at `index.ts:22`, 0 tests). `moduleNameMapper` reaches only jest's run-time resolution, and a `tsconfig` `paths` entry cannot map a RELATIVE import. New `jest.globalSetup.js` runs the toolchain's own generator, `pcf-scripts refreshTypes`, once before any file is compiled (offline, about 1 s, telemetry opted out with `PP_TOOLS_TELEMETRY_OPTOUT`; a failure, or no emitted file, stops the run). The tests now type-check against the REAL manifest types; the hand-written stub `__tests__/__mocks__/manifestTypes.ts` and its mapper entry are deleted (index.ts imports only interfaces, which TypeScript erases). `jest.config.js`'s comment now says what the config does. Seed J19 (no `globalSetup`, `generated/` deleted) gives exactly the verifier's failure (TS2307, 0 tests). A fresh detached worktree at the commit: §13.4. |
+| 3, 12 | ADR-038: the grid's "no PowerAppsOneGrid control in controldescriptionxml" gap was unpinned | **Pinned.** Inline case "verify: xml has no grid control (json valid)": a configuration with no grid control and a complete, valid JSON must report a gap. Seed G11 (the verifier's exact mutation, `if ($false)`) fails exactly that case. |
+| 4 | The grid script's dry run / `-Apply` said "Nothing to do" (exit 0) when the XML named the customizer but `controldescriptionjson` did not | **Fixed.** New pure `Get-GridTableAction` (`edit` / `publish` / `none`) and `Get-GridRunOutcome` (`act` / `unresolved` / `nothing`). A table whose XML names the customizer everywhere but whose platform-derived JSON does not is planned as `publish` (the JSON is regenerated only by a publish): the dry run prints `PLAN publish <table>` and exits 0; `-Apply` re-reads it (`CONFIG_CHANGED` if the XML moved), publishes it, records it in the snapshot (`publishedOnly`), and reads it back (still a gap = exit 1). A gap that no planned change closes stops the run with `UNRESOLVED` and exit 1; "Nothing to do" only when there is no gap. Eight inline cases; seeds G12-G14; live simulation G15 reproduces the f1 bug and shows the fix (§13.3). |
+| 5 | Stale help text in the picker script | **Corrected.** `.PARAMETER Forms` names the six default forms (the five of round 19 and the To Do main form of round 25); `.DESCRIPTION` says the To Do form gains only the hidden cells it lacks, on dev two: `sprk_regardingservicerequest` and `sprk_regardingagreement`. |
+| 6 | Observation: §12.3 entries P27, P15 and J3 | **No change**, as the verifier found: the committed note reads correctly. |
+| 7 | Observation: one flaky integration test and the f1 counts | Recorded; this round's full runs are in §13.4. |
+| 8, 9, 10 | Verifications of f1 (seeds, live state, scope) | Recorded; no change. |
+| round 38 | The grid lock covers the same columns the forms hide, from ONE shared list | **Built.** New **`config/regarding-filing-columns.json`** (`rootColumns`, `recordTypeColumn`, `pairTextColumns`, `lookupPrefix`, `lookupTypes`, plus the rule in words; the `config/secure-record-owner-role.json` precedent of a single-source list). `Lock-CoreAncestorStampColumnsOnForms.ps1` reads its locked columns (`rootColumns`) from it; `Add-RegardingFilingPickerToForms.ps1` reads the roots, the pair, the prefix and the lookup types from it (its `Get-LiveColumnSpecs`, `Get-NeededColumns` and `Test-IsRawFilingColumn` use the prefix and types); both take `-FilingColumnsPath` and stop (exit 1, `FILING_COLUMNS`) on a missing, malformed or incomplete file. The PCF imports the same file (webpack bundles only the used properties): `RootColumnLock.ts` now locks every FILING column (a root or a pair column whatever its type; a `sprk_regarding*` column whose type is a lookup type, read from the column definition, the cell props or the type the grid dispatched for), with the SAME editor (`stopEditing(true)`, `editable = false`) and renderer (`columnEditable = false`, `editable = false`) overrides; a pair name / id cell keeps its regarding link and is shown read-only; a root never gets a link (as before). **v1.1.1** in `ControlManifest.Input.xml`, `CUSTOMIZER_VERSION` / the index.ts header, `Solution/solution.xml`, `Solution/Controls/…/ControlManifest.xml` (copied from the build with `bundle.js` and `styles.css`), plus `Solution/pack.ps1`, `package.json` and `package-lock.json`. Jest 26 → **50** tests. The grid script writes the same configuration; its prerequisite is now **v1.1.1** (`$MinCustomizerVersion`), so `-Verify` cannot pass on a v1.1.0 customizer that leaves the pair and the intermediate lookups editable (fail closed, ADR-003). Docs: the I-1 row's task-168 parenthetical, `production-release.md`, `sdap-pcf-patterns.md`, `client-resources-inventory.md`. |
+
+**Placement / reuse (CLAUDE.md §10/§11).** No BFF change (nothing under `src/server/**`). No Dataverse plugin, business rule or web resource (ADR-002, ADR-006); no new PCF. New surface, with the three questions:
+- `config/regarding-filing-columns.json` — *existing*: the names lived in three copies (`$LockedColumns` in the lock script, `$RootColumns` / `$PairTextColumns` / `'sprk_regarding*'` in the picker script, `LOCKED_ROOT_COLUMNS` in the PCF; Grep); `config/secure-record-owner-role.json` is the repo's single-source-list precedent. *Extension*: a PowerShell script and a webpack bundle cannot share a code constant; one data file both read is the only single copy. *Cost of nothing*: round 38's "ONE shared list, never a second copy" is unmet, and the grid and form locks drift the first time a pair column is added.
+- `src/client/pcf/SpaarkeGridCustomizer/jest.globalSetup.js` — *existing*: no jest setup in the package; `moduleNameMapper` cannot reach the type-checker. *Extension*: it calls the toolchain's own `refreshTypes`, adding no generator and no stub. *Cost of nothing*: the suite runs 0 tests on a clean checkout (verifier item 2).
+- No new endpoint, service, registration, package, option, job or column. The CVE and publish-size checks do not apply (no BFF change).
+
+### 13.2 Live runs (spaarkedev1, read-only, 2026-10-05)
+
+- Picker `-Verify`: **exit 1, 75 gaps (30 visible raw controls) + 1 refusal (`PAIR_INCOMPLETE`)**, as in f1. New per-table line: `read 4 business rule(s) of the table and process flow(s) of the environment; WORKFLOW_REFERENCE: 0`. The four rows are the environment's process flows (`knowledgearticle` ×3, `contact` ×1; a read-only query of `workflows`); no business rule exists on the four tables (as inventory §2.3).
+- Lock `-Verify`: **exit 1, 16 unlocked controls, 3 `NO_FILING_PICKER`** (unchanged; its columns now come from the shared list).
+- Grid dry run: **exit 2** (`PREREQ_MISSING`: dev holds v1.0.0, the prerequisite is now v1.1.1). Grid `-Verify`: **exit 1, 13 gaps + 1 refusal** (as in f1).
+- Unreachable URL: picker and grid `-Verify` each exit 1 (`VERIFY FAIL: read fault`).
+
+### 13.3 Seeds (v1): each red, then restored
+
+Script seeds ran on scratch copies (`Run-ScriptSeeds.ps1`; the repo scripts' SHA-256 unchanged before and after); jest seeds edited the file in place and restored it byte-identical (SHA-256 compared, file touched).
+
+| Seed | Mutation | Red |
+|---|---|---|
+| W1 | `Get-WorkflowRefusals` never reports (`continue` for every row) | fixtures 19, 20 and three inline positives |
+| W2 | the business-rule `primaryentity` filter removed | only inline "rule of another table" |
+| W3 | the process-flow table filter removed | inline "flow of another table only" and "flow names the table only as a prefix" |
+| W4 | substring column match | only inline "rule references a near-miss column" |
+| W5 | substring table match for a flow | only inline "flow names the table only as a prefix" |
+| W6 | the category filter removed (every row a business rule) | only inline "a classic workflow (category 0)" |
+| W7 | a flow's `primaryentity` no longer counts | only inline "flow on the table (primaryentity)" |
+| W8 | roots in the raw set (every lookup raw) | inline "rule references only a root" and "raw names" |
+| W9 | LIVE wiring (read-only, scratch copy): a synthetic business rule on `sprk_event` that shows `sprk_regardingrecordid` injected into the query result | guarded: `-Verify` names `REFUSAL WORKFLOW_REFERENCE` and its `GAP` (76 gaps, 2 refusals), dry run exit 2; with the refusal/gap wiring removed: neither line (75, 1) |
+| G11 | the "no grid control" gap → `if ($false)` (the verifier's mutation) | only inline "verify: xml has no grid control (json valid)" |
+| G12 | the `publish` action removed | inline "xml has it, json does not" and "json names another" |
+| G13 | `unresolved` removed | only inline "a gap, nothing planned -> unresolved" |
+| G14 | a planned publish not counted as an action | only inline "only a publish planned -> act" |
+| G15 | LIVE simulation (read-only, scratch copy, `-Tables sprk_event`; prerequisite and membership treated as met; the XML replaced in memory by the transformed XML while the live JSON lags) | fixed: dry run `PLAN publish sprk_event`, exit 0; `-Verify` exit 1 (3 JSON gaps). With the f1 guard: dry run "Nothing to do", exit 0, while `-Verify` exits 1 — the verifier's finding, reproduced |
+| L7 | the lock script with a stale second copy of the roots (three, not read from the file) | only fixture 04 (`sprk_RegardingServiceRequest`) |
+| C5 | the shared file without `sprk_regardingmatter` (scratch copy via `-FilingColumnsPath`; jest: in place) | lock: 14 cases; picker: 8 fixtures + 2 inline; jest: "names the four roots …" |
+| C6 | the shared file missing, malformed, or with no `rootColumns` | both form scripts exit 1 (`FILING_COLUMNS`) before any work |
+| J10 | the pair columns not locked | jest: 13 failed |
+| J11 | the lookup branch never locks | jest: 9 failed |
+| J12 | the lookup-type check removed (any `sprk_regarding*` locked) | jest: 5 failed (the non-lookup negatives) |
+| J13 | the prefix check removed (any lookup locked) | jest: 3 failed (`x_sprk_regardingmatter`, `sprk_matter`) |
+| J14 | the link renderer runs before the read-only marking | jest: 4 failed |
+| J15 | a stale second copy of the roots in `RootColumnLock.ts` | jest: 3 failed (incl. "reads its columns from the shared file") |
+| J16 / J17 / J18 | the column-definition / cell-props / dispatched data type ignored | jest: 1 / 1 / 7 failed |
+| J19 | `globalSetup` removed, `generated/` deleted | TS2307 at `index.ts`, 0 tests (item 2's failure) |
+
+Restored hashes (SHA-256): `RootColumnLock.ts` `DE04942B…2E33`, `GridCustomizer.ts` `3C75FB71…8F6C`, `jest.config.js` `79C801D1…11E9`, `config/regarding-filing-columns.json` `6B83E852…9250`.
+
+### 13.4 Tests (v1)
+
+TEST_COUNTS_PLACEHOLDER
+
+### 13.5 Manual live gate: amendments to §12.5
+
+- **(f)** Deploy SpaarkeGridCustomizer **v1.1.1** (`Solution/pack.ps1`, import `SpaarkeGridCustomizerSolution_v1.1.1.zip`, publish); confirm the customcontrol reads **1.1.1** (the grid script refuses anything older).
+- **(g)** Grid script dry run: it may now also plan `publish <table>` (the JSON lags the XML); `-Apply` publishes and reads back.
+- **(h)(n)** In the `sprk_event` and `sprk_analysis` home grids, add with "Edit columns" the four roots AND `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordtype` and one non-root regarding lookup (for example `sprk_regardingcommunication`): each of the edit paths of §12.5 (n) leaves the value unchanged on read-back; another column still edits inline; the console shows `[SpaarkeGridCustomizer v1.1.1] customizer registered (filing columns not editable)`; a regarding name cell still renders as a link.
+- Picker `-Verify` now also fails on a business rule or process flow that references a raw filing column; it exits 0 only with none.
+
+```
+pwsh src/client/pcf/SpaarkeGridCustomizer/Solution/pack.ps1
+pac solution import --path src/client/pcf/SpaarkeGridCustomizer/Solution/bin/SpaarkeGridCustomizerSolution_v1.1.1.zip --publish-changes
+pwsh scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1
+pwsh scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1 -Apply -SnapshotPath .\grid-customizer-snapshot-dev.json
+pwsh scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1 -Verify
+```
+
+Trigger 9 (re-checked 2026-10-05): `9544c3b01` (156) is still not an ancestor of `work/unified-access-control-r2` (`59014238d`); a `merge-tree --write-tree` of work with this branch is conflict-free. Merge 156 first, then 168.
+
+### 13.6 `.claude/**` edits needed
+
+None (no `.claude/**` file names SpaarkeGridCustomizer, the picker script or the shared list).
