@@ -96,7 +96,15 @@ shared/taskpane/components/__tests__/SaveFlow.versionMode.test.tsx
 # cached only on success and cleared when the server says the type is gone.
 shared/taskpane/components/__tests__/RelatedToPicker.matterType.test.tsx
 shared/taskpane/components/__tests__/SaveFlow.matterTypeQuickCreate.test.tsx
-shared/taskpane/services/__tests__/matterTypeLookupService.cache.test.ts
+# Task 100 RENAMED matterTypeLookupService.cache.test.ts -> referenceListService.cache.test.ts with its service
+# (generalized to every create-form reference list). Every case it held is kept, run per list; not a removal.
+shared/taskpane/services/__tests__/referenceListService.cache.test.ts
+# --- the "+ New" create form's fields (task 100, UAT round 5 item 3) — green from creation --------------------
+# Pins: exactly the listed fields per type and order; Matter Type AND Practice Area required on a Matter; the
+# Assigned To picker is the REAL shared LookupField by exact alias; Assigned To prefilled from the server's default,
+# optional (cleared = omitted = the server's default, stated in the form), a late prefill never overwrites the user;
+# every value entered is submitted; the server's own error shown.
+shared/taskpane/components/__tests__/CreateRecordForm.test.tsx
 
 # --- related-record card (task 026, FR-09) - green from creation ----------
 # Pins: the card reads only the four direct slots (never sprk_related* or the
@@ -318,6 +326,8 @@ shared/taskpane/components/views/__tests__/CreateTodoView.test.tsx
 shared/adapters/__tests__/WordAdapter.documentChangeDetection.test.ts
 shared/taskpane/components/views/__tests__/SaveView.documentChangeDetection.test.tsx
 shared/taskpane/components/__tests__/RelatedToPicker.layout.test.tsx
+# Task 099 (UAT round 5): Document header owns the name; "+ New" hides the rest; focus when the locked name goes away.
+shared/taskpane/components/__tests__/SaveFlow.round5.test.tsx
 shared/taskpane/services/__tests__/taskPaneWidthService.test.ts
 # --- Word Email tab from the shared compose engine; no sharing links (task 096, UAT round 4 items 6-8) --------
 # Pins: the Email tab renders the REAL shared `EmailComposer` via its new pane wrapper `SendEmailPane`

@@ -6,6 +6,7 @@ import type { AttachmentInfo, HostType } from '@shared/adapters/types';
 import type { EntityType, EntitySearchResult } from '../../hooks/useEntitySearch';
 import { writeIdentityStampAfterSave, type DocumentIdentityState } from '../../services/documentIdentityService';
 import { subscribeToDocumentChanges } from '../../services/documentChangeDetectionService';
+import type { ContactOption } from './CreateTodoView';
 
 const useStyles = makeStyles({
   container: {
@@ -80,6 +81,11 @@ export interface SaveViewProps {
   savedState?: SavedDocumentPaneState;
   /** The setter half of the lifted bundle above. */
   onSavedStateChange?: React.Dispatch<React.SetStateAction<SavedDocumentPaneState>>;
+  /**
+   * Task 100: the pane's one contact search (`App.handleSearchContacts`), threaded straight through to `SaveFlow` for
+   * the "+ New" form's Assigned To field.
+   */
+  onSearchContacts?: (query: string) => Promise<ContactOption[]>;
 }
 
 /**
@@ -118,6 +124,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
   onRetryDocumentIdentity,
   savedState,
   onSavedStateChange,
+  onSearchContacts,
 }) => {
   const styles = useStyles();
 
@@ -384,6 +391,7 @@ export const SaveView: React.FC<SaveViewProps> = ({
         {...(resolvedDocumentId !== undefined ? { resolvedDocumentId } : {})}
         {...(documentIdentity !== undefined ? { documentIdentity } : {})}
         {...(onRetryDocumentIdentity ? { onRetryDocumentIdentity } : {})}
+        {...(onSearchContacts ? { onSearchContacts } : {})}
       />
     </div>
   );

@@ -357,7 +357,6 @@ describe('SaveView', () => {
       const onSavedStateChange = jest.fn();
       const savedState = {
         savedDocument: null,
-        profileRegenerated: false,
         profileRefreshSignal: 0,
         contentChangedSinceSave: false,
       };

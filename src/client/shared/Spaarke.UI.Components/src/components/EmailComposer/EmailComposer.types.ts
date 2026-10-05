@@ -255,6 +255,7 @@ export type ValidationErrorCode =
   | 'ATTACHMENT_TOO_LARGE'
   | 'ATTACHMENTS_TOO_MANY'
   | 'ATTACHMENT_BLOCKED_TYPE'
+  | 'ATTACHMENT_LINK_UNAVAILABLE'
   | 'FROM_REQUIRED'
   | 'FROM_NOT_APPROVED';
 
@@ -463,14 +464,17 @@ export interface IEmailComposerProps {
    */
   onUploadLocalAttachment?: (file: File) => Promise<{ documentId: string; driveItemId?: string; linkUrl?: string }>;
   /**
-   * Resolve a recipient-openable SPE **sharing link** for a governed `sprk_document`
-   * (owner UAT 2026-07-30 R2 item 12). Called AT SEND for every attachment the author toggled
-   * **Link** on that has a `documentId` — the returned URL REPLACES the attachment's `linkUrl` in
-   * the body-link block, so recipients (including external) open the actual file rather than an
-   * internal Dataverse/SPE-storage URL. Best-effort: return `null` (or throw) and the send keeps the
-   * prior `linkUrl` — a share-link failure NEVER blocks the send. Context-agnostic (ADR-012): the
-   * host owns the BFF call (`POST /api/documents/{id}/share-link`). Omitted → links keep their
-   * original (internal) URL, unchanged.
+   * Resolve the body link for a governed `sprk_document` the author toggled **Link** on. Called AT SEND
+   * for every such attachment that has a `documentId`; the returned URL REPLACES the attachment's
+   * `linkUrl` in the body-link block.
+   *
+   * **Task 098 (owner decision 2026-10-05): the link is the Spaarke RECORD link, never a file sharing
+   * link** — documents live in SharePoint Embedded, where Graph refuses sharing links; external recipients
+   * open the file through the external access platform. Return `null` (or throw) when no record link can
+   * be built: the engine then OMITS that link (never keeps an internal SPE URL) and refuses the send with
+   * an `ATTACHMENT_LINK_UNAVAILABLE` message on the attachments field, so the author sees why and can
+   * untick Link. Context-agnostic (ADR-012): the host builds the URL (`createXrmEmailComposeHandlers`).
+   * Omitted → links keep their original `linkUrl`, unchanged. (The name is historical.)
    */
   onResolveShareLink?: (documentId: string) => Promise<string | null>;
 

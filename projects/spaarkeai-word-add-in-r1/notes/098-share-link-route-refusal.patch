@@ -1,0 +1,318 @@
+diff --git a/src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs b/src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs
+index def2b8ac2..be6ee6213 100644
+--- a/src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs
++++ b/src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs
+@@ -131,16 +131,15 @@ public static class FileAccessEndpoints
+             .AddDocumentAuthorizationFilter("share")
+             .WithName("CreateDocumentShareLink")
+             .WithTags("File Access")
+-            .WithDescription("Create a recipient-openable SPE sharing link (Graph createLink) for a document. "
+-                           + "Requires Share on the document. Organization-scoped by default; set "
+-                           + "allowExternalRecipients=true for an anonymous link. Always expires.")
+-            .Produces<ShareLinkResponse>(StatusCodes.Status200OK)
++            .WithDescription("Refuses SPE-backed documents with 422 SHARE_LINK_UNSUPPORTED_SPE: Graph does not allow "
++                           + "sharing links in SharePoint Embedded containers. Link to the Spaarke record instead; "
++                           + "external recipients use the external access platform.")
+             .Produces(StatusCodes.Status400BadRequest)
+             .Produces(StatusCodes.Status401Unauthorized)
+             .Produces(StatusCodes.Status403Forbidden)
+             .Produces(StatusCodes.Status404NotFound)
+             .Produces(StatusCodes.Status409Conflict)
+-            .Produces(StatusCodes.Status502BadGateway);
++            .Produces(StatusCodes.Status422UnprocessableEntity);
+ 
+         docs.MapGet("/{documentId}/view-url", GetViewUrl)
+             .AddDocumentAuthorizationFilter("read")
+@@ -744,32 +743,32 @@ public static class FileAccessEndpoints
+ 
+         /// <summary>
+         /// POST /api/documents/{documentId}/share-link
+-        /// Creates a recipient-openable SPE sharing link (Graph createLink) for the document, so an
+-        /// emailed "Link" opens the actual file — including, on request, for external recipients
+-        /// (email-communication-solution-r5 R2 item 12). OBO: the caller's own SPE access performs the
+-        /// createLink; per-document authorization is the <c>"share"</c> filter on the route.
++        /// <b>Refuses</b> every SPE-backed document with a typed 422 (<see cref="ShareLinkUnsupportedSpeCode"/>).
+         /// </summary>
+         /// <remarks>
+         /// <para>
+-        /// <b>unified-access-control-r2 task 072.</b> Three things changed and they are independent:
+-        /// the route gained a per-document <c>share</c> gate (it had none); the link gained a bounded
+-        /// expiry (it was <c>expiration: null</c> — permanent); and <c>anonymous</c> stopped being the
+-        /// silent default (it is now an explicit request, capped harder, and logged).
++        /// <b>spaarkeai-word-add-in-r1 task 098 (owner decision 2026-10-05).</b> Every Spaarke document lives
++        /// in a SharePoint Embedded container, and Graph refuses item sharing links there ("This sharing
++        /// scenario is not supported on CSP Container site"). The route used to relay that Graph error as a
++        /// 502 nobody could act on. A link to a document in an email is now the Spaarke RECORD link
++        /// (<c>main.aspx?appname=…&amp;pagetype=entityrecord&amp;etn=sprk_document&amp;id=…</c>) built by the
++        /// composer; external recipients open the file through the external access platform, exactly as an
++        /// internal user opens it from Spaarke. No caller may mint a file sharing link for a Spaarke document.
+         /// </para>
+         /// <para>
+-        /// <b>Why expiry is the load-bearing control.</b> A minted SPE URL is not revocable through
+-        /// Dataverse — removing the caller's rights afterwards does not invalidate it. This file's header
+-        /// already records that as unsolved in general. Task 072 does not solve it in general; it removes
+-        /// the worst instance (permanent + anonymous + ungated) and bounds the rest.
++        /// <b>Why 422, not 409.</b> The request is well-formed and the caller is authorized; the refusal is a
++        /// permanent property of where the file lives, not a state the caller can change and retry. 409 is already
++        /// this file's vocabulary for the fixable pointer states (<c>no_file_attached</c>, <c>mapping_missing_drive</c>),
++        /// so 422 keeps the two distinguishable for a client that branches on status.
++        /// </para>
++        /// <para>
++        /// The route is kept (not deleted) because removing it is a contract change; the per-document
++        /// <c>share</c> filter still runs first, so an unauthenticated caller gets 401 and one without Share gets 403.
+         /// </para>
+         /// </remarks>
+         static async Task<IResult> CreateShareLink(
+             string documentId,
+-            ShareLinkRequest? request,
+             IDocumentDataverseService dataverseService,
+-            SpeFileStore speFileStore,
+-            IOptionsMonitor<ShareLinkOptions> shareLinkOptions,
+-            TimeProvider timeProvider,
+             ILogger<Program> logger,
+             HttpContext context,
+             CancellationToken ct)
+@@ -792,67 +791,20 @@ public static class FileAccessEndpoints
+                     $"Document with ID '{documentId}' does not exist", 404);
+             }
+ 
+-            // Reuses the same SPE-pointer validation as open-links (404/409 on missing/malformed pointers).
++            // Same SPE-pointer validation as open-links (409 on missing/malformed pointers): a document that
++            // passes it IS SPE-backed, which is exactly the case this route refuses.
+             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
+ 
+-            var (scope, expiresAt) = ResolveShareLinkPolicy(
+-                request, shareLinkOptions.CurrentValue, timeProvider, documentId, logger, context);
+-            var wantsExternalReach = scope == AnonymousScope;
+-
+-            if (wantsExternalReach)
+-            {
+-                // Warning, not Information: this is the one branch that publishes a handle reachable by
+-                // parties with no Spaarke identity. The caller's oid is what makes it attributable.
+-                logger.LogWarning(
+-                    "CreateShareLink minting an ANONYMOUS link | DocumentId: {DocumentId} | "
+-                    + "Caller: {CallerObjectId} | ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
+-                    documentId,
+-                    // The comment above is the whole point: "the caller's oid is what makes it
+-                    // attributable". Until 2026-08-27 this read `FindFirst("oid") ?? NameIdentifier`,
+-                    // which under inbound claim mapping resolved `sub` — pairwise per user+app and
+-                    // joinable to nothing. The audit line for minting an ANONYMOUS link was therefore
+-                    // recording a pseudonym, defeating exactly the attributability task 072 added it for.
+-                    CallerResolution.ResolveObjectId(context.User),
+-                    expiresAt,
+-                    context.TraceIdentifier);
+-            }
+-
+-            try
+-            {
+-                // Requires the tenant SPE/SharePoint external-sharing policy to allow "Anyone" links when
+-                // scope is anonymous; if disabled Graph throws → mapped to 502 below and the caller
+-                // (composer) falls back to the prior link (best-effort, never blocks the send).
+-                var url = await speFileStore.CreateSharingLinkAsUserAsync(
+-                    context, document.GraphDriveId!, document.GraphItemId!,
+-                    linkType: "view", scope: scope, expiration: expiresAt, ct: ct);
+-
+-                if (string.IsNullOrWhiteSpace(url))
+-                {
+-                    throw new SdapProblemException(
+-                        "share_link_unavailable", "Share Link Unavailable",
+-                        $"Graph returned no sharing link for document {documentId}", 502);
+-                }
++            logger.LogInformation(
++                "CreateShareLink refused: SPE-backed document | DocumentId: {DocumentId} | TraceId: {TraceId}",
++                documentId, context.TraceIdentifier);
+ 
+-                logger.LogInformation(
+-                    "CreateShareLink succeeded | DocumentId: {DocumentId} | Scope: {Scope} | "
+-                    + "ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
+-                    documentId, scope, expiresAt, context.TraceIdentifier);
+-                return TypedResults.Ok(new ShareLinkResponse(url, expiresAt, scope));
+-            }
+-            // ADR-007: endpoints must NOT reference Microsoft.Graph SDK types directly (the Graph
+-            // request/response + error types stay isolated in Infrastructure.Graph). We still want the
+-            // clean 502 mapping for a Graph OData error (most commonly: tenant policy forbids anonymous
+-            // links), so match it by type NAME via an exception filter — no `Microsoft.Graph.*` type
+-            // reference in this endpoint. Non-Graph exceptions propagate unchanged (behavior preserved).
+-            catch (Exception ex) when (ex.GetType().FullName?.Contains("ODataError", StringComparison.Ordinal) == true)
+-            {
+-                logger.LogWarning(ex,
+-                    "CreateShareLink Graph error | DocumentId: {DocumentId} | TraceId: {TraceId}",
+-                    documentId, context.TraceIdentifier);
+-                throw new SdapProblemException(
+-                    "share_link_failed", "Share Link Failed",
+-                    $"Could not create a sharing link (Graph): {ex.Message}", 502);
+-            }
++            throw new SdapProblemException(
++                ShareLinkUnsupportedSpeCode,
++                "Share Link Unsupported",
++                "Documents stored in SharePoint Embedded cannot be shared by file link. Link to the Spaarke "
++                + "record instead; external recipients open the file through the external access platform.",
++                StatusCodes.Status422UnprocessableEntity);
+         }
+ 
+         /// <summary>
+@@ -1196,6 +1148,9 @@ public static class FileAccessEndpoints
+         }
+     }
+ 
++    /// <summary>Stable ProblemDetails code for the share-link refusal (task 098).</summary>
++    internal const string ShareLinkUnsupportedSpeCode = "SHARE_LINK_UNSUPPORTED_SPE";
++
+     /// <summary>
+     /// Validates SPE pointer format before calling Graph API.
+     /// Throws SdapProblemException for invalid/missing pointers.
+@@ -1204,57 +1159,6 @@ public static class FileAccessEndpoints
+     /// never flipped) — use it only to distinguish "never uploaded" (HasFile=false) from
+     /// "partial/failed upload" (HasFile=true) when DriveId/ItemId is missing.
+     /// </summary>
+-    /// <summary>Graph link scopes used by the share-link route.</summary>
+-    private const string AnonymousScope = "anonymous";
+-    private const string OrganizationScope = "organization";
+-
+-    /// <summary>
+-    /// Decides the sharing scope and expiry for one share-link request (unified-access-control-r2
+-    /// task 072). Extracted from the handler because it is the one piece of genuine POLICY on that
+-    /// route — it changes for product/compliance reasons, while the rest of the handler changes for SPE
+-    /// plumbing reasons. Separate reasons-to-change, per docs/standards/COMPONENT-COMPLEXITY.md.
+-    /// </summary>
+-    /// <returns>The Graph link scope, and the instant the link stops working.</returns>
+-    /// <exception cref="SdapProblemException">
+-    /// 403 when external reach is requested but disabled for this environment.
+-    /// </exception>
+-    private static (string Scope, DateTimeOffset ExpiresAt) ResolveShareLinkPolicy(
+-        ShareLinkRequest? request,
+-        ShareLinkOptions options,
+-        TimeProvider timeProvider,
+-        string documentId,
+-        ILogger logger,
+-        HttpContext context)
+-    {
+-        var wantsExternalReach = request?.AllowExternalRecipients == true;
+-
+-        // Refuse rather than downgrade. A silent downgrade to organization scope yields a link that
+-        // looks fine to the sender and is dead on arrival for the external recipient — the failure
+-        // mode hardest to diagnose from a support ticket.
+-        if (wantsExternalReach && !options.AnonymousLinksEnabled)
+-        {
+-            logger.LogWarning(
+-                "CreateShareLink refused an anonymous link: Documents:ShareLinks:AnonymousLinksEnabled "
+-                + "is false | DocumentId: {DocumentId} | TraceId: {TraceId}",
+-                documentId, context.TraceIdentifier);
+-
+-            throw new SdapProblemException(
+-                "anonymous_links_disabled", "Anonymous Links Disabled",
+-                "This environment does not permit anyone-with-the-link sharing. Remove "
+-                + "allowExternalRecipients to mint an organization-scoped link instead.", 403);
+-        }
+-
+-        // Scope is organization unless the caller explicitly asked for external reach. The dangerous
+-        // option must be requested, never inherited from omission.
+-        var lifetimeDays = wantsExternalReach
+-            ? options.AnonymousMaxLifetimeDays
+-            : options.MaxLifetimeDays;
+-
+-        return (
+-            wantsExternalReach ? AnonymousScope : OrganizationScope,
+-            timeProvider.GetUtcNow().AddDays(lifetimeDays));
+-    }
+-
+     private static void ValidateSpePointers(string? driveId, string? itemId, string documentId, bool hasFile)
+     {
+         // Validate driveId exists
+diff --git a/tests/integration/contract/Api/Documents/ShareLinkSpeRefusalContractTests.cs b/tests/integration/contract/Api/Documents/ShareLinkSpeRefusalContractTests.cs
+new file mode 100644
+index 000000000..dc6de141f
+--- /dev/null
++++ b/tests/integration/contract/Api/Documents/ShareLinkSpeRefusalContractTests.cs
+@@ -0,0 +1,91 @@
++using System.Net;
++using System.Net.Http.Json;
++using FluentAssertions;
++using Sprk.Bff.Api.Tests.AccessControl;
++using Xunit;
++
++namespace Sprk.Bff.Api.Tests.Api.Documents;
++
++/// <summary>
++/// spaarkeai-word-add-in-r1 task 098 (owner decision 2026-10-05) — <c>POST /api/documents/{id}/share-link</c>
++/// refuses SPE-backed documents with a typed 422 <c>SHARE_LINK_UNSUPPORTED_SPE</c> instead of relaying Graph's
++/// error. Authorization still runs first (401/403 unchanged — covered by the UAC suite).
++/// </summary>
++/// <remarks>
++/// Reuses <see cref="ShareLinkTestFixture"/> (owned by unified-access-control-r2; referenced, not edited): its
++/// <c>MintedLinks</c> recorder is the evidence that the route never reaches Graph.
++/// </remarks>
++public class ShareLinkSpeRefusalContractTests : IClassFixture<ShareLinkTestFixture>
++{
++    private readonly ShareLinkTestFixture _fixture;
++    private const string DocumentId = "11111111-1111-1111-1111-111111111111";
++    private static string Route => $"/api/documents/{DocumentId}/share-link";
++
++    public ShareLinkSpeRefusalContractTests(ShareLinkTestFixture fixture)
++    {
++        _fixture = fixture;
++        _fixture.Reset();
++    }
++
++    [Fact]
++    public async Task AuthorizedCaller_SpeDocument_Gets422WithTypedCode_AndNothingIsMinted()
++    {
++        var client = _fixture.CreateClientWithRights("ReadAccess,ShareAccess");
++
++        var response = await client.PostAsJsonAsync(Route, new { });
++
++        // 422, not 409: well-formed request, authorized caller, permanent property of where the file lives.
++        // 409 stays the vocabulary for the fixable pointer states (no_file_attached, mapping_missing_drive).
++        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
++            "body was: {0}", await response.Content.ReadAsStringAsync());
++        (await ReadCodeAsync(response)).Should().Be("SHARE_LINK_UNSUPPORTED_SPE");
++        _fixture.MintedLinks.Should().BeEmpty("the route must not reach Graph at all");
++    }
++
++    [Fact]
++    public async Task Refusal_DoesNotRelayGraphErrorText()
++    {
++        var client = _fixture.CreateClientWithRights("ReadAccess,ShareAccess");
++
++        var body = await (await client.PostAsJsonAsync(Route, new { })).Content.ReadAsStringAsync();
++
++        body.Should().NotContain("CSP Container");
++        body.Should().Contain("Spaarke record");
++    }
++
++    [Fact]
++    public async Task ExternalRecipientsRequested_IsRefusedTheSameWay()
++    {
++        var client = _fixture.CreateClientWithRights("ReadAccess,ShareAccess");
++
++        var response = await client.PostAsJsonAsync(Route, new { allowExternalRecipients = true });
++
++        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
++        (await ReadCodeAsync(response)).Should().Be("SHARE_LINK_UNSUPPORTED_SPE");
++        _fixture.MintedLinks.Should().BeEmpty();
++    }
++
++    [Fact]
++    public async Task CallerWithoutShare_StillGets403_NotTheRefusal()
++    {
++        var client = _fixture.CreateClientWithRights("ReadAccess");
++
++        var response = await client.PostAsJsonAsync(Route, new { });
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [Fact]
++    public async Task NoToken_IsStillUnauthorized()
++    {
++        var response = await _fixture.CreateClient().PostAsJsonAsync(Route, new { });
++
++        response.StatusCode.Should().BeOneOf(HttpStatusCode.Unauthorized, HttpStatusCode.Forbidden);
++    }
++
++    private static async Task<string?> ReadCodeAsync(HttpResponseMessage response)
++    {
++        using var doc = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
++        return doc.RootElement.GetProperty("extensions").GetProperty("code").GetString();
++    }
++}

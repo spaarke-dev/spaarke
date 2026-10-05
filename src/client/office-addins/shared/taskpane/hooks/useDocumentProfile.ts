@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { apiClient, ApiClientError } from '@shared/services';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { summaryStatusFromCode, type DocumentSummaryStatusName } from '../services/documentProfileChoices';
 
 /**
