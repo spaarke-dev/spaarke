@@ -1972,7 +1972,7 @@ spelled nowhere the guard reads — which is why the binder-less-language bans a
 - **Not decided here — named for the main session:** which environment is "Spaarke's own operator environment". Only `dev`
   is known to be Spaarke-operated; the stopped `spaarke-bff-prod` ("demo" in `config/environments.json`) is the candidate.
   Until it is named, it does not carry the marker (fail closed: its tenant-/type-wide routes refuse). Gate (e) carries the
-  exact change.
+  exact change. **→ Decided by round 57 item 1 (option c): only `dev` for now — §15.1.**
 - Observed, not changed (another project's): `az bicep build-params` on `dev.bicepparam` fails BCP332 on
   `customerId = 'spaarkedev1'` (11 > the 8-char standard of `3293ee421`) — pre-existing on the base; the file's own header
   says this stack does not describe the running dev environment.
@@ -2126,8 +2126,9 @@ From the repo root, `az login` as an operator who can read Dataverse and the vau
      and the same with `--slot staging` — or simply the next `scripts/Deploy-BffApi.ps1` run for `dev`, which now sets it
      (dev is declared in `config/environments.json`);
   3. verify: step 1 shows `true` on both slots.
-  4. **Spaarke's own operator environment** — once the main session names it (only `dev` is known to be Spaarke-operated; the
-     stopped `spaarke-bff-prod`, `demo` in the registry, is the candidate): add `"speAdminPlatformOperatorEnvironment": true`
+  4. **Spaarke's own operator environment** — DECIDED by round 57 item 1 (§15.1): only `dev` carries the marker for now; the
+     change that STANDS UP Spaarke's production operator environment (the stopped `spaarke-bff-prod`, `demo` in the registry,
+     now declared `false`) is the change that does what follows — it is not a gate of this task: add `"speAdminPlatformOperatorEnvironment": true`
      to its `config/environments.json` entry (the key `Deploy-BffApi.ps1 -Environment` resolves), `param
      speAdminPlatformOperatorEnvironment = true` to its `.bicepparam`, its name to
      `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, and set the App Service setting as in 2.
@@ -2239,7 +2240,8 @@ infrastructure/bicep/stacks/model2-full.bicep --outfile infrastructure/bicep/sta
 - **D38 — tenant-wide and type-wide SPE admin routes: a root admin of a Spaarke-operated environment only** (deployment
   marker `SpeAdmin:PlatformOperatorEnvironment`, default false, validated on start; the uniform 403 first). The delegated
   container-type routes are not gated (Graph decides by the caller's own role; the BFF lends no identity). Round 35 item 5's
-  every-config type rule stays (it still reaches a config whose unit is outside the hierarchy).
+  every-config type rule stays (it still reaches a config whose unit is outside the hierarchy). **→ ACCEPTED by round 57
+  item 2 (option a) — D40, §15.2.**
 - **D39 — the marker is set only through Spaarke's deployment surface** (Bicep param default false; `environments.json`
   declaration; `Deploy-BffApi.ps1` sets it when declared and FAILS a deploy to an undeclared environment carrying it); an
   ArchTest keeps customer provisioning from naming it.
@@ -2250,4 +2252,193 @@ Only the manual live gates of §14.9 — (e) the marker on dev's two slots (an A
 repair with a minted credential, (a) the backfill `-Apply` / `-Bind`, (c) the post-deploy probes, (d) the next real L2 run —
 and f1's §11.16 (i)/(k). One decision input for the main session, not a code gap: which environment is "Spaarke's own operator
 environment" (only `dev` is known) — until it is named it does not carry the marker, so its tenant-/type-wide routes refuse
-(fail closed); gate (e) step 4 is the complete change. Nothing is deferred to another project.
+(fail closed); gate (e) step 4 is the complete change. Nothing is deferred to another project. **→ SUPERSEDED by §15
+(round 57): the decision input is answered (only `dev`), and §15.9 is the current "not closed".**
+
+## 15. Final fix round h — round 57 (the final re-verification of `task/uac-r2-165-f2-v2`), under owner round 56 (2026-10-05)
+
+### 15.0 How the round reached the branch
+
+- Branch **`task/uac-r2-165-h`** from `task/uac-r2-165-f2-v2` @ `fd8ae6c23` (the name was free). No push, PR or merge.
+- No `NOTE-FROM-MAIN.md`. Binding inputs read from `work/unified-access-control-r2`: rounds 1-55 (kept, nothing reverted),
+  **owner round 56** (classify every finding; fix (a)-(c) in the lane, record (d)-(f) as known limits; the over-engineering
+  check; the round cap — this is task 165's ONE further round, so whatever an (a)-(c) item leaves goes to the main session)
+  and **round 57** items 1-4 (this section, one sub-section each). Nothing else was changed.
+- `.claude/**`: no edit needed (no `.claude` file names the operator marker, its registry key or the deploy script's parse).
+- 167 still not landed on this branch: amendment 3 — no waiver / ledger / GovernedFiles edits. No route added, renamed,
+  deleted, or given a different mechanism (§15.8).
+
+### 15.1 Round 57 item 1 — only `dev` carries the operator marker (option c)
+
+The code already held the smallest fail-closed choice — only `dev` declared, the stack default `false`, only
+`dev.bicepparam` setting it, the guard's list `{ "dev" }` — so this item makes every surface SAY so and replaces the open
+"which environment?" question (§14.4, gate (e) step 4, §14.14) with the decision:
+
+| Surface | Now says |
+|---|---|
+| `config/environments.json` | `dev`: true, "today the ONLY one", must be a JSON boolean. **`demo`** (the stopped `spaarke-bff-prod`, the candidate): declared **`false`** explicitly, with the stand-up recipe (registry `true`, `.bicepparam` line, the guard's list, the App Service setting). `_template`: "today only dev; the production operator environment adds it in the change that stands it up". |
+| `infrastructure/bicep/stacks/dev.bicepparam` | dev is the ONLY parameter file that sets it today; the production operator environment adds the line to its own file when stood up. (`stacks/prod.bicepparam` is untouched: it does not name the marker, so it is `false` — and naming it there in a comment would only widen the guard's allow-list.) |
+| `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments` | `{ "dev" }` (unchanged); its doc comment states round 57's rule and what the stand-up change adds. |
+| `SpeAdminOptions.PlatformOperatorEnvironment` doc; `Deploy-BffApi.ps1` block comment | today only dev; the production operator environment from the change that stands it up. |
+| Topology doc (§ tenant-wide routes); customer deployment guide §6.5.4 (+ change-log row) | today only `dev`; `demo` declares `false`; the four things the stand-up change adds; until then every other environment refuses the eight routes. |
+
+The model2-full.bicep parameter description ("TRUE ONLY for a Spaarke-operated environment …") is unchanged: it states who
+may set it, not who does, and editing it would force a regenerated `model2-full.json` into the #1298 conflict for no change in
+meaning.
+
+### 15.2 Round 57 item 2 — D38 accepted (option a)
+
+**D40:** the DELEGATED container-type routes (list / get / create types, settings, owners) stay outside the operator marker.
+Graph authorizes them with the caller's OWN token and the BFF lends no identity, so the caller's SharePoint Embedded
+administrator role is the boundary; gating them would only remove legitimate screens. D38 is marked accepted (§14.13); the
+topology doc now says the delegated routes are ungated "by decision (round 57 item 2)". No code change.
+
+### 15.3 Round 57 item 3 (class a) — the deploy script's marker parse failed OPEN
+
+**The defect, reproduced** (P1, §15.6): `Deploy-BffApi.ps1` set `$markerDeclared = [bool]$markerEntry.speAdminPlatformOperatorEnvironment`.
+In PowerShell `[bool]"false"` is `$true` (every non-empty string is), so a registry entry declaring the STRING `"false"`
+deployed `SpeAdmin__PlatformOperatorEnvironment=true` — the tenant-wide and type-wide SPE admin routes opened on that
+environment for its root admin. The task-base block, run verbatim against `"dev": { …: "false" }`, prints `markerDeclared=True`.
+
+**The fix** — no new machinery beyond the one seam a test needs:
+
+- **`scripts/common/SpeAdminOperatorMarker.ps1`** — THE parse, one function `Get-SpeAdminOperatorMarkerDeclaration
+  -RegistryPath -Environment`: returns the value when it is a `[bool]` (exactly what `ConvertFrom-Json` makes of a JSON
+  `true`/`false`), `$false` when the registry, the environment or the key is absent (unchanged behaviour), and THROWS for
+  every other type — a string, a number, `null`, an array, an object — naming the type and value.
+- **`scripts/Deploy-BffApi.ps1`** dot-sources it and, on the throw, prints `OPERATOR MARKER DECLARATION INVALID — …` and
+  `exit 1` before any App Service call. The script no longer reads the key itself.
+- **The registry ArchTest** (`TheEnvironmentRegistry_DeclaresTheMarkerOnlyForSpaarkeOperatedEnvironments`) now first
+  refuses any present declaration that is not a JSON `true`/`false`, naming the environments.
+
+**Tests (both bite — §15.6):**
+
+- `TheRegistryCheck_RefusesAStringFalse` — the registry check run over an in-memory registry: `"false"`, `"true"`, `0` and
+  `null` are named; `true`, `false` and an absent key are not.
+- `TheDeployScriptsMarkerParse_RefusesAStringFalse_AndReadsOnlyAJsonBoolean` — runs THE parse in a real PowerShell host
+  (`pwsh`; `powershell.exe` as the Windows fallback — the ubuntu-latest CI runner ships `pwsh`; no host is a FAILURE, never a
+  skip) against a temporary registry: `"false"`, `"true"`, `1`, `null`, `[false]` → refused; `true` → `Boolean:True`;
+  `false`, an absent key and an unknown environment → `Boolean:False`. It also pins that `Deploy-BffApi.ps1` dot-sources the
+  module, takes `$markerDeclared` from it and (comments stripped) never names the key itself. Also verified by hand under
+  Windows PowerShell 5.1 (same answers).
+
+### 15.4 Round 57 item 3 (class b) — security fail-closed branches that had no biting test
+
+`ATypeRoute_WhenTheScopeCannotBeRead_Is503_AndNothingIsSent` faults `businessunits`; since round 49 the operator rule reads
+the caller's scope FIRST, so that fault is met (and answered 503) there, and the container-type rule's own branches were
+reachable by no test. Each now has a test that reaches it ITSELF, through the real host:
+
+| Branch | Test | How it reaches the branch |
+|---|---|---|
+| VB5 — the filter's `DecideContainerTypeAsync`: the type rule's `Unverifiable` → 503 | both tests below | each ends in that case; each asserts 503 `spe.admin.deny.scope_unverifiable`, the handler never ran, no Graph request |
+| VB6 — `SpeAdminTenantScope.DecideContainerTypeAccessAsync`: the scope read fault → `Unverifiable` | `SpeAdminPerContainerScopeTests.ATypeRoute_WhenTheTypeRulesOwnConfigTableReadFaults_Is503_AndNothingIsSent` (GET / POST consumers) | a ROOT admin of the operator host passes the operator rule and the configId rule (both read filtered rows only); only the type rule reads the WHOLE config table — the fixture now faults just that read (`FakeDataverseTables.FaultUnfilteredQueriesOn`, test fixture only). Asserts the type rule's own log line. |
+| VB7 — the same method: a full page (5000 rows) of the config table → `Unverifiable` | `…ATypeRoute_WhenTheConfigTableReadIsAFullPage_Is503_NeverJudgedOnATruncatedTable` (GET permissions / POST consumers) | 5000 config rows with Config A first, and the 5001st — the one the cap drops — is a config of the same type in a unit outside the hierarchy: judged on the 5000 it sees, the root admin would be Permitted. Asserts the full-page log line. |
+| VL7 — `H8SpeContainerTypeHandler.QuarantineClearedSince`'s `clearedAt >= since` | L2 `H8SpeContainerTypeHandlerTests.AC51_AnH8QuarantineClearedBeforeTheTypeWentInDoubt_IsNotTheOperatorsCheck_NoTypeIsCreated` | a run whose type went in doubt an hour ago carries an H8 quarantine an operator cleared BEFORE that: still `QuarantineRequired spe-container-type-creation-in-doubt`, the provisioner never called, the in-doubt marker kept. (AC46 already proves a clearance after the doubt lets H8 proceed.) |
+
+The existing operator-rule fault test is unchanged (it still proves that path).
+
+### 15.5 Known limits (owner round 56 classes (d)-(f) — one line each; repeat in the PR description)
+
+- **(d)** The creation guard does not see a `System.Net.WebClient` upload written by deliberately unusual script code (round 57 item 4).
+- **(d)** The creation guard's other stated blind spots stand as written in §14.3 (D37): a URL assembled at run time from fragments none of which spells the collection; a POST verb read from configuration or a third-party client's own method name; reflection, dynamic dispatch, `Invoke-Expression`, build-time generated code.
+- **(d)** `TheDeployScriptsMarkerParse_…`'s source check (comments stripped) cannot see the registry key read by indirection in `Deploy-BffApi.ps1` (a computed property name); THE parse module is the one reader by construction, and its behaviour is what the test runs.
+- **(e)** `SpeAdminTenantScope.GetEnvironmentReachAsync`'s full-page (5000-row) throw has no biting test (probe X1, §15.6); a truncated read can only narrow a non-operator's environment reach, so the branch fails closed without it.
+
+### 15.6 Seeding proofs (on the final code; `scratchpad/165h/seed.py`, session scratchpad)
+
+Each seed: ONE exact single-occurrence replacement (anchor found exactly once, LF or CRLF); the named tests run (BFF:
+`SpeAdminPerContainerScopeTests.ATypeRoute*`; L2: `H8SpeContainerTypeHandlerTests`; ArchTests:
+`SpeAdminOperatorEnvironmentMarkerGuardTests`); the source restored from a byte copy, MD5-checked and touched. `git status`
+was clean afterwards. **All 11 RED; none failed to compile.** The verifier's four (VB5, VB6, VB7, VL7) are seeded at the
+branch itself; VB5 and VB6 each in two forms (fail open / answer the 404 instead).
+
+| # | Seed | RED |
+|---|---|---|
+| VB5 | the filter lets the type rule's `Unverifiable` through (`return null`) | 4: both new type-route tests × 2 routes (the pre-existing operator-rule fault test stays GREEN — the verifier's finding, reproduced) |
+| VB5b | the filter's `Unverifiable` case removed (the type 404 answers) | the same 4 |
+| VB6 | the type rule's scope read fault → `Permitted` | 2: `ATypeRoute_WhenTheTypeRulesOwnConfigTableReadFaults_…` (GET / POST) |
+| VB6b | the type rule's scope read fault → `NotFoundOrOutOfScope` | the same 2 |
+| VB7 | the type rule's full-page refusal removed (it logs and continues) | 2: `ATypeRoute_WhenTheConfigTableReadIsAFullPage_…` (GET permissions / POST consumers) |
+| VL7 | `QuarantineClearedSince` without the time clause (`clearedAt >= DateTimeOffset.MinValue`) | `AC51_AnH8QuarantineClearedBeforeTheTypeWentInDoubt_…` |
+| A1 | `Deploy-BffApi.ps1` casts the declaration itself again (`[bool](…).speAdminPlatformOperatorEnvironment`) | `Deploy-BffApi.ps1's marker parse refuses the STRING "false" …` |
+| A2 | THE parse casts instead of refusing (`return [bool]$declaration.Value`) | the same (behavioural: `string-false=Boolean:True`) |
+| A3 | the registry declares `dev` as the STRING `"true"` | `config/environments.json declares the marker true only for …` |
+| A3b | the registry declares `demo` as the STRING `"false"` — the round 57 defect's own input | the same |
+| A4 | the registry check accepts any non-null declaration | `The registry check refuses a marker declared as the STRING "false" …` |
+
+**P1 — the deploy script's own block, behaviourally** (`scratchpad/165h/p1/p1.ps1`, pwsh 7): the pre-deploy marker block is
+extracted verbatim from the committed script and from the task base and run against a registry whose `dev` declares the
+STRING `"false"`. **Base: `markerDeclared=True`, exit 0 — the defect reproduced.** Branch: `OPERATOR MARKER DECLARATION
+INVALID — … not String 'false'.`, **exit 1**, before any `az` call. Branch with JSON `false` → `False`, JSON `true` → `True`.
+
+**X1 — a coverage probe beyond round 57** (not a round 57 item; recorded as a known limit, §15.5): removing
+`GetEnvironmentReachAsync`'s full-page throw turns NO `Auth.SpeAdmin` test red. Not fixed, by classification: a truncated
+config read can only DROP rows, so a non-operator's linked-environment set can only shrink — that branch fails closed by
+construction (class (e)).
+
+### 15.7 Placement (CLAUDE.md §10) and new surface (CLAUDE.md §11) — the over-engineering check (owner round 56 item 2)
+
+**Placement:** no BFF code changed except a doc comment (`SpeAdminOptions`). No new endpoint, filter, policy, service, DI
+registration, option, job, package, Dataverse column or plugin; no csproj / props change. Deployment surface: the existing
+registry and deploy script. Tests: existing classes and fixtures.
+
+| New | Existing (grep evidence) | Extension? | Cost of doing nothing |
+|---|---|---|---|
+| `scripts/common/SpeAdminOperatorMarker.ps1` (one function) | the parse lived inline in `Deploy-BffApi.ps1`, which cannot be dot-sourced without running a deploy; `scripts/common/` already holds `SpeConfigSecretNamePolicy.ps1` (the round 41 precedent: one rule, dot-sourced, run by tests) | it IS the extraction of the existing block (8 lines → one function), not a new mechanism | the fail-open parse is fixed but unprovable: nothing can run it, so a cast reintroduced later passes every check (seeds A1, A2) |
+| `FakeDataverseTables.FaultUnfilteredQueriesOn` (test fixture) | `FaultQueriesOn(entitySet)` faults every read of the set — including the configId rule's filtered read, which then answers first | a sibling of the existing fault switch | the container-type rule's own read-fault branch is reachable by no test (VB6) |
+| tests: 2 BFF (4 cases), 1 L2, 2 ArchTests; the registry check's `NonBooleanDeclarations` helper; `RunPowerShell` / `FindPowerShellHost` | `ComposeMergeIntegrityTests` starts an external process (LibreOffice) the same way | — | round 57 item 3's four branches and the parse stay unproven |
+
+Simpler alternatives considered and rejected: a C# re-implementation of the parse in the ArchTest (proves C#, not the
+script); a `-SelfTest` switch on `Deploy-BffApi.ps1` (widens a deploy script's interface for a test); asserting only
+the registry (a hand-edited or locally changed registry would still deploy `true`).
+
+### 15.8 Route authorization ledger input (task 167; still not landed — amendment 3, no waiver edits)
+
+No route added, renamed, deleted or given a different mechanism this round. New deny tests for the six container-type
+routes' existing mechanism (the filter's container-type rule), for 167's `ProofTest` column if wanted:
+`Sprk.Bff.Api.Tests.Auth.SpeAdmin.SpeAdminPerContainerScopeTests.ATypeRoute_WhenTheTypeRulesOwnConfigTableReadFaults_Is503_AndNothingIsSent`
+and `…ATypeRoute_WhenTheConfigTableReadIsAFullPage_Is503_NeverJudgedOnATruncatedTable`.
+
+### 15.9 Suites, publish size, conflict check — and what is not closed
+
+**Suites** (once, at the end, after every seed was restored; sequential, on a machine other sessions were also using):
+
+| Suite | Result |
+|---|---|
+| affected, during development | new type-route tests: `ATypeRoute*` 12 / 0; L2 `AC46`, `AC5*` 4 / 0; ArchTests `SpeAdminOperatorEnvironmentMarkerGuardTests` 5 / 0 |
+| full BFF unit suite `tests/unit/Sprk.Bff.Api.Tests` | **14,771 passed / 2 failed / 54 skipped (14,827)** — 28 m. (+4 vs f2-v2's 14,823: the two new type-route tests × 2 routes.) The 2 failures are CONTENTION, not this round: `AttachmentFilterServiceTests.Filter_LogoImage_Excluded("logoSmall.gif")` (the service's regex has a 1-second match timeout and treats a timeout as no match) and `OfficeVersionSaveRevertTests.EmailSave_ResentWithNoClientKey_IsStillAnsweredDuplicate_AndReadsNoFile` (`TaskCanceledException` after 2 m 24 s). **Isolated re-run: 4 / 0** (the three logo cases + the save test). Neither file nor anything it reaches was touched this round. |
+| NetArchTest `tests/Spaarke.ArchTests` | **367 passed / 0 failed / 0 skipped** (f2-v2: 365; +2: the registry string check and the deploy-script parse) |
+| `tests/integration/Sprk.Bff.Api.IntegrationTests` (full) | **104 passed / 0 failed / 0 skipped** |
+| `tests/integration/Spe.Integration.Tests` (full) | **403 passed / 0 failed / 25 skipped (428)** |
+| L2 `src/server/services/Sprk.Provisioning.ControlPlane.Tests` (full) | **1,631 passed / 0 failed / 1 skipped (1,632)** (f2-v2: 1,630 / 1,631; +1 = AC51) |
+
+**Code review / adr-check** (FULL rigor, self-review against the changed files): ADR-002 (no plugin) ✓ · ADR-003 (a
+non-boolean declaration now STOPS the deploy instead of opening the routes; the type rule's fault and full-page branches
+answer 503 and are proven to) ✓ · ADR-008 (no filter or per-handler check added) ✓ · ADR-010 (no DI change) ✓ · ADR-038 (BFF
+tests through the real host; L2 over the existing hand-written fakes; the ArchTest runs the real PowerShell parse; no
+`Mock<HttpMessageHandler>`, DI-registration or ctor null-check test) ✓. No §6.5 path needed.
+
+**Publish size** (CLAUDE.md §10, hazards 1-4): each side exported with `git archive` (`src/server`, `config`, the root build
+files) into a SHORT path, `dotnet restore` + `dotnet publish -c Release --no-restore` as `Deploy-BffApi.ps1`, zipped with
+PowerShell **`Compress-Archive`** (Optimal), PDBs included:
+
+| Side | Commit | Path | Zip | Files | MSB3030 |
+|---|---|---|---|---|---|
+| fresh `origin/master` (fetched 2026-10-05) | `b4b58a361` | `C:\wt165hm` | **45.65 MB** (47,864,529 B) | 212 | 0 |
+| task base (`task/uac-r2-165-f2-v2`) | `fd8ae6c23` | `C:\wt165hb` | **45.70 MB** (47,920,681 B) | 212 | 0 |
+| this branch | `e147c7b10` (the final source; later commits touch only this note and the POML) | `C:\wt165hn` | **45.70 MB** (47,920,628 B) | 212 | 0 |
+
+This round: **−53 B (0.00 MB)** — only a doc comment changed in the BFF. Branch vs fresh master **+0.05 MB** (+56,099 B);
+`b4b58a361` is not an ancestor, so that also carries the work branch's drift. Ceiling 60 MB. The export directories were
+removed afterwards. `dotnet list package --vulnerable --include-transitive` (BFF): **no vulnerable packages**; no
+`.csproj` / `.props` change.
+
+**Conflict check:** `git merge-tree` of this branch into `work/unified-access-control-r2` @ `6532bb494` — clean. The #1298
+overlap recorded in §14.12 is unchanged in kind (this round adds edits to `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`,
+`SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` and `dev.bicepparam` — comment/prose only; resolve by keeping both sides' text).
+
+**Not closed:** the manual live gates of §14.9 only — (e) steps 1-3 (the marker on dev's two slots, an App Service
+configuration write, BEFORE deploying this BFF; step 4 is now the production operator environment's own stand-up change,
+not a gate), (b) the config repair with a minted credential, (a) the backfill `-Apply` / `-Bind` / `-Verify` (BLOCKS
+deploying this BFF), (c) the post-deploy probes, (d) the next real L2 run — and f1's §11.16 (i)/(k). No (a)-(c) finding
+is left for escalation under owner round 56's cap; the (d)/(e) items are in §15.5.
