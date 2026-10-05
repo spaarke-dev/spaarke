@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-04 SESSION 35 — **T242 ✅ COMPLETE** (code; commits `bc73844f9` + gate fixes, pushed). **Next: T242b** (live dev + demo Managed Redis cut-over — every step needs owner approval). T242b is extended per owner ("do not defer"): demo cache, no-outage dev cut-over, ordering gates.
+> **Last Updated**: 2026-10-04 ~23:30 UTC SESSION 35 END (context-handoff) — **T242 ✅ COMPLETE** (code; commits `bc73844f9` + gate fixes, pushed). **Next: T242b** (live dev + demo Managed Redis cut-over — every step needs owner approval). T242b is extended per owner ("do not defer"): demo cache, no-outage dev cut-over, ordering gates.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -42,7 +42,7 @@
 |-------|-------|
 | **Task** | **242b — Dev + demo Redis → Azure Managed Redis B0 non-HA, Entra-only — LIVE** · `tasks/242b-dev-redis-managed-recreate.poml` · status **pending** · FULL · opus @ high · steps **prescriptive** |
 | **Step** | Not started. |
-| **Status** | pending — every live step needs the owner's OK (ask each time) |
+| **Status** | pending — **awaiting the owner's answer to "Shall I run the T242b step-1 preflight?"** (asked at session end; recommended yes). Every live step needs the owner's OK — ask each time. |
 | **Next Action** | `task-execute` on `tasks/242b-dev-redis-managed-recreate.poml`. Step 1 = owner OK → throwaway B0 non-HA preflight create in westus2 (also confirms whether the name `spaarke-bff-redis-dev` can be reused while the old Azure Cache for Redis exists). **Ordering gates (binding):** dev BFF gets `Redis__Endpoint` BEFORE this branch merges to master; `ConnectionStrings__Redis` + old cache removed only after master carries T242 + INDEX.md coordination note; Worker switches with its T242 build. |
 | **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → **T242b** (next, live dev + demo caches)  → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T241 (decommission) on owner go-ahead. |
 
@@ -92,7 +92,7 @@
 - Read-only checks: no vault holds a Bing / LlamaParse / SPE-owner-cert secret; dev/demo BFFs use `BingGrounding__*` (Foundry connection), no LlamaParse settings.
 
 ### Critical Context
-**T242b (next, live)**: the T242 code is on the branch — any BFF/Worker built from it REFUSES TO START in a deployed
+**T242b (next, live)**: the T242 code is ONLY on the branch (`659b442a4`, pushed) — deployed nowhere yet, not merged to master. Any BFF/Worker built from it REFUSES TO START in a deployed
 (Production-named) environment without `Redis__Endpoint`. Live facts (read-only, 2026-10-04): dev BFF `spaarke-bff-dev`
 (UAMI `mi-bff-api-dev`, principal 9fd47efb-…) and the L2 Worker (`sprk-controlplane-dev-uami`, 38f7693f-…) use
 `ConnectionStrings__Redis` → `spaarke-bff-redis-dev` (Basic C0, spe-infrastructure-westus2); demo BFF `spaarke-bff-demo`
