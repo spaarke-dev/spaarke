@@ -808,6 +808,30 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
    - Note §22's "each new check seeded" / "every seed bit" claims are corrected to what is true.
    - The test header comment that still says "unless it is byte-identical" (F-3) is corrected.
 
+## Round 55 (2026-10-05). BINDING. Main-session decision under round 15. Task 132, the share-write eviction, from its second re-verification of `task/uac-r2-132-f1-v1c-v2`.
+
+1. **Move the eviction INTO the share-write primitive.**
+   - **Why this, and not more bans:** three verification rounds found a new way around the guard each time (UnsafeAccessor; reflection; a VB late binder; a metadata token plus a compiled expression tree). Banning mechanisms one at a time cannot end, because any caller-side guard can be bypassed by a caller. The root-cause fix makes eviction a property of the write itself, so every route evicts, including routes no guard foresaw.
+   - **The design:**
+     - `Spaarke.Dataverse` gets ONE small hook interface, e.g. `IRecordShareWriteObserver`.
+     - `DataverseWebApiService`'s POA share writes (GrantAccess, ModifyAccess, RevokeAccess, and any other) call that observer after the write, in a `finally`, on `CancellationToken.None`. An observer fault is logged and never fails the write, the same contract as the seam.
+     - The BFF implements the observer with `IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync`. It is registered unconditionally, with a Null-Object for hosts without the cache (ADR-032 P-pattern, and §10 asymmetric-registration rule F.1).
+     - The current seam (`DataverseRecordShareService`) stops evicting separately, so no write evicts twice; or it becomes the observer itself. Choose whichever leaves ONE eviction path.
+   - **Justification (CLAUDE.md §11):**
+     - *Existing:* the seam evicts, but only for its own callers.
+     - *Extension:* the observer extends the primitive the seam already wraps.
+     - *Cost of doing nothing:* any non-seam route leaves stale access in the cache.
+   - **Tests:**
+     - A behaviour test proves an eviction for a write reached WITHOUT the seam: the verifier's seeds V and M, adapted as real tests calling the primitive by reflection and by expression.
+     - An observer fault does not fail the write.
+     - Exactly one eviction per write.
+     - Seed: remove the observer call, and the tests go red.
+2. **The IL guards stay as defence in depth,** but every comment, the guard header and note §16.8 now say what is TRUE:
+   - eviction is guaranteed by the primitive for every route that goes through `DataverseWebApiService`;
+   - the guards additionally stop a raw HTTP call to the share actions that bypasses that class. Enumerate exactly the shapes they check.
+   - Drop "no method chosen or invoked by reflection" and every other claim the guards cannot back.
+3. **The Unicode-escape `[UnsafeAccessor]` outside the scan set** (seed U5) is caught by scanning the compiled IL of EVERY `src/server` project, not the source text.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
