@@ -871,7 +871,9 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// </para>
     /// <list type="bullet">
     /// <item>Uses <c>JsonSchema.Net</c>'s <see cref="MetaSchemas.Draft202012"/> evaluator
-    /// — the canonical Draft 2020-12 meta-schema as published by json-schema.org.</item>
+    /// — the canonical Draft 2020-12 meta-schema as published by json-schema.org — always
+    /// through <see cref="Draft202012MetaSchemaValidator"/>, which serializes evaluations of
+    /// that shared instance (the library's Evaluate is not thread-safe on it).</item>
     /// <item>Deserializing the schema text into <see cref="Json.Schema.JsonSchema"/> can
     /// throw <see cref="JsonException"/> when the JSON cannot be coerced to a valid schema
     /// object (e.g., a string at the root). We catch and re-throw as
@@ -913,16 +915,12 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
 
         // Evaluate the candidate schema against the Draft 2020-12 meta-schema. This is
         // the canonical "is this a valid JSON Schema?" check.
-        EvaluationResults metaResults;
+        // Serialized through the shared gate: JsonSchema.Net's Evaluate is not thread-safe on
+        // the static MetaSchemas.Draft202012 instance (false IsValid=true under concurrency).
+        MetaSchemaEvaluation metaResults;
         try
         {
-            metaResults = MetaSchemas.Draft202012.Evaluate(
-                schemaNode,
-                new EvaluationOptions
-                {
-                    OutputFormat = OutputFormat.List,
-                    ValidateAgainstMetaSchema = false  // we ARE the meta-schema evaluation
-                });
+            metaResults = Draft202012MetaSchemaValidator.Evaluate(schemaNode);
         }
         catch (Exception ex)
         {
@@ -940,11 +938,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             // Collect a compact, admin-actionable error summary. We deliberately keep
             // the message short — full evaluation output is verbose and the failing keys
             // (e.g., /properties/query/type) tell admins where the fix belongs.
-            var errors = metaResults.Details
-                .Where(d => d.HasErrors && d.Errors is not null)
-                .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
-                .Take(5)
-                .ToArray();
+            var errors = metaResults.Errors.Take(5).ToArray();
 
             var summary = errors.Length > 0
                 ? string.Join("; ", errors)

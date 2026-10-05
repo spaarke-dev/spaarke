@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Json.Schema;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -524,21 +523,13 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 return null;
             }
 
-            var metaResults = MetaSchemas.Draft202012.Evaluate(
-                node,
-                new EvaluationOptions
-                {
-                    OutputFormat = OutputFormat.List,
-                    ValidateAgainstMetaSchema = false  // we ARE the meta-schema evaluation
-                });
+            // Serialized through the shared gate: JsonSchema.Net's Evaluate is not thread-safe on
+            // the static MetaSchemas.Draft202012 instance (false IsValid=true under concurrency).
+            var metaResults = Draft202012MetaSchemaValidator.Evaluate(node);
 
             if (!metaResults.IsValid)
             {
-                var firstErrors = metaResults.Details
-                    .Where(d => d.HasErrors && d.Errors is not null)
-                    .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
-                    .Take(3)
-                    .ToArray();
+                var firstErrors = metaResults.Errors.Take(3).ToArray();
 
                 logger.LogWarning(
                     "[R6-audit-1] sprk_jsonschema for tool {ToolId} is well-formed JSON but is " +
