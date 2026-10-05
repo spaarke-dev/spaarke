@@ -1,6 +1,7 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-10-05 (checkpoint #13, by context-handoff). Supersedes #12. Read the Quick Recovery table first.
+> **Last Updated**: 2026-10-05 (checkpoint #13, refreshed by context-handoff). Supersedes #12. Read the Quick Recovery table first.
+> **Refresh:** the integration branch has advanced LOCALLY, unpushed, to `15d98dd52`: 158 is merged and the 158 × 140 If-Match fix is done. `sweepmerge` is continuing with 158's round 61 walk (check it is in), then 165, 167 and 132.
 
 ## Quick Recovery (READ THIS FIRST)
 
