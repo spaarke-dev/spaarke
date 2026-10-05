@@ -55,6 +55,11 @@ public class RecordShareExpiryTests
     private static readonly Guid MemberB = Guid.Parse("77777777-7777-7777-7777-777777777777");
     private static readonly Guid FormerMember = Guid.Parse("88888888-8888-8888-8888-888888888888");
 
+    /// <summary>Task 140: the internal caller's Entra object id, its systemuser, and another systemuser (an earlier issuer).</summary>
+    private static readonly Guid CallerOid = Guid.Parse("0e140000-0000-0000-0000-0000000000a1");
+    private static readonly Guid CallerSystemUserId = Guid.Parse("5a140000-0000-0000-0000-0000000000a1");
+    private static readonly Guid OtherSystemUserId = Guid.Parse("5a140000-0000-0000-0000-0000000000b2");
+
     /// <summary>A FIXED clock: "today" is the UTC date 2026-09-10 in every test, whatever day they run.</summary>
     private static readonly DateTimeOffset Now = new(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Today = new(2026, 9, 10);
@@ -385,6 +390,92 @@ public class RecordShareExpiryTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
+    // Contact-issued shares are taken over (task 140; session 27 round 34 item 3)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Round 34 item 3: an internal Write holder who changes a CONTACT-issued share outside the grant core takes it over
+    /// exactly as <c>/grant</c> does — <c>sprk_grantedbycontact</c> cleared AND <c>sprk_grantedby</c> stamped with the
+    /// changing systemuser, in the SAME write as the expiry (the ONE transaction). Left stamped, the issuing contact could
+    /// revoke the operator's date, or lengthen it again with its own re-grant. The twins on the same record differ in one
+    /// input — the issuer: a systemuser-issued share and an organization share take the expiry and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_TakesOverEveryContactIssuedShare_InTheSameTransaction_AndOnlyThose()
+    {
+        _table.SystemUsersByOid[CallerOid] = CallerSystemUserId;
+        var contactIssued = _table.SeedContactShare(
+            ContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedByContact: OtherContactId);
+        var internallyIssued = _table.SeedContactShare(
+            UnrelatedContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedBySystemUser: OtherSystemUserId);
+        var firm = _table.SeedOrganizationShare(OrganizationId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60));
+
+        var result = await Send(NewExpiry, callerOid: CallerOid);
+
+        OkBody(result).UpdatedCount.Should().Be(3);
+        var updates = SingleBulkUpdate().Updates.ToDictionary(u => u.id, u => u.fields);
+
+        var takenOver = updates[contactIssued.Id];
+        takenOver.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedby" },
+            "the take-over travels in the SAME write as the date — never a second, separately failing one");
+        takenOver["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value,
+            "DBNull.Value is the IGenericEntityService convention that CLEARS a column (a C# null would be skipped)");
+        var stamp = takenOver["sprk_grantedby"].Should().BeOfType<Microsoft.Xrm.Sdk.EntityReference>().Subject;
+        stamp.LogicalName.Should().Be("systemuser");
+        stamp.Id.Should().Be(CallerSystemUserId, "the changing internal user now owns the decision");
+
+        updates[internallyIssued.Id].Keys.Should().Equal(new[] { "sprk_expiresdate" },
+            "a share an internal user issued is not re-stamped — only a contact-issued one is taken over");
+        updates[firm.Id].Keys.Should().Equal(new[] { "sprk_expiresdate" });
+
+        // What the SDK receives — through the REAL transaction builder: the issuer attribute present with a null value
+        // (the SDK's "clear"), the systemuser reference set, in the ONE ExecuteTransactionRequest.
+        var transaction = DataverseServiceClientImpl.BuildBulkUpdateTransaction(
+            "sprk_externalrecordaccess", SingleBulkUpdate().Updates);
+        var target = transaction.Requests.Cast<UpdateRequest>().Select(r => r.Target).Single(t => t.Id == contactIssued.Id);
+        target.Attributes.Should().ContainKey("sprk_grantedbycontact");
+        target["sprk_grantedbycontact"].Should().BeNull();
+        target.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_grantedby").Id.Should().Be(CallerSystemUserId);
+    }
+
+    /// <summary>
+    /// The systemuser stamp is audit; an unresolvable caller never blocks the write (the grant core's rule) — but the
+    /// contact issuer is STILL cleared, because that is what takes the decision out of the contact's hands. The twin of
+    /// the test above differing in one input: whether the caller's systemuser resolves.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_WhenTheCallersSystemUserDoesNotResolve_StillClearsTheContactIssuer()
+    {
+        var contactIssued = _table.SeedContactShare(
+            ContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedByContact: OtherContactId);
+
+        var result = await Send(NewExpiry, callerOid: CallerOid);
+
+        OkBody(result).UpdatedCount.Should().Be(1);
+        var fields = SingleBulkUpdate().Updates.Single(u => u.id == contactIssued.Id).fields;
+        fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact" });
+        fields["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value);
+        _table.SystemUserReads.Should().Equal(new[] { $"azureactivedirectoryobjectid eq {CallerOid}" },
+            "the caller's systemuser was looked up — by its Entra object id — and found nothing");
+    }
+
+    /// <summary>
+    /// With no contact-issued share on the record nothing is taken over, so the caller's systemuser is not even read —
+    /// the expiry write stays exactly what it was before task 140 (positive twin: the issuer is the one input).
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_WithNoContactIssuedShare_ReadsNoSystemUserAndWritesTheExpiryOnly()
+    {
+        _table.SystemUsersByOid[CallerOid] = CallerSystemUserId;
+        _table.SeedContactShare(ContactId, ExternalGrantRootType.Matter, MatterId, grantedBySystemUser: OtherSystemUserId);
+
+        await Send(NewExpiry, callerOid: CallerOid);
+
+        SingleBulkUpdate().Updates.Should().OnlyContain(u => u.fields.Count == 1 && u.fields.ContainsKey("sprk_expiresdate"));
+        _table.SystemUserReads.Should().BeEmpty();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
     // Failure shapes — a message, never a bare 500, and never a subset
     // ─────────────────────────────────────────────────────────────────────────────
 
@@ -469,7 +560,8 @@ public class RecordShareExpiryTests
 
     private Task<IResult> Send(
         DateOnly? expiry, string recordType = "matter",
-        GrantPolicyTestDoubles.MemberPagingParticipationService? participations = null) =>
+        GrantPolicyTestDoubles.MemberPagingParticipationService? participations = null,
+        Guid? callerOid = null) =>
         SetRecordShareExpiryEndpoint.Handle(
             new SetRecordShareExpiryRequest(recordType, MatterId, expiry),
             _client.Object,
@@ -478,7 +570,7 @@ public class RecordShareExpiryTests
             // its organization-member page read is answered from the table (by the production filter).
             participations ?? Participations(),
             new FakeTimeProvider(Now),
-            AuthenticatedContext(),
+            AuthenticatedContext(callerOid),
             NullLogger<Program>.Instance,
             CancellationToken.None);
 
@@ -488,11 +580,14 @@ public class RecordShareExpiryTests
     private (string Entity, List<(Guid id, Dictionary<string, object> fields)> Updates) SingleBulkUpdate() =>
         _bulkUpdates.Should().ContainSingle().Subject;
 
-    private static HttpContext AuthenticatedContext()
+    private static HttpContext AuthenticatedContext(Guid? callerOid = null)
     {
+        var claims = new List<Claim> { new("tid", TenantId) };
+        if (callerOid is { } oid)
+            claims.Add(new Claim("oid", oid.ToString()));
+
         var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim("tid", TenantId) }, authenticationType: "Test"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
         return context;
     }
 
@@ -525,10 +620,22 @@ public class RecordShareExpiryTests
         /// <summary>Set to make the share query fail outright.</summary>
         public Exception? QueryFailure { get; set; }
 
+        /// <summary>Task 140: Entra object id → systemuser id, for the take-over stamp's caller lookup.</summary>
+        public Dictionary<Guid, Guid> SystemUsersByOid { get; } = new();
+
+        /// <summary>Task 140: every <c>systemusers</c> <c>$filter</c> the handler sent.</summary>
+        public List<string> SystemUserReads { get; } = new();
+
         public ExternalGrantRow SeedContactShare(
             Guid contactId, ExternalGrantRootType rootType, Guid rootId,
-            DateOnly? expires = null, int stateCode = 0, Guid? organizationId = null)
-            => Seed(contactId, organizationId, rootType, rootId, expires, stateCode);
+            DateOnly? expires = null, int stateCode = 0, Guid? organizationId = null,
+            Guid? grantedByContact = null, Guid? grantedBySystemUser = null)
+        {
+            var row = Seed(contactId, organizationId, rootType, rootId, expires, stateCode);
+            row.GrantedByContactId = grantedByContact;
+            row.GrantedBySystemUserId = grantedBySystemUser;
+            return row;
+        }
 
         public ExternalGrantRow SeedOrganizationShare(
             Guid organizationId, ExternalGrantRootType rootType, Guid rootId, DateOnly? expires = null)
@@ -598,6 +705,23 @@ public class RecordShareExpiryTests
                     MatchMembers(filter)
                         .Select(m => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = m.ContactId })
                         .ToList());
+
+            // Task 140: the take-over stamp's caller lookup (GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync),
+            // answered by INTERPRETING its one clause — strict, like the share filter.
+            mock.Setup(c => c.QueryAsync<GrantExternalAccessEndpoint.SystemUserRow>(
+                    "systemusers", It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
+                {
+                    SystemUserReads.Add(filter ?? string.Empty);
+                    var oid = Regex.Match(filter ?? string.Empty, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36})$");
+                    if (!oid.Success)
+                        throw UnknownClause(filter ?? string.Empty);
+
+                    return SystemUsersByOid.TryGetValue(Guid.Parse(oid.Groups[1].Value), out var systemUserId)
+                        ? new List<GrantExternalAccessEndpoint.SystemUserRow> { new() { systemuserid = systemUserId } }
+                        : new List<GrantExternalAccessEndpoint.SystemUserRow>();
+                });
 
             return mock;
         }

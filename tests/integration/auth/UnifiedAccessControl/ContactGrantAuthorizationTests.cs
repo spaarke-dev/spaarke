@@ -15,6 +15,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
@@ -54,6 +55,7 @@ public class ContactGrantAuthorizationTests
     internal static readonly Guid Outsider = Guid.Parse("c1400000-0000-0000-0000-000000000003");
     internal static readonly Guid OtherContactGrantor = Guid.Parse("c1400000-0000-0000-0000-000000000004");
     internal static readonly Guid SystemUserId = Guid.Parse("5a140000-0000-0000-0000-000000000001");
+    internal static readonly Guid InternalUserOid = Guid.Parse("0e140000-0000-0000-0000-000000000001");
     internal static readonly Guid FirmA = Guid.Parse("0a140000-0000-0000-0000-00000000000a");
     internal static readonly Guid FirmB = Guid.Parse("0a140000-0000-0000-0000-00000000000b");
     internal static readonly DateOnly Today = new(2026, 10, 4);
@@ -855,6 +857,118 @@ public class ContactGrantAuthorizationTests
         _dataverse.Updates.Should().BeEmpty();
     }
 
+    /// <summary>
+    /// Session 27 round 34 item 3: "takes it over" is BOTH halves in ONE write — the contact issuer cleared AND
+    /// <c>sprk_grantedby</c> stamped with the changing systemuser (resolved from the caller's Entra object id).
+    /// </summary>
+    [Fact]
+    public async Task CoreDefaultMode_ChangingAContactIssuedRow_StampsTheChangingSystemUser_InTheSameWrite()
+    {
+        _dataverse.SystemUsersByOid[InternalUserOid] = SystemUserId;
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.ViewOnly, Today.AddDays(30), issuedByContact: Grantor);
+
+        var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
+            new GrantAccessRequest(Colleague, Guid.Empty, ExternalAccessLevel.Collaborate, null, null, "project", ProjectId),
+            ExternalGrantRootType.Project, ProjectId, Today, GrantCeiling.FromGrantorRights(AccessRights.Read | AccessRights.Write | AccessRights.Delete),
+            callerOid: InternalUserOid.ToString(), _dataverse, _participations, DenyList(), NullLogger.Instance, CancellationToken.None);
+
+        outcome.Refusal.Should().BeNull();
+        row.GrantedByContactId.Should().BeNull();
+        row.GrantedBySystemUserId.Should().Be(SystemUserId, "the changing internal user now owns the decision");
+        var write = _dataverse.Updates.Should().ContainSingle("the take-over travels with the change, never as a second write").Subject;
+        write.Payload.Should().Contain("\"sprk_GrantedByContact@odata.bind\":null")
+            .And.Contain($"\"sprk_GrantedBy@odata.bind\":\"/systemusers({SystemUserId})\"")
+            .And.Contain("\"sprk_accesslevel\"");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Session 27 round 34 item 3 — the SAME take-over OUTSIDE the grant core: POST set-record-share-expiry (the Manage
+    // Access toolbar's record-wide Expiration), the one other BFF writer that changes a grant row and leaves it ACTIVE
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// An internal Write holder sets the record's Expiration (shortening every share, the contact-issued one included).
+    /// Afterwards the issuing contact can neither lengthen the colleague's row again nor revoke it: the row is the
+    /// internal user's (<c>sprk_grantedbycontact</c> cleared, <c>sprk_grantedby</c> = the changing systemuser) — the
+    /// "override an operator's deliberate time bound" harm managed_elsewhere exists to prevent. To isolate the take-over,
+    /// the grantor's OWN grant is then renewed alone (as an operator might), so the grantor's expiry cap no longer stops
+    /// the lengthening by itself.
+    /// The twin differs in ONE input — whether the internal change happened: the contact then lengthens and revokes its
+    /// own row as usual.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RecordShareExpiry_ByAnInternalWriteHolder_TakesTheContactIssuedRowOver_SoTheContactCanNeitherLengthenNorRevokeIt(
+        bool internalChangeFirst)
+    {
+        var row = _dataverse.Seed(Colleague, ProjectId, (int)ExternalAccessLevel.Collaborate, Today.AddDays(30), issuedByContact: Grantor);
+        var grantorRow = _dataverse.RowsFor(Grantor).Single();
+
+        if (internalChangeFirst)
+        {
+            var expiry = await SetRecordShareExpiryAsInternalUser(Today.AddDays(10));
+
+            Ok<SetRecordShareExpiryResponse>(expiry).UpdatedCount.Should().Be(2, "both shares of the project take the date");
+            _dataverse.BulkUpdates.Should().ContainSingle("ONE all-or-nothing transaction carries the date and the take-over");
+            row.ExpiresDate.Should().Be(Today.AddDays(10));
+            row.GrantedByContactId.Should().BeNull("the contact issuer is cleared in the same write");
+            row.GrantedBySystemUserId.Should().Be(SystemUserId, "the changing internal user is stamped");
+            grantorRow.GrantedByContactId.Should().BeNull("the grantor's own row was never contact-issued");
+
+            grantorRow.ExpiresDate = Today.AddDays(200); // an operator renews the grantor's own grant alone
+        }
+
+        var before = Snapshot(row);
+        var lengthen = await Grant(Request(ExternalAccessLevel.Collaborate, expiry: Today.AddDays(60)), Ciam(ExternalAccessLevel.Collaborate));
+
+        if (internalChangeFirst)
+        {
+            Problem(lengthen).Should().Be((409, ExternalGrantLifecycle.ContactGrantManagedElsewhereReasonCode));
+            Snapshot(row).Should().Be(before, "the internal user's date is not lengthened");
+
+            var revoke = await Revoke(row.Id, Ciam(ExternalAccessLevel.Collaborate));
+            Problem(revoke).Should().Be((404, ContactGrantorAuthorizationFilter.NotFoundReasonCode));
+            row.IsActive.Should().BeTrue("the contact cannot revoke a decision an internal user made");
+        }
+        else
+        {
+            Ok<ContactGrantResponse>(lengthen).ExpiryDate.Should().Be(Today.AddDays(60));
+            row.ExpiresDate.Should().Be(Today.AddDays(60));
+            row.GrantedByContactId.Should().Be(Grantor);
+
+            Ok<ContactGrantRevokeResponse>(await Revoke(row.Id, Ciam(ExternalAccessLevel.Collaborate))).DeactivatedCount.Should().Be(1);
+            row.IsActive.Should().BeFalse();
+        }
+    }
+
+    /// <summary>
+    /// The real <c>set-record-share-expiry</c> handler, as an internal Write holder (its Entra object id resolves to
+    /// <see cref="SystemUserId"/>), over this table: the share read through the table's interpreted <c>$filter</c>, the
+    /// SDK transaction applied to the same rows (<see cref="ContactGrantTable.ApplyBulkUpdate"/>).
+    /// </summary>
+    private Task<IResult> SetRecordShareExpiryAsInternalUser(DateOnly expiry)
+    {
+        _dataverse.SystemUsersByOid[InternalUserOid] = SystemUserId;
+        var sdk = new Mock<IDataverseService>(MockBehavior.Strict);
+        sdk.Setup(d => d.BulkUpdateAsync(
+                It.IsAny<string>(), It.IsAny<List<(Guid id, Dictionary<string, object> fields)>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, List<(Guid id, Dictionary<string, object> fields)>, CancellationToken>(
+                (entity, updates, _) => _dataverse.ApplyBulkUpdate(entity, updates))
+            .Returns(Task.CompletedTask);
+
+        var internalUser = new DefaultHttpContext
+        {
+            TraceIdentifier = "trace-140-share-expiry",
+            User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("oid", InternalUserOid.ToString()) }, "test")),
+        };
+
+        return SetRecordShareExpiryEndpoint.Handle(
+            new SetRecordShareExpiryRequest("project", ProjectId, expiry),
+            _dataverse, sdk.Object, _participations, new FixedClock(Today), internalUser,
+            NullLogger<Program>.Instance, CancellationToken.None);
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // A matter root goes through the same rights dispatch
     // ─────────────────────────────────────────────────────────────────────────────
@@ -1147,6 +1261,12 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
     public bool FailUpdates { get; set; }
     public bool FailRetrieve { get; set; }
 
+    /// <summary>Entra object id → systemuser id: the <c>systemusers</c> read behind the internal take-over stamp.</summary>
+    public Dictionary<Guid, Guid> SystemUsersByOid { get; } = new();
+
+    /// <summary>Every <c>IGenericEntityService.BulkUpdateAsync</c> applied through <see cref="ApplyBulkUpdate"/>.</summary>
+    public List<(string Entity, List<(Guid Id, Dictionary<string, object> Fields)> Updates)> BulkUpdates { get; } = new();
+
     public IReadOnlyList<ExternalGrantRow> RowsFor(Guid contactId)
         => _rows.Where(r => r.ContactId == contactId && r.IsActive).ToList();
 
@@ -1160,8 +1280,45 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
         Updates.Clear();
         Names.Clear();
         OrganizationStates.Clear();
+        SystemUsersByOid.Clear();
+        BulkUpdates.Clear();
         FailUpdates = FailRetrieve = false;
         BeforeCreate = null;
+    }
+
+    /// <summary>
+    /// Applies an SDK bulk write (<c>IGenericEntityService.BulkUpdateAsync</c> — LOGICAL names and SDK value types, as
+    /// <c>DataverseServiceClientImpl.BuildBulkUpdateTransaction</c> hands them on) to this table: a C# <c>null</c> is
+    /// skipped, <see cref="DBNull.Value"/> clears, a lookup is an <see cref="Microsoft.Xrm.Sdk.EntityReference"/> of the
+    /// lookup's own target. A column or target this fake does not model THROWS — it never ignores a write.
+    /// </summary>
+    public void ApplyBulkUpdate(string entityLogicalName, List<(Guid id, Dictionary<string, object> fields)> updates)
+    {
+        if (entityLogicalName != "sprk_externalrecordaccess")
+            throw new InvalidOperationException($"The fake models bulk writes to sprk_externalrecordaccess only, not '{entityLogicalName}'.");
+
+        BulkUpdates.Add((entityLogicalName, updates.Select(u => (u.id, new Dictionary<string, object>(u.fields))).ToList()));
+        foreach (var (id, fields) in updates)
+        {
+            var row = _rows.Single(r => r.Id == id);
+            foreach (var (column, value) in fields)
+            {
+                switch (column)
+                {
+                    case "sprk_expiresdate": row.ExpiresDate = DateOnly.FromDateTime((DateTime)value); break;
+                    case "sprk_grantedbycontact": row.GrantedByContactId = LookupId(value, "contact"); break;
+                    case "sprk_grantedby": row.GrantedBySystemUserId = LookupId(value, "systemuser"); break;
+                    default: throw new InvalidOperationException($"The fake does not model a bulk write of '{column}'.");
+                }
+            }
+        }
+
+        static Guid? LookupId(object value, string target) => value switch
+        {
+            DBNull => null,
+            Microsoft.Xrm.Sdk.EntityReference reference when reference.LogicalName == target => reference.Id,
+            _ => throw new InvalidOperationException($"A '{target}' lookup was written as {value.GetType().Name} {value}."),
+        };
     }
 
     public ExternalGrantRow Seed(Guid contactId, Guid rootId, int level, DateOnly expiry,
@@ -1210,6 +1367,7 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
                 .Where(kv => (filter ?? string.Empty).Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
                 .Select(kv => new Dictionary<string, object?> { ["contactid"] = kv.Key, ["fullname"] = kv.Value.FullName, ["emailaddress1"] = kv.Value.Email })
                 .ToList(),
+            "systemusers" => MatchSystemUsers(filter ?? string.Empty),
             _ => Array.Empty<object>(),
         };
 
@@ -1340,6 +1498,18 @@ internal sealed class ContactGrantTable : DataverseWebApiClient
             rows = rows.Where(r => r.IsActive);
 
         return rows.ToList();
+    }
+
+    /// <summary>The internal caller's systemuser by Entra object id — the one clause the issuer-stamp lookup sends (strict).</summary>
+    private List<Dictionary<string, object?>> MatchSystemUsers(string filter)
+    {
+        var oid = Regex.Match(filter, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36})$");
+        if (!oid.Success)
+            throw new InvalidOperationException($"The fake does not understand the systemusers filter '{filter}'.");
+
+        return SystemUsersByOid.TryGetValue(Guid.Parse(oid.Groups[1].Value), out var systemUserId)
+            ? new List<Dictionary<string, object?>> { new() { ["systemuserid"] = systemUserId } }
+            : new List<Dictionary<string, object?>>();
     }
 
     private static Guid? BoundId(IDictionary<string, object?> payload, string key)

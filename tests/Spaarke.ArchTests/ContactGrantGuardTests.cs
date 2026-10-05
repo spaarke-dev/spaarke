@@ -92,5 +92,33 @@ public class ContactGrantGuardTests
         Assert.Equal("contact", target);
         Assert.Contains($"_{column}_value", lifecycle, StringComparison.Ordinal);
         Assert.StartsWith("sprk_", column, StringComparison.Ordinal);
+
+        // The LOGICAL name the SDK take-over write clears (set-record-share-expiry's bulk update, session 27 round 34
+        // item 3) is the same column — a wrong name there is a transaction fault on every record with a contact-issued share.
+        var logicalConst = Regex.Match(lifecycle, @"GrantedByContactAttribute\s*=\s*""([^""]+)""");
+        Assert.True(logicalConst.Success, "ExternalGrantLifecycle.GrantedByContactAttribute was not found.");
+        Assert.Equal(column, logicalConst.Groups[1].Value);
+    }
+
+    /// <summary>
+    /// The schema script's <c>-Verify</c> (gate G-140-1) can pass: <c>sprk_externalrecordaccess</c> is in SpaarkeCore with
+    /// <c>rootcomponentbehavior = 0</c> (live, read-only, 2026-10-04), so the new column and relationship get NO
+    /// <c>solutioncomponents</c> row of their own and <c>AddSolutionComponent</c> on them is a no-op. Each of them must
+    /// therefore carry its table's MetadataId into the shared helper's decision (<c>ViaTable</c>) — without it the column
+    /// and relationship read MISSING forever (task 140 verifier r1 item 3, the batch-4 133/143 false negative).
+    /// <c>SchemaScriptSolutionMembershipGuardTests</c> pins the helper itself; this pins this script's use of it.
+    /// </summary>
+    [Fact(DisplayName = "Task 140: the schema script decides the column's and relationship's solution membership through their table")]
+    public void TheSchemaScriptCountsTheColumnAndRelationshipThroughTheirTable()
+    {
+        var script = TextOf(SchemaScript);
+
+        Assert.Contains(". (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')", script, StringComparison.Ordinal);
+        Assert.DoesNotContain("solutioncomponents?", script, StringComparison.OrdinalIgnoreCase);
+        Assert.Matches(new Regex(@"Test-DvInSolution\s+-Membership\s+\$membership\s+-ComponentId\s+\$c\.Id\s+-TableMetadataId\s+\$c\['TableId'\]"), script);
+
+        var subcomponents = Regex.Matches(script, @"\$components\.Add\(@\{[^}]*Type\s*=\s*(2|10|14)\s*;[^}]*\}\)");
+        Assert.Equal(2, subcomponents.Count); // the column (2) and its relationship (10)
+        Assert.All(subcomponents, m => Assert.Contains("TableId = $tableId", m.Value, StringComparison.Ordinal));
     }
 }
