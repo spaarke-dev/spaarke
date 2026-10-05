@@ -206,11 +206,18 @@ function Read-FilingColumns([string]$Path) {
         RootColumns      = @($j.rootColumns | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
         RecordTypeColumn = "$($j.recordTypeColumn)".Trim().ToLowerInvariant()
         PairTextColumns  = @($j.pairTextColumns | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
+        OptionalPairTextColumns = @($j.optionalPairTextColumns | ForEach-Object { "$_".Trim().ToLowerInvariant() } | Where-Object { $_ })
         LookupPrefix     = "$($j.lookupPrefix)".Trim().ToLowerInvariant()
         LookupTypes      = @($j.lookupTypes | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
     }
     if ($out.RootColumns.Count -eq 0 -or $out.PairTextColumns.Count -eq 0 -or -not $out.RecordTypeColumn -or -not $out.LookupPrefix -or $out.LookupTypes.Count -eq 0) {
         throw "FILING_COLUMNS: '$Path' lacks rootColumns, recordTypeColumn, pairTextColumns, lookupPrefix or lookupTypes"
+    }
+    # Decision round 44: the required pair is DERIVED from the one list. An optional column that is not a pair column
+    # is a typo that would silently require (or silently drop) a column — refuse it, naming it.
+    $stray = @($out.OptionalPairTextColumns | Where-Object { $out.PairTextColumns -notcontains $_ })
+    if ($stray.Count -gt 0) {
+        throw "FILING_COLUMNS: '$Path' optionalPairTextColumns names $($stray -join ', '), which is not in pairTextColumns"
     }
     return $out
 }
@@ -225,9 +232,10 @@ $RootColumns = @($FilingColumns.RootColumns)
 $LookupPrefix = $FilingColumns.LookupPrefix
 $LookupTypes = @($FilingColumns.LookupTypes)
 # The ADR-024 pair the RegardingResolver WRITES on every pick and clear (ResolverWriteHandler): a table missing any of
-# these cannot host it. Its write contract, not the filing-column list: the record-type column and every pair text
-# column except sprk_regardingrecordnumber, which the picker writes only where the column exists.
-$RequiredPairColumns = @(@($RecordTypeColumn) + @($PairTextColumns | Where-Object { $_ -cne 'sprk_regardingrecordnumber' }))
+# these cannot host it (PAIR_INCOMPLETE names the missing column). DERIVED from the one list (decision round 44): the
+# record-type column and every pair text column the list does not mark optional (optionalPairTextColumns — the
+# columns the picker writes only where they exist, e.g. sprk_regardingrecordnumber). No column is named here.
+$RequiredPairColumns = @(@($RecordTypeColumn) + @($PairTextColumns | Where-Object { $FilingColumns.OptionalPairTextColumns -notcontains $_ }))
 $PickerName = 'sprk_Spaarke.Controls.RegardingResolver'
 $PickerPattern = '(?i)(^|_)Spaarke\.Controls\.RegardingResolver$'
 $PresaveLibrary = 'sprk_todo_regarding_presave'
@@ -968,6 +976,33 @@ if ($SelfTest) {
     $wfs += @{ Name = 'raw names: pair + non-root lookups, no root' }
     if ($rawOk) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', 'raw names: pair + non-root lookups, no root') -ForegroundColor Green }
     else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got [{2}])" -f 'inline', 'raw names: pair + non-root lookups, no root', ($wfRaw -join ', ')) -ForegroundColor Red }
+    # Decision round 44: the required pair is DERIVED from the one list — the record-type column plus every pair text
+    # column not marked optional — and a table lacking one is refused naming it; a stray optional entry is refused too.
+    $reqWant = @(@($RecordTypeColumn) + @($PairTextColumns | Where-Object { $FilingColumns.OptionalPairTextColumns -notcontains $_ }))
+    $reqOk = (($RequiredPairColumns -join ',') -ceq ($reqWant -join ',')) -and $FilingColumns.OptionalPairTextColumns.Count -gt 0 -and
+        @($RequiredPairColumns | Where-Object { $FilingColumns.OptionalPairTextColumns -contains $_ }).Count -eq 0
+    $wfs += @{ Name = 'required pair: derived, optional excluded' }
+    if ($reqOk) { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', 'required pair: derived from the list, optional excluded') -ForegroundColor Green }
+    else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got [{2}])" -f 'inline', 'required pair: derived from the list, optional excluded', ($RequiredPairColumns -join ', ')) -ForegroundColor Red }
+    foreach ($missing in $RequiredPairColumns) {
+        $specs = @(@($RequiredPairColumns + @('sprk_regardingmatter')) | Where-Object { $_ -ne $missing } | ForEach-Object { [pscustomobject]@{ Name = $_ } })
+        $got = @(Get-PickerRefusals '<form><tabs /></form>' 'sprk_event' $specs | Where-Object { $_.Code -eq 'PAIR_INCOMPLETE' })
+        $wfs += @{ Name = "pair incomplete: $missing" }
+        if ($got.Count -eq 1 -and $got[0].Detail -like "*lacks $missing*") { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', "a table lacking $missing is refused, naming it") -ForegroundColor Green }
+        else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got [{2}])" -f 'inline', "a table lacking $missing is refused, naming it", (($got | ForEach-Object { $_.Detail }) -join '; ')) -ForegroundColor Red }
+    }
+    $strayPath = Join-Path ([System.IO.Path]::GetTempPath()) ("filing-columns-stray-{0}.json" -f [guid]::NewGuid().ToString('N'))
+    try {
+        $strayJson = Get-Content -LiteralPath $FilingColumnsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $strayJson.optionalPairTextColumns = @('sprk_regardingrecordnumbr')
+        $strayJson | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $strayPath -Encoding UTF8
+        $strayMsg = $null
+        try { [void](Read-FilingColumns $strayPath) } catch { $strayMsg = $_.Exception.Message }
+    }
+    finally { Remove-Item -LiteralPath $strayPath -ErrorAction SilentlyContinue }
+    $wfs += @{ Name = 'stray optional column refused' }
+    if ($strayMsg -like '*optionalPairTextColumns names sprk_regardingrecordnumbr*') { Write-Host ("  PASS  {0,-40} {1}" -f 'inline', 'an optional column outside pairTextColumns is refused, naming it') -ForegroundColor Green }
+    else { $failures++; Write-Host ("  FAIL  {0,-40} {1} (got '{2}')" -f 'inline', 'an optional column outside pairTextColumns is refused, naming it', $strayMsg) -ForegroundColor Red }
     if ($failures -gt 0) { Write-Host "`nSELF-TEST FAIL: $failures case(s)." -ForegroundColor Red; exit 1 }
     Write-Host "`nSELF-TEST PASS: $($cases.Count) fixture case(s) + $($pairs.Count + $libs.Count + $wfs.Count) inline check(s)." -ForegroundColor Green
     exit 0
