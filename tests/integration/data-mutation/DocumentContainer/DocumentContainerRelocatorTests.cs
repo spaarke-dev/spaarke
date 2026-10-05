@@ -19,6 +19,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -122,9 +123,25 @@ public class DocumentContainerRelocatorTests
     }
 
     /// <summary>The relocator over the world (sharing its entity service), a recording SPE facade and indexing facade.</summary>
+    /// <remarks>
+    /// The SPE facade models what a relocation relies on (task 166 f1-v2, owner round 45 item 1): every item has a version
+    /// list (<see cref="Versions"/>; an item not listed has ONE version "1.0" written by the document's creator); a prior
+    /// version downloads as that version's bytes; an upload with <see cref="ConflictBehavior.Replace"/> to a name an
+    /// upload already created writes a NEW VERSION of that same item (SharePoint's behaviour), any other upload creates an
+    /// item; each upload appends a version written by the BFF identity, and <see cref="CopyVersionLimit"/> drops the
+    /// oldest beyond the target container's version limit.
+    /// </remarks>
     internal sealed class Rig
     {
-        private (string Drive, string Item)? _lastDownload;
+        private (string Drive, string Item, string? Version)? _lastDownload;
+        private readonly Dictionary<(string Drive, string Name), string> _names = new();
+        private readonly Dictionary<(string Drive, string Item), int> _uploads = new();
+
+        /// <summary>When an item's versions were written, unless a test says otherwise.</summary>
+        public static readonly DateTimeOffset Written = new(2026, 1, 15, 9, 0, 0, TimeSpan.Zero);
+
+        /// <summary>The display name Graph reports for <see cref="Creator"/>.</summary>
+        public const string CreatorName = "Casey Creator";
 
         public Rig(World world, Func<SpeItemCreator, SpeItemCreator>? copyFacts = null)
         {
@@ -140,26 +157,71 @@ public class DocumentContainerRelocatorTests
                 null!);
             Spe.Setup(s => s.GetItemCreatorAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string drive, string item, CancellationToken _) => world.ItemFacts(drive, item));
+            Spe.Setup(s => s.ListFileVersionsAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string drive, string item, CancellationToken _) =>
+                    world.ItemFacts(drive, item) is null ? null : (IReadOnlyList<VersionInfoDto>)VersionsOf(drive, item).ToList());
             Spe.Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string drive, string item, CancellationToken _) =>
                 {
                     Steps.Add($"download {drive}/{item}");
-                    _lastDownload = (drive, item);
-                    return new MemoryStream(new byte[1234]);
+                    _lastDownload = (drive, item, null);
+                    return new MemoryStream(new byte[world.ItemFacts(drive, item)?.Size ?? 1234]);
+                });
+            Spe.Setup(s => s.DownloadFileVersionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string drive, string item, string version, CancellationToken _) =>
+                {
+                    Steps.Add($"download {drive}/{item}@{version}");
+                    if (VersionDownloadFails(drive, item, version))
+                    {
+                        return null;
+                    }
+
+                    _lastDownload = (drive, item, version);
+                    var size = VersionsOf(drive, item).First(v => v.Id == version).Size;
+                    return new MemoryStream(new byte[size]);
                 });
             Spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync((string drive, string name, Stream _, ConflictBehavior conflict, CancellationToken _) =>
+                .ReturnsAsync((string drive, string name, Stream content, ConflictBehavior conflict, CancellationToken _) =>
                 {
                     Steps.Add($"upload {drive} ({conflict})");
-                    var copyId = Copies.Count == 0 ? CopyItem : $"{CopyItem}-{Copies.Count + 1}";
-                    Copies.Add((drive, copyId));
-                    var (sourceDrive, sourceItem) = _lastDownload ?? (drive, Item);
+                    var length = content.Length;
+                    if (conflict != ConflictBehavior.Replace || !_names.TryGetValue((drive, name), out var copyId))
+                    {
+                        copyId = Copies.Count == 0 ? CopyItem : $"{CopyItem}-{Copies.Count + 1}";
+                        Copies.Add((drive, copyId));
+                        if (_names.ContainsKey((drive, name)))
+                        {
+                            name = $"{Path.GetFileNameWithoutExtension(name)} {Copies.Count}{Path.GetExtension(name)}"; // Rename
+                        }
+
+                        _names[(drive, name)] = copyId;
+                    }
+
+                    var (sourceDrive, sourceItem, sourceVersion) = _lastDownload ?? (drive, Item, null);
                     var source = world.ItemFacts(sourceDrive, sourceItem)!;
+                    var written = sourceVersion is null ? source : source with { Size = length, QuickXorHash = $"hash-{sourceItem}@{sourceVersion}" };
                     // The copy is uploaded APP-ONLY by the BFF identity: no user, the BFF's application id.
-                    world.Items[(drive, copyId)] = copyFacts?.Invoke(source)
-                        ?? source with { UserObjectId = null, ApplicationId = BffApplication, WebUrl = $"https://contoso.sharepoint.com/{copyId}" };
-                    return new FileHandleDto(copyId, name, TargetRoot, source.Size, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-                        $"\"{{{copyId}}},1\"", false, $"https://contoso.sharepoint.com/{copyId}", drive);
+                    world.Items[(drive, copyId)] = copyFacts?.Invoke(written)
+                        ?? written with { UserObjectId = null, ApplicationId = BffApplication, WebUrl = $"https://contoso.sharepoint.com/{copyId}" };
+
+                    // Every upload is a new version of the item it lands on, written by the BFF identity now.
+                    _uploads[(drive, copyId)] = _uploads.GetValueOrDefault((drive, copyId)) + 1;
+                    if (!Versions.TryGetValue((drive, copyId), out var history))
+                    {
+                        Versions[(drive, copyId)] = history = new List<VersionInfoDto>();
+                    }
+
+                    history.Add(new VersionInfoDto($"{_uploads[(drive, copyId)]}.0", null, DateTimeOffset.UtcNow, length, "SharePoint App")
+                    {
+                        LastModifiedByApplicationId = BffApplication,
+                    });
+                    while (CopyVersionLimit is { } limit && history.Count > limit)
+                    {
+                        history.RemoveAt(0); // the target's version limit drops the OLDEST
+                    }
+
+                    return new FileHandleDto(copyId, name, TargetRoot, length, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                        $"\"{{{copyId}}},{_uploads[(drive, copyId)]}\"", false, $"https://contoso.sharepoint.com/{copyId}", drive);
                 });
             Spe.Setup(s => s.DeleteFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync((string drive, string item, CancellationToken _) =>
@@ -185,13 +247,16 @@ public class DocumentContainerRelocatorTests
             public HashSet<string> Held { get; } = new(StringComparer.Ordinal);
             public List<string> Released { get; } = new();
 
+            /// <summary>When set, taking a lock FAULTS (the lock store is unreachable).</summary>
+            public Exception? Fault { get; set; }
+
             public Task<bool> IsEventProcessedAsync(string eventId, CancellationToken cancellationToken = default) => Task.FromResult(false);
 
             public Task MarkEventAsProcessedAsync(string eventId, TimeSpan? expiration = null, CancellationToken cancellationToken = default)
                 => Task.CompletedTask;
 
             public Task<bool> TryAcquireProcessingLockAsync(string eventId, TimeSpan? lockDuration = null, CancellationToken cancellationToken = default)
-                => Task.FromResult(Held.Add(eventId));
+                => Fault is not null ? Task.FromException<bool>(Fault) : Task.FromResult(Held.Add(eventId));
 
             public Task ReleaseProcessingLockAsync(string eventId, CancellationToken cancellationToken = default)
             {
@@ -214,9 +279,37 @@ public class DocumentContainerRelocatorTests
         public List<(string Drive, string Item)> Copies { get; } = new();
         public Func<string, string, bool> DeleteFails { get; set; } = (_, _) => false;
 
+        /// <summary>Version lists by item (see the class remarks for the default).</summary>
+        public Dictionary<(string Drive, string Item), List<VersionInfoDto>> Versions { get; } = new();
+
+        /// <summary>The most versions a copy keeps (the target container's version limit); null = unlimited.</summary>
+        public int? CopyVersionLimit { get; set; }
+
+        /// <summary>A prior version's download returns nothing (Graph 404 for it).</summary>
+        public Func<string, string, string, bool> VersionDownloadFails { get; set; } = (_, _, _) => false;
+
+        /// <summary>The item's versions, oldest first.</summary>
+        public IReadOnlyList<VersionInfoDto> VersionsOf(string drive, string item)
+            => Versions.TryGetValue((drive, item), out var listed)
+                ? listed
+                : World.ItemFacts(drive, item) is { } facts
+                    ? [new VersionInfoDto("1.0", null, Written, facts.Size ?? 0, CreatorName) { LastModifiedByUserId = Creator }]
+                    : [];
+
         public string? LedgerOf(Guid id) => World.Rows[("sprk_document", id)].GetAttributeValue<string>(Ledger);
+        public string? VersionRecordOf(Guid id) => World.Rows[("sprk_document", id)].GetAttributeValue<string>(RelocatedVersionHistory.Column);
         public string? ItemOf(Guid id) => World.Rows[("sprk_document", id)].GetAttributeValue<string>("sprk_graphitemid");
         public string? DriveOf(Guid id) => World.Rows[("sprk_document", id)].GetAttributeValue<string>("sprk_graphdriveid");
+
+        /// <summary>What the version history route reports for the document's CURRENT file (round 45 item 1).</summary>
+        public async Task<IReadOnlyList<VersionInfoDto>> ReportedHistoryAsync(Guid id)
+        {
+            var drive = DriveOf(id)!;
+            var item = ItemOf(id)!;
+            var listed = VersionsOf(drive, item).Reverse().ToList(); // Graph lists newest first
+            return await RelocatedVersionHistory.WithOriginalAuthorshipAsync(
+                World.EntityService!, id, item, listed, NullLogger.Instance, CancellationToken.None);
+        }
     }
 
     // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
@@ -756,10 +849,11 @@ public class DocumentContainerRelocatorTests
     }
 
     [Fact]
-    public async Task ARepeatCall_NeverDeletesASourceThatIsNotByteIdenticalToTheDocumentsFile()
+    public async Task ALedgerEntryWithoutAWitness_NeverDeletesOrCopiesItsSource()
     {
-        // The ledger is the only witness on a repeat call: a ledger entry naming another file (forged before the lock, or
-        // corrupted) must never become a delete of that file.
+        // The ledger is the only record of a source on a repeat call, and since round 45 item 4 its WITNESS is what a
+        // source is deleted against. An entry without one (only a hand-written ledger lacks it — the column is BFF-written
+        // and field-secured from creation) names a file the relocator never verified: never deleted, never copied.
         var world = Environment();
         var row = Doc(matter: SecureMatter, drive: SecureContainer, item: Rig.CopyItem);
         row[Ledger] = LedgerJson(CustomerAContainer, "01SOMEONEELSESFILE");
@@ -771,16 +865,20 @@ public class DocumentContainerRelocatorTests
         var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
 
         result.Complete.Should().BeFalse();
-        result.Incomplete.Should().ContainSingle().Which.Pending.Should().Contain(p => p.Contains("byte-identical", StringComparison.Ordinal));
+        result.Incomplete.Should().ContainSingle().Which.Pending.Should().Contain(p => p.Contains("source-unverifiable", StringComparison.Ordinal));
         rig.Spe.Verify(s => s.DeleteFileAsync(CustomerAContainer, "01SOMEONEELSESFILE", It.IsAny<CancellationToken>()), Times.Never);
+        rig.Copies.Should().BeEmpty("an unverified source is never copied into the document either");
+        result.SourceChangedAfterMove.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task ARepeatCall_WhenGraphReturnsNoHash_DoesNotDeleteTheSource()
+    public async Task AWitnessWithoutAHash_IsMatchedByTheSourcesVersion_AndTheSourceIsDeleted()
     {
+        // Graph returned no quickXorHash for the source: the witness's version id decides (SharePoint mints a new version
+        // for every content change). Unchanged version, same size → the source is the one that was copied → deleted.
         var world = Environment();
         var row = Doc(matter: SecureMatter, drive: SecureContainer, item: Rig.CopyItem);
-        row[Ledger] = LedgerJson(CustomerAContainer, Item);
+        row[Ledger] = LedgerJson(CustomerAContainer, Item, witnessSize: 1234, witnessHash: null, witnessVersion: "1.0");
         world.Rows[("sprk_document", DocumentId)] = row;
         world.Items[(SecureContainer, Rig.CopyItem)] = new SpeItemCreator("memo.docx", null, BffApplication, 1234, null);
         world.Items[(CustomerAContainer, Item)] = new SpeItemCreator("memo.docx", Creator, null, 1234, null);
@@ -788,8 +886,29 @@ public class DocumentContainerRelocatorTests
 
         var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
 
-        result.Complete.Should().BeFalse("size alone is not proof that the two are the same file");
-        rig.Spe.Verify(s => s.DeleteFileAsync(CustomerAContainer, Item, It.IsAny<CancellationToken>()), Times.Never);
+        result.Complete.Should().BeTrue("the source still is the version the witness recorded");
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull();
+        rig.Copies.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void TheWitnessRule_SizeAndHash_ElseSizeAndVersion()
+    {
+        var witness = new DocumentContainerRelocator.RelocationWitness(10, "h", "2.0");
+        var same = new SpeItemCreator("f", null, null, 10, "h");
+
+        DocumentContainerRelocator.Compare(witness, same, null).Should().Be(DocumentContainerRelocator.WitnessComparison.Matches);
+        DocumentContainerRelocator.Compare(witness, same with { Size = 11 }, null).Should().Be(DocumentContainerRelocator.WitnessComparison.Changed);
+        DocumentContainerRelocator.Compare(witness, same with { QuickXorHash = "x" }, null).Should().Be(DocumentContainerRelocator.WitnessComparison.Changed);
+        DocumentContainerRelocator.Compare(witness, same with { QuickXorHash = null }, "2.0").Should().Be(DocumentContainerRelocator.WitnessComparison.Matches,
+            "without a hash on one side the version decides");
+        DocumentContainerRelocator.Compare(witness, same with { QuickXorHash = null }, "3.0").Should().Be(DocumentContainerRelocator.WitnessComparison.Changed);
+        DocumentContainerRelocator.Compare(witness, same with { QuickXorHash = null }, null).Should().Be(DocumentContainerRelocator.WitnessComparison.Unknown,
+            "a version list that could not be read decides nothing — retried, never deleted");
+        DocumentContainerRelocator.Compare(null, same, "2.0").Should().Be(DocumentContainerRelocator.WitnessComparison.NoWitness);
+        DocumentContainerRelocator.Compare(new DocumentContainerRelocator.RelocationWitness(10, null, null), same, "2.0")
+            .Should().Be(DocumentContainerRelocator.WitnessComparison.NoWitness, "a witness without a hash or a version proves nothing");
+        DocumentContainerRelocator.Compare(witness, null, "2.0").Should().Be(DocumentContainerRelocator.WitnessComparison.Changed);
     }
 
     [Fact]
@@ -978,25 +1097,8 @@ public class DocumentContainerRelocatorTests
         world.ItemFacts(CustomerBContainer, Item).Should().BeNull("the linked attachment row moved with the document, so nothing uses the source");
     }
 
-    [Fact]
-    public async Task ACommunicationsOwnAttachmentRecord_KeepsTheSource_ForThatCommunication()
-    {
-        var world = Environment();
-        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
-        var unlinked = Guid.Parse("3f000000-0000-4000-8000-00000000f1a0");
-        world.Rows[("sprk_communicationattachment", unlinked)] = new Entity("sprk_communicationattachment", unlinked)
-        {
-            ["sprk_graphdriveid"] = CustomerBContainer,
-            ["sprk_graphitemid"] = Item,
-        };
-        var rig = new Rig(world);
-
-        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], CustomerA1Container, RelocationPurpose.LegacyMigration, apply: true);
-
-        result.Complete.Should().BeTrue();
-        result.SourceKeptForOtherRecords.Should().ContainSingle().Which.KeptFor.Should().Contain($"sprk_communicationattachment:{unlinked}");
-        world.ItemFacts(CustomerBContainer, Item).Should().NotBeNull();
-    }
+    // (f1-v1's ACommunicationsOwnAttachmentRecord_KeepsTheSource_ForThatCommunication pinned F-B — every unlinked attachment
+    // row kept the source whatever its communication's subtree. Replaced by the round-45 item 3 tests below.)
 
     [Fact]
     public async Task Relocate_WhenAReKeyFails_IsPending_AndARepeatCallCompletesIt()
@@ -1103,20 +1205,469 @@ public class DocumentContainerRelocatorTests
         DocumentContainerRelocator.CopyMismatch(source, null).Should().NotBeNull();
     }
 
-    [Fact]
-    public void TheRepeatCallsDeletionTest_NeedsTheSameSizeAndHash_BothPresent()
-    {
-        var file = new SpeItemCreator("f", null, null, 10, "h");
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // F-A / owner round 45 item 4 — a repeat call deletes the source by the WITNESS recorded at verification, and a
+    // source edited after the move is re-copied by the relocator itself (never a manual step)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
 
-        DocumentContainerRelocator.IsByteIdentical(file, file).Should().BeTrue();
-        DocumentContainerRelocator.IsByteIdentical(file, file with { QuickXorHash = null }).Should().BeFalse();
-        DocumentContainerRelocator.IsByteIdentical(file with { QuickXorHash = null }, file with { QuickXorHash = null }).Should().BeFalse();
-        DocumentContainerRelocator.IsByteIdentical(file, file with { Size = 11 }).Should().BeFalse();
-        DocumentContainerRelocator.IsByteIdentical(file, file with { QuickXorHash = "x" }).Should().BeFalse();
-        DocumentContainerRelocator.IsByteIdentical(file, null).Should().BeFalse();
+    [Fact]
+    public async Task ARepeatCall_DeletesTheSourceByItsWitness_ThoughTheDocumentWasEditedSinceTheMove()
+    {
+        // Probe Q1 of the f1-v1 verification: the first source delete fails, the user then edits the RELOCATED document
+        // (a new size and hash), and the repeat call must still delete the secure file's source from the shared
+        // container — it is compared with what was copied, not with the document's current file.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var rig = new Rig(world) { DeleteFails = (drive, item) => drive == CustomerAContainer && item == Item };
+
+        var first = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+        first.Complete.Should().BeFalse("the source delete failed");
+        rig.LedgerOf(DocumentId).Should().Contain("\"witness\"", "the ledger records the source's witness when the copy is verified");
+
+        world.Items[(SecureContainer, Rig.CopyItem)] = world.ItemFacts(SecureContainer, Rig.CopyItem)! with { Size = 5555, QuickXorHash = "edited-after-the-move" };
+        rig.DeleteFails = (_, _) => false;
+        var second = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+        var third = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        second.Complete.Should().BeTrue("the source still matches its witness, whatever the document became since");
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull("the secure file's source is gone from the shared container");
+        rig.LedgerOf(DocumentId).Should().BeNull();
+        third.Complete.Should().BeTrue();
+        rig.Copies.Should().ContainSingle("nothing was edited at the source, so nothing is re-copied");
+        second.SourceChangedAfterMove.Should().BeEmpty();
     }
 
-    /// <summary>A stored ledger owing one source (pending delete, re-key and index).</summary>
-    internal static string LedgerJson(string sourceDrive, string sourceItem)
-        => $$"""{"v":1,"entries":[{"sourceDrive":"{{sourceDrive}}","sourceItem":"{{sourceItem}}","source":"pending","rekeyPending":true,"indexed":"none","at":"2026-10-05T00:00:00+00:00"}]}""";
+    [Fact]
+    public async Task ASourceKeptForAnotherRecord_ThenReleased_IsDeletedByItsWitness_ThoughTheDocumentWasEdited()
+    {
+        // F-A case (2): a source kept for another row, that row later gone, the document edited meanwhile.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        world.Rows[("sprk_document", OtherDocumentId)] = UnfiledDoc(OtherDocumentId, CustomerB, CustomerAContainer, Item);
+        var rig = new Rig(world);
+        (await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true))
+            .Complete.Should().BeTrue();
+
+        world.Items[(SecureContainer, Rig.CopyItem)] = world.ItemFacts(SecureContainer, Rig.CopyItem)! with { Size = 7777, QuickXorHash = "edited" };
+        world.Rows.Remove(("sprk_document", OtherDocumentId));
+        var again = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        again.Complete.Should().BeTrue();
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull();
+        rig.LedgerOf(DocumentId).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ASourceEditedAfterTheMove_IsReportedWithTheRowId_AndReCopiedWithItsEdits_ThenDeleted()
+    {
+        // Round 45 item 4: the source no longer matches its witness — reported source-changed-after-move with the row id,
+        // never deleted as it stands, and closed by the relocator's own re-entry: re-copy (the document's file and history,
+        // then the source's edits), verify, re-point. Nothing is lost and nobody acts by hand.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var rig = new Rig(world) { DeleteFails = (drive, item) => drive == CustomerAContainer && item == Item };
+        (await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true))
+            .Complete.Should().BeFalse();
+
+        // Someone saves to the old file after the move (a still-open session): a new version of the source.
+        var editedAt = new DateTimeOffset(2026, 10, 6, 8, 0, 0, TimeSpan.Zero);
+        world.Items[(CustomerAContainer, Item)] = world.ItemFacts(CustomerAContainer, Item)! with { Size = 2000, QuickXorHash = "source-edited" };
+        rig.Versions[(CustomerAContainer, Item)] =
+        [
+            new VersionInfoDto("1.0", null, Rig.Written, 1234, Rig.CreatorName) { LastModifiedByUserId = Creator },
+            new VersionInfoDto("2.0", null, editedAt, 2000, "Late Editor") { LastModifiedByUserId = OtherPersonObjectId.ToString("D") },
+        ];
+        rig.DeleteFails = (_, _) => false;
+
+        var second = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        second.Complete.Should().BeTrue("the re-copy closed it on this call");
+        var changed = second.SourceChangedAfterMove.Should().ContainSingle(c => c.NewItem != null).Subject;
+        changed.DocumentId.Should().Be(DocumentId, "reported with the row id");
+        changed.SourceItem.Should().Be(Item);
+        changed.CarriedVersions.Should().Be(1, "exactly the version written after the move");
+        rig.ItemOf(DocumentId).Should().Be(changed.NewItem).And.NotBe(Rig.CopyItem, "re-pointed to the re-copy");
+        rig.DriveOf(DocumentId).Should().Be(SecureContainer);
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull("re-copied, so the edited source is deleted against its new witness");
+        world.ItemFacts(SecureContainer, Rig.CopyItem).Should().BeNull("the replaced copy is deleted too — its history is in the re-copy");
+        rig.LedgerOf(DocumentId).Should().BeNull();
+        world.ItemFacts(SecureContainer, changed.NewItem!)!.Size.Should().Be(2000, "the document now carries the edit");
+
+        var history = await rig.ReportedHistoryAsync(DocumentId);
+        history.Select(v => (v.LastModifiedBy, v.LastModifiedDateTime)).Should().Equal(
+            [("Late Editor", editedAt), (Rig.CreatorName, Rig.Written)],
+            "newest first: the edit made after the move, then the original — each with its ORIGINAL author and date");
+    }
+
+    [Fact]
+    public async Task ASourceEditedWhileItIsBeingMoved_IsReCopiedOnTheSameCall()
+    {
+        // The source changes between the copy's verification and the settle that would delete it (a save racing the
+        // move): it no longer matches the witness recorded moments earlier, so it is re-copied on this same call.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var rig = new Rig(world);
+        var edited = false;
+        rig.Spe.Setup(s => s.GetItemCreatorAsync(CustomerAContainer, Item, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() =>
+            {
+                if (world.Updates.Count > 0 && !edited)
+                {
+                    edited = true; // the first read after the re-point sees the racing save
+                    world.Items[(CustomerAContainer, Item)] = world.ItemFacts(CustomerAContainer, Item)! with { Size = 3000, QuickXorHash = "saved-during-the-move" };
+                    rig.Versions[(CustomerAContainer, Item)] =
+                    [
+                        new VersionInfoDto("1.0", null, Rig.Written, 1234, Rig.CreatorName) { LastModifiedByUserId = Creator },
+                        new VersionInfoDto("2.0", null, Rig.Written.AddHours(1), 3000, Rig.CreatorName) { LastModifiedByUserId = Creator },
+                    ];
+                }
+
+                return world.ItemFacts(CustomerAContainer, Item);
+            });
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        result.Complete.Should().BeTrue();
+        result.SourceChangedAfterMove.Should().ContainSingle().Which.NewItem.Should().Be(rig.ItemOf(DocumentId));
+        world.ItemFacts(SecureContainer, rig.ItemOf(DocumentId)!)!.Size.Should().Be(3000, "the racing save is in the document");
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull();
+        rig.LedgerOf(DocumentId).Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ASourceEditedAfterTheMove_WhoseReCopyFails_IsPending_NeverDeleted_AndARepeatCallClosesIt()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var rig = new Rig(world) { DeleteFails = (drive, item) => drive == CustomerAContainer && item == Item };
+        await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+        world.Items[(CustomerAContainer, Item)] = world.ItemFacts(CustomerAContainer, Item)! with { Size = 2000, QuickXorHash = "source-edited" };
+        rig.Versions[(CustomerAContainer, Item)] =
+        [
+            new VersionInfoDto("1.0", null, Rig.Written, 1234, Rig.CreatorName) { LastModifiedByUserId = Creator },
+            new VersionInfoDto("2.0", null, Rig.Written.AddDays(1), 2000, "Late Editor"),
+        ];
+        rig.DeleteFails = (_, _) => false;
+        rig.Spe.Setup(s => s.UploadSmallAsync(SecureContainer, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Graph unavailable")); // every upload into the target now faults
+
+        var second = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        second.Complete.Should().BeFalse("the edited source could not be re-copied yet");
+        second.Incomplete.Should().ContainSingle().Which.Pending.Should().Contain(p => p.StartsWith("source-changed-after-move", StringComparison.Ordinal));
+        second.SourceChangedAfterMove.Should().ContainSingle().Which.DocumentId.Should().Be(DocumentId);
+        world.ItemFacts(CustomerAContainer, Item).Should().NotBeNull("never deleted while its edit is not carried");
+        rig.ItemOf(DocumentId).Should().Be(Rig.CopyItem);
+        rig.LedgerOf(DocumentId).Should().Contain(Item);
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // Owner round 45 item 1 — a moved file keeps its version history; its original authorship is recorded
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly DateTimeOffset T1 = new(2025, 3, 1, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset T2 = new(2025, 6, 1, 9, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset T3 = new(2025, 9, 1, 9, 0, 0, TimeSpan.Zero);
+
+    private static Rig WithThreeVersions(World world, string drive)
+    {
+        var rig = new Rig(world);
+        rig.Versions[(drive, Item)] =
+        [
+            new VersionInfoDto("3.0", null, T3, 1234, "Carol Current") { LastModifiedByUserId = Creator }, // listed newest first
+            new VersionInfoDto("1.0", null, T1, 100, "Alice First") { LastModifiedByUserId = Creator },
+            new VersionInfoDto("2.0", null, T2, 200, "Bob Second") { LastModifiedByUserId = OtherPersonObjectId.ToString("D") },
+        ];
+        return rig;
+    }
+
+    [Fact]
+    public async Task Relocate_ReplaysTheSourcesHistory_OldestFirst_TheCurrentContentLast()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = WithThreeVersions(world, CustomerBContainer);
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+
+        outcome.State.Should().Be(RelocationState.Relocated);
+        rig.Steps.Should().Equal(
+            $"download {CustomerBContainer}/{Item}@1.0", $"upload {CustomerA1Container} (Rename)",
+            $"download {CustomerBContainer}/{Item}@2.0", $"upload {CustomerA1Container} (Replace)",
+            $"download {CustomerBContainer}/{Item}", $"upload {CustomerA1Container} (Replace)",
+            $"delete {CustomerBContainer}/{Item} (after re-point)");
+        rig.Copies.Should().ContainSingle("every version after the first is written to the SAME item");
+        rig.VersionsOf(CustomerA1Container, Rig.CopyItem).Select(v => v.Size).Should().Equal(100, 200, 1234);
+        outcome.VersionsTruncated.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Relocate_RecordsEachReplayedVersionsOriginalAuthorAndDate_InTheSameUpdateAsThePointer()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = WithThreeVersions(world, CustomerBContainer);
+
+        await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+
+        var repoint = world.Updates.First().Fields;
+        repoint["sprk_graphitemid"].Should().Be(Rig.CopyItem);
+        repoint[RelocatedVersionHistory.Column].Should().BeOfType<string>()
+            .Which.Should().Contain("Alice First", "the version record is written with the re-point, one update");
+        var history = await rig.ReportedHistoryAsync(DocumentId);
+        history.Select(v => (v.Id, v.LastModifiedBy, v.LastModifiedDateTime, v.Size)).Should().Equal(
+            [("3.0", "Carol Current", T3, 1234L), ("2.0", "Bob Second", T2, 200L), ("1.0", "Alice First", T1, 100L)],
+            "the history a user sees is unchanged: the replayed versions report their ORIGINAL author and date");
+        history.Select(v => v.LastModifiedByUserId).Should().Equal(Creator, OtherPersonObjectId.ToString("D"), Creator);
+    }
+
+    [Fact]
+    public async Task Relocate_WhenAReplayedVersionCannotBeRead_DeletesTheCopy_AndLeavesTheRowAndTheSource()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = WithThreeVersions(world, CustomerBContainer);
+        rig.VersionDownloadFails = (_, _, version) => version == "2.0";
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+
+        outcome.State.Should().Be(RelocationState.FileMissing);
+        outcome.Detail.Should().Contain("version 2.0");
+        rig.Spe.Verify(s => s.DeleteFileAsync(CustomerA1Container, Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Once,
+            "the partial copy (version 1.0 already written) is removed");
+        rig.Spe.Verify(s => s.DeleteFileAsync(CustomerBContainer, Item, It.IsAny<CancellationToken>()), Times.Never);
+        world.Updates.Should().BeEmpty("the row is untouched; a repeat call retries");
+    }
+
+    [Fact]
+    public async Task Relocate_WhenAReplayedVersionIsWrittenWithTheWrongSize_DeletesTheCopy_AndFails()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = WithThreeVersions(world, CustomerBContainer);
+        // Graph lists version 2.0 at 200 bytes, but its download yields 250: the upload's size check catches it.
+        rig.Spe.Setup(s => s.DownloadFileVersionAsync(CustomerBContainer, Item, "2.0", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(new byte[250]));
+
+        var outcome = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+
+        outcome.State.Should().Be(RelocationState.Failed);
+        outcome.Detail.Should().Contain("size");
+        rig.Spe.Verify(s => s.DeleteFileAsync(CustomerA1Container, Rig.CopyItem, It.IsAny<CancellationToken>()), Times.Once);
+        world.Updates.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Relocate_WhenTheTargetKeepsFewerVersions_StatesVersionsTruncated_WithCounts_AndIsComplete()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = WithThreeVersions(world, CustomerBContainer);
+        rig.CopyVersionLimit = 2;
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], CustomerA1Container, RelocationPurpose.LegacyMigration, apply: true);
+
+        result.Complete.Should().BeTrue("a truncated history is a STATED outcome — no retry could change the target's limit");
+        var truncated = result.VersionsTruncated.Should().ContainSingle().Subject;
+        (truncated.DocumentId, truncated.ReplayedVersions, truncated.KeptVersions).Should().Be((DocumentId, 3, 2));
+        var history = await rig.ReportedHistoryAsync(DocumentId);
+        history.Select(v => v.LastModifiedBy).Should().Equal("Carol Current", "Bob Second");
+    }
+
+    [Fact]
+    public async Task ASecondMove_KeepsTheFirstOriginalAuthorship()
+    {
+        // A file moved twice (the migration, then Make Secure): the second replay reads the first move's record, so a
+        // version keeps its ORIGINAL author, never "the BFF, at the first move".
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = WithThreeVersions(world, CustomerBContainer);
+        await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true);
+        world.Rows[("sprk_document", DocumentId)]["sprk_matter"] = new EntityReference("sprk_matter", SecureMatter);
+
+        var second = await rig.Relocator.RelocateIfMisplacedAsync(DocumentId, apply: true, RelocationPurpose.MakeSecure, expectedTargetContainer: SecureContainer);
+
+        second.State.Should().Be(RelocationState.Relocated);
+        rig.DriveOf(DocumentId).Should().Be(SecureContainer);
+        var history = await rig.ReportedHistoryAsync(DocumentId);
+        history.Select(v => (v.LastModifiedBy, v.LastModifiedDateTime)).Should().Equal(
+            [("Carol Current", T3), ("Bob Second", T2), ("Alice First", T1)]);
+    }
+
+    [Fact]
+    public async Task TheVersionRecord_IsReportedOnlyForTheItemItDescribes_AndAnUnreadableOneChangesNothing()
+    {
+        var graph = new List<VersionInfoDto>
+        {
+            new("2.0", null, T2, 200, "SharePoint App"),
+            new("1.0", null, T1, 100, "SharePoint App"),
+        };
+        var record = RelocatedVersionHistory.Map.Parse(new RelocatedVersionHistory.Map("01COPY",
+            [new RelocatedVersionHistory.Entry("1.0", "Alice First", Creator, null, T1.AddYears(-1), 100, "01SRC", "1.0")]).Serialize().Json)!;
+
+        var applied = RelocatedVersionHistory.Apply(record, "01COPY", graph);
+        applied.Select(v => v.LastModifiedBy).Should().Equal("SharePoint App", "Alice First");
+        applied[1].LastModifiedDateTime.Should().Be(T1.AddYears(-1));
+        RelocatedVersionHistory.Apply(record, "01ANOTHERITEM", graph).Should().Equal(graph, "a record of another item says nothing about this one");
+
+        var entities = new Mock<IGenericEntityService>();
+        entities.Setup(e => e.RetrieveAsync("sprk_document", DocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_document", DocumentId) { [RelocatedVersionHistory.Column] = "{ not a record" });
+        (await RelocatedVersionHistory.WithOriginalAuthorshipAsync(entities.Object, DocumentId, "01COPY", graph, NullLogger.Instance, CancellationToken.None))
+            .Should().Equal(graph);
+        entities.Setup(e => e.RetrieveAsync("sprk_document", DocumentId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("Dataverse unavailable"));
+        (await RelocatedVersionHistory.WithOriginalAuthorshipAsync(entities.Object, DocumentId, "01COPY", graph, NullLogger.Instance, CancellationToken.None))
+            .Should().Equal(graph, "presentation only: an unreadable record never fails the history");
+    }
+
+    [Fact]
+    public async Task WithoutTheVersionRecordColumn_NothingIsMoved_FailClosed()
+    {
+        var world = new World { ArchiveContainerId = ArchiveContainer, RelocatedVersionsColumnMissing = true };
+        world.BusinessUnits[CustomerA] = (Root, CustomerAContainer);
+        world.BusinessUnits[CustomerA1] = (CustomerA, CustomerA1Container);
+        world.BusinessUnits[CustomerB] = (Root, CustomerBContainer);
+        world.Rows[("sprk_matter", PlainMatter)] = Environment().Rows[("sprk_matter", PlainMatter)];
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], CustomerA1Container, RelocationPurpose.LegacyMigration, apply: true);
+
+        result.Complete.Should().BeFalse();
+        rig.Steps.Should().BeEmpty("without a place to record who wrote the history, no file is moved");
+        world.Updates.Should().BeEmpty();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // F-B / owner round 45 item 3 — a communication's own attachment record is classified by its communication's subtree
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    private static readonly Guid UnlinkedAttachment = Guid.Parse("3f000000-0000-4000-8000-00000000f1a0");
+    private static readonly Guid CommunicationId = Guid.Parse("3a000000-0000-4000-8000-00000000f1a0");
+
+    private static void AddUnlinkedAttachment(World world, string drive, Guid? communication)
+    {
+        var row = new Entity("sprk_communicationattachment", UnlinkedAttachment)
+        {
+            ["sprk_graphdriveid"] = drive,
+            ["sprk_graphitemid"] = Item,
+        };
+        if (communication is { } c)
+        {
+            row["sprk_communication"] = new EntityReference("sprk_communication", c);
+        }
+
+        world.Rows[("sprk_communicationattachment", UnlinkedAttachment)] = row;
+    }
+
+    [Fact]
+    public async Task MakeSecure_AnUnlinkedAttachmentRowOfACommunicationInsideTheSubtree_IsReKeyedToTheCopy_AndTheSourceIsDeleted()
+    {
+        // The f1-v1 exposure: this row kept the secure bytes in the shared container while the transition said COMPLETE.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        world.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", SecureMatter),
+        };
+        AddUnlinkedAttachment(world, CustomerAContainer, CommunicationId);
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        result.Complete.Should().BeTrue();
+        result.SourceKeptForOtherRecords.Should().BeEmpty("a communication of the secure record's subtree belongs with the moved file");
+        var attachment = world.Rows[("sprk_communicationattachment", UnlinkedAttachment)];
+        attachment.GetAttributeValue<string>("sprk_graphdriveid").Should().Be(SecureContainer);
+        attachment.GetAttributeValue<string>("sprk_graphitemid").Should().Be(Rig.CopyItem);
+        world.ItemFacts(CustomerAContainer, Item).Should().BeNull("no secure bytes stay in the shared container");
+    }
+
+    [Fact]
+    public async Task ACommunicationsOwnAttachmentRecord_OutsideTheSubtree_KeepsTheSource_ForThatCommunication()
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        // A communication regarding nothing resolves to the archive container: not where the moved file now is.
+        world.Rows[("sprk_communication", CommunicationId)] = new Entity("sprk_communication", CommunicationId);
+        AddUnlinkedAttachment(world, CustomerBContainer, CommunicationId);
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], CustomerA1Container, RelocationPurpose.LegacyMigration, apply: true);
+
+        result.Complete.Should().BeTrue();
+        result.SourceKeptForOtherRecords.Should().ContainSingle().Which.KeptFor.Should().Contain($"sprk_communicationattachment:{UnlinkedAttachment}");
+        world.ItemFacts(CustomerBContainer, Item).Should().NotBeNull();
+        world.Rows[("sprk_communicationattachment", UnlinkedAttachment)].GetAttributeValue<string>("sprk_graphitemid").Should().Be(Item);
+    }
+
+    [Theory]
+    [InlineData(false)] // it names no communication
+    [InlineData(true)]  // its communication cannot be read
+    public async Task AnUnlinkedAttachmentRowWhoseCommunicationsSubtreeIsUndecidable_IsPending_AndKeepsTheSource(bool namesACommunication)
+    {
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        AddUnlinkedAttachment(world, CustomerAContainer, namesACommunication ? Guid.NewGuid() : null); // an unmodelled (unreadable) row
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        result.Complete.Should().BeFalse("undecidable is pending, never 'outside'");
+        result.Incomplete.Should().ContainSingle().Which.Pending.Should().Contain(p => p.Contains($"sprk_communicationattachment {UnlinkedAttachment}", StringComparison.Ordinal));
+        world.ItemFacts(CustomerAContainer, Item).Should().NotBeNull();
+        result.SourceKeptForOtherRecords.Should().BeEmpty();
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+    // F-C — the guards f1-v1 built that no test proved (verifier seeds V6, V8)
+    // ═════════════════════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task MoveAlong_UnderTheLegacyMigration_NeverCopiesARowWhoseFileIsNotVerifiablyItsOwn()
+    {
+        // V6: a row inside the moved file's container names the same file, but the file is not ITS creator's upload. The
+        // move-along applies the same legitimacy rule as a relocation: it is reported for an administrator, never copied.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(drive: CustomerBContainer, item: Item);
+        world.Rows[("sprk_document", OtherDocumentId)] = Doc(drive: CustomerBContainer, item: Item, createdBy: OtherPerson, id: OtherDocumentId);
+        var rig = new Rig(world);
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], CustomerA1Container, RelocationPurpose.LegacyMigration, apply: true);
+
+        var outcome = result.Outcomes.Should().ContainSingle().Subject;
+        outcome.MovedAlong.Should().ContainSingle().Which.State.Should().Be(RelocationState.SourceUnverified);
+        rig.Copies.Should().ContainSingle("only the document's own file was copied");
+        rig.ItemOf(OtherDocumentId).Should().Be(Item, "the other row is not moved");
+        world.ItemFacts(CustomerBContainer, Item).Should().NotBeNull("a row still names it, so the source is not deleted");
+        outcome.KeptForOtherRecords.Should().ContainSingle().Which.KeptFor.Should().Contain(k => k.Contains(OtherDocumentId.ToString(), StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task WhenTheRelocationLockCannotBeTaken_NothingMoves_FailClosed()
+    {
+        // V8: whether another relocation of the document runs is UNKNOWN (the lock store faults) — treated as held.
+        var world = Environment();
+        world.Rows[("sprk_document", DocumentId)] = Doc(matter: SecureMatter, drive: CustomerAContainer, item: Item);
+        var rig = new Rig(world);
+        rig.Locks.Fault = new TimeoutException("Redis unavailable");
+
+        var result = await rig.Relocator.RelocateDocumentsAsync([DocumentId], SecureContainer, RelocationPurpose.MakeSecure, apply: true);
+
+        result.Complete.Should().BeFalse();
+        result.Outcomes.Should().ContainSingle().Which.State.Should().Be(RelocationState.Failed);
+        rig.Steps.Should().BeEmpty();
+        world.Updates.Should().BeEmpty();
+    }
+
+    /// <summary>A stored ledger owing one source (pending delete, re-key and index), with or without a witness.</summary>
+    internal static string LedgerJson(
+        string sourceDrive, string sourceItem, long? witnessSize = null, string? witnessHash = null, string? witnessVersion = null)
+    {
+        var witness = witnessSize is null && witnessHash is null && witnessVersion is null
+            ? string.Empty
+            : $$""","witness":{"size":{{witnessSize?.ToString() ?? "null"}},"quickXorHash":{{(witnessHash is null ? "null" : $"\"{witnessHash}\"")}},"version":{{(witnessVersion is null ? "null" : $"\"{witnessVersion}\"")}}}""";
+        return $$"""{"v":1,"entries":[{"sourceDrive":"{{sourceDrive}}","sourceItem":"{{sourceItem}}","source":"pending","rekeyPending":true,"indexed":"none","at":"2026-10-05T00:00:00+00:00"{{witness}}}]}""";
+    }
 }

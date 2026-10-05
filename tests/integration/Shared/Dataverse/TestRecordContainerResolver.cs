@@ -223,6 +223,12 @@ internal static class TestRecordContainerResolver
         public bool RelocationLedgerColumnMissing { get; init; }
 
         /// <summary>
+        /// The environment does not have <c>sprk_document.sprk_relocatedversions</c> yet (task 166 f1-v2: the relocation's
+        /// version record, the same schema gate) — any read naming it throws, as Dataverse does.
+        /// </summary>
+        public bool RelocatedVersionsColumnMissing { get; init; }
+
+        /// <summary>
         /// A query of this entity faults (Dataverse unavailable) — e.g. <c>sprk_communicationattachment</c> to make the
         /// relocator's re-key or reference read fail.
         /// </summary>
@@ -294,6 +300,12 @@ internal static class TestRecordContainerResolver
                     {
                         throw new InvalidOperationException(
                             "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_relocationpending'.");
+                    }
+
+                    if (entity == "sprk_document" && RelocatedVersionsColumnMissing && columns.Contains("sprk_relocatedversions"))
+                    {
+                        throw new InvalidOperationException(
+                            "'sprk_Document' entity doesn't contain attribute with Name = 'sprk_relocatedversions'.");
                     }
 
                     if (Rows.TryGetValue((entity, id), out var row) || people.TryGetValue((entity, id), out row))

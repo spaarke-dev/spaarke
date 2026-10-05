@@ -953,6 +953,78 @@ public class DriveItemOperations
         }
     }
 
+    /// <summary>
+    /// Download a SPECIFIC prior version's content using APP-ONLY (broker) authentication — the app-only twin of
+    /// <see cref="DownloadFileVersionAsUserAsync"/>. Returns <c>null</c> when the item or that version is not found.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 166, owner round 45 item 1: a relocation REPLAYS the source's version history into
+    /// its copy through the BFF identity, oldest first, so a moved file keeps its history. ⚠️ Performs NO authorization:
+    /// its only caller is <c>DocumentContainerRelocator</c>, which reads the source it is moving (a server-derived
+    /// relocation of a <c>sprk_document</c> row's own file).
+    /// </remarks>
+    public async Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+    {
+        using var activity = Activity.Current;
+        activity?.SetTag("operation", "DownloadFileVersion");
+        activity?.SetTag("driveId", driveId);
+        activity?.SetTag("itemId", itemId);
+        activity?.SetTag("versionId", versionId);
+
+        _logger.LogInformation(
+            "Downloading version {VersionId} of file {ItemId} from drive {DriveId} (app-only)", versionId, itemId, driveId);
+
+        try
+        {
+            var stream = await _factory.ForApp().Drives[driveId].Items[itemId]
+                .Versions[versionId].Content
+                .GetAsync(cancellationToken: ct);
+
+            if (stream == null)
+            {
+                _logger.LogWarning("Failed to download version {VersionId} of file {ItemId} - stream is null", versionId, itemId);
+                return null;
+            }
+
+            return stream;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Version {VersionId} of file {ItemId} not found in drive {DriveId}", versionId, itemId, driveId);
+            return null;
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
+        {
+            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
+            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "Graph API error downloading file version (app-only): {Error}", ex.Message);
+            throw new InvalidOperationException($"Failed to download file version: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
+    /// The <see cref="VersionInfoDto"/> projection of one Graph version: id (= label), date, size and who wrote it
+    /// (display name; the person's or application's id server-side only).
+    /// </summary>
+    private static VersionInfoDto ToVersionInfo(DriveItemVersion v)
+        => new(
+            Id: v.Id!,
+            ETag: null,
+            LastModifiedDateTime: v.LastModifiedDateTime ?? default,
+            Size: v.Size ?? 0,
+            LastModifiedBy: v.LastModifiedBy?.User?.DisplayName ?? v.LastModifiedBy?.Application?.DisplayName)
+        {
+            LastModifiedByUserId = v.LastModifiedBy?.User?.Id,
+            LastModifiedByApplicationId = v.LastModifiedBy?.Application?.Id,
+        };
+
     public async Task<string?> GetCurrentVersionIdAsUserAsync(
         HttpContext ctx,
         string driveId,
@@ -1051,11 +1123,7 @@ public class DriveItemOperations
             var mapped = versions.Value
                 .Where(v => v.Id != null)
                 .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
-                .Select(v => new VersionInfoDto(
-                    Id: v.Id!,
-                    ETag: null,
-                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
-                    Size: v.Size ?? 0))
+                .Select(ToVersionInfo)
                 .ToList();
 
             _logger.LogInformation(
@@ -1128,11 +1196,7 @@ public class DriveItemOperations
             var mapped = versions.Value
                 .Where(v => v.Id != null)
                 .OrderByDescending(v => v.LastModifiedDateTime ?? DateTimeOffset.MinValue)
-                .Select(v => new VersionInfoDto(
-                    Id: v.Id!,
-                    ETag: null,
-                    LastModifiedDateTime: v.LastModifiedDateTime ?? default,
-                    Size: v.Size ?? 0))
+                .Select(ToVersionInfo)
                 .ToList();
 
             _logger.LogInformation(

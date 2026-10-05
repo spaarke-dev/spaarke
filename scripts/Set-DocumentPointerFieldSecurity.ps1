@@ -6,7 +6,10 @@
       -Target DocumentPointers (default) — sprk_document.sprk_graphdriveid / sprk_graphitemid, the SharePoint Embedded
                                            pointer the BFF follows as the application (owner round 21 item 1 (a)), and
                                            sprk_relocationpending, the relocation ledger (task 166 f1-v1, owner round 37:
-                                           it names a source the BFF may later delete, so only the BFF may write it);
+                                           it names a source the BFF may later delete, so only the BFF may write it),
+                                           and sprk_relocatedversions, the relocation's version record (task 166 f1-v2,
+                                           owner round 45 item 1: it says who wrote a moved file's history). The two
+                                           relocation columns are created already secured; this grants their profiles;
       -Target ReportCatalog              — sprk_report.sprk_pbi_reportid / sprk_workspaceid / sprk_datasetid /
                                            sprk_iscustom, the Power BI pointer the reporting module derives embed
                                            tokens, exports and deletes from (owner round 25 item 6).
@@ -33,9 +36,11 @@
       (p4) nothing outside the BFF still WRITES the columns:
            DocumentPointers — (p4a) EVIDENCE: no web resource deployed in the environment (code pages, form scripts and
                               PCF bundles — every JavaScript and HTML web resource) contains a client write of a locked
-                              column: an object key, a computed key, a bracket or dotted assignment, or a form setValue —
-                              directly or through a constant bound to the column name in the same resource (task 166
-                              f1-v1, F3; Find-PointerWrite below).
+                              column: an object key, a computed key, a bracket or dotted assignment, a form setValue
+                              (through getAttribute or through getControl(...).getAttribute()), or Reflect.set /
+                              defineProperty — directly or through a name bound to the column in the same resource, or
+                              any alias of it (task 166 f1-v1 F3 and f1-v2 F-D; Find-PointerWrite in
+                              scripts/common/Find-ClientPointerWrite.ps1, the detector the CI guard also runs).
                               Since task 166 f1 the shipped clients create the row WITHOUT the pointer and call the
                               BFF's POST /api/v1/documents/{id}/file, so the scan is satisfiable; a hit names the web
                               resource still carrying an old bundle. (p4b) -ClientNoLongerWritesPointers: the operator's
@@ -48,8 +53,8 @@
            configuration that writes outside the BFF; it would fail every write it drives once locked);
       (p6) the table is a ROOT component of -SolutionUniqueName with rootcomponentbehavior 0 (include all
            subcomponents), so the secured columns travel with the solution to every other environment;
-      (p7) every column to lock exists (DocumentPointers: sprk_relocationpending is created by
-           scripts/Set-DocumentRelocationSchema.ps1 -Apply, task 166 f1-v1).
+      (p7) every column to lock exists (DocumentPointers: sprk_relocationpending and sprk_relocatedversions are created by
+           scripts/Set-DocumentRelocationSchema.ps1 -Apply, task 166 f1-v1 / f1-v2).
 
     STEPS (-Apply), per column, in this order:
       (a) secure the column (IsSecured = true);
@@ -136,46 +141,19 @@ $Api = "$EnvironmentUrl/api/data/v9.2"
 
 # ── Constants ───────────────────────────────────────────────────────────────────────────────────────────────
 $Targets = @{
-    DocumentPointers = @{ Table = 'sprk_document'; Columns = @('sprk_graphdriveid', 'sprk_graphitemid', 'sprk_relocationpending'); What = 'the document pointers and the relocation ledger' }
+    DocumentPointers = @{ Table = 'sprk_document'; Columns = @('sprk_graphdriveid', 'sprk_graphitemid', 'sprk_relocationpending', 'sprk_relocatedversions'); What = 'the document pointers and the relocation record (ledger and version record)' }
     ReportCatalog    = @{ Table = 'sprk_report'; Columns = @('sprk_pbi_reportid', 'sprk_workspaceid', 'sprk_datasetid', 'sprk_iscustom'); What = 'the report catalog pointers' }
 }
 $Table = $Targets[$Target].Table
 $Columns = $Targets[$Target].Columns
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
+$RelocationRecordColumns = @('sprk_relocationpending', 'sprk_relocatedversions')
 
-# A CLIENT write of a locked document column in deployed JavaScript. Kept in step with
-# tests/Spaarke.ArchTests/ClientDocumentPointerWriteGuardTests.cs, which holds the source tree to the same rule in CI
-# (task 166 f1-v1, F3: the object-key and setValue shapes alone missed bracket, dotted and computed-key writes and writes
-# through a constant). Reads ($select strings, property access, ['sprk_graphitemid'] lookups, comparisons) never match.
-$ColumnAlt = 'sprk_(?:graph(?:item|drive)id|relocationpending)'
-$PointerWritePatterns = @(
-    ('["'']?' + $ColumnAlt + '["'']?\s*:'),                                                   # object key
-    ('[{,]\s*\[\s*["''`]' + $ColumnAlt + '["''`]\s*\]\s*:'),                                # computed key
-    ('\[\s*["''`]' + $ColumnAlt + '["''`]\s*\]\s*(?:\?\?|\|\||&&)?=(?![=>])'),              # bracket assignment
-    ('\.\s*' + $ColumnAlt + '\s*(?:\?\?|\|\||&&)?=(?![=>])'),                               # dotted assignment
-    ('(?:getAttribute|attributes\s*\.\s*get)\(\s*["''`]' + $ColumnAlt + '["''`]\s*\)\s*\??\.\s*setValue') # form setValue
-)
-# A name bound to a column-name string in the same resource (const F = "sprk_graphitemid" / { ITEM: 'sprk_graphitemid' }),
-# and the write shapes that go THROUGH such a name (computed key, bracket assignment, setValue).
-$ColumnNameBinding = '(?<![\w$.])([A-Za-z_$][\w$]*)\s*[=:]\s*["''`]' + $ColumnAlt + '["''`]'
-function Find-PointerWrite([string]$Text) {
-    foreach ($pattern in $PointerWritePatterns) {
-        $m = [regex]::Match($Text, $pattern)
-        if ($m.Success) { return $m.Value }
-    }
-    foreach ($binding in [regex]::Matches($Text, $ColumnNameBinding)) {
-        $path = '(?:[\w$]+\s*\.\s*)*' + [regex]::Escape($binding.Groups[1].Value) + '(?![\w$])'
-        foreach ($through in @(
-                ('[{,]\s*\[\s*' + $path + '\s*\]\s*:'),
-                ('\[\s*' + $path + '\s*\]\s*(?:\?\?|\|\||&&)?=(?![=>])'),
-                ('(?:getAttribute|attributes\s*\.\s*get)\(\s*' + $path + '\s*\)\s*\??\.\s*setValue'))) {
-            $m = [regex]::Match($Text, $through)
-            if ($m.Success) { return $m.Value }
-        }
-    }
-    return $null
-}
+# A CLIENT write of a locked document column in deployed JavaScript: Find-PointerWrite, from the ONE detector file
+# tests/Spaarke.ArchTests/ClientDocumentPointerWriteGuardTests.cs runs through pwsh over every write and read case of the
+# CI guard (task 166 f1-v2, F-D), so this scan and the source-tree guard cannot drift apart unseen.
+. (Join-Path $PSScriptRoot 'common/Find-ClientPointerWrite.ps1')
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -295,7 +273,7 @@ foreach ($column in $Columns) {
     try { Invoke-DvGet "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$column')?`$select=LogicalName" | Out-Null }
     catch {
         $missingColumns++
-        $hint = if ($column -eq 'sprk_relocationpending') { ' — run scripts/Set-DocumentRelocationSchema.ps1 -Apply first' } else { '' }
+        $hint = if ($column -in $RelocationRecordColumns) { ' — run scripts/Set-DocumentRelocationSchema.ps1 -Apply first' } else { '' }
         Report 'FAIL' "(p7) $Table.$column does not exist in this environment$hint"
     }
 }

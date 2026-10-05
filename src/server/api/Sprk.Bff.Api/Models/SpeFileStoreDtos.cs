@@ -23,11 +23,34 @@ public record FileHandleDto(
 // caller as the interesting property. The OBO path uses UploadSessionResponse — a different type, still
 // live, and NOT this one.
 
+/// <summary>One SharePoint Embedded version of a file.</summary>
+/// <param name="Id">The version id — for SharePoint also its label ("1.0", "2.0", …).</param>
+/// <param name="ETag">Not populated by the version list (null).</param>
+/// <param name="LastModifiedDateTime">When the version was written.</param>
+/// <param name="Size">The version's size in bytes.</param>
+/// <param name="LastModifiedBy">
+///   Who wrote the version (Graph <c>lastModifiedBy</c> display name). For a version a relocation REPLAYED into a moved
+///   file, the version history routes report the ORIGINAL author and date the relocation recorded (unified-access-control-r2
+///   task 166, owner round 45 item 1; <c>Services.Documents.RelocatedVersionHistory</c>), because Graph cannot set them.
+/// </param>
 public record VersionInfoDto(
     string Id,
     string? ETag,
     DateTimeOffset LastModifiedDateTime,
-    long Size);
+    long Size,
+    string? LastModifiedBy = null)
+{
+    /// <summary>
+    /// The writer's Entra object id (<c>lastModifiedBy.user.id</c>), when a person wrote it. Server-side only (never
+    /// serialized): the relocation records it as the replayed version's original author.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? LastModifiedByUserId { get; init; }
+
+    /// <summary>The writing application's id (<c>lastModifiedBy.application.id</c>) for an app-only write. Server-side only.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? LastModifiedByApplicationId { get; init; }
+}
 
 public record ContainerDto(
     string Id,

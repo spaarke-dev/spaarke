@@ -148,10 +148,12 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
             clean ? LogLevel.Information : LogLevel.Warning,
             "[DOCUMENT-MIGRATION] heartbeat mode={Mode} examined={Examined} wouldNewlyRefuse={WouldNewlyRefuse} "
             + "relocatedButRefused={RelocatedButRefused} pending={Pending} servedOnlyAfterFlip={ServedOnlyAfterFlip} "
+            + "sourceChangedAfterMove={SourceChangedAfterMove} versionsTruncated={VersionsTruncated} "
             + "counts={Counts} passComplete={PassComplete} attempt={Attempt} durationMs={DurationMs} trigger={Trigger} "
             + "runId={RunId} correlationId={CorrelationId}",
             report.Mode, report.Examined, report.WouldNewlyRefuse, report.RelocatedButRefused, report.Pending,
-            report.ServedOnlyAfterFlip, JsonSerializer.Serialize(report.Counts), passComplete,
+            report.ServedOnlyAfterFlip, report.SourceChangedAfterMove, report.VersionsTruncated,
+            JsonSerializer.Serialize(report.Counts), passComplete,
             context.Attempt, (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
 
         return new JobRunResult(
@@ -263,9 +265,21 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
         /// <summary>Other rows moved along with a document because they named the same file.</summary>
         public int MovedAlong { get; private set; }
 
+        /// <summary>
+        /// Sources edited after their move (owner round 45 item 4: <c>source-changed-after-move</c>, with the row id) —
+        /// STATED: the relocation closes each one itself (re-copy, verify, re-point); one it could not close yet is also in
+        /// <see cref="Pending"/>.
+        /// </summary>
+        public int SourceChangedAfterMove { get; private set; }
+
+        /// <summary>Moved files whose history the target container truncated (round 45 item 1: stated, never silent).</summary>
+        public int VersionsTruncated { get; private set; }
+
         public Dictionary<string, int> Counts { get; } = new(StringComparer.Ordinal);
         public List<object> Rows { get; } = [];
         public List<object> SourceKeptForOtherRecords { get; } = [];
+        public List<object> SourceChangedAfterMoveRows { get; } = [];
+        public List<object> VersionsTruncatedRows { get; } = [];
         public int RowsTotal { get; private set; }
 
         /// <summary>Nothing left for the migration to do in this batch, and nothing the flip would newly refuse.</summary>
@@ -328,8 +342,40 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
                 }
             }
 
+            foreach (var changed in outcome.SourceChangedAfterMove.Concat(outcome.MovedAlong.SelectMany(m => m.SourceChangedAfterMove)))
+            {
+                SourceChangedAfterMove++;
+                if (SourceChangedAfterMoveRows.Count < MaxListedPerRun)
+                {
+                    SourceChangedAfterMoveRows.Add(new
+                    {
+                        documentId = changed.DocumentId,
+                        sourceDrive = changed.SourceDrive,
+                        sourceItem = changed.SourceItem,
+                        carriedVersions = changed.CarriedVersions,
+                        newItem = changed.NewItem,
+                    });
+                }
+            }
+
+            foreach (var truncated in outcome.VersionsTruncated.Concat(outcome.MovedAlong.SelectMany(m => m.VersionsTruncated)))
+            {
+                VersionsTruncated++;
+                if (VersionsTruncatedRows.Count < MaxListedPerRun)
+                {
+                    VersionsTruncatedRows.Add(new
+                    {
+                        documentId = truncated.DocumentId,
+                        item = truncated.Item,
+                        replayedVersions = truncated.ReplayedVersions,
+                        keptVersions = truncated.KeptVersions,
+                        unrecordedAuthors = truncated.UnrecordedAuthors,
+                    });
+                }
+            }
+
             if (outcome.State is RelocationState.InPlace && !newlyRefused && interim == true && !owes
-                && outcome.KeptForOtherRecords.Count == 0)
+                && outcome.KeptForOtherRecords.Count == 0 && outcome.SourceChangedAfterMove.Count == 0)
             {
                 return; // healthy: counted, not listed
             }
@@ -370,8 +416,12 @@ public sealed class DocumentContainerMigrationJob : IScheduledJob
             relocatedButRefused = RelocatedButRefused,
             pending = Pending,
             movedAlong = MovedAlong,
+            sourceChangedAfterMove = SourceChangedAfterMove,
+            versionsTruncated = VersionsTruncated,
             counts = Counts,
             sourceKeptForOtherRecords = SourceKeptForOtherRecords,
+            sourceChangedAfterMoveRows = SourceChangedAfterMoveRows,
+            versionsTruncatedRows = VersionsTruncatedRows,
             rowsTotal = RowsTotal,
             rowsListed = Rows.Count,
             rows = Rows,

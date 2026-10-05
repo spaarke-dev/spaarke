@@ -190,6 +190,59 @@ public class DocumentContainerMigrationJobTests
     }
 
     [Fact]
+    public async Task UnderTheStrictRuleInForce_ARelocatedFileOnlyTheInterimRuleWouldRefuse_IsServed_AndTheRunIsClean()
+    {
+        // F-C / V5: relocatedButRefused asks the rule IN FORCE. With the strict rule in force, a moved file in its derived
+        // container is served — even one the interim rule would refuse (here: a copy Graph reports as written by an
+        // application that is not the BFF). Counting it against the interim rule would block a run that is clean.
+        var world = new TestRecordContainerResolver.DocumentPointerWorld { ArchiveContainerId = ArchiveContainer, Strict = true };
+        foreach (var (unit, value) in Environment().BusinessUnits)
+        {
+            world.BusinessUnits[unit] = value;
+        }
+
+        world.Rows[("sprk_matter", PlainMatter)] = Environment().Rows[("sprk_matter", PlainMatter)];
+        world.Rows[("sprk_document", Misplaced)] = Document(Misplaced, PlainMatter, CustomerBContainer, Item);
+        var rig = new Rig(world, copyFacts: source => source with { UserObjectId = null, ApplicationId = Guid.NewGuid().ToString("D") });
+        var (job, _) = Arrange(world, writes: true, rig: rig);
+
+        var result = await RunAsync(job);
+
+        var report = JsonNode.Parse(result.ResultJson!)!;
+        var row = report["rows"]!.AsArray().Should().ContainSingle().Subject!;
+        row["interim"]!.GetValue<bool>().Should().BeFalse("precondition: the interim rule would refuse this copy");
+        row["strict"]!.GetValue<bool>().Should().BeTrue();
+        report["relocatedButRefused"]!.GetValue<int>().Should().Be(0, "the rule in force (strict) serves it");
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task TheReport_StatesATruncatedHistory_WithCounts_WithoutBlockingTheRun()
+    {
+        // Round 45 item 1: the target's version limit dropping the oldest replayed versions is stated, never silent — and
+        // it is not work left to do (no retry could change the limit).
+        var world = Environment();
+        world.Rows[("sprk_document", Misplaced)] = Document(Misplaced, PlainMatter, CustomerBContainer, Item);
+        var rig = new Rig(world) { CopyVersionLimit = 1 };
+        rig.Versions[(CustomerBContainer, Item)] =
+        [
+            new VersionInfoDto("1.0", null, Rig.Written, 100, Rig.CreatorName),
+            new VersionInfoDto("2.0", null, Rig.Written.AddDays(1), 1234, Rig.CreatorName),
+        ];
+        var (job, _) = Arrange(world, writes: true, rig: rig);
+
+        var result = await RunAsync(job);
+
+        var report = JsonNode.Parse(result.ResultJson!)!;
+        report["versionsTruncated"]!.GetValue<int>().Should().Be(1);
+        var listed = report["versionsTruncatedRows"]!.AsArray().Should().ContainSingle().Subject!;
+        listed["documentId"]!.GetValue<Guid>().Should().Be(Misplaced);
+        listed["replayedVersions"]!.GetValue<int>().Should().Be(2);
+        listed["keptVersions"]!.GetValue<int>().Should().Be(1);
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task AFileBothRulesRefuse_IsListedForAnAdministrator_ButDoesNotBlockTheFlip()
     {
         // Misplaced AND another person's upload: never copied (not verifiably the row's own), refused today and after

@@ -13,8 +13,8 @@ namespace Sprk.Bff.Api.Services.Documents;
 
 /// <summary>
 /// The ONE server-side owner of WHERE a <c>sprk_document</c>'s file lives (unified-access-control-r2 task 166 f1; owner
-/// round 21 item 1 (i)–(ii), round 26 item 3, round 37): the only writer of a document's SharePoint Embedded pointer
-/// (<c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c>) outside a server path that uploads the bytes itself.
+/// round 21 item 1 (i)–(ii), round 26 item 3, round 37, round 45): the only writer of a document's SharePoint Embedded
+/// pointer (<c>sprk_graphdriveid</c> / <c>sprk_graphitemid</c>) outside a server path that uploads the bytes itself.
 /// </summary>
 /// <remarks>
 /// <para><b>Two operations, one pointer-attach path.</b></para>
@@ -24,32 +24,41 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// route, and asks the BFF to attach them. The BFF verifies, then stamps the pointer as the application — the identity
 /// the pointer columns' field-level security admits (<c>scripts/Set-DocumentPointerFieldSecurity.ps1</c>).</item>
 /// <item><see cref="RelocateIfMisplacedAsync"/> — moves a file that is NOT in its document's derived container into
-/// it: copy through the BFF identity, verify (size, and <c>quickXorHash</c> where Graph returns one), re-point through
-/// the SAME pointer-attach path, then settle what the move leaves behind (below). Two callers, one mechanism (round 26
-/// item 3): task 166's legacy migration (<see cref="DocumentContainerMigrationJob"/>) and the Make Secure transition
-/// (task 150's provisioning lane).</item>
+/// it: copy through the BFF identity — REPLAYING the source's version history oldest first, the current content last
+/// (round 45 item 1) — verify (each version's size; the final content's size, and <c>quickXorHash</c> where Graph returns
+/// one), re-point through the SAME pointer-attach path, then settle what the move leaves behind (below). Two callers, one
+/// mechanism (round 26 item 3): task 166's legacy migration (<see cref="DocumentContainerMigrationJob"/>) and the Make
+/// Secure transition (task 150's provisioning lane).</item>
 /// </list>
-/// <para><b>What a move leaves behind, and the relocation ledger</b> (owner round 37, task 166 f1-v1). Re-pointing the row
-/// is one atomic Dataverse update that ALSO re-keys the row's own columns holding the old drive / item
-/// (<see cref="ReKeyedOwnColumns"/>) and writes the row's relocation ledger (<see cref="RelocationLedgerColumn"/>): one
-/// entry per old item, naming what is still owed for it —</para>
+/// <para><b>What a move leaves behind, and the relocation ledger</b> (owner round 37, task 166 f1-v1; round 45). Re-pointing
+/// the row is one atomic Dataverse update that ALSO re-keys the row's own columns holding the old drive / item
+/// (<see cref="ReKeyedOwnColumns"/>), records the replayed versions' ORIGINAL authorship
+/// (<see cref="RelocatedVersionHistory.Column"/>) and writes the row's relocation ledger (<see cref="RelocationLedgerColumn"/>):
+/// one entry per old item, naming what is still owed for it, and the source's WITNESS — its size, <c>quickXorHash</c> and
+/// version at the moment its copy was verified (round 45 item 4) —</para>
 /// <list type="bullet">
 /// <item><b>re-key</b>: the other rows that hold the old item id for THIS document — a child attachment's
 /// <c>sprk_parentgraphitemid</c>, and the <c>sprk_communicationattachment</c> row linked to this document;</item>
-/// <item><b>source</b>: the old item is deleted only when no row references it any more. A referencing
-/// <c>sprk_document</c> whose own derived container is the one this document now lives in (inside the secure record's
-/// subtree, for Make Secure) is moved along — with its OWN copy, because <c>sprk_graphitemid_uk</c> is a unique key on
-/// the item id and two rows can never share one. A row OUTSIDE keeps the source, which is then that record's file: the
-/// transition is complete and the report lists it (<see cref="DocumentRelocationOutcome.KeptForOtherRecords"/>); the
-/// entry stays so a later pass deletes the source once nothing references it;</item>
+/// <item><b>source</b>: the old item is deleted only when no row references it any more AND it still matches its witness.
+/// A referencing <c>sprk_document</c> whose own derived container is the one this document now lives in (inside the secure
+/// record's subtree, for Make Secure) is moved along — with its OWN copy, because <c>sprk_graphitemid_uk</c> is a unique key
+/// on the item id and two rows can never share one. A <c>sprk_communicationattachment</c> row not linked to this document
+/// is classified by the subtree of the record its communication is regarding (round 45 item 3): inside → re-keyed to the
+/// current file; outside → it keeps the source; undecidable → pending. A row OUTSIDE keeps the source, which is then that
+/// record's file: the transition is complete and the report lists it (<see cref="DocumentRelocationOutcome.KeptForOtherRecords"/>);
+/// the entry stays so a later pass deletes the source once nothing references it. A source EDITED after the move no longer
+/// matches its witness: it is reported (<see cref="DocumentRelocationOutcome.SourceChangedAfterMove"/>, never deleted as
+/// it stands) and closed by the relocator itself — re-copy (the document's current file and history, then the source's
+/// versions written after the move), verify, re-point — never by a manual step;</item>
 /// <item><b>index</b>: the new item indexed and the old item's chunks removed, through ONE <c>Services/Ai/PublicContracts</c>
 /// facade (<see cref="IRelocatedFileIndexing"/>, ADR-013).</item>
 /// </list>
 /// <para>Whatever cannot be finished is reported pending (<see cref="RelocationState.RelocationPending"/>, incomplete) and
-/// stays in the ledger, so a REPEAT call — the next Make Secure call, or the migration's next pass — recognises the row
-/// as already re-pointed and settles it. A source is deleted on a repeat call only when it is byte-identical to the
-/// document's current file (size and <c>quickXorHash</c>), so a ledger entry can never be used to delete an unrelated file.
-/// The ledger column is BFF-written only (field-level security, <c>scripts/Set-DocumentPointerFieldSecurity.ps1</c>).</para>
+/// stays in the ledger, so a REPEAT call — the next Make Secure call, or the migration's next pass — recognises the row as
+/// already re-pointed and settles it. The ledger is the only witness of a source on a repeat call, so a source is deleted
+/// only when it still matches the witness recorded at verification (round 45 item 4) — never compared with the
+/// document's CURRENT file, which its users may have edited since. The ledger and the version record are BFF-written only
+/// (field-level security from their creation, <c>scripts/Set-DocumentRelocationSchema.ps1</c>).</para>
 /// <para><b>Every step is logged with before / after ids</b> (<c>[DOCUMENT-RELOCATE]</c>).</para>
 /// <para><b>Placement</b> (CLAUDE.md §10; <c>.claude/constraints/bff-extensions.md</c>): in the BFF — it composes the
 /// BFF's own container decisions (<see cref="RecordContainerResolver"/>), its app-only SPE facade and its Dataverse
@@ -58,7 +67,7 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// </remarks>
 public sealed class DocumentContainerRelocator
 {
-    /// <summary>Graph's simple-upload boundary for SPE (250 MB). A larger file is reported, never half-copied.</summary>
+    /// <summary>Graph's simple-upload boundary for SPE (250 MB). A larger file (or version) is reported, never half-copied.</summary>
     internal const long MaxRelocatableBytes = 250L * 1024 * 1024;
 
     /// <summary>
@@ -87,6 +96,7 @@ public sealed class DocumentContainerRelocator
     private const string ParentItemColumn = "sprk_parentgraphitemid";
     private const string AttachmentEntity = "sprk_communicationattachment";
     private const string AttachmentDocumentColumn = "sprk_document";
+    private const string AttachmentCommunicationColumn = "sprk_communication";
 
     /// <summary>
     /// The row's OWN legacy columns that hold its file's drive or item (live <c>sprk_document</c> metadata, spaarkedev1
@@ -278,7 +288,7 @@ public sealed class DocumentContainerRelocator
     /// THE pointer-attach path: the only write of a document's pointer by this type. App-only — the identity the pointer
     /// columns' field-level security admits. <c>sprk_hasfile</c> is set with the pointer, so "has a file" and "points at
     /// a file" never disagree. <paramref name="alsoWrite"/> carries what a RELOCATION writes in the same atomic update:
-    /// the re-keyed own columns and the relocation ledger (<see cref="DBNull.Value"/> clears a column).
+    /// the re-keyed own columns, the version record and the relocation ledger (<see cref="DBNull.Value"/> clears a column).
     /// </summary>
     private Task WritePointerAsync(
         Guid documentId, string drive, string item, string? webUrl, IReadOnlyDictionary<string, object>? alsoWrite,
@@ -371,8 +381,23 @@ public sealed class DocumentContainerRelocator
         // An earlier move of this row may still owe something (round 37 / F2): settle it BEFORE anything else, so a
         // repeat call completes it whatever the file's placement is now.
         var ledger = RelocationLedger.Parse(row!.GetAttributeValue<string>(RelocationLedgerColumn));
-        var prior = await SettleOrReportAsync(documentId, row, sourceDrive, sourceItem, ledger, purpose, apply, justCopiedFrom: null, ct)
+        var prior = await SettleOrReportAsync(documentId, row, sourceDrive, sourceItem, ledger, purpose, apply, ct)
             .ConfigureAwait(false);
+
+        // Round 45 item 4: a source EDITED after its move is closed by the relocator's own re-entry — re-copy, verify,
+        // re-point (in the document's CURRENT container), then the settle deletes the source against its new witness.
+        if (apply && prior.Changed.Count > 0 && !prior.LedgerUnreadable)
+        {
+            var recopy = await RecopyChangedSourcesAsync(documentId, row, sourceDrive, sourceItem, prior, purpose, ct)
+                .ConfigureAwait(false);
+            prior = recopy.Summary;
+            if (recopy.Row is { } after)
+            {
+                row = after;
+                sourceDrive = after.GetAttributeValue<string>(DriveColumn)?.Trim() ?? sourceDrive;
+                sourceItem = after.GetAttributeValue<string>(ItemColumn)?.Trim() ?? sourceItem;
+            }
+        }
 
         var derivation = await _resolver.DeriveDocumentContainersAsync(documentId, ct).ConfigureAwait(false);
         if (!derivation.Decided)
@@ -445,19 +470,39 @@ public sealed class DocumentContainerRelocator
                 $"its {RelocationLedgerColumn} is unreadable; an administrator must repair it before the file is moved").With(prior);
         }
 
-        var moved = await MoveAsync(documentId, row, sourceDrive, sourceItem, target, facts, prior.Ledger,
-            LedgerSourceState.Pending, ct).ConfigureAwait(false);
+        // Round 45 item 1: the copy carries the source's version history — read it (with any originals an earlier move of
+        // this row recorded) before a byte moves.
+        var history = await ReadHistoryAsync(sourceDrive, sourceItem, VersionRecordOf(row), ct).ConfigureAwait(false);
+        if (history.Failure is not null)
+        {
+            return DocumentRelocationOutcome.Of(
+                documentId, RelocationState.Failed, sourceDrive, sourceItem, target, null,
+                $"its version history could not be copied: {history.Failure}").With(prior);
+        }
+
+        var moved = await MoveAsync(documentId, row, sourceDrive, sourceItem, target,
+            new ReplayPlan(history.Steps, facts, history.Witness, facts.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
+            prior.Ledger, LedgerSourceState.Pending, ct).ConfigureAwait(false);
         if (moved.Failure is not null)
         {
             return moved.Failure.With(prior);
         }
 
-        // Settle what the move owes now — the copy was verified against the source moments ago in this process, so the
-        // source may be deleted without the repeat call's byte-identity check.
+        // Settle what the move owes now. The source is deleted only when it still matches the witness this move recorded
+        // moments ago (an edit in between is re-copied, below).
         var rowAfter = await ReadRowAsync(documentId, ct).ConfigureAwait(false) ?? row;
         var settled = await SettleOrReportAsync(documentId, rowAfter, target, moved.CopyId!,
-            RelocationLedger.Parse(rowAfter.GetAttributeValue<string>(RelocationLedgerColumn)), purpose, apply: true,
-            justCopiedFrom: (sourceDrive, sourceItem), ct).ConfigureAwait(false);
+            RelocationLedger.Parse(rowAfter.GetAttributeValue<string>(RelocationLedgerColumn)), purpose, apply: true, ct)
+            .ConfigureAwait(false);
+        settled.Note(moved.Truncated);
+        var finalItem = moved.CopyId!;
+        if (settled.Changed.Count > 0 && !settled.LedgerUnreadable)
+        {
+            var recopy = await RecopyChangedSourcesAsync(documentId, rowAfter, target, moved.CopyId!, settled, purpose, ct)
+                .ConfigureAwait(false);
+            settled = recopy.Summary;
+            finalItem = recopy.Row?.GetAttributeValue<string>(ItemColumn)?.Trim() ?? finalItem;
+        }
 
         var state = settled.Pending.Count > 0
             ? RelocationState.RelocationPending
@@ -471,8 +516,13 @@ public sealed class DocumentContainerRelocator
                 "relocated; the source is kept because rows outside this document's container still use it (that record's file)",
             _ => "relocated",
         };
-        var outcome = DocumentRelocationOutcome.Of(documentId, state, sourceDrive, sourceItem, target, moved.CopyId, detail).With(settled);
-        return outcome with { MovedAlong = prior.MovedAlong.Concat(outcome.MovedAlong).ToList() };
+        var outcome = DocumentRelocationOutcome.Of(documentId, state, sourceDrive, sourceItem, target, finalItem, detail).With(settled);
+        return outcome with
+        {
+            MovedAlong = prior.MovedAlong.Concat(outcome.MovedAlong).ToList(),
+            SourceChangedAfterMove = prior.ChangedAfterMove.Concat(outcome.SourceChangedAfterMove).ToList(),
+            VersionsTruncated = prior.Truncated.Concat(outcome.VersionsTruncated).ToList(),
+        };
     }
 
     /// <summary>
@@ -480,7 +530,8 @@ public sealed class DocumentContainerRelocator
     /// transition (round 26 item 3: the record's existing files move into its own container). Each document goes through
     /// <see cref="RelocateIfMisplacedAsync"/> with <paramref name="targetContainerId"/> as the expected target; a fault in
     /// one document is that document's <see cref="RelocationState.Failed"/>, never the batch's. The result counts every
-    /// outcome, lists the INCOMPLETE ones and every source kept for another record; a repeat call settles what is owed.
+    /// outcome, lists the INCOMPLETE ones, every source kept for another record, every source edited after its move and
+    /// every truncated history; a repeat call settles what is owed.
     /// </summary>
     public async Task<DocumentRelocationBatchResult> RelocateDocumentsAsync(
         IReadOnlyCollection<Guid> documentIds, string targetContainerId, RelocationPurpose purpose, bool apply,
@@ -509,11 +560,134 @@ public sealed class DocumentContainerRelocator
     }
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    // The move: copy → verify → re-point (with the own-column re-key and the ledger entry, one update)
+    // The version history a move carries (owner round 45 item 1)
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>One version to write into the copy: where its bytes come from, its expected size, and its ORIGINAL authorship.</summary>
+    private sealed record ReplayStep(
+        string VersionId, Func<CancellationToken, Task<Stream?>> Open, long? ExpectedSize, RelocatedVersionHistory.Entry Origin);
+
+    /// <summary>
+    /// What a copy is made of: the <see cref="Steps"/> oldest first (the last is the content the copy must end with),
+    /// <see cref="FinalFacts"/> — the item that content is verified against — and the WITNESS of the item the row moves
+    /// away from (recorded in its ledger entry).
+    /// </summary>
+    private sealed record ReplayPlan(
+        IReadOnlyList<ReplayStep> Steps, SpeItemCreator FinalFacts, RelocationWitness OldItemWitness, string? FileName);
+
+    /// <summary>An item's history as replay steps, its facts and its witness — or why it cannot be copied.</summary>
+    private sealed record History(
+        IReadOnlyList<ReplayStep> Steps, SpeItemCreator? Facts, RelocationWitness Witness, string? Failure)
+    {
+        public static History Fail(string why) => new([], null, new RelocationWitness(null, null, null), why);
+
+        /// <summary>
+        /// The steps written AFTER <paramref name="version"/> (a source's edits since its move), oldest first; when the
+        /// version ids cannot be ordered, the current content alone (it differs from the witness — that is why it is asked).
+        /// </summary>
+        public IReadOnlyList<ReplayStep> After(string? version)
+        {
+            if (Steps.Count == 0)
+            {
+                return [];
+            }
+
+            if (version is null || !System.Version.TryParse(version, out var witnessed)
+                || Steps.Any(s => !System.Version.TryParse(s.VersionId, out _)))
+            {
+                return [Steps[^1]];
+            }
+
+            var newer = Steps.Where(s => System.Version.Parse(s.VersionId) > witnessed).ToList();
+            return newer.Count > 0 ? newer : [Steps[^1]];
+        }
+    }
+
+    /// <summary>
+    /// The item's versions, oldest first, as replay steps: every PRIOR version through the app-only
+    /// <see cref="SpeFileStore.DownloadFileVersionAsync"/>, the current content last through the current download. Each
+    /// version's original authorship is the one <paramref name="record"/> holds for it (an earlier relocation replayed it),
+    /// else Graph's. The witness is the item's size, hash and current version.
+    /// </summary>
+    private async Task<History> ReadHistoryAsync(string drive, string item, RelocatedVersionHistory.Map? record, CancellationToken ct)
+    {
+        var facts = await _spe.GetItemCreatorAsync(drive, item, ct).ConfigureAwait(false);
+        if (facts is null)
+        {
+            return History.Fail($"{drive}/{item} is not in its drive");
+        }
+
+        IReadOnlyList<VersionInfoDto>? listed;
+        try
+        {
+            listed = await _spe.ListFileVersionsAsync(drive, item, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] the versions of {Drive}/{Item} could not be listed.", drive, item);
+            return History.Fail($"the versions of {drive}/{item} could not be listed ({ex.GetType().Name})");
+        }
+
+        if (listed is null)
+        {
+            return History.Fail($"{drive}/{item} is not in its drive");
+        }
+
+        var ordered = OldestFirst(listed);
+        var steps = new List<ReplayStep>(Math.Max(ordered.Count, 1));
+        for (var i = 0; i < ordered.Count; i++)
+        {
+            var version = ordered[i];
+            var origin = record?.Of(item, version.Id) is { } recorded
+                ? recorded
+                : new RelocatedVersionHistory.Entry(string.Empty, version.LastModifiedBy, version.LastModifiedByUserId,
+                    version.LastModifiedByApplicationId, version.LastModifiedDateTime, version.Size, item, version.Id);
+            var versionId = version.Id;
+            steps.Add(i == ordered.Count - 1
+                ? new ReplayStep(versionId, c => _spe.DownloadFileAsync(drive, item, c), facts.Size, origin)
+                : new ReplayStep(versionId, c => _spe.DownloadFileVersionAsync(drive, item, versionId, c), version.Size, origin));
+        }
+
+        if (steps.Count == 0)
+        {
+            // Graph listed no version (it lists the current one for every file): the current content, authorship unknown.
+            steps.Add(new ReplayStep(string.Empty, c => _spe.DownloadFileAsync(drive, item, c), facts.Size,
+                new RelocatedVersionHistory.Entry(string.Empty, null, null, null, null, facts.Size ?? 0, item, null)));
+        }
+
+        var witness = new RelocationWitness(facts.Size, facts.QuickXorHash, ordered.Count > 0 ? ordered[^1].Id : null);
+        if (!witness.IsProvable)
+        {
+            return History.Fail($"{drive}/{item} reports no size, or neither a quickXorHash nor a version, so a later call "
+                                + "could never prove it unchanged");
+        }
+
+        if (steps.Any(s => s.ExpectedSize is > MaxRelocatableBytes))
+        {
+            return History.Fail($"a version of {drive}/{item} is larger than a single-request copy ({MaxRelocatableBytes} bytes)");
+        }
+
+        return new History(steps, facts, witness, null);
+    }
+
+    /// <summary>Versions oldest first: by version number when every id is one ("1.0", "2.0", …), else by date.</summary>
+    internal static List<VersionInfoDto> OldestFirst(IEnumerable<VersionInfoDto> versions)
+    {
+        var list = versions.Where(v => !string.IsNullOrWhiteSpace(v.Id)).ToList();
+        return list.All(v => System.Version.TryParse(v.Id, out _))
+            ? list.OrderBy(v => System.Version.Parse(v.Id)).ToList()
+            : list.OrderBy(v => v.LastModifiedDateTime).ToList();
+    }
+
+    private static RelocatedVersionHistory.Map? VersionRecordOf(Entity row)
+        => RelocatedVersionHistory.Map.Parse(row.GetAttributeValue<string>(RelocatedVersionHistory.Column));
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    // The move: copy (replay) → verify → re-point (with the own-column re-key, the version record and the ledger, one update)
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     private async Task<MoveResult> MoveAsync(
-        Guid documentId, Entity row, string sourceDrive, string sourceItem, string targetDrive, SpeItemCreator sourceFacts,
+        Guid documentId, Entity row, string sourceDrive, string sourceItem, string targetDrive, ReplayPlan plan,
         RelocationLedger ledger, LedgerSourceState sourceState, CancellationToken ct)
     {
         if (ledger.Entries.Count >= MaxLedgerEntries)
@@ -525,36 +699,82 @@ public sealed class DocumentContainerRelocator
 
         // Read the row's own reference columns BEFORE any byte moves: if they cannot be read, nothing has happened yet.
         var ownReferences = await ReadOwnReferenceColumnsAsync(documentId, ct).ConfigureAwait(false);
-        var uploadPath = SpeUploadPath.SanitizeFileName(sourceFacts.Name ?? row.GetAttributeValue<string>(FileNameColumn));
 
-        // 1. COPY through the BFF identity. Rename on a name collision: a flat container must never overwrite another
-        //    document's file.
-        FileHandleDto? copy;
-        await using (var bytes = await _spe.DownloadFileAsync(sourceDrive, sourceItem, ct).ConfigureAwait(false))
+        // 1. COPY through the BFF identity, REPLAYING the history oldest first (round 45 item 1): the first version creates
+        //    the copy (Rename on a name collision — a flat container must never overwrite another document's file), every
+        //    later one is written to that same item (each becomes a new version of it), the current content last. Each
+        //    upload's size is checked; any failure removes the copy and leaves the row and the source untouched.
+        FileHandleDto? copy = null;
+        for (var i = 0; i < plan.Steps.Count; i++)
         {
-            if (bytes is null)
+            var step = plan.Steps[i];
+            FileHandleDto? written;
+            try
             {
+                await using var bytes = await step.Open(ct).ConfigureAwait(false);
+                if (bytes is null)
+                {
+                    await RemoveCopyAsync(documentId, targetDrive, copy, ct).ConfigureAwait(false);
+                    return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                        documentId, RelocationState.FileMissing, sourceDrive, sourceItem, targetDrive, null,
+                        i == plan.Steps.Count - 1
+                            ? "the source file could not be downloaded"
+                            : $"version {step.VersionId} of the source could not be downloaded"));
+                }
+
+                // The first upload names the copy (sanitized: a file name IS a path); every later one is written to the name
+                // Graph gave the copy — sanitizing a name Graph accepted changes nothing, so it lands on the same item.
+                var uploadPath = SpeUploadPath.SanitizeFileName(copy?.Name ?? plan.FileName ?? row.GetAttributeValue<string>(FileNameColumn));
+                written = await _spe.UploadSmallAsync(
+                    targetDrive, uploadPath, bytes, copy is null ? ConflictBehavior.Rename : ConflictBehavior.Replace, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                // A fault mid-replay must not leave a partial copy behind: the row and the source are untouched.
+                _logger.LogError(ex,
+                    "[DOCUMENT-RELOCATE] replay FAULTED for document {DocumentId} at version {Version}; the row and the source "
+                    + "are unchanged.", documentId, step.VersionId);
+                await RemoveCopyAsync(documentId, targetDrive, copy, ct).ConfigureAwait(false);
                 return MoveResult.Failed(DocumentRelocationOutcome.Of(
-                    documentId, RelocationState.FileMissing, sourceDrive, sourceItem, targetDrive, null,
-                    "the source file could not be downloaded"));
+                    documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null,
+                    $"the copy faulted at version {step.VersionId} ({ex.GetType().Name})"));
             }
 
-            copy = await _spe.UploadSmallAsync(targetDrive, uploadPath, bytes, ConflictBehavior.Rename, ct).ConfigureAwait(false);
-        }
+            var failure = written is null || string.IsNullOrWhiteSpace(written.Id)
+                ? copy is null ? "the copy was not created" : $"version {step.VersionId} was not written into the copy"
+                : copy is not null && !string.Equals(written.Id, copy.Id, StringComparison.Ordinal)
+                    ? $"version {step.VersionId} was written to another item ({written.Id}), not the copy"
+                    : step.ExpectedSize is { } expected && written.Size != expected
+                        ? $"version {step.VersionId} was written with size {written.Size?.ToString() ?? "unknown"}, not {expected}"
+                        : null;
+            if (failure is not null)
+            {
+                if (written is not null && !string.IsNullOrWhiteSpace(written.Id)
+                    && (copy is null || !string.Equals(written.Id, copy.Id, StringComparison.Ordinal)))
+                {
+                    await DeleteQuietlyAsync(targetDrive, written.Id, ct).ConfigureAwait(false);
+                }
 
-        if (copy is null || string.IsNullOrWhiteSpace(copy.Id))
-        {
-            return MoveResult.Failed(DocumentRelocationOutcome.Of(
-                documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, "the copy was not created"));
+                await RemoveCopyAsync(documentId, targetDrive, copy, ct).ConfigureAwait(false);
+                _logger.LogError(
+                    "[DOCUMENT-RELOCATE] replay FAILED for document {DocumentId} ({Failure}); the row and the source are unchanged.",
+                    documentId, failure);
+                return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                    documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, failure));
+            }
+
+            copy = written;
         }
 
         _logger.LogInformation(
-            "[DOCUMENT-RELOCATE] copied: document {DocumentId} {SourceDrive}/{SourceItem} -> {TargetDrive}/{TargetItem}",
-            documentId, sourceDrive, sourceItem, targetDrive, copy.Id);
+            "[DOCUMENT-RELOCATE] copied: document {DocumentId} {SourceDrive}/{SourceItem} -> {TargetDrive}/{TargetItem} "
+            + "({Versions} version(s) replayed, oldest first)", documentId, sourceDrive, sourceItem, targetDrive, copy!.Id,
+            plan.Steps.Count);
 
-        // 2. VERIFY the copy against the source before anything points at it or the source is touched.
+        // 2. VERIFY the copy's content against the source before anything points at it or the source is touched.
         var copyFacts = await _spe.GetItemCreatorAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
-        var mismatch = CopyMismatch(sourceFacts, copyFacts);
+        var mismatch = CopyMismatch(plan.FinalFacts, copyFacts);
         if (mismatch is not null)
         {
             _logger.LogError(
@@ -567,8 +787,20 @@ public sealed class DocumentContainerRelocator
                 $"the copy did not verify ({mismatch})"));
         }
 
-        // 3. RE-POINT through the pointer-attach path — with the row's own re-keyed columns and the ledger entry for the
-        //    old item, in ONE update, so no crash can leave a re-pointed row that forgot what it still owes.
+        // 3. The ORIGINAL authorship of every version the copy now holds, against its NEW version id (round 45 item 1).
+        //    The copy's versions are listed and matched newest-to-newest; fewer than replayed = the target's version limit
+        //    dropped the oldest (stated: versions-truncated, never silent).
+        var record = await RecordReplayAsync(documentId, targetDrive, copy.Id, plan, ct).ConfigureAwait(false);
+        if (record.Failure is not null)
+        {
+            await DeleteQuietlyAsync(targetDrive, copy.Id, ct).ConfigureAwait(false);
+            return MoveResult.Failed(DocumentRelocationOutcome.Of(
+                documentId, RelocationState.Failed, sourceDrive, sourceItem, targetDrive, null, record.Failure));
+        }
+
+        // 4. RE-POINT through the pointer-attach path — with the row's own re-keyed columns, the version record and the
+        //    ledger entry (with the source's witness) for the old item, in ONE update, so no crash can leave a re-pointed
+        //    row that forgot what it still owes or who wrote its history.
         var alsoWrite = ReKeyOwnColumns(ownReferences, sourceDrive, sourceItem, targetDrive, copy);
         var entry = new RelocationLedgerEntry
         {
@@ -578,8 +810,10 @@ public sealed class DocumentContainerRelocator
             RekeyPending = true,
             Indexed = LedgerIndexScope.None,
             At = _time.GetUtcNow(),
+            Witness = plan.OldItemWitness,
         };
         alsoWrite[RelocationLedgerColumn] = ledger.With(entry).Serialize();
+        alsoWrite[RelocatedVersionHistory.Column] = record.Json!;
         try
         {
             await WritePointerAsync(documentId, targetDrive, copy.Id, copyFacts!.WebUrl, alsoWrite, ct).ConfigureAwait(false);
@@ -596,15 +830,70 @@ public sealed class DocumentContainerRelocator
 
         _logger.LogInformation(
             "[DOCUMENT-RELOCATE] re-pointed: document {DocumentId} {SourceDrive}/{SourceItem} -> {TargetDrive}/{TargetItem}; "
-            + "re-keyed own columns [{Columns}]; ledger entry for the old item recorded.",
+            + "re-keyed own columns [{Columns}]; {Recorded} version(s) recorded with their original authorship; ledger entry "
+            + "(with the source's witness) for the old item recorded.",
             documentId, sourceDrive, sourceItem, targetDrive, copy.Id,
-            string.Join(", ", alsoWrite.Keys.Where(k => k != RelocationLedgerColumn)));
-        return new MoveResult(copy.Id, copyFacts, null);
+            string.Join(", ", alsoWrite.Keys.Where(k => k != RelocationLedgerColumn && k != RelocatedVersionHistory.Column)),
+            record.Recorded);
+        return new MoveResult(copy.Id, copyFacts, null, record.Truncated);
     }
 
-    private sealed record MoveResult(string? CopyId, SpeItemCreator? CopyFacts, DocumentRelocationOutcome? Failure)
+    private sealed record MoveResult(string? CopyId, SpeItemCreator? CopyFacts, DocumentRelocationOutcome? Failure, VersionsTruncated? Truncated = null)
     {
         public static MoveResult Failed(DocumentRelocationOutcome failure) => new(null, null, failure);
+    }
+
+    private sealed record ReplayRecord(string? Json, int Recorded, VersionsTruncated? Truncated, string? Failure);
+
+    /// <summary>The copy's version record: each of its versions matched to the step it replayed, newest to newest.</summary>
+    private async Task<ReplayRecord> RecordReplayAsync(
+        Guid documentId, string targetDrive, string copyId, ReplayPlan plan, CancellationToken ct)
+    {
+        IReadOnlyList<VersionInfoDto>? copyVersions;
+        try
+        {
+            copyVersions = await _spe.ListFileVersionsAsync(targetDrive, copyId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] the copy's versions could not be listed (document {DocumentId}).", documentId);
+            return new ReplayRecord(null, 0, null, $"the copy's versions could not be listed ({ex.GetType().Name}), so their "
+                                                   + "original authorship could not be recorded");
+        }
+
+        if (copyVersions is null || copyVersions.Count == 0)
+        {
+            return new ReplayRecord(null, 0, null, "the copy's versions could not be listed, so their original authorship could not be recorded");
+        }
+
+        var written = OldestFirst(copyVersions);
+        var matched = Math.Min(written.Count, plan.Steps.Count);
+        var entries = Enumerable.Range(0, matched)
+            .Select(k => plan.Steps[plan.Steps.Count - matched + k].Origin with { Id = written[written.Count - matched + k].Id })
+            .ToList();
+        var (json, dropped) = new RelocatedVersionHistory.Map(copyId, entries).Serialize();
+        var truncated = written.Count < plan.Steps.Count || dropped > 0
+            ? new VersionsTruncated(documentId, copyId, plan.Steps.Count, written.Count, dropped)
+            : null;
+        if (truncated is not null)
+        {
+            _logger.LogWarning(
+                "[DOCUMENT-RELOCATE] versions-truncated: document {DocumentId}'s copy {Copy} holds {Kept} of {Replayed} replayed "
+                + "versions (the target container's version limit); {Dropped} oldest original author(s) not recorded (column limit).",
+                documentId, copyId, written.Count, plan.Steps.Count, dropped);
+        }
+
+        return new ReplayRecord(json, entries.Count - dropped, truncated, null);
+    }
+
+    private async Task RemoveCopyAsync(Guid documentId, string drive, FileHandleDto? copy, CancellationToken ct)
+    {
+        if (copy is not null && !string.IsNullOrWhiteSpace(copy.Id))
+        {
+            _logger.LogWarning("[DOCUMENT-RELOCATE] removing the partial copy {Drive}/{Item} of document {DocumentId}.",
+                drive, copy.Id, documentId);
+            await DeleteQuietlyAsync(drive, copy.Id, ct).ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -691,7 +980,94 @@ public sealed class DocumentContainerRelocator
            || ex.Message.Contains("does not contain attribute", StringComparison.OrdinalIgnoreCase);
 
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
-    // Settling the ledger (round 37 items 1-2; F2)
+    // A source edited after its move (owner round 45 item 4): re-copy, verify, re-point
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+
+    private sealed record RecopyResult(SettleSummary Summary, Entity? Row);
+
+    /// <summary>
+    /// Closes every source in <paramref name="summary"/> that was edited after its move: a NEW copy, in the document's
+    /// current container, of the document's current file WITH its history (originals as recorded), followed by each
+    /// edited source's versions written after its witness, oldest first; verified against the source's current content;
+    /// the row re-pointed to it (the replaced file becomes an old item of the ledger, with its own witness, and each edited
+    /// source's witness becomes its current state); then settled — so the replaced file and each source are deleted on
+    /// this same call unless they change again. Nothing the document or the source held is lost: both histories are in the
+    /// new copy. A failure leaves everything as it was and is reported pending; the next call retries.
+    /// </summary>
+    private async Task<RecopyResult> RecopyChangedSourcesAsync(
+        Guid documentId, Entity row, string currentDrive, string currentItem, SettleSummary summary, RelocationPurpose purpose,
+        CancellationToken ct)
+    {
+        var changed = summary.Changed.OrderBy(c => c.Entry.At).ToList();
+        var current = await ReadHistoryAsync(currentDrive, currentItem, VersionRecordOf(row), ct).ConfigureAwait(false);
+        if (current.Failure is not null)
+        {
+            summary.AddPending($"source-changed-after-move: the re-copy could not start ({current.Failure}); a repeat call retries");
+            return new RecopyResult(summary, null);
+        }
+
+        var steps = new List<ReplayStep>(current.Steps);
+        var ledger = summary.Ledger;
+        var reports = new List<SourceChangedAfterMove>();
+        SpeItemCreator? finalFacts = null;
+        foreach (var source in changed)
+        {
+            var history = await ReadHistoryAsync(source.Entry.SourceDrive, source.Entry.SourceItem, record: null, ct).ConfigureAwait(false);
+            if (history.Failure is not null)
+            {
+                summary.AddPending($"source-changed-after-move: {source.Entry.SourceDrive}/{source.Entry.SourceItem} could not be "
+                                   + $"re-copied ({history.Failure}); a repeat call retries");
+                return new RecopyResult(summary, null);
+            }
+
+            var edits = history.After(source.Entry.Witness?.Version);
+            steps.AddRange(edits);
+            ledger = ledger.With(source.Entry with { Witness = history.Witness, Source = LedgerSourceState.Pending });
+            finalFacts = history.Facts;
+            reports.Add(new SourceChangedAfterMove(documentId, source.Entry.SourceDrive, source.Entry.SourceItem, edits.Count, null));
+        }
+
+        var moved = await MoveAsync(documentId, row, currentDrive, currentItem, currentDrive,
+            new ReplayPlan(steps, finalFacts!, current.Witness, current.Facts!.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
+            ledger, LedgerSourceState.Pending, ct).ConfigureAwait(false);
+        if (moved.Failure is not null)
+        {
+            summary.AddPending($"source-changed-after-move: the re-copy failed ({moved.Failure.State}: {moved.Failure.Detail}); "
+                               + "a repeat call retries");
+            return new RecopyResult(summary, null);
+        }
+
+        _logger.LogInformation(
+            "[DOCUMENT-RELOCATE] source-changed-after-move: document {DocumentId} re-copied {CurrentDrive}/{CurrentItem} + "
+            + "{Sources} with the edits made after the move -> {CurrentDrive}/{NewItem} (round 45 item 4).",
+            documentId, currentDrive, currentItem, string.Join(", ", reports.Select(r => $"{r.SourceDrive}/{r.SourceItem} ({r.CarriedVersions})")),
+            currentDrive, moved.CopyId);
+
+        var rowAfter = await ReadRowAsync(documentId, ct).ConfigureAwait(false) ?? row;
+        var settled = await SettleOrReportAsync(documentId, rowAfter, currentDrive, moved.CopyId!,
+            RelocationLedger.Parse(rowAfter.GetAttributeValue<string>(RelocationLedgerColumn)), purpose, apply: true, ct)
+            .ConfigureAwait(false);
+        settled.MovedAlong.InsertRange(0, summary.MovedAlong);
+        // The sources this re-copy closed are reported once, closed (with the new item); any other report stands.
+        settled.ChangedAfterMove.InsertRange(0, summary.ChangedAfterMove.Where(c =>
+            !changed.Any(x => SameItem(x.Entry.SourceDrive, x.Entry.SourceItem, c.SourceDrive, c.SourceItem))));
+        settled.ChangedAfterMove.AddRange(reports.Select(r => r with { NewItem = moved.CopyId }));
+        settled.Truncated.InsertRange(0, summary.Truncated);
+        settled.Note(moved.Truncated);
+
+        // Edited AGAIN between this re-copy and its delete: the source no longer matches its new witness — reported
+        // pending (settled.Changed is not acted on twice in one call); the next call re-copies.
+        foreach (var again in settled.Changed)
+        {
+            settled.AddPending($"source-changed-after-move: {again.Entry.SourceDrive}/{again.Entry.SourceItem} changed again during "
+                               + "the re-copy; a repeat call re-copies it");
+        }
+
+        return new RecopyResult(settled, rowAfter);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+    // Settling the ledger (round 37 items 1-2; F2; round 45 items 3-4)
     // ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -700,7 +1076,7 @@ public sealed class DocumentContainerRelocator
     /// </summary>
     private async Task<SettleSummary> SettleOrReportAsync(
         Guid documentId, Entity row, string currentDrive, string currentItem, RelocationLedger? ledger, RelocationPurpose purpose,
-        bool apply, (string Drive, string Item)? justCopiedFrom, CancellationToken ct)
+        bool apply, CancellationToken ct)
     {
         if (ledger is null)
         {
@@ -746,9 +1122,7 @@ public sealed class DocumentContainerRelocator
             var sourceDetail = (string?)null;
             if (entry.Source is LedgerSourceState.Pending or LedgerSourceState.KeptForOtherRecords)
             {
-                var justCopied = justCopiedFrom is { } j && SameItem(j.Drive, j.Item, entry.SourceDrive, entry.SourceItem);
-                currentFacts ??= await _spe.GetItemCreatorAsync(currentDrive, currentItem, ct).ConfigureAwait(false);
-                var source = await SettleSourceAsync(documentId, entry, currentDrive, currentFacts, purpose, justCopied, summary, ct)
+                var source = await SettleSourceAsync(documentId, entry, currentDrive, currentItem, purpose, summary, ct)
                     .ConfigureAwait(false);
                 entry = entry with { Source = source.State };
                 sourceDetail = source.Detail;
@@ -820,7 +1194,9 @@ public sealed class DocumentContainerRelocator
 
         if (entry.Source == LedgerSourceState.Pending)
         {
-            owed.Add($"source-pending: {entry.SourceDrive}/{entry.SourceItem}" + (sourceDetail is null ? string.Empty : $" ({sourceDetail})"));
+            owed.Add(sourceDetail is not null && sourceDetail.StartsWith(SourceChangedAfterMovePrefix, StringComparison.Ordinal)
+                ? $"{sourceDetail} ({entry.SourceDrive}/{entry.SourceItem})"
+                : $"source-pending: {entry.SourceDrive}/{entry.SourceItem}" + (sourceDetail is null ? string.Empty : $" ({sourceDetail})"));
         }
 
         var required = entry.Source == LedgerSourceState.Removed ? LedgerIndexScope.All : LedgerIndexScope.Own;
@@ -831,6 +1207,9 @@ public sealed class DocumentContainerRelocator
 
         return owed;
     }
+
+    /// <summary>The report code of a source edited after its move (round 45 item 4).</summary>
+    internal const string SourceChangedAfterMovePrefix = "source-changed-after-move";
 
     /// <summary>
     /// Children and communication attachments of THIS document that still name the old item → the current file.
@@ -878,11 +1257,7 @@ public sealed class DocumentContainerRelocator
             }, ct).ConfigureAwait(false);
             foreach (var attachment in (IEnumerable<Entity>?)attachments?.Entities ?? [])
             {
-                await _dataverse.UpdateAsync(AttachmentEntity, attachment.Id,
-                    new Dictionary<string, object> { [DriveColumn] = currentDrive, [ItemColumn] = currentItem }, ct).ConfigureAwait(false);
-                _logger.LogInformation(
-                    "[DOCUMENT-RELOCATE] re-keyed: communication attachment {Attachment} {OldDrive}/{OldItem} -> {NewDrive}/{NewItem} "
-                    + "(document {DocumentId}).", attachment.Id, entry.SourceDrive, entry.SourceItem, currentDrive, currentItem, documentId);
+                await ReKeyAttachmentAsync(attachment.Id, entry, currentDrive, currentItem, $"document {documentId}", ct).ConfigureAwait(false);
             }
 
             return true;
@@ -896,16 +1271,27 @@ public sealed class DocumentContainerRelocator
         }
     }
 
+    private async Task ReKeyAttachmentAsync(
+        Guid attachmentId, RelocationLedgerEntry entry, string currentDrive, string currentItem, string why, CancellationToken ct)
+    {
+        await _dataverse.UpdateAsync(AttachmentEntity, attachmentId,
+            new Dictionary<string, object> { [DriveColumn] = currentDrive, [ItemColumn] = currentItem }, ct).ConfigureAwait(false);
+        _logger.LogInformation(
+            "[DOCUMENT-RELOCATE] re-keyed: communication attachment {Attachment} {OldDrive}/{OldItem} -> {NewDrive}/{NewItem} ({Why}).",
+            attachmentId, entry.SourceDrive, entry.SourceItem, currentDrive, currentItem, why);
+    }
+
     private sealed record SourceSettlement(LedgerSourceState State, string? Detail);
 
     /// <summary>
     /// The old item: gone → removed; referenced only by rows OUTSIDE → kept for those records (settled); referenced by
-    /// rows that belong where this document's file now is → moved along (each with its own copy); unreferenced → deleted
-    /// (on a repeat call only when byte-identical to the current file). Anything unknown keeps it pending.
+    /// rows that belong where this document's file now is → moved along / re-keyed; unreferenced → deleted only when it
+    /// still matches the witness recorded when its copy was verified (round 45 item 4) — edited since → reported
+    /// <see cref="SourceChangedAfterMovePrefix"/> and handed to the re-copy. Anything unknown keeps it pending.
     /// </summary>
     private async Task<SourceSettlement> SettleSourceAsync(
-        Guid documentId, RelocationLedgerEntry entry, string currentDrive, SpeItemCreator? currentFacts, RelocationPurpose purpose,
-        bool justCopied, SettleSummary summary, CancellationToken ct)
+        Guid documentId, RelocationLedgerEntry entry, string currentDrive, string currentItem, RelocationPurpose purpose,
+        SettleSummary summary, CancellationToken ct)
     {
         var sourceFacts = await _spe.GetItemCreatorAsync(entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false);
         if (sourceFacts is null)
@@ -955,7 +1341,41 @@ public sealed class DocumentContainerRelocator
             }
         }
 
-        keptFor.AddRange(references.Attachments.Select(a => $"sprk_communicationattachment:{a}"));
+        // Round 45 item 3: a communication's own attachment record of this file is classified by the subtree of the record
+        // its communication is regarding — the same split as the document rows above (round 37 item 2).
+        foreach (var attachment in references.Attachments)
+        {
+            if (attachment.Communication is not { } communicationId || communicationId == Guid.Empty)
+            {
+                unknown.Add($"sprk_communicationattachment {attachment.Id} (it names no communication, so where it belongs cannot be derived)");
+                continue;
+            }
+
+            var derivation = await _resolver.DeriveCommunicationContainersAsync(communicationId, ct).ConfigureAwait(false);
+            if (!derivation.Decided)
+            {
+                unknown.Add($"sprk_communicationattachment {attachment.Id} (its communication's container cannot be derived: {derivation.Reason})");
+                continue;
+            }
+
+            if (!derivation.Allows(currentDrive))
+            {
+                keptFor.Add($"sprk_communicationattachment:{attachment.Id}");
+                continue;
+            }
+
+            // Inside: its communication belongs where this document's file now is — it names the current file from now on.
+            try
+            {
+                await ReKeyAttachmentAsync(attachment.Id, entry, currentDrive, currentItem,
+                    $"communication {communicationId} belongs with document {documentId}'s file", ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] communication attachment {Attachment} could not be re-keyed.", attachment.Id);
+                unknown.Add($"sprk_communicationattachment {attachment.Id} belongs with this file but could not be re-keyed ({ex.GetType().Name})");
+            }
+        }
 
         if (unknown.Count > 0)
         {
@@ -971,13 +1391,26 @@ public sealed class DocumentContainerRelocator
             return new SourceSettlement(LedgerSourceState.KeptForOtherRecords, null);
         }
 
-        // No row references it. On a repeat call the ledger is the only witness, so the source must be provably a copy of
-        // THIS document's file before it is deleted (a ledger entry can never be used to delete an unrelated file).
-        if (!justCopied && !IsByteIdentical(sourceFacts, currentFacts))
+        // No row references it. Round 45 item 4: delete it only when it still matches the witness recorded when its copy
+        // was verified — never compared with the document's CURRENT file, which its users may have edited since.
+        switch (await CompareWithWitnessAsync(entry, sourceFacts, ct).ConfigureAwait(false))
         {
-            return new SourceSettlement(LedgerSourceState.Pending,
-                "it cannot be verified as a byte-identical copy of this document's file (size and quickXorHash), so it is not "
-                + "deleted automatically — an administrator must check and remove it");
+            case WitnessComparison.NoWitness:
+                return new SourceSettlement(LedgerSourceState.Pending,
+                    "source-unverifiable: this ledger entry carries no witness recorded at verification, so the source is "
+                    + "neither deleted nor copied by it (only a hand-written entry lacks one)");
+            case WitnessComparison.Unknown:
+                return new SourceSettlement(LedgerSourceState.Pending,
+                    "it could not be compared with the witness recorded at verification; a repeat call retries");
+            case WitnessComparison.Changed:
+                summary.Changed.Add(new ChangedSource(entry, sourceFacts));
+                summary.ChangedAfterMove.Add(new SourceChangedAfterMove(documentId, entry.SourceDrive, entry.SourceItem, 0, null));
+                _logger.LogWarning(
+                    "[DOCUMENT-RELOCATE] source-changed-after-move: {SourceDrive}/{SourceItem} (document {DocumentId}) no longer "
+                    + "matches the witness recorded at verification; it is not deleted.", entry.SourceDrive, entry.SourceItem, documentId);
+                return new SourceSettlement(LedgerSourceState.Pending,
+                    $"{SourceChangedAfterMovePrefix}: the source was edited after the move (it no longer matches the witness "
+                    + "recorded when its copy was verified), so it is not deleted as it stands");
         }
 
         if (!await DeleteQuietlyAsync(entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false))
@@ -991,13 +1424,91 @@ public sealed class DocumentContainerRelocator
         return new SourceSettlement(LedgerSourceState.Removed, null);
     }
 
-    private sealed record SourceReferences(IReadOnlyList<Guid> Documents, IReadOnlyList<Guid> Attachments);
+    internal enum WitnessComparison
+    {
+        Matches,
+        Changed,
+        Unknown,
+        NoWitness,
+    }
+
+    /// <summary>
+    /// The source now against its witness: the same size AND — when both carry one — the same <c>quickXorHash</c>;
+    /// otherwise the same current version id (SharePoint mints a new version for every content change). A source whose
+    /// versions cannot be listed when they are needed is <see cref="WitnessComparison.Unknown"/> (retried, never deleted).
+    /// </summary>
+    private async Task<WitnessComparison> CompareWithWitnessAsync(RelocationLedgerEntry entry, SpeItemCreator now, CancellationToken ct)
+    {
+        if (entry.Witness is not { IsProvable: true })
+        {
+            return WitnessComparison.NoWitness;
+        }
+
+        var witness = entry.Witness;
+
+        string? currentVersion = null;
+        if (string.IsNullOrWhiteSpace(witness.QuickXorHash) || string.IsNullOrWhiteSpace(now.QuickXorHash))
+        {
+            try
+            {
+                var versions = await _spe.ListFileVersionsAsync(entry.SourceDrive, entry.SourceItem, ct).ConfigureAwait(false);
+                if (versions is null)
+                {
+                    return WitnessComparison.Unknown;
+                }
+
+                currentVersion = OldestFirst(versions).LastOrDefault()?.Id;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex, "[DOCUMENT-RELOCATE] the versions of {Drive}/{Item} could not be listed.", entry.SourceDrive, entry.SourceItem);
+                return WitnessComparison.Unknown;
+            }
+        }
+
+        return Compare(witness, now, currentVersion);
+    }
+
+    /// <summary>The witness rule itself (see <see cref="CompareWithWitnessAsync"/>).</summary>
+    internal static WitnessComparison Compare(RelocationWitness? witness, SpeItemCreator? now, string? currentVersion)
+    {
+        if (witness is not { IsProvable: true })
+        {
+            return WitnessComparison.NoWitness;
+        }
+
+        if (now?.Size is not { } size || witness.Size != size)
+        {
+            return WitnessComparison.Changed;
+        }
+
+        if (!string.IsNullOrWhiteSpace(witness.QuickXorHash) && !string.IsNullOrWhiteSpace(now.QuickXorHash))
+        {
+            return string.Equals(witness.QuickXorHash, now.QuickXorHash, StringComparison.Ordinal)
+                ? WitnessComparison.Matches
+                : WitnessComparison.Changed;
+        }
+
+        if (string.IsNullOrWhiteSpace(witness.Version) || string.IsNullOrWhiteSpace(currentVersion))
+        {
+            return string.IsNullOrWhiteSpace(witness.Version) ? WitnessComparison.Changed : WitnessComparison.Unknown;
+        }
+
+        return string.Equals(witness.Version, currentVersion, StringComparison.Ordinal)
+            ? WitnessComparison.Matches
+            : WitnessComparison.Changed;
+    }
+
+    private sealed record AttachmentReference(Guid Id, Guid? Communication);
+
+    private sealed record SourceReferences(IReadOnlyList<Guid> Documents, IReadOnlyList<AttachmentReference> Attachments);
 
     /// <summary>
     /// The OTHER rows that still name the old item: <c>sprk_document</c> rows (in a degraded environment — the unique key
     /// <c>sprk_graphitemid_uk</c> forbids two while it is Active), and <c>sprk_communicationattachment</c> rows not linked
-    /// to this document (a communication's own attachment record). App-only (a row the operator cannot see still depends
-    /// on the file). <see langword="null"/> = could not be read, or more than <see cref="MaxReferencesPerSource"/>.
+    /// to this document (a communication's own attachment record), each with its communication. App-only (a row the
+    /// operator cannot see still depends on the file). <see langword="null"/> = could not be read, or more than
+    /// <see cref="MaxReferencesPerSource"/>.
     /// </summary>
     private async Task<SourceReferences?> ReadSourceReferencesAsync(Guid documentId, RelocationLedgerEntry entry, CancellationToken ct)
     {
@@ -1018,7 +1529,7 @@ public sealed class DocumentContainerRelocator
             }, ct).ConfigureAwait(false);
             var attachments = await _dataverse.RetrieveMultipleAsync(new QueryExpression(AttachmentEntity)
             {
-                ColumnSet = new ColumnSet(DriveColumn, AttachmentDocumentColumn),
+                ColumnSet = new ColumnSet(DriveColumn, AttachmentDocumentColumn, AttachmentCommunicationColumn),
                 TopCount = MaxReferencesPerSource,
                 Criteria = new FilterExpression(LogicalOperator.And)
                 {
@@ -1038,7 +1549,8 @@ public sealed class DocumentContainerRelocator
                 atts.Where(a => a.GetAttributeValue<EntityReference>(AttachmentDocumentColumn)?.Id != documentId
                                 && (string.IsNullOrWhiteSpace(a.GetAttributeValue<string>(DriveColumn))
                                     || RecordContainerResolver.IsSameContainerId(a.GetAttributeValue<string>(DriveColumn), entry.SourceDrive)))
-                    .Select(a => a.Id).ToList());
+                    .Select(a => new AttachmentReference(a.Id, a.GetAttributeValue<EntityReference>(AttachmentCommunicationColumn)?.Id))
+                    .ToList());
         }
         catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
@@ -1114,8 +1626,16 @@ public sealed class DocumentContainerRelocator
                     null, "too large for a single-request copy");
             }
 
-            var moved = await MoveAsync(other, row, entry.SourceDrive, entry.SourceItem, targetDrive, facts, ledger,
-                LedgerSourceState.Delegated, ct).ConfigureAwait(false);
+            var history = await ReadHistoryAsync(entry.SourceDrive, entry.SourceItem, VersionRecordOf(row), ct).ConfigureAwait(false);
+            if (history.Failure is not null)
+            {
+                return DocumentRelocationOutcome.Of(other, RelocationState.Failed, entry.SourceDrive, entry.SourceItem, targetDrive,
+                    null, $"its version history could not be copied: {history.Failure}");
+            }
+
+            var moved = await MoveAsync(other, row, entry.SourceDrive, entry.SourceItem, targetDrive,
+                new ReplayPlan(history.Steps, facts, history.Witness, facts.Name ?? row.GetAttributeValue<string>(FileNameColumn)),
+                ledger, LedgerSourceState.Delegated, ct).ConfigureAwait(false);
             if (moved.Failure is not null)
             {
                 return moved.Failure;
@@ -1123,8 +1643,9 @@ public sealed class DocumentContainerRelocator
 
             var rowAfter = await ReadRowAsync(other, ct).ConfigureAwait(false) ?? row;
             var settled = await SettleOrReportAsync(other, rowAfter, targetDrive, moved.CopyId!,
-                RelocationLedger.Parse(rowAfter.GetAttributeValue<string>(RelocationLedgerColumn)), purpose, apply: true,
-                justCopiedFrom: null, ct).ConfigureAwait(false);
+                RelocationLedger.Parse(rowAfter.GetAttributeValue<string>(RelocationLedgerColumn)), purpose, apply: true, ct)
+                .ConfigureAwait(false);
+            settled.Note(moved.Truncated);
             _logger.LogInformation(
                 "[DOCUMENT-RELOCATE] moved along: document {Other} {SourceDrive}/{SourceItem} -> {TargetDrive}/{TargetItem} "
                 + "(it named the same source).", other, entry.SourceDrive, entry.SourceItem, targetDrive, moved.CopyId);
@@ -1144,7 +1665,8 @@ public sealed class DocumentContainerRelocator
 
     private async Task<Entity?> ReadRowAsync(Guid documentId, CancellationToken ct)
         => await _dataverse.RetrieveAsync(
-            DocumentEntity, documentId, [DriveColumn, ItemColumn, FileNameColumn, SearchIndexNameColumn, RelocationLedgerColumn], ct)
+            DocumentEntity, documentId,
+            [DriveColumn, ItemColumn, FileNameColumn, SearchIndexNameColumn, RelocationLedgerColumn, RelocatedVersionHistory.Column], ct)
             .ConfigureAwait(false);
 
     private static bool SameItem(string? driveA, string? itemA, string? driveB, string? itemB)
@@ -1172,17 +1694,6 @@ public sealed class DocumentContainerRelocator
 
         return null;
     }
-
-    /// <summary>
-    /// The repeat call's deletion test: the same size AND the same <c>quickXorHash</c>, both present. Stricter than
-    /// <see cref="CopyMismatch"/> (which accepts a hash Graph has not computed yet), because here the ledger — not a copy
-    /// made moments ago — is the only witness that the two are the same file.
-    /// </summary>
-    internal static bool IsByteIdentical(SpeItemCreator? a, SpeItemCreator? b)
-        => a is not null && b is not null
-           && a.Size is { } size && b.Size == size
-           && !string.IsNullOrWhiteSpace(a.QuickXorHash) && !string.IsNullOrWhiteSpace(b.QuickXorHash)
-           && string.Equals(a.QuickXorHash, b.QuickXorHash, StringComparison.Ordinal);
 
     private async Task<bool> DeleteQuietlyAsync(string drive, string item, CancellationToken ct)
     {
@@ -1254,6 +1765,12 @@ public sealed class DocumentContainerRelocator
         public LedgerIndexScope Indexed { get; init; }
         public DateTimeOffset At { get; init; }
 
+        /// <summary>
+        /// The source as its copy was verified (round 45 item 4): the ONLY thing a later call deletes it against. An entry
+        /// without one (only a hand-written ledger lacks it) never deletes or copies its source.
+        /// </summary>
+        public RelocationWitness? Witness { get; init; }
+
         [JsonIgnore]
         public bool IsComplete
             => !RekeyPending
@@ -1263,6 +1780,17 @@ public sealed class DocumentContainerRelocator
         [JsonIgnore]
         public bool IsSettled
             => IsComplete || (!RekeyPending && Source == LedgerSourceState.KeptForOtherRecords && Indexed >= LedgerIndexScope.Own);
+    }
+
+    /// <summary>
+    /// The witness of a source (owner round 45 item 4): its size, <c>quickXorHash</c> and current version id when its copy
+    /// was verified. Provable = a size and at least one of the hash or the version.
+    /// </summary>
+    internal sealed record RelocationWitness(long? Size, string? QuickXorHash, string? Version)
+    {
+        [JsonIgnore]
+        public bool IsProvable
+            => Size is not null && (!string.IsNullOrWhiteSpace(QuickXorHash) || !string.IsNullOrWhiteSpace(Version));
     }
 
     /// <summary>Where the old item stands.</summary>
@@ -1294,6 +1822,9 @@ public sealed class DocumentContainerRelocator
         All,
     }
 
+    /// <summary>A source a settle found edited after its move — handed to the re-copy.</summary>
+    internal sealed record ChangedSource(RelocationLedgerEntry Entry, SpeItemCreator Facts);
+
     /// <summary>What a settle (or report) found.</summary>
     internal sealed class SettleSummary
     {
@@ -1315,10 +1846,29 @@ public sealed class DocumentContainerRelocator
         public List<string> Pending { get; } = [];
         public List<KeptSource> Kept { get; } = [];
         public List<DocumentRelocationOutcome> MovedAlong { get; } = [];
+
+        /// <summary>Sources edited after their move, found by this settle (the re-copy's input).</summary>
+        public List<ChangedSource> Changed { get; } = [];
+
+        /// <summary>The stated report of sources edited after their move (round 45 item 4: reported with the row id).</summary>
+        public List<SourceChangedAfterMove> ChangedAfterMove { get; } = [];
+
+        /// <summary>Histories the target's version limit truncated (round 45 item 1: stated, never silent).</summary>
+        public List<VersionsTruncated> Truncated { get; } = [];
+
         public string? PendingSourceDrive { get; private set; }
         public string? PendingSourceItem { get; private set; }
 
         public void AddPending(string reason) => Pending.Add(reason);
+
+        /// <summary>Records what a move stated (a truncated history).</summary>
+        public void Note(VersionsTruncated? truncated)
+        {
+            if (truncated is not null)
+            {
+                Truncated.Add(truncated);
+            }
+        }
 
         public void Report(RelocationLedgerEntry entry, IReadOnlyList<string> owed)
         {
@@ -1362,7 +1912,7 @@ public enum RelocationState
     /// <summary>Report-only: the file is misplaced and WOULD be moved.</summary>
     WouldRelocate,
 
-    /// <summary>Moved: copied, verified, re-pointed; the source deleted, the references re-keyed, the index re-keyed.</summary>
+    /// <summary>Moved: copied with its history, verified, re-pointed; the source deleted, the references re-keyed, the index re-keyed.</summary>
     Relocated,
 
     /// <summary>
@@ -1397,6 +1947,26 @@ public enum RelocationState
 /// <param name="KeptFor">The rows that still use it (<c>sprk_document:{id}</c> / <c>sprk_communicationattachment:{id}</c>).</param>
 public sealed record KeptSource(Guid DocumentId, string SourceDrive, string SourceItem, IReadOnlyList<string> KeptFor);
 
+/// <summary>
+/// A source edited after its move (owner round 45 item 4: <c>source-changed-after-move</c>, reported with the row id). The
+/// relocator closes it itself — re-copy, verify, re-point — and <see cref="NewItem"/> names the copy that carries the edits
+/// (null while it is still owed: then the outcome's <see cref="DocumentRelocationOutcome.Pending"/> says why).
+/// </summary>
+/// <param name="DocumentId">The document whose old file was edited.</param>
+/// <param name="SourceDrive">The edited source's drive.</param>
+/// <param name="SourceItem">The edited source.</param>
+/// <param name="CarriedVersions">How many of the source's versions written after the move the re-copy carried.</param>
+/// <param name="NewItem">The document's file after the re-copy.</param>
+public sealed record SourceChangedAfterMove(Guid DocumentId, string SourceDrive, string SourceItem, int CarriedVersions, string? NewItem);
+
+/// <summary>
+/// A moved file whose history the target container could not hold in full (owner round 45 item 1: <c>versions-truncated</c>,
+/// stated with counts, never silent): <see cref="KeptVersions"/> of <see cref="ReplayedVersions"/> survive (the oldest
+/// dropped by the target's version limit); <see cref="UnrecordedAuthors"/> of the oldest kept versions show Graph's own
+/// author and date (the record's column limit).
+/// </summary>
+public sealed record VersionsTruncated(Guid DocumentId, string Item, int ReplayedVersions, int KeptVersions, int UnrecordedAuthors);
+
 /// <summary>One document's relocation result (the migration report's row).</summary>
 public sealed record DocumentRelocationOutcome(
     Guid DocumentId,
@@ -1415,6 +1985,12 @@ public sealed record DocumentRelocationOutcome(
 
     /// <summary>Rows that named the same source and belonged with this file, moved along (each with its own copy).</summary>
     public IReadOnlyList<DocumentRelocationOutcome> MovedAlong { get; init; } = [];
+
+    /// <summary>Sources edited after their move (round 45 item 4) — stated; closed by the relocator's re-copy.</summary>
+    public IReadOnlyList<SourceChangedAfterMove> SourceChangedAfterMove { get; init; } = [];
+
+    /// <summary>Histories the target's version limit truncated (round 45 item 1) — stated, complete.</summary>
+    public IReadOnlyList<VersionsTruncated> VersionsTruncated { get; init; } = [];
 
     /// <summary>The pointer the row ends with: the new one after a move, the current one otherwise.</summary>
     public (string? Drive, string? Item) FinalPointer
@@ -1439,12 +2015,15 @@ public sealed record DocumentRelocationOutcome(
                 .Concat(summary.Kept.Select(k => k.DocumentId == Guid.Empty ? k with { DocumentId = DocumentId } : k))
                 .ToList(),
             MovedAlong = MovedAlong.Concat(summary.MovedAlong).ToList(),
+            SourceChangedAfterMove = SourceChangedAfterMove.Concat(summary.ChangedAfterMove).ToList(),
+            VersionsTruncated = VersionsTruncated.Concat(summary.Truncated).ToList(),
         };
 }
 
 /// <summary>
 /// A batch's per-file outcomes, counts by state, the INCOMPLETE ones (anything not settled: a planned, failed or pending
-/// move, an undecidable container, a missing or unverified file) and every source kept for another record.
+/// move, an undecidable container, a missing or unverified file), every source kept for another record, every source
+/// edited after its move and every truncated history.
 /// </summary>
 public sealed record DocumentRelocationBatchResult(
     IReadOnlyList<DocumentRelocationOutcome> Outcomes,
@@ -1454,6 +2033,12 @@ public sealed record DocumentRelocationBatchResult(
 {
     /// <summary>Every file is settled.</summary>
     public bool Complete => Incomplete.Count == 0;
+
+    /// <summary>Sources edited after their move (round 45 item 4), each with its document id and, once closed, its new item.</summary>
+    public IReadOnlyList<SourceChangedAfterMove> SourceChangedAfterMove { get; init; } = [];
+
+    /// <summary>Moved files whose history the target container truncated (round 45 item 1).</summary>
+    public IReadOnlyList<VersionsTruncated> VersionsTruncated { get; init; } = [];
 
     internal static DocumentRelocationBatchResult From(IReadOnlyList<DocumentRelocationOutcome> outcomes)
     {
@@ -1465,14 +2050,21 @@ public sealed record DocumentRelocationBatchResult(
             .ToList();
         var kept = outcomes.SelectMany(o => o.KeptForOtherRecords.Concat(o.MovedAlong.SelectMany(m => m.KeptForOtherRecords)))
             .ToList();
-        return new DocumentRelocationBatchResult(outcomes, counts, incomplete, kept);
+        return new DocumentRelocationBatchResult(outcomes, counts, incomplete, kept)
+        {
+            SourceChangedAfterMove = outcomes
+                .SelectMany(o => o.SourceChangedAfterMove.Concat(o.MovedAlong.SelectMany(m => m.SourceChangedAfterMove))).ToList(),
+            VersionsTruncated = outcomes
+                .SelectMany(o => o.VersionsTruncated.Concat(o.MovedAlong.SelectMany(m => m.VersionsTruncated))).ToList(),
+        };
     }
 
     /// <summary>
     /// Settled: nothing to move or owe (<see cref="RelocationState.NoFile"/>, <see cref="RelocationState.InPlace"/>), or
     /// moved with nothing owed (<see cref="RelocationState.Relocated"/>, and
     /// <see cref="RelocationState.RelocatedSourceKeptForOtherRecords"/> — the kept source is another record's file, owner
-    /// round 37 item 2 — for BOTH purposes). A row that still owes anything is never settled.
+    /// round 37 item 2 — for BOTH purposes). A row that still owes anything is never settled. A truncated history and a
+    /// source edited after its move that the re-copy closed are STATED outcomes, not owed ones.
     /// </summary>
     internal static bool IsSettled(DocumentRelocationOutcome outcome)
         => outcome.Pending.Count == 0 && IsSettledState(outcome.State);

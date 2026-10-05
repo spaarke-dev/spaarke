@@ -250,9 +250,9 @@ public sealed class ExternalDocumentVersionDto
     public string CreatedAt { get; init; } = "";
 
     /// <summary>
-    /// Always null today: <c>VersionInfoDto</c> does not carry <c>lastModifiedBy</c>. Kept in the
-    /// contract because the client already types it optional; fabricating an author would be worse
-    /// than omitting one.
+    /// Who wrote the version: Graph's <c>lastModifiedBy</c> display name, or — for a version a relocation replayed into a
+    /// moved file — the ORIGINAL author the relocation recorded (unified-access-control-r2 task 166, owner round 45 item 1).
+    /// Null when Graph names no one; never fabricated.
     /// </summary>
     [JsonPropertyName("createdByName")]
     public string? CreatedByName { get; init; }

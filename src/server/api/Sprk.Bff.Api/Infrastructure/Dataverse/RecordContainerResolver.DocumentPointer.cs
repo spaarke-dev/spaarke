@@ -473,6 +473,50 @@ public sealed partial class RecordContainerResolver
         }
     }
 
+    /// <summary>
+    /// The container(s) a COMMUNICATION's content belongs in — the communication pipeline's own answer (its secure root's
+    /// own container, else <c>Communication:ArchiveContainerId</c>), exactly the answer <see cref="DeriveDocumentContainersAsync"/>
+    /// gives a document linked to that communication (<c>sprk_relatedcommunication</c>).
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 166, owner round 45 item 3: a <c>sprk_communicationattachment</c> row that names a
+    /// moved file but is not linked to the moved document is classified by the subtree of the record its communication is
+    /// regarding — inside the moved file's container (re-keyed to the copy), outside it (the source stays for it), or
+    /// undecidable (pending). Fail closed: an unreadable communication or an ambiguous / refused resolution is NOT decided.
+    /// </remarks>
+    internal async Task<DocumentContainerDerivation> DeriveCommunicationContainersAsync(Guid communicationId, CancellationToken ct = default)
+    {
+        if (communicationId == Guid.Empty)
+        {
+            return DocumentContainerDerivation.Undecided("an empty communication id names no communication");
+        }
+
+        try
+        {
+            var decision = await ResolveForRecordWithFixedFallbackAsync(CommunicationEntity, communicationId, _archiveContainerId, ct)
+                .ConfigureAwait(false);
+            return decision.Outcome switch
+            {
+                ContainerDecisionOutcome.ResolvedSecure when !string.IsNullOrWhiteSpace(decision.ContainerId)
+                    => new DocumentContainerDerivation(true, [decision.ContainerId!.Trim()], decision.ContainerId!.Trim(), IsSecure: true,
+                        "the secure container of the communication's record"),
+                ContainerDecisionOutcome.ResolvedFallback when !string.IsNullOrWhiteSpace(decision.ContainerId)
+                    => new DocumentContainerDerivation(true, [decision.ContainerId!.Trim()], decision.ContainerId!.Trim(), IsSecure: false,
+                        "the communication's container (its record is not secure)"),
+                _ => DocumentContainerDerivation.Undecided($"the communication resolved to {decision.Outcome}"),
+            };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogInformation(ex, "[DOCUMENT-CONTAINER] The container of communication {CommunicationId} could not be derived.", communicationId);
+            return DocumentContainerDerivation.Undecided($"the communication or one of its records could not be read ({ex.GetType().Name})");
+        }
+    }
+
     private async Task<DocumentContainerDerivation> DeriveCoreAsync(Guid documentId, int depth, CancellationToken ct)
     {
         var columns = DocumentLinkFields.LogicalNames

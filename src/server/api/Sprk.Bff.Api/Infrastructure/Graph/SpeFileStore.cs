@@ -176,11 +176,26 @@ public class SpeFileStore : ISpeFileOperations
     // authorizes on the Dataverse side (project participation + document→project scoping) and then
     // reads app-only, exactly as the sibling content-download route does — an external CIAM contact
     // is not a Dataverse principal, so there is no delegated permission to exchange.
-    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+    // `virtual` (task 166, owner round 45 item 1): the relocation's version replay lists the source's history through it,
+    // and its module-boundary test double substitutes it (see UploadSmallAsync).
+    public virtual Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.ListFileVersionsAsync(driveId, itemId, ct);
+
+    /// <summary>
+    /// App-only download of a specific PRIOR version (unified-access-control-r2 task 166, owner round 45 item 1): the ONE
+    /// facade method the relocation's version replay adds. Performs NO authorization — its only caller,
+    /// <c>DocumentContainerRelocator</c>, reads the source of a server-derived move of a document's own file. Not on
+    /// <see cref="ISpeFileOperations"/>: no route reads a version app-only. <c>virtual</c> for the module-boundary double.
+    /// </summary>
+    public virtual Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+        => _driveItemOps.DownloadFileVersionAsync(driveId, itemId, versionId, ct);
 
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,

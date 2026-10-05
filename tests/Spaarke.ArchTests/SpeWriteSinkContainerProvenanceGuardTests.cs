@@ -773,9 +773,12 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             "The relocation COPY: writes the document's bytes app-only into the container its record derives, "
             + "so a misplaced legacy file lands where the strict pointer rule will look for it (ADR-003 "
             + "fail-closed: an undecided derivation is refused, never defaulted; ADR-002 WP-1: the server owns "
-            + "the invariant). ConflictBehavior.Rename so a flat container never overwrites another document's "
-            + "file. The copy is verified (size, and quickXorHash where Graph returns one) BEFORE anything "
-            + "points at it."),
+            + "the invariant). The source's version history is REPLAYED oldest first (task 166 f1-v2, owner round "
+            + "45 item 1): the first version with ConflictBehavior.Rename so a flat container never overwrites another "
+            + "document's file, every later one with Replace onto the name Graph gave that copy, and each must land on "
+            + "the copy's own item id (else both are deleted). A source edited after its move is re-copied the same "
+            + "way into the document's CURRENT container (round 45 item 4). Each upload's size and the final content "
+            + "(size, and quickXorHash where Graph returns one) are verified BEFORE anything points at the copy."),
 
         new SinkSite("Services/Documents/DocumentContainerRelocator.cs", "DeleteFileAsync", 1,
             Provenance.ServerDerivedRecord, "166",
@@ -783,13 +786,15 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "source named by the sprk_document row's own sprk_graphdriveid / sprk_graphitemid — recorded, in the "
             + "same update as the re-point, in the row's BFF-written relocation ledger (sprk_relocationpending, "
             + "task 166 f1-v1) when the delete is owed to a repeat call",
-            "The relocation's two deletes share one helper: the unverified/unattached COPY this same call "
-            + "created, or the SOURCE after the row was re-pointed — and the source only when no row still uses "
-            + "it (another sprk_document, or a communication's own attachment record; an unreadable answer keeps "
-            + "it), so a delete can never break another row (ADR-003; ADR-007). On a REPEAT call the ledger is "
-            + "the only witness, so the source is deleted only when it is byte-identical (size and quickXorHash, "
-            + "both present) to the document's current file: a ledger entry can never delete an unrelated file. "
-            + "The drive is never caller-named."),
+            "The relocation's two deletes share one helper: the unverified/unattached/partial COPY this same call "
+            + "created (a failed replay, verify or re-point), or the SOURCE after the row was re-pointed — and the "
+            + "source only when no row still uses it (another sprk_document, or a communication's own attachment "
+            + "record of a communication outside the moved file's container; an unreadable or undecidable answer "
+            + "keeps it), so a delete can never break another row (ADR-003; ADR-007). The source is deleted only "
+            + "while it still matches the WITNESS its ledger entry recorded when its copy was verified (size, and "
+            + "quickXorHash or else its version — task 166 f1-v2, owner round 45 item 4): an entry without one never "
+            + "deletes, and a source edited since is re-copied first, so a delete can never discard an edit or an "
+            + "unrelated file. The drive is never caller-named."),
 
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED

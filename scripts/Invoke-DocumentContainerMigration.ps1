@@ -11,14 +11,20 @@
     the container derived for its own record — once those files are moved. Round 26 item 3 made the move ONE BFF service,
     DocumentContainerRelocator (shared with Make Secure), which for each misplaced file: copies it into the derived
     container through the BFF identity, verifies the copy (size, and quickXorHash where Graph returns one), re-points the
-    sprk_document through the pointer-attach path (re-keying the row's own columns that held the old ids and recording what
-    the move still owes in the row's relocation ledger, sprk_relocationpending, in the same update), and then settles the
-    rest: the rows holding the old item for this document are re-keyed (a child attachment's sprk_parentgraphitemid, its
+    sprk_document through the pointer-attach path (re-keying the row's own columns that held the old ids, recording the
+    replayed versions' original authorship in sprk_relocatedversions and what the move still owes — with the source's
+    witness — in the row's relocation ledger, sprk_relocationpending, all in the same update), and then settles the rest:
+    the rows holding the old item for this document are re-keyed (a child attachment's sprk_parentgraphitemid, its
     communication attachment row), the new item is indexed and the old item's chunks removed (owner round 37 item 1), and
-    the source is deleted — never before the copy is verified, and never while a row still uses it. A row of ANOTHER record
-    that uses the same file keeps it (it is that record's file; listed under sourceKeptForOtherRecords); a row that belongs
-    with the moved file is moved along with its own copy (round 37 item 2). Whatever cannot be finished stays in the
-    ledger and the NEXT run settles it (round 37 / F2). Each step is logged with before / after ids
+    the source is deleted — never before the copy is verified, never while a row still uses it, and only while it still
+    matches the witness recorded at verification (owner round 45 item 4). The copy carries the source's version history
+    (round 45 item 1: replayed oldest first; a target version limit that truncates it is listed under versionsTruncated). A
+    row of ANOTHER record that uses the same file keeps it (it is that record's file; listed under
+    sourceKeptForOtherRecords); a row that belongs with the moved file is moved along with its own copy (round 37 item 2);
+    a communication's own attachment record goes by the subtree of its communication's record (round 45 item 3). A source
+    EDITED after its move is listed under sourceChangedAfterMove and closed by the relocation itself — re-copy, verify,
+    re-point — never by a manual step. Whatever cannot be finished stays in the ledger and the NEXT run settles it (round
+    37 / F2). Each step is logged with before / after ids
     ('[DOCUMENT-RELOCATE] copied: / re-pointed: / re-keyed: / index re-keyed: / source deleted: / source KEPT for other
     records: / moved along:').
 
@@ -166,7 +172,7 @@ function Invoke-OneRun {
 }
 
 function Invoke-Pass([string] $ExpectedMode) {
-    $totals = [ordered]@{ examined = 0; wouldNewlyRefuse = 0; refusedByBoth = 0; servedOnlyAfterFlip = 0; relocatedButRefused = 0; pending = 0; movedAlong = 0; keptForOtherRecords = 0; rowsTotal = 0; rowsListed = 0 }
+    $totals = [ordered]@{ examined = 0; wouldNewlyRefuse = 0; refusedByBoth = 0; servedOnlyAfterFlip = 0; relocatedButRefused = 0; pending = 0; movedAlong = 0; keptForOtherRecords = 0; sourceChangedAfterMove = 0; versionsTruncated = 0; rowsTotal = 0; rowsListed = 0 }
     foreach ($s in $States) { $totals[$s] = 0 }
     $covering = $false
     $lastEnd = $null
@@ -200,6 +206,8 @@ function Invoke-Pass([string] $ExpectedMode) {
         $totals.pending += $r.pending
         $totals.movedAlong += $r.movedAlong
         $totals.keptForOtherRecords += @($r.sourceKeptForOtherRecords).Count
+        if ($null -ne $r.PSObject.Properties['sourceChangedAfterMove']) { $totals.sourceChangedAfterMove += $r.sourceChangedAfterMove }
+        if ($null -ne $r.PSObject.Properties['versionsTruncated']) { $totals.versionsTruncated += $r.versionsTruncated }
         $totals.rowsTotal += $r.rowsTotal
         $totals.rowsListed += $r.rowsListed
         foreach ($s in $States) {
@@ -223,6 +231,18 @@ function Invoke-Pass([string] $ExpectedMode) {
             if ($kept) {
                 Write-Host ("  KEPT for other records: {0}/{1} (document {2} moved away) used by {3}" -f $kept.sourceDrive,
                     $kept.sourceItem, $kept.documentId, (@($kept.keptFor) -join ', '))
+            }
+        }
+        foreach ($changed in @($r.sourceChangedAfterMoveRows)) {
+            if ($changed) {
+                Write-Host ("  SOURCE CHANGED AFTER MOVE: {0}/{1} (document {2}) — {3}" -f $changed.sourceDrive, $changed.sourceItem,
+                    $changed.documentId, $(if ($changed.newItem) { "re-copied with $($changed.carriedVersions) later version(s) into $($changed.newItem)" } else { 'not closed yet (see its pending line); the next -Apply run re-copies it' }))
+            }
+        }
+        foreach ($truncated in @($r.versionsTruncatedRows)) {
+            if ($truncated) {
+                Write-Host ("  VERSIONS TRUNCATED: document {0} copy {1} keeps {2} of {3} replayed versions (the target's version limit); {4} oldest author(s) unrecorded" -f
+                    $truncated.documentId, $truncated.item, $truncated.keptVersions, $truncated.replayedVersions, $truncated.unrecordedAuthors)
             }
         }
         Write-Host ("Run {0}: {1} documents (after {2} … {3}), passComplete={4}" -f $n, $r.examined, $r.startAfter, $r.endAt, $r.passComplete)
@@ -257,6 +277,8 @@ Write-Host ("Would be newly refused by the strict rule: {0}   refused by both ru
     $t.wouldNewlyRefuse, $t.refusedByBoth, $t.servedOnlyAfterFlip)
 Write-Host ("Relocations still owing a step: {0}   relocated files the rule in force refuses: {1}   rows moved along: {2}   sources kept for other records: {3}" -f
     $t.pending, $t.relocatedButRefused, $t.movedAlong, $t.keptForOtherRecords)
+Write-Host ("Sources edited after their move (re-copied by the relocation; any not closed yet is in 'still owing'): {0}   histories truncated by a target's version limit (stated): {1}" -f
+    $t.sourceChangedAfterMove, $t.versionsTruncated)
 if ($t.SourceUnverified -gt 0 -or $t.FileMissing -gt 0) {
     Write-Warning ("{0} document(s) are not verifiably their row's own file and {1} name a missing item: both rules refuse " +
         "them today; they are listed above for an administrator to repair or re-file. The migration never copies them." -f
