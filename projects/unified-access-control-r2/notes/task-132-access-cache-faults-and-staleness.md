@@ -1015,3 +1015,155 @@ on `6808d587c`, whose production code the later commits do not change (ArchTests
 this run. Production code since `137b088f5`: doc comments only — no IL change, no package, no publish-size or CVE delta.
 
 `.claude/**`: no edit needed.
+
+### 16.8 Verifier round f1-v1c-v1 (2026-10-05; `task/uac-r2-132-f1-v1c-v2` from `task/uac-r2-132-f1-v1c-v1` @ `c8e1c299d`)
+
+Owner and main-session rounds re-read from `work/unified-access-control-r2` (through round 50). **Round 48 is this
+round's binding decision** (main session under round 15): (a) no `[UnsafeAccessor]` anywhere in `src/server`, an
+ArchTest seeded with seed U; (b) no reflection over the Dataverse service types — `GetMethod(s)` / `GetMember(s)` /
+`InvokeMember` on them or on a Type obtained from them, no `MethodInfo.Invoke` / `CreateDelegate` against them — through
+the existing IL-scan infrastructure, seeded with seed R; (c) the doc comments, the guard header and §16.6 / §16.7 state
+exactly what is enforced, never "by construction" beyond it; (d) the gate script's `ReassignMatter -Apply` never
+overwrites a recorded `OriginalOwner`, tested. No other round after 10 decides anything for task 132. No
+`NOTE-FROM-MAIN.md`. No live call and no live write this round.
+
+**Verifier items (f1-v1c-v1 numbering).** **1 (blocking, seed U), 2 (blocking, seed R) and 9 (the "by construction"
+claim) — CLOSED** below, per round 48 (a)-(c). **7 (minor, gate script) — CLOSED** per round 48 (d). 3 (seeds A-C), 4
+(the behaviour tests are not tautological), 5 (suites), 6 (other checks) — met, no change. 8 (earlier items) — as the
+verifier states; the one it found not met (the earlier item 10, the "by construction" guarantee) is this round's item 9,
+closed here. **10 / 11** — G-1 / G-2 (live writes: `notes/task-132-live-gate.ps1`, §12) and criterion 17's reviewer
+approval (PR time, §15.3): unchanged.
+
+**What was wrong.** Both seeds reach `DataverseWebApiService.RevokeAccessAsync` around the evicting seam with all 622
+ArchTests green, and the comments said neither could exist:
+
+| Seed | Shape | Why every rule missed it |
+|---|---|---|
+| U | `[UnsafeAccessor(UnsafeAccessorKind.Method)] private static extern Task RevokeAccessAsync(DataverseWebApiService client, …)` on a new BFF type, called unqualified. Proven live by the verifier: one RevokeAccess POST reached the fake Dataverse with no eviction. | C1 saw a call to a method declared on the PROBE type, not the client; C4 found no string; C6 matches member names only against the action words (`RevokeAccessAsync` is another word); T1 needs a `.` before the name. A compiled route with nothing computed at run time — contradicting "only a name the code computes at run time … is beyond it". |
+| R | `typeof(DataverseWebApiService).GetMethods().First(x => <4 parameters, the third a DataversePrincipalRef, returns Task>).Invoke(dv, …)` | No method token for the write, no name, no constant. The disclosure covered only a name "assembled at run time … or read from a live store"; selecting by signature is neither. |
+
+**The fix — ban the MECHANISMS, on any type (round 48 (a)/(b)).** In
+`tests/Spaarke.ArchTests/PoaShareClientSingletonGuardTests.cs`, over the same compiled scan set as C1 (every `src`
+assembly the BFF runs or that can name the client; each must load):
+
+| # | Rule (test) | What it enforces |
+|---|---|---|
+| C7 | `NoCompiledCodeChoosesOrInvokesAMethodByReflection` | No reference (`call` / `callvirt` / `newobj` / `ldftn` / `ldvirtftn` / `jmp` / `ldtoken`, so lambdas, method groups and expression trees too) to an API that **chooses a method by reflection** — a method or member lookup on `Type` / `TypeInfo` / `IReflect` (`GetMethod(s)`, `GetMember(s)`, `GetDefaultMembers`, `FindMembers`, `GetMemberWithSameMetadataDefinitionAs`, `GetInterfaceMap`, `DeclaredMethods` / `DeclaredMembers`, `GetDeclaredMethod(s)`, `DeclaringMethod`), their extension spellings (`RuntimeReflectionExtensions`, `TypeExtensions`, `PropertyInfoExtensions`, `EventInfoExtensions`), a `Module` lookup by name or metadata token, a property's or event's accessor methods, a name-based `Expression.Call`, `RuntimeMethodHandle.FromIntPtr`; that **invokes reflectively** — `MethodBase.Invoke` (methods and constructors), `InvokeMember`, `Delegate.CreateDelegate`, `MethodInfo.CreateDelegate`, `MethodInvoker` / `ConstructorInvoker`, `RuntimeMethodHandle.GetFunctionPointer`, `Marshal.GetDelegateForFunctionPointer`, compiling an expression tree, a `dynamic` member access (the C# run-time binder); or that **runs code the compiled scan cannot read** — `System.Reflection.Emit`, an assembly loaded at run time (`Assembly.Load*` / `LoadFrom` / `LoadFile` / `UnsafeLoadFrom`, `AssemblyLoadContext.LoadFrom*`, `AppDomain.Load` / `ExecuteAssembly*` / `CreateInstance*`, `Activator.CreateInstanceFrom` / `CreateInstance(string assembly, …)`). On ANY type — so on the Dataverse service types and on any Type obtained from them, however obtained (`typeof`, `GetType()` on the client, a type parameter, a type found by enumeration): where the Type came from no longer matters. **Not banned**, because none of it reaches a method: reading properties, fields and attributes, a type's name, constructing by type (`Activator.CreateInstance(Type)`), embedded resources, an expression tree a LINQ provider translates. Today the scan set makes **zero** banned references (the BFF's reflection is `GetProperties` / `GetValue`, `GetCustomAttributes`, `Assembly.GetTypes`, `Activator.CreateInstance(Type)`), so no exemption exists; a future need is a review decision named in the guard, and the reflected type must not be a Dataverse service type. |
+| C8 | `NoCompiledCodeCarriesAnUnsafeAccessor` | No `[UnsafeAccessor]` / `[UnsafeAccessorType]` (.NET 10) in the compiled metadata of the scan set — on a type, member, parameter, return value, generic parameter, the assembly or a module — however the attribute was spelled or aliased, generated code included. |
+| T6 | `NoServerSourceNamesUnsafeAccessor` | No `UnsafeAccessor` (attribute, kind enum, type companion, an alias's target) outside a whole-line `//` comment in any `.cs` / `.csproj` / `.props` / `.targets` under `src/server` — the projects outside the compiled scan set included (the L2 control plane) — or in the `Directory.Build.props` / `.targets` above it (where a global `using` alias could hide the name from the source that uses it). Conservative: a block comment or a string naming it is flagged too. Precondition: the walk reaches the BFF project, the client, the L2 Worker project and the root `Directory.Build.props`. |
+
+Why bans and not a provenance analysis: a rule that follows where a `Type` came from (`typeof`, `GetType()`, a type
+parameter, a field, a collection, DI's `GetService(Type)`) can always be routed around one more hop; a ban on the
+mechanism cannot. It costs nothing today (zero references) and makes round 48 (b)'s "or on a Type obtained from them"
+true without having to trace anything.
+
+**Controls** (`CompiledDetector_FlagsEveryBypassShape_AndPassesTheSeam`; compile-only fixtures in
+`PoaShareClientSingletonGuardControls.cs`): **seed U verbatim** — the earlier rules C1, C4 and C6 asserted to PASS it
+(the finding), C8 to flag it; a field accessor that lifts the seam's private client, and `[UnsafeAccessorType]` on a
+parameter — flagged. **Seed R verbatim** — C1 and C4 asserted to pass it, C7 to flag `Type.GetMethods` and
+`MethodBase.Invoke`. 19 more C7 shapes, each asserted by the API it reaches (`GetMember` on `obj.GetType()`, `IReflect`,
+`DeclaredMethods`, `GetRuntimeMethods`, `GetInterfaceMap`, `Module.ResolveMethod` by token, a property's `GetMethod`,
+`InvokeMember`, both `CreateDelegate`s, `MethodInvoker`, a function pointer, a compiled tree, a name-based
+`Expression.Call`, `dynamic`, `DynamicMethod`, `Assembly.Load(byte[])`, `AssemblyLoadContext.LoadFromStream`, a
+`typeof(T)` helper). A positive control of the reflection the BFF does use (property values, a type's name,
+`Activator.CreateInstance(Type)`, attributes, resource names, a compiler-built expression tree) and the sanctioned shape:
+flagged by neither. Text (`Detector_…`): seed U's line, the fully qualified attribute, a `global using` alias, an MSBuild
+`<Using … Alias>`, a `//` inside a string on the line — flagged; a doc comment and a whole-line comment that mention it —
+not.
+
+**Seeds — the real tree** (`seeds132v2.ps1`: each written into the real files, built, the guard run from a TRX, then
+restored by `git checkout HEAD` / removal, `git status --porcelain` empty and `git diff --quiet HEAD` asserted, restored
+files touched). Guard = `PoaShareClientSingletonGuardTests` (33).
+
+| # | Seed | Red (of 33) | Offender reported | What it proves |
+|---|---|---|---|---|
+| U | the verifier's seed U, verbatim, as `Services/Access/ProbeU.cs` | **2** — C8, T6 | `ProbeU.RevokeAccessAsync: [UnsafeAccessorAttribute]`; `…/ProbeU.cs` | item 1 |
+| R | the verifier's seed R, verbatim, as `Services/Access/ProbeR.cs` | **1** — C7 | `ProbeR → MethodBase.Invoke`, `→ Type.GetMethods` | item 2 |
+| U2 | a field `[UnsafeAccessor]` in **Spaarke.Dataverse** (the client's own project) | **2** — C8, T6 | `Spaarke.Dataverse.ProbeU2.HttpOf` | the client project is scanned |
+| U3 | **aliases** in the root `Directory.Build.props` (`<Using … UnsafeAccessorAttribute Alias="FastAttribute">`, `… UnsafeAccessorKind Alias="FastKind">`) + `[Fast(FastKind.Method)] extern … RevokeAccessAsync(DataverseWebApiService …)` in a BFF file that never spells the word | **2** — T6, C8 | `Directory.Build.props`; `ProbeU3.RevokeAccessAsync` | an alias defeats neither rule |
+| U4 | an `[UnsafeAccessor]` in the **L2 Worker** project (outside the compiled scan set) | **1** — T6 | `…/Sprk.Provisioning.ControlPlane.Worker/ProbeU4.cs` | "anywhere in src/server" |
+| R2 | `object o = dv; ((MethodInfo)o.GetType().GetMember("Revoke" + suffix)[0]).Invoke(o, null)` | **1** — C7 | `→ Type.GetMember`, `→ MethodBase.Invoke` | an `object`-typed holder, a run-time name |
+| R3 | `Of<T>() => typeof(T).GetMethods()`, called `Of<DataverseWebApiService>()` | **1** — C7 | `→ Type.GetMethods` | a type parameter |
+| R4 | `Delegate.CreateDelegate(typeof(Func<…>), dv, "RevokeAccessAsync")` | **3** — C7, C4, T4 | `→ Delegate.CreateDelegate`; `"RevokeAccessAsync"` | by-name binding |
+| R5 | `((dynamic)typeof(DataverseWebApiService)).GetMethods()` | **1** — C7 | `→ Binder.InvokeMember` | reflection through `dynamic` |
+| R6 | `AssemblyLoadContext.Default.LoadFromStream(image)` | **1** — C7 | `→ AssemblyLoadContext.LoadFromStream` | code loaded at run time |
+| R7 | `Expression.Lambda(Expression.Call(Expression.Constant(dv), "Revoke" + suffix, null)).Compile()` | **1** — C7 | `→ Expression.Call`, `→ Expression`1.Compile` | name-based lookup + compile |
+| R8 | `((IReflect)typeof(DataverseWebApiService)).GetMethods(flags)` | **1** — C7 | `→ IReflect.GetMethods` | the `IReflect` spelling |
+| R9 | `MethodInvoker.Create(dv.GetType().GetTypeInfo().DeclaredMethods.Single(<by signature>)).Invoke(dv, …)` | **1** — C7 | `→ TypeInfo.get_DeclaredMethods`, `→ MethodInvoker.Create`, `→ MethodInvoker.Invoke` | the .NET 8+ invoker |
+
+All 13 seeds red, every one restored. C1-C6 and T1-T5 are unchanged this round; their controls still pass, and seed R4
+shows C4 / T4 still bite.
+
+**The gate script (round 48 (d)).** `ReassignMatter -Apply` recorded the matter's current owner unconditionally: run
+twice, the second run recorded the first run's TARGET TEAM as the "original", and `RestoreMatter` could no longer restore
+the real owner of the test matter. Now the state holds a record PER MATTER; `-Apply` records the original owner only when
+the matter has no record or its record was restored (otherwise it prints "already recorded … KEPT" and only refreshes the
+reassign time); `RestoreMatter -Apply` marks the record restored only when the owner reads back as the original (else it
+keeps the record so the restore can be retried); a state file of the earlier single-matter shape is read as that
+matter's record; new `-StatePath` (default unchanged, `%TEMP%\task-132-live-gate.state.json`). **Tested:**
+`notes/task-132-live-gate.Tests.ps1` (Pester 6.2; `az` and `Invoke-RestMethod` mocked, a catch-all mock fails any
+unexpected call, the fake owner changes only through the mocked PATCH) — **7 / 7**: the first `-Apply` records the real
+owner; a second `-Apply` keeps it (the reported defect); two reassigns then a restore put the REAL owner back; after a
+verified restore the next reassign records afresh; two matters keep their own originals; the legacy state shape; a dry
+run patches and records nothing. **Seeded** (same restore discipline): G1 the original re-read on every `-Apply` (the
+reported defect) **3 / 7 red**; G2 a restore never marked **2 / 7**; G3 the legacy shape ignored **1 / 7**; restored 7 / 7.
+
+**Wording (round 48 (c)) — exactly what is enforced, nothing beyond it.** Rewritten: the guard header ("WHAT THIS GUARD
+ENFORCES — exactly the rules below", C7 / C8 / T6 added, a "NOT ENFORCED" paragraph in place of "OUT OF REACH, by
+construction"); `DataverseRecordShareService`'s class remarks ("What the build guard enforces": (1) every compiled call
+path, (2) no UnsafeAccessor, (3) no method chosen or invoked by reflection nor code the scan cannot read; inside the type,
+the every-path proof; "Not enforced"), and its "no share writer can be born without it" sentence; the interface remark
+that points at them; the `IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync` remarks ("covered by
+construction" removed; the same three things; "a route outside those … is review's"); the
+`AccessCacheInvalidationTests.Shares.cs` summary ("any compiled route" → the three things); `IlCallScan`'s remarks ("out
+of its reach by construction" → what a reference scan cannot see, and which mechanisms the guard bans instead); §16.1
+(heading and claim), §16.6 and §16.7 (corrections appended, the original wording kept for the record); the f1-v1c POML
+outcome (correction appended).
+
+**What the build enforces now — the statement every place above repeats.** Over every `src` assembly the BFF runs or
+that can name `DataverseWebApiService`: (1) every compiled call path to the client's POA writes (C1-C6; C3 inside the
+seam: only the three interface methods write, and every path awaits the write and then evicts that record), plus the
+text and configuration rules T1-T5; (2) no `[UnsafeAccessor]` (C8, and T6 over all of `src/server`); (3) no method chosen
+or invoked by reflection, on any type, and no code the scan cannot read (C7). **Not enforced** (review's): a POA write by
+a route that uses none of those mechanisms — above all a raw HTTP call whose action URL exists only at run time
+(assembled from pieces none of which is the action name, or read from a live store no repository file holds); native
+code; code outside the scan set (it cannot name the client and does not run in the BFF). POA writes made outside the BFF
+(MDA, flows, scripts) are the TTL-bounded out-of-band row (§9, owner R3/R4).
+
+**Placement / justification (CLAUDE.md §10 / §11).** No production surface: the production edits are doc comments only
+(`IDataverseRecordShareService.cs`, `IMembershipCacheInvalidator.cs`; the diff is `///` lines only), so no IL change, no
+publish-size or CVE delta, no package. **New test rules C7 / C8 / T6** — members of the existing guard class on the
+existing `IlCallScan.MethodReferences` and `SourceScan` (no new helper): (1) existing — C1-C6 read method tokens, string
+constants and metadata NAMES; none reads the attribute that makes a method an accessor, or a reflective call; (2)
+extension — they extend the same guard over the same scan set (one reason to change: the routes by which a POA write can
+reach Dataverse around the evicting seam; §11.5 — the file grows to ~1,760 lines, cohesive, one invariant); (3) cost of
+doing nothing — seeds U and R ship an unshare that keeps access for up to 2 min with the build green. **New Pester test
+file** `notes/task-132-live-gate.Tests.ps1`: (1) existing — none (the repository has no Pester tests; the script's own
+`-Verify` reads live state and cannot exercise its bookkeeping without live writes); (2) extension — it is the gate
+script's own test, beside it; (3) cost of doing nothing — round 48 (d) requires the fix tested, and a regression would
+leave `RestoreMatter` unable to put a live test matter's real owner back. **New script parameter** `-StatePath`: the
+seam that keeps the tests' state out of the operator's real state file (default unchanged). No plugin (ADR-002); fail
+closed unchanged (ADR-003). `.claude/**`: no edit needed.
+
+**Step 9.5 — code-review + adr-check over the round's diff (FULL / TEST-MODIFYING rigor).** Checked, no finding: ADR-038
+B1 (no transport double), B3 / B4 (no DI-registration or constructor tests), B8 (no string-bound reflection into a
+private: the rules read IL references and attribute metadata; the controls are the guard's own compile-only fixtures,
+never executed — `Adr038TestBanGuardTests` passes over them); ADR-010 (no new interface); ADR-002; ADR-003 (no production
+logic change). Accepted, with reason: C7 is deliberately broader than round 48 (b)'s wording (any type, not only the
+Dataverse service types) — that breadth is what makes "a Type obtained from them" enforceable without a provenance
+analysis, and it costs nothing today; T6 is conservative (a block comment or string that names UnsafeAccessor is flagged —
+reword it); the L2 projects outside the compiled scan set are covered by T6's text only (they cannot name the client and
+do not run in the BFF, so C8's compiled check adds nothing there).
+
+**Results (round f1-v1c-v1, 2026-10-05), after every seed was restored.** Build: ArchTests, BFF, BFF unit tests and
+`Sprk.Bff.Api.IntegrationTests` 0 warnings / 0 errors; `Spe.Integration.Tests` 0 errors and the 5 pre-existing CA2024
+warnings in the untouched `AnalysisEndpointsIntegrationTests.cs`. Affected first: `PoaShareClientSingletonGuardTests`
+**33 / 0 / 0** in Debug and in Release (30 + C7, C8, T6; `CompiledDetector_…` and `Detector_…` extended);
+`task-132-live-gate.Tests.ps1` **7 / 7** (Pester 6.2). Then once in full, on `f80836182` (this round's production and
+test code; the later commit is notes and the POML only): NetArchTest **625 / 0 / 0** (622 + 3);
+`Sprk.Bff.Api.IntegrationTests` **104 / 0 / 0**; `Spe.Integration.Tests` **403 passed / 0 failed / 25 skipped (428)**;
+BFF unit suite — first run **15,434 passed / 19 failed / 54 skipped** (15,507; 30 m 46 s): all 19 were
+WebApplicationFactory requests cancelled after 3-4 minutes ("Error while copying content to a stream"; one 19-minute
+eval harness) while the machine ran 87 `dotnet` processes at 88 % CPU (other agents' suites) — the 19 re-run in
+isolation **19 / 0 / 0**, and a second full run **15,453 passed / 0 failed / 54 skipped (15,507; 20 m 52 s)**: contention,
+not this round (its production edits are doc comments only). No package change: no publish-size or CVE delta.
