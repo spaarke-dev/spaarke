@@ -61,7 +61,14 @@
 //         RunStatus.WaitingOnGate (NOT Resumable, NOT QuarantineRequired) +
 //         InterStepState IDs persisted + T6Verified gate Pending + NO
 //         CompletedPhase appended + kvWriter NEVER called.
-//   AC-23..AC-30 (unified-access-control-r2 task 165, owner round 35 item 1)
+//   AC-30..AC-38 (unified-access-control-r2 task 165, owner round 41 item 1)
+//         H8 RECORDS what it created before verifying it, and a re-entry
+//         (after the 24h replication wait, a quarantine, a lost write or a
+//         crash) RESUMES with the recorded root container — it never creates
+//         a second container type or root container, never hands an unbound
+//         container to H7, and when the recorded root container was removed
+//         (failed bind) it creates only a new root container in the same type.
+//   AC-23..AC-29 (unified-access-control-r2 task 165, owner round 35 item 1)
 //         Every container is stamped with its owning business unit: H8 binds
 //         the verified root container to the customer environment's ROOT
 //         business unit (H5 output) BEFORE the KV write and the H7 handoff;
@@ -558,10 +565,14 @@ public sealed class H8SpeContainerTypeHandlerTests
         repo.LastWrittenRun.CurrentPhase.Should().Be("H8");
         repo.LastWrittenRun.ErrorDetail.Should().BeNull("a replication-pending wait is not an error");
 
-        // Container-type/root-container ARE real, durable side effects —
-        // persisted so a later resume does not need to re-derive them.
+        // Container-type/root-container ARE real, durable side effects — RECORDED (InterStepState.ContainerTypeId +
+        // the T6 gate's evidence) so a later re-entry RESUMES with them, but NOT handed to H7: the root container is
+        // still UNBOUND (unified-access-control-r2 task 165, owner round 41 item 1).
         repo.LastWrittenRun.InterStepState.ContainerTypeId.Should().Be(ContainerTypeId);
-        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().Be(RootContainerId);
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().BeNull(
+            "SpeContainerId is H7's hand-off — an unbound container is never handed off");
+        repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Evidence!.Value
+            .GetProperty("rootContainerId").GetString().Should().Be(RootContainerId);
 
         // Gate is Pending, NOT Verified — verification genuinely has not happened yet.
         repo.LastWrittenRun.GateStates.Should().ContainKey(SpeContainerTypeGates.T6Verified);
@@ -733,6 +744,251 @@ public sealed class H8SpeContainerTypeHandlerTests
         provisioner.BindCallCount.Should().Be(0);
     }
 
+
+    // ---------- AC-30..AC-38 resume with what was created (task 165, owner round 41 item 1) ----------
+
+    [Fact]
+    public async Task AC30_AReplicationPendingWait_ThenResume_CreatesNothing_AndBindsAndHandsOffTheSameContainer()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-30");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var verifier = FakeVerifier.Sequence(
+            new SpeContainerVerificationResult.ReplicationPending("404 — the 24h replication window"),
+            new SpeContainerVerificationResult.Verified("active"));
+        var kvWriter = FakeKvWriter.Wrote();
+        var handler = BuildHandler(repo, provisioner, verifier, kvWriter);
+
+        (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None)).Should().BeOfType<HandlerResult.Success>();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.WaitingOnGate);
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().BeNull("the container is not bound yet");
+
+        // The reconciler re-dispatches H8 once the processed marker expires (~24h).
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(1,
+            "the resume must NOT create a second container type and root container (the first would be orphaned UNBOUND)");
+        verifier.CallCount.Should().Be(2);
+        verifier.LastRequest!.ContainerId.Should().Be(RootContainerId, "the resume verifies the container it recorded");
+        provisioner.BindCallCount.Should().Be(1);
+        provisioner.LastBindRequest!.ContainerId.Should().Be(RootContainerId);
+        kvWriter.LastRequest!.ContainerTypeId.Should().Be(ContainerTypeId);
+        repo.LastWrittenRun!.CompletedPhases.Should().ContainSingle(cp => cp.Phase == "H8");
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().Be(RootContainerId,
+            "only now — bound — is the container handed to H7");
+        repo.LastWrittenRun.GateStates[SpeContainerTypeGates.T6Verified].Status.Should().Be(GateState.Verified);
+    }
+
+    [Fact]
+    public async Task AC31_AResumeDuringTheWait_CreatesNothing_AndKeepsWaiting()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-31");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var verifier = FakeVerifier.ReplicationPending("404 — still replicating");
+        var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(1);
+        provisioner.BindCallCount.Should().Be(0, "an unaddressable container is not bound (D19)");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.WaitingOnGate);
+        repo.LastWrittenRun.InterStepState.ContainerTypeId.Should().Be(ContainerTypeId);
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task AC32_TheCreationIsRecordedBeforeVerification_SoAQuarantinedVerifyResumesWithTheSameContainer()
+    {
+        var run = BuildRun();
+        var order = new List<string>();
+        var repo = new FakeRepository(run, etag: "etag-32", order: order);
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId, order);
+        var verifier = FakeVerifier.SequenceInOrder(order,
+            new TimeoutException("verify timed out"),
+            new SpeContainerVerificationResult.Verified("active"));
+        var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote(order));
+
+        var first = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        first.Should().BeOfType<HandlerResult.Failure>().Which.Class.Should().Be(FailureClass.QuarantineRequired);
+        order.Take(3).Should().Equal(new[] { "provision", "write", "verify" },
+            "the creation is persisted to the run BEFORE anything that can fail, wait or crash");
+        repo.LastWrittenRun!.InterStepState.ContainerTypeId.Should().Be(ContainerTypeId);
+
+        // The operator clears the quarantine and resumes.
+        var resumed = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        resumed.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(1);
+        provisioner.LastBindRequest!.ContainerId.Should().Be(RootContainerId);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(RootContainerId);
+    }
+
+    [Fact]
+    public async Task AC33_AFailedBindThatRemovedTheContainer_ResumesWithANewRootContainerInTheSameType_NeverASecondType()
+    {
+        const string secondRoot = "b!bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-33");
+        var provisioner = FakeProvisioner.Sequence(
+            new SpeContainerTypeProvisionOutcome[]
+            {
+                new SpeContainerTypeProvisionOutcome.Success(new SpeContainerTypeProvisionOutputs(ContainerTypeId, RootContainerId)),
+                new SpeContainerTypeProvisionOutcome.Success(new SpeContainerTypeProvisionOutputs(ContainerTypeId, secondRoot)),
+            },
+            new SpeContainerBindOutcome[]
+            {
+                new SpeContainerBindOutcome.NotBound("the stamp did not read back — the container was removed", Removed: true),
+                new SpeContainerBindOutcome.Bound(),
+            });
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote());
+
+        var first = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        first.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode
+            .Should().Be(SpeContainerTypeRejectionCodes.ContainerBindingFailed);
+        repo.LastWrittenRun!.InterStepState.ContainerTypeId.Should().Be(ContainerTypeId, "the type stays on record");
+        H8SpeContainerTypeHandler.ReadRecordedCreation(repo.LastWrittenRun).RootContainerId
+            .Should().BeNull("the removed container must not be verified again — a 404 reads as the replication wait");
+
+        var resumed = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        resumed.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(2);
+        provisioner.LastRequest!.ExistingContainerTypeId.Should().Be(ContainerTypeId,
+            "a container type cannot be deleted — the resume creates only a root container in the recorded one");
+        provisioner.LastBindRequest!.ContainerId.Should().Be(secondRoot);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(secondRoot);
+    }
+
+    [Fact]
+    public async Task AC34_AProvisionerFailureAfterTheTypeWasCreated_RecordsTheType_AndTheResumeCreatesOnlyARootContainer()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-34");
+        var provisioner = FakeProvisioner.Sequence(new SpeContainerTypeProvisionOutcome[]
+        {
+            new SpeContainerTypeProvisionOutcome.Failure("Graph 503 creating the root container", IsDelegatedTokenTrap: false,
+                CreatedContainerTypeId: ContainerTypeId),
+            new SpeContainerTypeProvisionOutcome.Success(new SpeContainerTypeProvisionOutputs(ContainerTypeId, RootContainerId)),
+        });
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote());
+
+        var first = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        first.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode
+            .Should().Be(SpeContainerTypeRejectionCodes.ProvisioningFailed);
+        repo.LastWrittenRun!.InterStepState.ContainerTypeId.Should().Be(ContainerTypeId);
+
+        var resumed = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        resumed.Should().BeOfType<HandlerResult.Success>();
+        provisioner.LastRequest!.ExistingContainerTypeId.Should().Be(ContainerTypeId);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(RootContainerId);
+    }
+
+    [Fact]
+    public async Task AC35_ARunLeftByThePreRound41PendingPath_ResumesWithItsContainer_AndWithdrawsTheUnboundHandOff()
+    {
+        // The old MarkWaitingOnGateAsync wrote ContainerTypeId, SpeContainerId (the UNBOUND container — the defect) and
+        // the T6 gate Pending with the root container in its evidence.
+        var run = BuildRun();
+        run.Status = RunStatus.WaitingOnGate;
+        run.InterStepState.ContainerTypeId = ContainerTypeId;
+        run.InterStepState.SpeContainerId = RootContainerId;
+        run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
+        {
+            Status = GateState.Pending,
+            VerifierHandler = "H8",
+            Evidence = System.Text.Json.JsonSerializer.SerializeToElement(new
+            {
+                rootContainerId = RootContainerId,
+                verifiedStatus = "replication-pending",
+                verifiedViaAppOnlyToken = false,
+            }),
+        };
+        var repo = new FakeRepository(run, etag: "etag-35");
+        var provisioner = FakeProvisioner.Success("dddddddd-0000-0000-0000-000000000002", "b!second");
+        var verifier = FakeVerifier.ReplicationPending("404 — still replicating");
+        var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(0, "the run already holds a container type and root container");
+        verifier.LastRequest!.ContainerId.Should().Be(RootContainerId);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNull("the unbound hand-off is withdrawn");
+    }
+
+    [Fact]
+    public async Task AC36_ARecordedRootContainerWithoutAType_IsQuarantined_AndNothingIsCreated()
+    {
+        var run = BuildRun();
+        run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
+        {
+            Status = GateState.Pending,
+            VerifierHandler = "H8",
+            Evidence = System.Text.Json.JsonSerializer.SerializeToElement(new { rootContainerId = RootContainerId }),
+        };
+        var repo = new FakeRepository(run, etag: "etag-36");
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var verifier = FakeVerifier.Verified("active");
+        var handler = BuildHandler(repo, provisioner, verifier, FakeKvWriter.Wrote());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.CreationRecordInconsistent);
+        provisioner.CallCount.Should().Be(0);
+        verifier.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC37_TheCreationRecord_IsMergedOverAConcurrentWrite_AndSurvives()
+    {
+        var run = BuildRun();
+        var concurrent = BuildRun();
+        concurrent.GateStates["operator-note"] = new GateEntry { Status = GateState.Verified, VerifierHandler = "operator" };
+        var repo = new FakeRepository(run, etag: "etag-37",
+            scripted: (call, _) => call == 1
+                ? new ReplaceRunResult.Conflict(new ProvisioningRunReadResult(concurrent, "etag-37-operator"))
+                : null);
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"), FakeKvWriter.Wrote());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        repo.ETagsUsed[1].Should().Be("etag-37-operator", "the record is retried over the CURRENT document");
+        repo.LastWrittenRun!.GateStates.Should().ContainKey("operator-note", "the concurrent write is kept");
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().Be(RootContainerId);
+        provisioner.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task AC38_ACreationThatCannotBeRecorded_IsQuarantined_NamingBothIds_AndGoesNoFurther()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-38",
+            scripted: (call, _) => call == 1 ? new ReplaceRunResult.NotFound() : null);
+        var provisioner = FakeProvisioner.Success(ContainerTypeId, RootContainerId);
+        var verifier = FakeVerifier.Verified("active");
+        var kvWriter = FakeKvWriter.Wrote();
+        var handler = BuildHandler(repo, provisioner, verifier, kvWriter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SpeContainerTypeRejectionCodes.CreationRecordNotPersisted);
+        failure.Diagnostic.Should().Contain(ContainerTypeId).And.Contain(RootContainerId).And.Contain("-Bind");
+        verifier.CallCount.Should().Be(0);
+        provisioner.BindCallCount.Should().Be(0);
+        kvWriter.CallCount.Should().Be(0);
+    }
+
     // ---------- helpers ----------
 
     private static H8SpeContainerTypeHandler BuildHandler(
@@ -788,12 +1044,22 @@ public sealed class H8SpeContainerTypeHandlerTests
     {
         private ProvisioningRun? _run;
         private string? _etag;
+        private readonly List<string>? _order;
+        private readonly Func<int, ProvisioningRun, ReplaceRunResult?>? _scripted;
+        private int _replaceCalls;
         public ProvisioningRun? LastWrittenRun { get; private set; }
 
-        public FakeRepository(ProvisioningRun? run, string? etag)
+        /// <summary>The If-Match ETag of every ReplaceRunAsync call, in order.</summary>
+        public List<string> ETagsUsed { get; } = new();
+
+        public FakeRepository(
+            ProvisioningRun? run, string? etag, List<string>? order = null,
+            Func<int, ProvisioningRun, ReplaceRunResult?>? scripted = null)
         {
             _run = run;
             _etag = etag;
+            _order = order;
+            _scripted = scripted;
         }
 
         public Task<ProvisioningRunReadResult?> ReadRunAsync(string customerId, string runId, CancellationToken ct)
@@ -806,6 +1072,14 @@ public sealed class H8SpeContainerTypeHandlerTests
 
         public Task<ReplaceRunResult> ReplaceRunAsync(ProvisioningRun run, string ifMatchEtag, CancellationToken ct)
         {
+            _replaceCalls++;
+            ETagsUsed.Add(ifMatchEtag);
+            _order?.Add("write");
+            if (_scripted?.Invoke(_replaceCalls, run) is { } scripted)
+            {
+                return Task.FromResult(scripted);
+            }
+
             LastWrittenRun = run;
             _run = run;
             _etag = ifMatchEtag + "-next";
@@ -820,6 +1094,8 @@ public sealed class H8SpeContainerTypeHandlerTests
         private readonly SpeContainerBindOutcome _bindOutcome;
         private readonly Exception? _bindThrows;
         private readonly List<string>? _order;
+        private readonly Queue<SpeContainerTypeProvisionOutcome>? _outcomes;
+        private readonly Queue<SpeContainerBindOutcome>? _bindOutcomes;
         public int CallCount { get; private set; }
         public SpeContainerTypeProvisionRequest? LastRequest { get; private set; }
         public int BindCallCount { get; private set; }
@@ -847,6 +1123,18 @@ public sealed class H8SpeContainerTypeHandlerTests
 
         public static FakeProvisioner Throws(Exception ex) => new(null, ex);
 
+        /// <summary>One provision outcome (and optionally one bind outcome) per call, in order — for resume tests.</summary>
+        public static FakeProvisioner Sequence(
+            SpeContainerTypeProvisionOutcome[] outcomes, SpeContainerBindOutcome[]? binds = null)
+            => new(outcomes, binds);
+
+        private FakeProvisioner(SpeContainerTypeProvisionOutcome[] outcomes, SpeContainerBindOutcome[]? binds)
+            : this((SpeContainerTypeProvisionOutcome?)null, null)
+        {
+            _outcomes = new Queue<SpeContainerTypeProvisionOutcome>(outcomes);
+            _bindOutcomes = binds is null ? null : new Queue<SpeContainerBindOutcome>(binds);
+        }
+
         public Task<SpeContainerTypeProvisionOutcome> ProvisionAsync(
             SpeContainerTypeProvisionRequest request, CancellationToken ct)
         {
@@ -854,7 +1142,7 @@ public sealed class H8SpeContainerTypeHandlerTests
             LastRequest = request;
             _order?.Add("provision");
             if (_throwOnCall is not null) throw _throwOnCall;
-            return Task.FromResult(_outcome!);
+            return Task.FromResult(_outcomes is not null ? _outcomes.Dequeue() : _outcome!);
         }
 
         public Task<SpeContainerBindOutcome> BindRootContainerAsync(SpeContainerBindRequest request, CancellationToken ct)
@@ -863,7 +1151,7 @@ public sealed class H8SpeContainerTypeHandlerTests
             LastBindRequest = request;
             _order?.Add("bind");
             if (_bindThrows is not null) throw _bindThrows;
-            return Task.FromResult(_bindOutcome);
+            return Task.FromResult(_bindOutcomes is { Count: > 0 } ? _bindOutcomes.Dequeue() : _bindOutcome);
         }
     }
 
@@ -899,6 +1187,7 @@ public sealed class H8SpeContainerTypeHandlerTests
         private readonly SpeContainerVerificationResult? _result;
         private readonly Exception? _throwOnCall;
         private readonly List<string>? _order;
+        private readonly Queue<object>? _sequence;
         public int CallCount { get; private set; }
         public SpeContainerVerificationRequest? LastRequest { get; private set; }
 
@@ -920,12 +1209,34 @@ public sealed class H8SpeContainerTypeHandlerTests
 
         public static FakeVerifier Throws(Exception ex) => new(null, ex);
 
+        /// <summary>One result (or exception) per call, in order — for resume tests.</summary>
+        public static FakeVerifier Sequence(params object[] steps) => new(null, steps);
+
+        /// <summary>As <see cref="Sequence(object[])"/>, recording "verify" into <paramref name="order"/>.</summary>
+        public static FakeVerifier SequenceInOrder(List<string> order, params object[] steps) => new(order, steps);
+
+        private FakeVerifier(List<string>? order, object[] steps)
+            : this(null, null, order)
+        {
+            _sequence = new Queue<object>(steps);
+        }
+
         public Task<SpeContainerVerificationResult> VerifyAsync(
             SpeContainerVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
             LastRequest = request;
             _order?.Add("verify");
+            if (_sequence is not null)
+            {
+                return _sequence.Dequeue() switch
+                {
+                    Exception ex => throw ex,
+                    SpeContainerVerificationResult r => Task.FromResult(r),
+                    var other => throw new InvalidOperationException($"bad step {other}"),
+                };
+            }
+
             if (_throwOnCall is not null) throw _throwOnCall;
             return Task.FromResult(_result!);
         }

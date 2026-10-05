@@ -73,6 +73,15 @@
 // The ONE targeted exception: the registration POST tolerates an ODataError
 // 409 Conflict (treated as "already registered," not a failure) — a
 // zero-new-call-shape defensive addition, not a speculative GET.
+// RESUME (unified-access-control-r2 task 165, owner round 41 item 1): the
+// handler now RECORDS what this call created in the run, immediately, and a
+// re-entry never calls ProvisionAsync for a recorded root container. When only
+// the container type is recorded (the root container was removed after a
+// failed bind, or creation stopped after the type), the request carries
+// ExistingContainerTypeId and CreateAsync creates only the root container in
+// it; a Failure reports the type it created (CreatedContainerTypeId) so the
+// handler records that too. A resume therefore never makes a second container
+// type (undeletable, capped per tenant) or a second, orphaned root container.
 //
 // BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1):
 // BindRootContainerAsync / BindNewContainerAsync stamp the root container with
@@ -161,51 +170,85 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
             _options.CertLoadTimeout, cancellationToken).ConfigureAwait(false);
 
         var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(request.TenantId, request.OwningAppId, cert);
+        return await CreateAsync(graph, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The Graph part of <see cref="ProvisionAsync"/>: create the container type — UNLESS
+    /// <see cref="SpeContainerTypeProvisionRequest.ExistingContainerTypeId"/> names the one this run already created
+    /// (unified-access-control-r2 task 165, owner round 41 item 1: a resume never creates a second, undeletable type) —
+    /// register the owning app on it, then create the root container in it. A failure after the type exists reports it
+    /// (<see cref="SpeContainerTypeProvisionOutcome.Failure.CreatedContainerTypeId"/>) so the handler records it.
+    /// Internal so a test can drive it with a <c>GraphServiceClient</c> over a fake transport.
+    /// </summary>
+    internal async Task<SpeContainerTypeProvisionOutcome> CreateAsync(
+        GraphServiceClient graph,
+        SpeContainerTypeProvisionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(request);
 
         _logger.LogInformation(
             "H8 Graph SPE container-type provisioning starting: customerId={CustomerId} tenantId={TenantId} " +
-            "owningAppId={OwningAppId}",
-            request.CustomerId, request.TenantId, request.OwningAppId);
+            "owningAppId={OwningAppId} existingContainerTypeId={ExistingContainerTypeId}",
+            request.CustomerId, request.TenantId, request.OwningAppId, request.ExistingContainerTypeId ?? "(none)");
 
+        // The type this call created or reused — reported on every failure after it exists.
+        string? containerTypeId = string.IsNullOrWhiteSpace(request.ExistingContainerTypeId)
+            ? null
+            : request.ExistingContainerTypeId.Trim();
         try
         {
-            // (1) Create the container type (GOTCHA 1 — v1.0 GA shape).
-            using var createTypeTimeout = LinkedTimeout(cancellationToken);
-            var containerType = await graph.Storage.FileStorage.ContainerTypes.PostAsync(
-                new FileStorageContainerType
-                {
-                    Name = request.DisplayName,
-                    OwningAppId = Guid.Parse(request.OwningAppId),
-                },
-                cancellationToken: createTypeTimeout.Token).ConfigureAwait(false);
-
-            if (containerType is null || string.IsNullOrWhiteSpace(containerType.Id))
+            if (containerTypeId is null)
             {
-                return new SpeContainerTypeProvisionOutcome.Failure(
-                    $"Graph POST /storage/fileStorage/containerTypes returned no usable Id for customerId " +
-                    $"'{request.CustomerId}'.", IsDelegatedTokenTrap: false);
-            }
+                // (1) Create the container type (GOTCHA 1 — v1.0 GA shape).
+                using var createTypeTimeout = LinkedTimeout(cancellationToken);
+                var containerType = await graph.Storage.FileStorage.ContainerTypes.PostAsync(
+                    new FileStorageContainerType
+                    {
+                        Name = request.DisplayName,
+                        OwningAppId = Guid.Parse(request.OwningAppId),
+                    },
+                    cancellationToken: createTypeTimeout.Token).ConfigureAwait(false);
 
-            _logger.LogInformation(
-                "T6 cleared: container-type ID {ContainerTypeId} created via confidential-client cert-based auth.",
-                containerType.Id);
+                if (containerType is null || string.IsNullOrWhiteSpace(containerType.Id))
+                {
+                    return new SpeContainerTypeProvisionOutcome.Failure(
+                        $"Graph POST /storage/fileStorage/containerTypes returned no usable Id for customerId " +
+                        $"'{request.CustomerId}'.", IsDelegatedTokenTrap: false);
+                }
+
+                containerTypeId = containerType.Id;
+                _logger.LogInformation(
+                    "T6 cleared: container-type ID {ContainerTypeId} created via confidential-client cert-based auth.",
+                    containerTypeId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "H8 reuses the container type {ContainerTypeId} this run already created — only a root container is created.",
+                    containerTypeId);
+            }
 
             // (2) Register the owning app's FULL permissions on the container
             // type (GOTCHA 2 — replaces the retired script's SharePoint REST
             // applicationPermissions PUT under a DIFFERENT token audience).
             // Non-409 failures propagate to the outer catch (ODataError) below
-            // for uniform T6-trap classification.
-            await EnsureRegistrationAsync(graph, containerType.Id, request, cancellationToken)
+            // for uniform T6-trap classification. Repeated on a reused type: a
+            // 409 is "already registered", and the first attempt may be the one
+            // that failed.
+            await EnsureRegistrationAsync(graph, containerTypeId, request, cancellationToken)
                 .ConfigureAwait(false);
 
-            // (3) Create the root/test container within the new container type.
+            // (3) Create the root/test container within the container type.
             using var createContainerTimeout = LinkedTimeout(cancellationToken);
             var container = await graph.Storage.FileStorage.Containers.PostAsync(
                 new FileStorageContainer
                 {
                     DisplayName = $"{request.DisplayName} - Root",
                     Description = "Root container for document storage - owned by BFF API app",
-                    ContainerTypeId = Guid.Parse(containerType.Id),
+                    ContainerTypeId = Guid.Parse(containerTypeId),
                 },
                 cancellationToken: createContainerTimeout.Token).ConfigureAwait(false);
 
@@ -213,7 +256,8 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
             {
                 return new SpeContainerTypeProvisionOutcome.Failure(
                     $"Graph POST /storage/fileStorage/containers returned no usable Id for containerTypeId " +
-                    $"'{containerType.Id}' (customerId '{request.CustomerId}').", IsDelegatedTokenTrap: false);
+                    $"'{containerTypeId}' (customerId '{request.CustomerId}').", IsDelegatedTokenTrap: false,
+                    CreatedContainerTypeId: containerTypeId);
             }
 
             _logger.LogInformation(
@@ -221,7 +265,7 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
                 container.Id);
 
             return new SpeContainerTypeProvisionOutcome.Success(new SpeContainerTypeProvisionOutputs(
-                ContainerTypeId: containerType.Id,
+                ContainerTypeId: containerTypeId,
                 RootContainerId: container.Id));
         }
         catch (ODataError ex)
@@ -229,8 +273,8 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
             var isTrap = SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError(ex);
             _logger.LogError(ex,
                 "H8 Graph SPE container-type provisioning ODataError: customerId={CustomerId} status={Status} " +
-                "isDelegatedTokenTrap={IsDelegatedTokenTrap}",
-                request.CustomerId, ex.ResponseStatusCode, isTrap);
+                "isDelegatedTokenTrap={IsDelegatedTokenTrap} containerTypeId={ContainerTypeId}",
+                request.CustomerId, ex.ResponseStatusCode, isTrap, containerTypeId ?? "(none)");
             var diagnostic = isTrap
                 ? $"T6 silent-fail trap detected: Graph ODataError {ex.ResponseStatusCode} contains " +
                   $"'{SpeConfidentialClientGraphFactory.DelegatedTokenTrapPhrase}' for customerId " +
@@ -238,7 +282,8 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
                   $"container-type creation (spec.md FR-33 / T6). {ex.Error?.Code} {ex.Error?.Message}"
                 : $"Graph ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message} " +
                   $"(customerId '{request.CustomerId}').";
-            return new SpeContainerTypeProvisionOutcome.Failure(diagnostic, IsDelegatedTokenTrap: isTrap);
+            return new SpeContainerTypeProvisionOutcome.Failure(
+                diagnostic, IsDelegatedTokenTrap: isTrap, CreatedContainerTypeId: containerTypeId);
         }
     }
 

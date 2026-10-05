@@ -20,7 +20,9 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 /// nothing), and the SPE admin app's own placeholder is the same name. <c>spe-owning-app-</c> admits exactly that secret
 /// in the dev vault; a shorter <c>spe-</c> would also admit <c>SPE-ContainerTypeId</c> (Key Vault names are
 /// case-insensitive). The remainder follows Key Vault's own name rule (letters, digits, hyphens; 127 characters in all),
-/// so no path or query character can ever reach the vault request.
+/// so no path or query character can ever reach the vault request. The expression ends at <c>\z</c> — the END of the
+/// string — never at <c>$</c>, which in .NET also matches just before a trailing newline (owner round 41 item 5: with
+/// <c>$</c>, <c>"spe-owning-app-secret\n"</c> conformed).
 /// </para>
 /// <para>
 /// <b>Where it is enforced.</b> (1) Config POST/PUT answer 400 for any other name. (2) Every configId route that uses
@@ -44,7 +46,7 @@ public static class SpeConfigSecretNamePolicy
     private const int KeyVaultNameMaxLength = 127;
 
     private static readonly Regex Allowed = new(
-        "^" + Regex.Escape(RequiredPrefix) + "[A-Za-z0-9-]{1," + (KeyVaultNameMaxLength - RequiredPrefix.Length) + "}$",
+        "^" + Regex.Escape(RequiredPrefix) + "[A-Za-z0-9-]{1," + (KeyVaultNameMaxLength - RequiredPrefix.Length) + @"}\z",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase,
         TimeSpan.FromMilliseconds(100));
 

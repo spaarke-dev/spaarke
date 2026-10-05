@@ -284,6 +284,18 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
                 "complete before H7 dispatches — this is the source for sprk_SharePointEmbeddedContainerId.",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (!run.CompletedPhases.Any(cp => string.Equals(cp.Phase, HandlerIds.H8, StringComparison.Ordinal)))
+        {
+            // unified-access-control-r2 task 165, owner round 41 item 1: H8 hands its root container off only once it is
+            // BOUND to its business unit (CompletedPhase H8). A value written before that — the pre-round-41
+            // replication-pending path wrote one while the container was still unbound — is never consumed. The DAG
+            // (H7 depends on H8) already keeps H7 waiting; this is the handler's own fail-closed check.
+            return await FailMissingUpstreamAsync(run, etag, "speContainerId",
+                "InterStepState.speContainerId is present but H8 has not completed — the SPE root container is handed " +
+                "to H7 only after H8 has bound it to its business unit (unified-access-control-r2 task 165). H7 did " +
+                "not write sprk_SharePointEmbeddedContainerId.",
+                cancellationToken).ConfigureAwait(false);
+        }
         if (string.IsNullOrWhiteSpace(_options.ClientSecret))
         {
             var diagnostic =

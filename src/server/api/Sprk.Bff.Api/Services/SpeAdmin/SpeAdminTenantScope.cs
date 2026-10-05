@@ -1161,7 +1161,24 @@ public enum SpeContainerRefusal
 /// </summary>
 /// <param name="Reachable">The container ids (of those asked about) the caller may see.</param>
 /// <param name="IsPlatformOperator">The caller's own unit is the root.</param>
-public sealed record SpeAdminContainerTrim(IReadOnlySet<string> Reachable, bool IsPlatformOperator);
+public sealed record SpeAdminContainerTrim(IReadOnlySet<string> Reachable, bool IsPlatformOperator)
+{
+    /// <summary>
+    /// THE rule for forwarding a Graph search total, shared by the container and the item search (task 165, owner rounds
+    /// 20, 35 and 41): Graph's total counts every hit the owning app sees — under Model 1 other customers' too — so it is
+    /// reported ONLY to a platform operator, ONLY when nothing was removed from this page, and ONLY when there is no
+    /// further page (a later page Graph counted but nobody here judged may hold unbound or another environment's
+    /// containers, which no admin reaches). Otherwise null: the caller reports what it can stand behind.
+    /// </summary>
+    /// <param name="graphTotal">Graph's own total for the query (null when Graph reports none).</param>
+    /// <param name="pageItemCount">How many hits Graph returned on this page.</param>
+    /// <param name="visibleCount">How many of them the caller reaches.</param>
+    /// <param name="nextSkipToken">Graph's continuation token — non-null means a further page exists.</param>
+    public long? ReportableGraphTotal(long? graphTotal, int pageItemCount, int visibleCount, string? nextSkipToken) =>
+        IsPlatformOperator && visibleCount == pageItemCount && nextSkipToken is null
+            ? graphTotal
+            : null;
+}
 
 /// <summary>
 /// The configs a caller reaches — the answer of <see cref="SpeAdminTenantScope.GetReachableConfigIdsAsync"/>.

@@ -383,7 +383,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **8 authoritative solutions** (§11.1a): SpaarkeCore, webresources, then 6 tier-3 parallel | All 8 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
-| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s). **Binds the root container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1); runs after **H3 and H5** | Container GET succeeds; stamp reads back; container ID persisted to Dataverse + KV | `spe-{customerId}` |
+| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s). **Binds the root container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1); runs after **H3 and H5**; **records what it created at once and RESUMES with it** (after the 24h replication wait, a quarantine or a crash it never creates a second container type or root container — round 41 item 1) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound; persisted to Dataverse + KV | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
@@ -405,6 +405,8 @@ H0 --> H1 --> H2a --> { H2b (indexes), H4 (KV), H5 (dv-env) }   # 3-way parallel
                                                                      # to the environment's root business unit (task 165)
 
 H5 --> H6 (solutions) --> H7 --> H10 (needs H6) --> H11
+                            ^
+                  H8 (SPE) -+   # H7 also needs H8: it writes H8's root container, handed off only once BOUND (task 165, round 41)
                                     |
                                     v
                               { H12a (AI seed), H12b (config seed) }   # parallel
@@ -773,9 +775,23 @@ business unit that owns it as the custom property `spaarkeBusinessUnitId`, and t
 unbound container — not even for a root-unit administrator. H8 therefore runs after H5, reads the new environment's
 **root** business unit before creating anything (no environment URL or no root unit → Resumable, nothing created), and
 once the root container is verified readable stamps it, reads the stamp back, and **removes** the container if the stamp
-did not land (QuarantineRequired: `spe-container-binding-failed` / `…-not-removed` / `…-infra-fault`). Only a bound container
-is handed to H7. Every other creation path follows the same rule: the BFF, `New-BusinessUnitContainer.ps1`,
-`Provision-Customer.ps1` step 10, `Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`.
+did not land (QuarantineRequired: `spe-container-binding-failed` / `…-not-removed` / `…-infra-fault`). Every other creation
+path follows the same rule: the BFF, `New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
+`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`.
+
+**The replication wait and every other resume (owner round 41 item 1).** An SPE container may be unaddressable for up to
+24h after creation, so H8 binds only after the app-only GET verifies it. To make that safe, H8 **records what it created in
+the run immediately** — `interStepState.containerTypeId` plus the `h8-t6-verified` gate, Pending, naming the root
+container — before it verifies, binds or writes anything else. Every later entry (the re-dispatch after the 24h wait, a
+resume after a quarantine, a crash) reads that record and **resumes at verification with the same container**: it never
+creates a second container type (container types cannot be deleted and are capped per tenant) or a second root container
+(which used to leave the first one orphaned and UNBOUND). If a failed bind removed the recorded root container, the
+resume creates only a new root container in the recorded type. The container is **handed to H7**
+(`interStepState.speContainerId` → `sprk_SharePointEmbeddedContainerId`) **only once it is bound** — H8 writes that
+field only on completion, after the bind and the KV write; H7 depends on H8 in the DAG and refuses a container id from a
+run where H8 has not completed. While the run waits, H9 and the other branches still advance; H7, H10 and what follows
+wait for the bound container. A creation H8 could not record (the run deleted, or every merge lost a concurrent write)
+is QuarantineRequired `spe-creation-record-not-persisted`, naming both ids for an operator to bind (`-Bind`) or remove.
 
 Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId`) AND KV secret (`customer-{customerId}-spe-container-id`) — enables I4 invariant enforcement.
 
@@ -1016,10 +1032,17 @@ pac admin create-environment `
 # When onboarding onto a SHARED container type, run the -Verify above in EVERY environment that already uses the type —
 # a container of the type left unbound in one environment is otherwise nobody's to administer.
 
-# Phase 5c — SPE config Key Vault secret names (task 165, owner round 35 item 3). The BFF resolves only owning-app secret
-# names starting 'spe-owning-app-'; a config naming anything else is refused (409) until it is renamed (manual gate:
-# store the secret under a conforming name, then update the config). Read-only check, MUST exit 0:
+# Phase 5c — SPE config Key Vault secret names (task 165, owner round 35 item 3; round 41 item 4). The BFF resolves only
+# owning-app secret names starting 'spe-owning-app-'; a config naming anything else is refused (409) until it is renamed.
+# Read-only check, MUST exit 0:
 .\scripts\Test-SpeConfigSecretNames.ps1 -EnvironmentUrl "<dv-org-url>" -Verify
+#   for each config it lists (MANUAL GATE; never delete the config): store the owning app's client secret under a
+#   conforming name in the BFF Key Vault(s) and point the config at it — dry run, then -Apply (mint a new client secret
+#   with -MintClientSecret, or copy one with -SourceKeyVaultName/-SourceSecretName), then -Verify (exit 0):
+.\scripts\Repair-SpeConfigSecretName.ps1 -EnvironmentUrl "<dv-org-url>" -ConfigId "<config-id>" `
+    -SecretName "spe-owning-app-<name>" -KeyVaultName "<bff-kv>","<operator-kv>"
+.\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
+.\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
 
 # Phase 6 — BFF deploy
 .\scripts\Deploy-BffApi.ps1 -CustomerId "acme" -Slot production

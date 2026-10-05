@@ -71,6 +71,22 @@ public static class SpeContainerTypeRejectionCodes
     public const string ContainerBindingInfraFault = "spe-container-binding-infra-fault";
 
     /// <summary>
+    /// The run records a root container this H8 created but no container type for it — a state H8 never writes
+    /// (unified-access-control-r2 task 165, owner round 41 item 1). QuarantineRequired, and NOTHING is created: H8 never
+    /// guesses which type it made, and never makes a second container while one it created is unaccounted for.
+    /// </summary>
+    public const string CreationRecordInconsistent = "spe-creation-record-inconsistent";
+
+    /// <summary>
+    /// H8 created a container type and root container but could not record them in the run (the run was deleted, or
+    /// every merge retry lost a concurrent write). QuarantineRequired: the diagnostic names both ids — the root container
+    /// is UNBOUND (no SPE admin route reaches it); bind it with
+    /// <c>scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind &lt;containerId&gt;=&lt;rootBusinessUnitId&gt;</c> or remove it
+    /// before the run is resumed (a resume of a run with no record creates afresh).
+    /// </summary>
+    public const string CreationRecordNotPersisted = "spe-creation-record-not-persisted";
+
+    /// <summary>
     /// The provisioner reported a hard failure (PS script non-zero exit /
     /// Graph error) that is NOT a T6 delegated-token trap. Resumable — operator
     /// resolves the precondition (connectivity, permissions, SPE cert-replication

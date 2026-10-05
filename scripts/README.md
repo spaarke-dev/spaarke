@@ -1069,7 +1069,8 @@ is onboarded onto a container type another environment already uses (`-Verify` m
 **Safety model:** dry run by default (`-WhatIf` forces it); write-ahead reversal manifest (`-RevertManifest <csv> -Apply`
 undoes); every write read back; never overwrites a stamp (MISMATCH / FOREIGN / MALFORMED / BIND-CONFLICT are listed);
 `-MaxWritesPerRun` samples; `-Verify` lists every still-unbound container and fails on it, on a mismatch, an unreadable
-binding or a config whose containers could not be listed.
+binding or a config whose containers could not be listed. A config whose Key Vault secret name is outside the BFF's
+allow-list is SKIPPED with its secret never read (round 41 item 4 — repair it with `Repair-SpeConfigSecretName.ps1`).
 
 ```powershell
 .\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault>            # dry run
@@ -1082,7 +1083,8 @@ binding or a config whose containers could not be listed.
 `Invoke-SpeContainerBindOrRemove` (stamp, read back, remove the container if the stamp did not land), used by every script
 that creates a container (`New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
 `Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`). `SpeAdminContainerBindingGuardTests`
-fails the build on a script that creates a container without it.
+fails the build on a script that creates a container without it — including a URI held in a variable, a splat, `az rest`,
+or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 item 5).
 
 ### `Backfill-RecordOwnership.ps1`
 **Purpose:** Re-owns EXISTING **app-owned** `sprk_document` / `sprk_todo` rows to a business unit's DEFAULT OWNER TEAM, record-first — the backfill for write-path invariant **I-6**. Before task 080 every BFF-created record was owned by the BFF application user in the ROOT business unit, which no child-business-unit user can read at Deep depth. The team comes from the record the row is filed against (document: `sprk_matter` → `sprk_project` → `sprk_invoice` → `sprk_workassignment`; To Do: record regarding → document → communication), mirroring `RecordOwnershipResolver`. Rows filed against nothing are **reported, never written** — the create was app-only, so the data does not record who made it ("we can't guess").
@@ -1220,12 +1222,36 @@ pwsh scripts/Test-SpeContainerPermissionPaging.ps1 -ContainerId 'b!...' -AccessT
 ### `Test-SpeConfigSecretNames.ps1`
 **Purpose:** READ-ONLY. Lists the SPE container-type configs whose `sprk_keyvaultsecretname` is outside the BFF's allow-list
 (ONE pinned prefix, `spe-owning-app-`; unified-access-control-r2 task 165, owner round 35 item 3). The BFF refuses such a
-config (409) and never reads the secret it names. Renaming is a manual gate: store the owning app's secret under a
-conforming name, then update the config.
+config (409) and never reads the secret it names. Renaming is a manual gate — `Repair-SpeConfigSecretName.ps1` below.
 **Usage:** 🔴 Per environment, before / after deploying task 165's BFF. **Lifecycle:** ✅ Maintained (task 165 f2, 2026-10-04)
 
 ```powershell
 .\Test-SpeConfigSecretNames.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify   # exit 1 while any config does not conform
+```
+
+**Shared module:** `common/SpeConfigSecretNamePolicy.ps1` — THE PowerShell copy of the BFF's allow-list (`$SpeConfigSecretNamePrefix`,
+`Test-SpeConfigSecretNameAllowed`; the expression ends at `\z`, never `$`, which also matches before a trailing newline —
+round 41 item 5). Dot-sourced by this script, `Repair-SpeConfigSecretName.ps1` and the container-binding backfill;
+`SpeAdminContainerBindingGuardTests` pins it equal to the C# rule and fails on a script that reads a config's secret
+without it.
+
+### `Repair-SpeConfigSecretName.ps1`
+**Purpose:** Repairs ONE config the check above lists (unified-access-control-r2 task 165, owner round 41 item 4): stores
+the config's owning-app client secret under a conforming name in the BFF Key Vault(s) and PATCHes the config's
+`sprk_keyvaultsecretname` to it (If-Match on its ETag). The value comes from a vault that already holds the name (a repeat
+run mints nothing), else `-MintClientSecret` (Graph `addPassword` on the owning app — an Entra write, existing credentials
+kept; the keyId is printed, the value never) or `-SourceKeyVaultName`/`-SourceSecretName`. Never deletes the config, never
+overwrites a stored secret.
+**Usage:** 🔴 Manual gate, per non-conforming config. **Lifecycle:** ✅ Maintained (task 165 f2-v1, 2026-10-05)
+**Dependencies:** Azure CLI (`az login` with Dataverse write on the config, Key Vault secret get/set on each vault, and —
+for `-MintClientSecret` — rights to add a credential to the owning app), PowerShell 7+
+**Safety model:** dry run by default; `-Apply` writes; `-Verify` (read-only) exits 0 only when the config names the secret,
+every vault holds the same value, and that value authenticates as the owning app (a client-credentials token request).
+
+```powershell
+.\Repair-SpeConfigSecretName.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ConfigId <config-id> -SecretName spe-owning-app-<name> -KeyVaultName <bff-kv>,<operator-kv>   # dry run
+.\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
+.\Repair-SpeConfigSecretName.ps1 ... -Verify   # must exit 0
 ```
 
 ### `tests/bicep-e2e-dry-run.ps1`

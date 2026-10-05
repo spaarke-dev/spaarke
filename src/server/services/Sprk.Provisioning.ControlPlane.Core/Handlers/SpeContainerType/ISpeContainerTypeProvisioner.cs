@@ -16,6 +16,10 @@
 //   bound to the ROOT business unit of the customer's Dataverse environment
 //   (H8 therefore runs after H5 — DagAdvancer.HandlerDependencies) through
 //   BindRootContainerAsync, once the container is verified readable.
+//   RESUME (owner round 41 item 1): H8 records what it created in the run
+//   immediately; a re-entry never calls ProvisionAsync for a recorded root
+//   container, and when only the type is recorded it passes
+//   ExistingContainerTypeId so no second (undeletable) container type is made.
 //
 // WHY -CreateTestContainer FOR THE "ROOT CONTAINER" (deviation from the POML's
 // literal "invoke New-BusinessUnitContainer.ps1" wording — Path C pivot):
@@ -127,6 +131,12 @@ public abstract record SpeContainerBindOutcome
 /// <param name="VaultName">Customer Key Vault name holding the SPE owner cert (§4D I4 tenant-scoped vault) — passed as the script's <c>-KeyVaultName</c>.</param>
 /// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert (T6 cert bootstrap) — passed as the script's <c>-CertSecretName</c>.</param>
 /// <param name="DisplayName">Container-type display name.</param>
+/// <param name="ExistingContainerTypeId">
+/// The container type THIS run's H8 already created (recorded in the run — unified-access-control-r2 task 165, owner
+/// round 41 item 1), or null. When set, NO container type is created: only a new root container is created in it (the
+/// recorded root container was removed after a failed bind, or creation stopped after the type). A container type is
+/// durable customer data that cannot be deleted, so a resume never creates a second one.
+/// </param>
 public sealed record SpeContainerTypeProvisionRequest(
     string CustomerId,
     string TenantId,
@@ -134,7 +144,8 @@ public sealed record SpeContainerTypeProvisionRequest(
     string SharePointDomain,
     string VaultName,
     string CertSecretName,
-    string DisplayName);
+    string DisplayName,
+    string? ExistingContainerTypeId = null);
 
 /// <summary>
 /// Outputs H8 needs to (a) populate <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.ContainerTypeId"/>,
@@ -164,7 +175,10 @@ public abstract record SpeContainerTypeProvisionOutcome
     /// markers are absent despite a claimed success) — the handler maps this to
     /// <see cref="Handlers.FailureClass.QuarantineRequired"/> + a distinct
     /// rejection code so operators never mistake a T6 regression for a routine
-    /// Resumable failure.
+    /// Resumable failure. <paramref name="CreatedContainerTypeId"/> names the container type this call DID create (or
+    /// reused) before it failed, so the handler records it and a resume creates only the root container in it
+    /// (task 165, owner round 41 item 1) — null when no container type exists yet.
     /// </summary>
-    public sealed record Failure(string Diagnostic, bool IsDelegatedTokenTrap) : SpeContainerTypeProvisionOutcome;
+    public sealed record Failure(string Diagnostic, bool IsDelegatedTokenTrap, string? CreatedContainerTypeId = null)
+        : SpeContainerTypeProvisionOutcome;
 }

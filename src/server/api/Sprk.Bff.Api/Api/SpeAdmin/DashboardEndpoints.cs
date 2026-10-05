@@ -273,8 +273,10 @@ public static class DashboardEndpoints
     /// <remarks>
     /// <para>
     /// A PLATFORM OPERATOR (own unit = the root) who reaches EVERY config gets the aggregate unchanged — including
-    /// the AGGREGATE of the unattributed containers (unbound ones, which no admin route reaches: owner round 35 item 2 —
-    /// a count and storage, never an id or a name; the alarm that a backfill / -Bind is owed).
+    /// the AGGREGATE of the unattributed containers (bound to a unit of this environment under which no config of their
+    /// type sits — a count and storage, never an id or a name). UNBOUND containers are in no view at all, this one
+    /// included (owner round 41 item 2: under Model 1 they may be another customer's); the backfill's -Verify lists
+    /// them.
     /// Anyone else gets a projection, even when every config the aggregate happens to NAME is theirs: a config the
     /// sync skipped as incomplete is named nowhere, yet it is counted in the completeness concern.
     /// </para>

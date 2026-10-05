@@ -14,9 +14,14 @@ namespace Spaarke.ArchTests;
 ///   <item><b>Every container-creation path stamps</b> (round 35 item 1 — not only the BFF's). In <c>src/</c>: each
 ///   <c>FileStorage.Containers…PostAsync(</c> sits in a method that binds the new container (<c>BindNewContainerAsync(</c>),
 ///   or is listed in <see cref="DeferredBinders"/> with the step that binds it, and that step is verified. In
-///   <c>scripts/</c>: each container-create call (a POST to the containers collection) is followed, in the same function
+///   <c>scripts/</c> (and PowerShell under <c>src/</c>): each container-create call is followed, in the same function
 ///   (or the same top-level script), by <c>Invoke-SpeContainerBindOrRemove</c>, and the script dot-sources
-///   <c>common/SpeContainerBinding.ps1</c>. An unstamped container is reached by NO admin route (round 35 item 2).</item>
+///   <c>common/SpeContainerBinding.ps1</c>. An unstamped container is reached by NO admin route (round 35 item 2).
+///   <b>Round 41 item 5:</b> the guard follows every route to the collection, not one spelling — in C# a collection or
+///   FileStorage builder held in a variable, passed along or constructed directly is refused, and a spelled-out collection
+///   URL in a method that POSTs is a create; in a script that names the collection, a POST whose URI is not provably
+///   another endpoint (a variable, a splat, a function's result) is a create; the Graph SDK cmdlet is a create anywhere;
+///   no other source type may address the collection at all.</item>
 ///   <item><b>ONE constant on each side.</b> The property name is spelled as a literal in exactly one <c>.cs</c> file under
 ///   <c>src/</c> (the source-linked contract) and exactly one script under <c>scripts/</c> (the common module), and the
 ///   two are equal. The Key Vault secret-name prefix (round 35 item 3) likewise agrees between the BFF and the
@@ -35,7 +40,34 @@ public sealed class SpeAdminContainerBindingGuardTests
     // 1a. Stamped at creation — C# (all of src/)
     // ─────────────────────────────────────────────────────────────────────────
 
-    private static readonly Regex ContainerCreate = new(@"FileStorage\s*\.\s*Containers\s*\.\s*PostAsync\s*\(", RegexOptions.Compiled);
+    /// <summary>
+    /// A member access to the Graph SDK's <c>FileStorage</c> request builder (the <c>Microsoft.Graph.Storage.FileStorage</c>
+    /// NAMESPACE is skipped). Owner round 41 item 5: the guard follows EVERY route to the containers collection, not one
+    /// spelling of it — a builder held in a variable, passed along or constructed directly is refused, because nothing
+    /// could then tell a create through it from a read.
+    /// </summary>
+    private static readonly Regex FileStorageMember = new(@"\.\s*FileStorage\b", RegexOptions.Compiled);
+
+    private static readonly Regex GraphStorageNamespace = new(
+        @"Microsoft\s*\.\s*Graph\s*\.\s*(?:Beta\s*\.\s*)?Storage\s*$", RegexOptions.Compiled);
+
+    private static readonly Regex FileStorageMemberNext = new(
+        @"\G\s*\.\s*(?<member>Containers|ContainerTypes|ContainerTypeRegistrations|DeletedContainers)\b", RegexOptions.Compiled);
+
+    private static readonly Regex IndexerNext = new(@"\G\s*\[", RegexOptions.Compiled);
+
+    private const string Balanced = @"\((?>[^()]+|\((?<d>)|\)(?<-d>))*(?(d)(?!))\)";
+
+    /// <summary>The only uses of the containers COLLECTION builder the guard can judge: a chained GET or POST.</summary>
+    private static readonly Regex CollectionChainNext = new(
+        @"\G\s*(?:\.\s*WithUrl\s*" + Balanced + @"\s*)?\.\s*(?<verb>GetAsync|PostAsync)\s*\(", RegexOptions.Compiled);
+
+    /// <summary>The collection URL spelled out (raw HTTP / Kiota request information / a script) — not an item URL.</summary>
+    private static readonly Regex CollectionUrl = new(@"fileStorage/containers(?![/\w])", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>Signals that a C# method sends a POST.</summary>
+    private static readonly Regex CSharpPostSignal = new(
+        @"\.\s*Post(?:AsJson)?Async\s*\(|HttpMethod\s*\.\s*Post\b|Method\s*\.\s*POST\b|""POST""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Creation sites whose binding is a LATER step of the same handler run, not the creating method — key: the creating
@@ -43,8 +75,8 @@ public sealed class SpeAdminContainerBindingGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> DeferredBinders = new Dictionary<string, string>
     {
-        // H8 creates the root container in ProvisionAsync and binds it after the app-only GET verification (an SPE
-        // container may be unaddressable for up to 24h after creation — binding earlier would delete a healthy one).
+        // H8 creates the root container in CreateAsync, records it, and binds it after the app-only GET verification (an
+        // SPE container may be unaddressable for up to 24h after creation — binding earlier would delete a healthy one).
         ["src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphContainerTypeProvisioner.cs"] =
             "H8SpeContainerTypeHandler.HandleAsync -> ISpeContainerTypeProvisioner.BindRootContainerAsync -> BindNewContainerAsync",
     };
@@ -53,31 +85,49 @@ public sealed class SpeAdminContainerBindingGuardTests
     public void EveryContainerCreationPath_BindsTheNewContainer()
     {
         var files = SourceFiles(Path.Combine(RepoRoot, "src"), "*.cs")
-            .Select(f => (Rel: Rel(f), Code: StripComments(File.ReadAllText(f))))
+            .Select(f => (Rel: Rel(f), Analysis: AnalyseCSharp(StripComments(File.ReadAllText(f)))))
             .ToList();
 
-        var creators = files.Where(f => ContainerCreate.IsMatch(f.Code)).ToList();
+        var creators = files.Where(f => f.Analysis.Creations.Count > 0).ToList();
         Assert.True(creators.Count >= 3,
             "the scan must find the three C# creation paths (SpeAdminGraphService, ContainerOperations, the L2 H8 " +
             $"provisioner) — found {creators.Count}, so it would pass vacuously");
 
         var violations = new List<string>();
-        foreach (var (rel, code) in creators)
+        foreach (var (rel, analysis) in files)
         {
-            if (DeferredBinders.ContainsKey(rel))
+            violations.AddRange(analysis.Opaque.Select(v => $"{rel}: {v}"));
+            if (!DeferredBinders.ContainsKey(rel))
             {
-                continue;
+                violations.AddRange(analysis.Unbound.Select(v => $"{rel}: {v}"));
             }
-
-            violations.AddRange(UnboundCreations(code).Select(v => $"{rel}: {v}"));
         }
 
         Assert.True(violations.Count == 0,
-            "These methods create an SPE container without binding it to its owning business unit (owner rounds 20/35; " +
-            "call BindNewContainerAsync in the same method):\n  " + string.Join("\n  ", violations));
+            "These create an SPE container without binding it to its owning business unit, or reach the containers " +
+            "collection in a form the guard cannot judge (owner rounds 20/35/41: call BindNewContainerAsync in the same " +
+            "method, and use the collection only as a chained .GetAsync( / .PostAsync( on graph.Storage.FileStorage.Containers):\n  " +
+            string.Join("\n  ", violations));
 
         var stale = DeferredBinders.Keys.Where(k => !creators.Any(c => c.Rel == k)).ToList();
         Assert.True(stale.Count == 0, "Deferred-binder entries naming no creation site — delete them: " + string.Join(", ", stale));
+    }
+
+    [Fact(DisplayName = "No other source under src/ addresses the SPE containers collection")]
+    public void NoOtherSourceUnderSrc_AddressesTheContainersCollection()
+    {
+        // TypeScript / JavaScript / Python / shell under src/ has no binder: a container created there would stay unbound.
+        // C# and PowerShell under src/ go through their own analysers.
+        var patterns = new[] { "*.ts", "*.tsx", "*.js", "*.mjs", "*.cjs", "*.py", "*.sh" };
+        var hits = patterns
+            .SelectMany(p => SourceFiles(Path.Combine(RepoRoot, "src"), p))
+            .Where(f => CollectionUrl.IsMatch(File.ReadAllText(f)) || ScriptSdkCreate.IsMatch(File.ReadAllText(f)))
+            .Select(Rel)
+            .ToList();
+
+        Assert.True(hits.Count == 0,
+            "These src/ files address the SPE containers collection outside the C# and PowerShell creation paths — create " +
+            "containers only through a path that binds them:\n  " + string.Join("\n  ", hits));
     }
 
     [Fact(DisplayName = "The L2 H8 root container is bound by the handler after verification, before the KV write and the H7 handoff")]
@@ -95,17 +145,28 @@ public sealed class SpeAdminContainerBindingGuardTests
         Assert.Contains(".DeleteAsync(", bindStep);
         Assert.Contains("BindNewContainerAsync(", MethodBody(provisioner, "BindRootContainerAsync("));
 
-        // The handler binds the verified container BEFORE the KV write and before the success state hands it to H7.
+        // The handler reads its own creation record, creates only without one, RECORDS what it created, then verifies,
+        // binds, writes the KV secret and completes — in that order (owner round 41 item 1).
         var handle = MethodBody(handler, "HandleAsync(");
+        var recorded = handle.IndexOf("ReadRecordedCreation(", StringComparison.Ordinal);
+        var provision = handle.IndexOf("_provisioner.ProvisionAsync(", StringComparison.Ordinal);
+        var record = provision < 0 ? -1 : handle.IndexOf("RecordCreationAsync(", provision, StringComparison.Ordinal);
         var verify = handle.IndexOf("_verifier.VerifyAsync(", StringComparison.Ordinal);
         var bind = handle.IndexOf("_provisioner.BindRootContainerAsync(", StringComparison.Ordinal);
         var kv = handle.IndexOf("_kvWriter.WriteAsync(", StringComparison.Ordinal);
         var complete = handle.IndexOf("MarkCompleteAsync(", StringComparison.Ordinal);
-        Assert.True(verify > 0 && bind > verify && kv > bind && complete > kv,
-            $"H8 must verify, then bind, then write the KV secret, then complete (offsets: verify {verify}, bind {bind}, kv {kv}, complete {complete})");
+        Assert.True(recorded > 0 && provision > recorded && record > provision && verify > record && bind > verify && kv > bind
+                    && complete > kv,
+            "H8 must read its creation record, create, record, verify, bind, write the KV secret, then complete (offsets: " +
+            $"read {recorded}, provision {provision}, record {record}, verify {verify}, bind {bind}, kv {kv}, complete {complete})");
+
+        // The H7 hand-off (InterStepState.SpeContainerId) is given a container ONLY on completion — after the bind.
+        var handOffs = Regex.Matches(handler, @"SpeContainerId\s*=(?!=)(?!\s*null\b)").Count;
+        Assert.True(handOffs == 1 && MethodBody(handler, "MarkCompleteAsync(").Contains("SpeContainerId = outputs.RootContainerId", StringComparison.Ordinal),
+            $"InterStepState.SpeContainerId must be given a container in exactly one place, MarkCompleteAsync (found {handOffs})");
     }
 
-    [Fact(DisplayName = "The C# creation analyser flags a seeded unbound creation and passes a bound one")]
+    [Fact(DisplayName = "The C# creation analyser flags every seeded unbound or opaque creation and passes the bound and read forms")]
     public void TheCreationAnalyser_BitesOnASeededUnboundCreation()
     {
         const string bound = """
@@ -116,6 +177,31 @@ public sealed class SpeAdminContainerBindingGuardTests
                 return c;
             }
             """;
+        const string boundViaWithUrl = """
+            public async Task<X> CreateAsync()
+            {
+                var c = await graphClient.Storage.FileStorage.Containers.WithUrl(Build(url, "x")).PostAsync(body);
+                await BindNewContainerAsync(graphClient, c.Id, unit, ct);
+                return c;
+            }
+            """;
+        const string reads = """
+            public async Task<X> ListAsync()
+            {
+                var page = await graphClient.Storage.FileStorage
+                    .Containers
+                    .GetAsync(c => c.QueryParameters.Top = 5, ct);
+                var next = await graphClient.Storage.FileStorage.Containers.WithUrl($"{b}/storage/fileStorage/containers?$skiptoken={t}").GetAsync();
+                var item = await graphClient.Storage.FileStorage.Containers[id].Drive.GetAsync();
+                return page;
+            }
+
+            public Task<T> CreateTypeAsync() => graphClient.Storage.FileStorage.ContainerTypes.PostAsync(t);
+            """;
+        const string namespaceOnly = """
+            using Microsoft.Graph.Storage.FileStorage.Containers.Item.Permissions;
+            public sealed class X { private Microsoft.Graph.Storage.FileStorage.Containers.Item.Drive.DriveRequestBuilder? _d; }
+            """;
         const string unbound = """
             public async Task<X> CreateAsync()
             {
@@ -124,26 +210,135 @@ public sealed class SpeAdminContainerBindingGuardTests
                 return c;
             }
             """;
+        // Owner round 41 item 5 — the verifier's seed H2: the collection builder held in a variable.
+        const string heldCollection = """
+            public async Task<X> CreateAsync()
+            {
+                var containers = graph.Storage.FileStorage.Containers;
+                return await containers.PostAsync(body);
+            }
+            """;
+        const string heldFileStorage = """
+            public async Task<X> CreateAsync()
+            {
+                var fs = graph.Storage.FileStorage;
+                return await fs.Containers.PostAsync(body);
+            }
+            """;
+        const string passedAlong = """
+            public Task<X> CreateAsync() => Send(graph.Storage.FileStorage.Containers, body);
+            """;
+        const string constructed = """
+            public async Task<X> CreateAsync()
+            {
+                return await new ContainersRequestBuilder(url, adapter).PostAsync(body);
+            }
+            """;
+        const string rawHttp = """
+            public async Task<HttpResponseMessage> CreateAsync()
+            {
+                return await http.PostAsync($"{baseUrl}/storage/fileStorage/containers", content);
+            }
+            """;
+        const string kiota = """
+            public async Task CreateAsync()
+            {
+                var info = new RequestInformation { HttpMethod = Method.POST, URI = new Uri(baseUrl + "/storage/fileStorage/containers") };
+                await adapter.SendNoContentAsync(info);
+            }
+            """;
 
-        Assert.Empty(UnboundCreations(bound));
-        Assert.NotEmpty(UnboundCreations(unbound));
+        Assert.Empty(Problems(bound));
+        Assert.Empty(Problems(boundViaWithUrl));
+        Assert.Empty(Problems(reads));
+        Assert.Empty(Problems(namespaceOnly));
+        foreach (var (name, seeded) in new[]
+                 {
+                     ("unbound", unbound), ("heldCollection", heldCollection), ("heldFileStorage", heldFileStorage),
+                     ("passedAlong", passedAlong), ("constructed", constructed), ("rawHttp", rawHttp), ("kiota", kiota),
+                 })
+        {
+            Assert.True(Problems(seeded).Count > 0, $"the analyser must flag the seeded '{name}' creation");
+        }
+
+        static List<string> Problems(string source)
+        {
+            var analysis = AnalyseCSharp(StripComments(source));
+            return analysis.Unbound.Concat(analysis.Opaque).ToList();
+        }
     }
 
-    /// <summary>For each container creation, the enclosing method body must call <c>BindNewContainerAsync(</c>.</summary>
-    private static List<string> UnboundCreations(string source)
+    /// <summary>What the guard finds in one C# file.</summary>
+    /// <param name="Creations">Offsets of every container CREATE the guard recognises.</param>
+    /// <param name="Unbound">Creations whose method does not bind the new container.</param>
+    /// <param name="Opaque">Uses of the containers collection the guard cannot judge (held, passed, constructed).</param>
+    private sealed record CSharpAnalysis(List<int> Creations, List<string> Unbound, List<string> Opaque);
+
+    private static CSharpAnalysis AnalyseCSharp(string code)
     {
-        var code = StripComments(source);
-        var violations = new List<string>();
-        foreach (Match m in ContainerCreate.Matches(code))
+        // using directives are not request builders (blanked, keeping offsets).
+        code = Regex.Replace(code, @"^[ \t]*using\s+[^;\n]+;", m => new string(' ', m.Length), RegexOptions.Multiline);
+
+        var creations = new List<int>();
+        var opaque = new List<string>();
+
+        foreach (Match m in FileStorageMember.Matches(code))
         {
-            var body = EnclosingMethodBody(code, m.Index);
-            if (!body.Contains("BindNewContainerAsync(", StringComparison.Ordinal))
+            if (GraphStorageNamespace.IsMatch(code[Math.Max(0, m.Index - 80)..m.Index]))
             {
-                violations.Add($"creation at offset {m.Index} is not bound in its method");
+                continue; // Microsoft.Graph.Storage.FileStorage… — the namespace, not the request builder
+            }
+
+            var member = FileStorageMemberNext.Match(code, m.Index + m.Length);
+            if (!member.Success)
+            {
+                opaque.Add($"line {LineOf(code, m.Index)}: the FileStorage request builder is held or passed — chain it");
+                continue;
+            }
+
+            if (member.Groups["member"].Value != "Containers")
+            {
+                continue;
+            }
+
+            var afterCollection = member.Index + member.Length;
+            if (IndexerNext.IsMatch(code, afterCollection))
+            {
+                continue; // Containers[id] — one container, not the collection
+            }
+
+            var chain = CollectionChainNext.Match(code, afterCollection);
+            if (!chain.Success)
+            {
+                opaque.Add($"line {LineOf(code, m.Index)}: the containers COLLECTION builder is used other than in a chained " +
+                           ".GetAsync( / .PostAsync( — a create through it could not be seen");
+            }
+            else if (chain.Groups["verb"].Value == "PostAsync")
+            {
+                creations.Add(m.Index);
             }
         }
 
-        return violations;
+        foreach (Match m in Regex.Matches(code, @"\bContainersRequestBuilder\b"))
+        {
+            opaque.Add($"line {LineOf(code, m.Index)}: ContainersRequestBuilder named directly — use graph.Storage.FileStorage.Containers, chained");
+        }
+
+        // The collection URL spelled out: a create when its method sends a POST.
+        foreach (Match m in CollectionUrl.Matches(code))
+        {
+            if (CSharpPostSignal.IsMatch(EnclosingMethodBody(code, m.Index)))
+            {
+                creations.Add(m.Index);
+            }
+        }
+
+        var unbound = creations
+            .Where(i => !EnclosingMethodBody(code, i).Contains("BindNewContainerAsync(", StringComparison.Ordinal))
+            .Select(i => $"the create at line {LineOf(code, i)} is not bound in its method")
+            .ToList();
+
+        return new CSharpAnalysis(creations, unbound, opaque);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -153,15 +348,31 @@ public sealed class SpeAdminContainerBindingGuardTests
     private const string ScriptBinder = "Invoke-SpeContainerBindOrRemove";
     private const string ScriptBindingModule = "common/SpeContainerBinding.ps1";
 
-    /// <summary>A URI that ends at the containers COLLECTION (a create when POSTed; a GET of it lists).</summary>
-    private static readonly Regex ScriptContainersCollection = new(
-        @"fileStorage/containers[""']", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    /// <summary>The Graph PowerShell SDK's container create cmdlet (v1.0 and beta) — a create wherever it appears.</summary>
+    private static readonly Regex ScriptSdkCreate = new(
+        @"New-Mg(?:Beta)?StorageFileStorageContainer(?![\w-])", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>A quoted string that ends a path at <c>/containers</c> (the collection) — a "$base/containers" spelling.</summary>
+    private static readonly Regex QuotedRelativeCollection = new(
+        @"[""'][^""'\n]*/containers(?![/\w])[^""'\n]*[""']", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>Every way a script asks for a POST: -Method Post, a splat's Method = 'Post', az rest, curl, an enum, a helper's positional 'Post'.</summary>
+    private static readonly Regex ScriptPostSignal = new(
+        @"-Method\s*:?\s*['""]?Post\b|\bMethod\s*=\s*['""]?Post\b|--method\s+['""]?post\b|-X\s+['""]?POST\b|\]::Post\b|(?<![\w-])['""]Post['""]",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex ScriptNamedUri = new(
+        @"(?:-Uri\s*:?|--ur[il])\s+(?<arg>""[^""]*""|'[^']*'|\$[\w:]+|\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    private static readonly Regex ScriptQuotedPath = new(@"""[^""\n]*/[^""\n]*""|'[^'\n]*/[^'\n]*'", RegexOptions.Compiled);
 
     [Fact(DisplayName = "Every SPE container a script creates is bound to its business unit, or removed")]
     public void EveryScriptThatCreatesAContainer_BindsIt()
     {
-        var scripts = SourceFiles(Path.Combine(RepoRoot, "scripts"), "*.ps1")
-            .Concat(SourceFiles(Path.Combine(RepoRoot, "scripts"), "*.psm1"))
+        // scripts/, and any PowerShell under src/ (round 35 item 1: "a container-create call site in src/ or scripts/").
+        var scripts = new[] { "scripts", "src" }
+            .SelectMany(root => SourceFiles(Path.Combine(RepoRoot, root), "*.ps1")
+                .Concat(SourceFiles(Path.Combine(RepoRoot, root), "*.psm1")))
             .Select(f => (Rel: Rel(f), Text: File.ReadAllText(f)))
             .ToList();
 
@@ -172,12 +383,28 @@ public sealed class SpeAdminContainerBindingGuardTests
 
         var violations = creators.SelectMany(s => UnboundScriptCreations(s.Text).Select(v => $"{s.Rel}: {v}")).ToList();
         Assert.True(violations.Count == 0,
-            "These scripts create an SPE container without binding it (owner round 35 item 1: call " + ScriptBinder +
+            "These scripts create (or may create) an SPE container without binding it (owner rounds 35/41: call " + ScriptBinder +
             " after the create, in the same function, and dot-source " + ScriptBindingModule + "):\n  " +
             string.Join("\n  ", violations));
     }
 
-    [Fact(DisplayName = "The script creation analyser flags a seeded unbound creation and passes a bound one")]
+    [Fact(DisplayName = "No other script type under scripts/ addresses the SPE containers collection")]
+    public void NoOtherScriptType_AddressesTheContainersCollection()
+    {
+        // Shell, Python, JavaScript and pipeline YAML have no binder: a container created there would stay unbound.
+        var patterns = new[] { "*.sh", "*.py", "*.js", "*.mjs", "*.cjs", "*.ts", "*.cmd", "*.bat", "*.yml", "*.yaml" };
+        var hits = patterns
+            .SelectMany(p => SourceFiles(Path.Combine(RepoRoot, "scripts"), p))
+            .Where(f => CollectionUrl.IsMatch(File.ReadAllText(f)) || ScriptSdkCreate.IsMatch(File.ReadAllText(f)))
+            .Select(Rel)
+            .ToList();
+
+        Assert.True(hits.Count == 0,
+            "These scripts address the SPE containers collection with no binder — create containers only through a " +
+            "PowerShell path that calls " + ScriptBinder + ":\n  " + string.Join("\n  ", hits));
+    }
+
+    [Fact(DisplayName = "The script creation analyser flags every seeded unbound creation and passes the bound and read forms")]
     public void TheScriptCreationAnalyser_BitesOnASeededUnboundCreation()
     {
         const string bound = """
@@ -190,6 +417,16 @@ public sealed class SpeAdminContainerBindingGuardTests
                 Invoke-SpeContainerBindOrRemove -Token $t -ContainerId $c.id -BusinessUnitId $u
             }
             """;
+        const string otherPosts = """
+            $list = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers?`$top=5" -Method Get
+            $tokenUrl = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
+            $tok = Invoke-RestMethod -Uri $tokenUrl -Method POST -Body $tb
+            Invoke-RestMethod -Uri "$dv/api/data/v9.2/environmentvariablevalues" -Method Post -Body $x
+            Invoke-SpeGraph $Token 'Post' "$GraphBase/storage/fileStorage/containers/$id/permissions" $grant
+            """;
+        const string notACreate = """
+            $list = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" -Method Get
+            """;
         const string unbound = """
             . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
             function New-Thing {
@@ -197,34 +434,126 @@ public sealed class SpeAdminContainerBindingGuardTests
             }
             function Other { Invoke-SpeContainerBindOrRemove -Token $t -ContainerId $x -BusinessUnitId $u }
             """;
-        const string notACreate = """
-            $list = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" -Method Get
-            """;
         const string noModule = """
             $c = Invoke-RestMethod -Uri 'https://graph.microsoft.com/beta/storage/fileStorage/containers' -Method Post -Body $b
             Invoke-SpeContainerBindOrRemove -Token $t -ContainerId $c.id -BusinessUnitId $u
             """;
+        // Owner round 41 item 5 — the verifier's seed H1: the URI held in a variable.
+        const string uriInVariable = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $uri = "https://graph.microsoft.com/v1.0/storage/fileStorage/containers"; Invoke-RestMethod -Uri $uri -Method Post
+            """;
+        const string uriBuiltFromABase = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $base = "https://graph.microsoft.com/v1.0/storage/fileStorage"
+            $c = Invoke-RestMethod -Uri "$base/containers" -Method Post -Body $b
+            """;
+        const string splatted = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $p = @{
+                Uri    = "https://graph.microsoft.com/v1.0/storage/fileStorage/containers"
+                Method = 'Post'
+                Body   = $b
+            }
+            $c = Invoke-RestMethod @p
+            """;
+        const string uriFromAFunction = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            function Get-CollectionUri { "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" }
+            $c = Invoke-RestMethod -Uri (Get-CollectionUri) -Method Post -Body $b
+            """;
+        const string azRest = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            az rest --method post --url "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" --body $b
+            """;
+        const string sdkCmdlet = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $c = New-MgStorageFileStorageContainer -BodyParameter $b
+            """;
 
         Assert.Empty(UnboundScriptCreations(bound));
-        Assert.NotEmpty(UnboundScriptCreations(unbound));
+        Assert.Empty(ScriptCreations(otherPosts));
         Assert.Empty(ScriptCreations(notACreate));
-        Assert.NotEmpty(UnboundScriptCreations(noModule));
+        foreach (var (name, seeded) in new[]
+                 {
+                     ("unbound", unbound), ("noModule", noModule), ("uriInVariable", uriInVariable),
+                     ("uriBuiltFromABase", uriBuiltFromABase), ("splatted", splatted), ("uriFromAFunction", uriFromAFunction),
+                     ("azRest", azRest), ("sdkCmdlet", sdkCmdlet),
+                 })
+        {
+            Assert.True(UnboundScriptCreations(seeded).Count > 0, $"the analyser must flag the seeded '{name}' creation");
+        }
     }
 
-    /// <summary>The offsets of every container CREATE in a script: a containers-collection URI in a POST command.</summary>
+    /// <summary>
+    /// The offsets of every container CREATE (or possible create) in a script. Fail closed (owner round 41 item 5): in a
+    /// script that names the containers collection anywhere, a POST whose URI the analyser cannot prove is another
+    /// endpoint — a variable it cannot resolve to literals, a splat, a function's result — counts as a create.
+    /// </summary>
     private static List<int> ScriptCreations(string script)
     {
         var text = StripPowerShellComments(script);
-        var creations = new List<int>();
-        foreach (Match m in ScriptContainersCollection.Matches(text))
+        var creations = ScriptSdkCreate.Matches(text).Select(m => m.Index).ToList();
+
+        var namesCollection = CollectionUrl.IsMatch(text)
+                              || (text.Contains("fileStorage", StringComparison.OrdinalIgnoreCase) && QuotedRelativeCollection.IsMatch(text));
+        if (!namesCollection)
         {
-            if (Regex.IsMatch(LogicalCommand(text, m.Index), @"-Method\s+['""]?Post\b|\s'Post'\s", RegexOptions.IgnoreCase))
+            return creations;
+        }
+
+        foreach (Match post in ScriptPostSignal.Matches(text))
+        {
+            if (PostMayCreateAContainer(text, LogicalCommand(text, post.Index)))
             {
-                creations.Add(m.Index);
+                creations.Add(post.Index);
             }
         }
 
         return creations;
+    }
+
+    /// <summary>Whether one POST command (in a script that names the collection) may create a container.</summary>
+    private static bool PostMayCreateAContainer(string script, string command)
+    {
+        static bool IsCollection(string s) => CollectionUrl.IsMatch(s) || Regex.IsMatch(s, @"/containers(?![/\w])", RegexOptions.IgnoreCase);
+
+        var named = ScriptNamedUri.Match(command);
+        if (named.Success)
+        {
+            var arg = named.Groups["arg"].Value;
+            if (arg.StartsWith('"') || arg.StartsWith('\''))
+            {
+                return IsCollection(arg);
+            }
+
+            if (Regex.IsMatch(arg, @"^\$[\w:]+$"))
+            {
+                // A variable: every assignment of it in the script must be a literal that is provably another endpoint.
+                var name = Regex.Escape(arg.TrimStart('$').Replace("script:", string.Empty, StringComparison.OrdinalIgnoreCase));
+                var assignments = Regex.Matches(script, $@"^\s*\$(?:script:)?{name}\s*=\s*(?<rhs>.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                if (assignments.Count == 0)
+                {
+                    return true; // a parameter or computed elsewhere — unknown
+                }
+
+                foreach (Match a in assignments)
+                {
+                    var paths = ScriptQuotedPath.Matches(a.Groups["rhs"].Value).Select(p => p.Value).ToList();
+                    if (paths.Count == 0 || paths.Any(IsCollection))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            return true; // an expression — unknown
+        }
+
+        var literals = ScriptQuotedPath.Matches(command).Select(p => p.Value).ToList();
+        return literals.Count == 0 || literals.Any(IsCollection);
     }
 
     private static List<string> UnboundScriptCreations(string script)
@@ -329,11 +658,59 @@ public sealed class SpeAdminContainerBindingGuardTests
         Assert.Equal(literal, ScriptVariable(module, "SpeContainerStampProperty"));
     }
 
-    [Fact(DisplayName = "The secret-name -Verify script checks the prefix the BFF enforces")]
+    private const string ScriptSecretNamePolicyModule = "common/SpeConfigSecretNamePolicy.ps1";
+
+    /// <summary>The scripts that judge a config's Key Vault secret name — each must do it through THE module.</summary>
+    private static readonly string[] ScriptsJudgingSecretNames =
+    {
+        "Test-SpeConfigSecretNames.ps1",            // round 35 item 3's -Verify
+        "Repair-SpeConfigSecretName.ps1",           // round 41 item 4's dry run / -Apply / -Verify
+        "Backfill-SpeContainerBusinessUnitStamp.ps1", // refuses a non-conforming name before reading the vault
+    };
+
+    [Fact(DisplayName = "The PowerShell secret-name rule is ONE module that agrees with the BFF, and every script that judges a name uses it")]
     public void TheSecretNameVerifyScript_AgreesWithTheBff()
     {
-        var script = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "Test-SpeConfigSecretNames.ps1"));
-        Assert.Equal(SpeConfigSecretNamePolicy.RequiredPrefix, ScriptVariable(script, "SpeConfigSecretNamePrefix"));
+        var module = File.ReadAllText(Path.Combine(RepoRoot, "scripts", "common", "SpeConfigSecretNamePolicy.ps1"));
+        Assert.Equal(SpeConfigSecretNamePolicy.RequiredPrefix, ScriptVariable(module, "SpeConfigSecretNamePrefix"));
+
+        // Owner round 41 item 5: the allow-list ends at the END OF THE STRING (\z), never at '$', which in .NET also
+        // matches just before a trailing newline — so a name followed by a newline would conform.
+        Assert.Contains("+ '}\\z'", module, StringComparison.Ordinal);
+        Assert.DoesNotContain("+ '}$'", module, StringComparison.Ordinal);
+
+        foreach (var name in ScriptsJudgingSecretNames)
+        {
+            var script = StripPowerShellComments(File.ReadAllText(Path.Combine(RepoRoot, "scripts", name)));
+            Assert.True(script.Contains(ScriptSecretNamePolicyModule, StringComparison.OrdinalIgnoreCase),
+                $"{name} must dot-source {ScriptSecretNamePolicyModule} (the ONE PowerShell copy of the rule)");
+            Assert.True(ScriptVariable(script, "SpeConfigSecretNamePrefix") is null && !script.Contains("[A-Za-z0-9-]{1,", StringComparison.Ordinal),
+                $"{name} must not spell the rule again");
+            Assert.True(script.Contains("Test-SpeConfigSecretNameAllowed", StringComparison.Ordinal),
+                $"{name} must judge names with Test-SpeConfigSecretNameAllowed");
+        }
+
+        // Any script that takes a config's secret name AND reads a vault must be one of the above (it must judge first).
+        var vaultReaders = SourceFiles(Path.Combine(RepoRoot, "scripts"), "*.ps1")
+            .Where(f =>
+            {
+                var text = StripPowerShellComments(File.ReadAllText(f));
+                return text.Contains("sprk_keyvaultsecretname", StringComparison.OrdinalIgnoreCase)
+                       && Regex.IsMatch(text, @"az\s+keyvault\s+secret\s+show|vault\.azure\.net/secrets", RegexOptions.IgnoreCase);
+            })
+            .Select(Path.GetFileName)
+            .ToList();
+        Assert.True(vaultReaders.Count >= 2, $"the scan must find the vault-reading scripts (found {vaultReaders.Count})");
+        Assert.True(vaultReaders.All(r => ScriptsJudgingSecretNames.Contains(r)),
+            "These scripts read a config's Key Vault secret without the allow-list: " +
+            string.Join(", ", vaultReaders.Where(r => !ScriptsJudgingSecretNames.Contains(r))));
+
+        // The backfill refuses a non-conforming name BEFORE it reads the vault (as the BFF does).
+        var backfill = StripPowerShellComments(File.ReadAllText(Path.Combine(RepoRoot, "scripts", "Backfill-SpeContainerBusinessUnitStamp.ps1")));
+        var judged = backfill.IndexOf("Test-SpeConfigSecretNameAllowed $SecretName", StringComparison.Ordinal);
+        var vaultRead = backfill.IndexOf("az keyvault secret show", StringComparison.Ordinal);
+        Assert.True(judged > 0 && vaultRead > judged,
+            $"the backfill must judge the secret name before it reads the vault (judged at {judged}, read at {vaultRead})");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

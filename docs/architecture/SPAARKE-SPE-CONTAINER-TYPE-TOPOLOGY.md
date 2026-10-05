@@ -331,7 +331,12 @@ an ArchTest pins both and fails on any creation site that does not stamp.
   unit); the L2 control plane's **H8** root container (the new environment's root business unit, after verification);
   `scripts/New-BusinessUnitContainer.ps1` (the business unit it is run for), `scripts/Provision-Customer.ps1` step 10 (the
   root business unit) and `scripts/Create-NewContainerType.ps1 -CreateTestContainer` (`-TestContainerBusinessUnitId`). A
-  stamp that does not read back removes the container again. Existing containers:
+  stamp that does not read back removes the container again. **H8's 24h replication wait** (round 41 item 1): H8 binds
+  only a container it has verified addressable, so it RECORDS what it created in the run at once and every later entry
+  resumes with that container — it never creates a second container type or root container, and it hands the container
+  to H7 (`sprk_SharePointEmbeddedContainerId`) only once bound; H7 waits for H8 in the DAG. The guard follows every
+  route to the containers collection (round 41 item 5) — a builder held in a variable, a URI held in a variable, a splat,
+  raw HTTP, the Graph PowerShell cmdlet — not one spelling. Existing containers:
   `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1` (dry run / `-Apply` / `-Verify`) derives the owner only from
   authoritative records, takes an explicit `-Bind <containerId>=<businessUnitId>` for a container no record claims, and
   its `-Verify` lists — and fails on — every container still unbound.
@@ -340,8 +345,11 @@ an ArchTest pins both and fails on any creation site that does not stamp.
   route — root-unit admins included (round 35 item 2: under Model 1 a root admin of any environment whose config names a
   shared type would otherwise reach another customer's unbound containers); every refusal is the same 404, logged with
   its reason (`unbound`, `malformed`, `absent`, `other_type`, `out_of_scope`); an unreadable binding fails closed. Lists
-  and searches are trimmed the same way. **Manual gate:** the backfill's `-Apply` + `-Verify` exit 0 in every environment
-  before task 165's BFF is deployed there, and before a further environment is onboarded onto a shared type.
+  and searches are trimmed the same way, and an unbound container is in **no dashboard view** either — not even the
+  platform operator's aggregate (round 41 item 2: under Model 1 the root admin of any environment is that environment's
+  platform operator, so an aggregate over a shared type's unbound containers would count other customers'); its alarm is
+  the backfill's `-Verify`. **Manual gate:** the backfill's `-Apply` + `-Verify` exit 0 in every environment before
+  task 165's BFF is deployed there, and before a further environment is onboarded onto a shared type.
 - **Server-owned**: the custom-property route refuses to set or change it.
 - **Read one container at a time**: on the containers **collection** Graph accepts `$select=customProperties`, echoes it
   in `@odata.context`, and drops it from every row (measured 2026-10-04, beta and v1.0) — the same silent shape

@@ -160,10 +160,9 @@ public static class SearchItemsEndpoints
                         MimeType: item.MimeType))
                     .ToList(),
                 NextSkipToken: searchResult.NextSkipToken,
-                TotalCount: trim.IsPlatformOperator && visible.Count == searchResult.Items.Count
-                            && searchResult.NextSkipToken is null
-                    ? searchResult.TotalCount
-                    : visible.Count);
+                TotalCount: (int?)trim.ReportableGraphTotal(
+                                searchResult.TotalCount, searchResult.Items.Count, visible.Count, searchResult.NextSkipToken)
+                            ?? visible.Count);
 
             logger.LogInformation(
                 "SearchItems: query='{Query}', containerId={ContainerId}, results={Count}, hasNextPage={HasNext}, " +

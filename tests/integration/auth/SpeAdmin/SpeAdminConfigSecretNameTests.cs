@@ -162,6 +162,7 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
     [InlineData("SPE-ContainerTypeId")]           // starts with "spe-" but is not an owning-app secret
     [InlineData("spe-owning-apps-acme")]          // a near miss of the prefix
     [InlineData("spe-owning-app-")]               // the prefix alone names nothing
+    [InlineData("spe-owning-app-acme\n")]         // round 41 item 5: a trailing newline (the format check's '$' admits it)
     public async Task Post_WithASecretNameOutsideThePrefix_Is400_WithTheRulesCode_AndNothingIsCreated(string name)
     {
         using var client = Admin();

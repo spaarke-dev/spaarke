@@ -13,6 +13,11 @@
 // hand-written fake transport (this project's established pattern — never
 // Mock<HttpMessageHandler>). "No DELETE was sent" is the absence of a recorded
 // request, not a mock expectation.
+//
+// Owner round 41 item 1 (the resume): GraphContainerTypeProvisioner.CreateAsync,
+// over the same transport, reuses a container type the run already created
+// (ExistingContainerTypeId — no second, undeletable type) and reports the type
+// it DID create when a later step fails (CreatedContainerTypeId), so H8 records it.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -131,7 +136,74 @@ public sealed class GraphContainerTypeProvisionerBindTests
         graph.Requests.Should().ContainSingle(r => r.Method == "DELETE");
     }
 
+    // ── CreateAsync: the resume never makes a second container type (owner round 41 item 1) ─────────
+
+    private const string ExistingType = "cccccccc-dddd-eeee-ffff-000000000001";
+    private const string OwningApp = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
+
+    [Fact]
+    public async Task AnExistingContainerType_IsReused_OnlyARootContainerIsCreatedInIt()
+    {
+        var graph = new FakeGraph
+        {
+            OnPost = r => r.RequestUri!.AbsolutePath.EndsWith("/containerTypeRegistrations", StringComparison.Ordinal)
+                ? Json(HttpStatusCode.Conflict, """{"error":{"code":"conflict","message":"already registered"}}""")
+                : Json(HttpStatusCode.Created, "{\"id\":\"b!new-root\",\"containerTypeId\":\"" + ExistingType + "\"}"),
+        };
+
+        var outcome = await Create(graph, existingContainerTypeId: ExistingType);
+
+        var success = outcome.Should().BeOfType<SpeContainerTypeProvisionOutcome.Success>().Subject;
+        success.Outputs.ContainerTypeId.Should().Be(ExistingType);
+        success.Outputs.RootContainerId.Should().Be("b!new-root");
+        graph.Requests.Should().NotContain(r => r.Method == "POST" && r.Path.EndsWith("/containerTypes", StringComparison.Ordinal),
+            "a container type cannot be deleted — a resume must never create a second one");
+        var create = graph.Requests.Should().ContainSingle(r => r.Method == "POST" && r.Path.EndsWith("/containers", StringComparison.Ordinal)).Subject;
+        using var body = JsonDocument.Parse(create.Body!);
+        body.RootElement.GetProperty("containerTypeId").GetString().Should().Be(ExistingType);
+    }
+
+    [Fact]
+    public async Task AFailureAfterTheTypeWasCreated_ReportsTheType_SoTheHandlerRecordsIt()
+    {
+        var graph = new FakeGraph
+        {
+            OnPost = r =>
+            {
+                var path = r.RequestUri!.AbsolutePath;
+                if (path.EndsWith("/containerTypes", StringComparison.Ordinal))
+                {
+                    return Json(HttpStatusCode.Created, "{\"id\":\"" + ExistingType + "\",\"name\":\"acme\"}");
+                }
+
+                return path.EndsWith("/containerTypeRegistrations", StringComparison.Ordinal)
+                    ? Json(HttpStatusCode.Created, "{\"id\":\"" + ExistingType + "\"}")
+                    : Json(HttpStatusCode.ServiceUnavailable, """{"error":{"code":"serviceNotAvailable","message":"try later"}}""");
+            },
+        };
+
+        var outcome = await Create(graph, existingContainerTypeId: null);
+
+        var failure = outcome.Should().BeOfType<SpeContainerTypeProvisionOutcome.Failure>().Subject;
+        failure.CreatedContainerTypeId.Should().Be(ExistingType,
+            "the type exists — H8 records it so the resume creates only the root container in it");
+        failure.IsDelegatedTokenTrap.Should().BeFalse();
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
+
+    private static Task<SpeContainerTypeProvisionOutcome> Create(FakeGraph transport, string? existingContainerTypeId)
+    {
+        var sut = new GraphContainerTypeProvisioner(
+            new UnusableCredential(),
+            Options.Create(new SpeContainerTypeOptions()),
+            NullLogger<GraphContainerTypeProvisioner>.Instance);
+        var graph = new GraphServiceClient(new HttpClient(transport), new AnonymousAuthenticationProvider(), BaseUrl);
+        return sut.CreateAsync(graph, new SpeContainerTypeProvisionRequest(
+            CustomerId: "acme", TenantId: "00000000-1111-2222-3333-444444444444", OwningAppId: OwningApp,
+            SharePointDomain: "acme.sharepoint.com", VaultName: "kv", CertSecretName: "cert", DisplayName: "acme",
+            ExistingContainerTypeId: existingContainerTypeId), CancellationToken.None);
+    }
 
     private static Task<SpeContainerBindOutcome> Bind(FakeGraph transport, Guid unit)
     {
@@ -161,6 +233,7 @@ public sealed class GraphContainerTypeProvisionerBindTests
         public Func<HttpRequestMessage, HttpResponseMessage>? OnPatch { get; init; }
         public Func<HttpRequestMessage, HttpResponseMessage>? OnGet { get; init; }
         public Func<HttpRequestMessage, HttpResponseMessage>? OnDelete { get; init; }
+        public Func<HttpRequestMessage, HttpResponseMessage>? OnPost { get; init; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -172,6 +245,7 @@ public sealed class GraphContainerTypeProvisionerBindTests
                 "PATCH" => OnPatch,
                 "GET" => OnGet,
                 "DELETE" => OnDelete,
+                "POST" => OnPost,
                 _ => null,
             };
 

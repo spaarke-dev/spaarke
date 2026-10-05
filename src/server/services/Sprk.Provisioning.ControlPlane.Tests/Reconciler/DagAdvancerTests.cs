@@ -165,6 +165,30 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
+    public void ComputeReadyHandlers_AfterH6_H7WaitsForH8_WhichHandsOffOnlyABoundContainer()
+    {
+        // H8 dispatched but not complete — e.g. waiting out the 24h SPE replication window with its root container
+        // created and recorded but NOT yet bound (unified-access-control-r2 task 165, owner round 41 item 1).
+        var run = MakeRun(RunStatus.WaitingOnGate, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H9", "H6");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().NotContain("H7",
+            "H7 writes H8's root container into sprk_SharePointEmbeddedContainerId — it must wait until H8 has bound it");
+        ready.Should().Contain("H8");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6AndH8_UnlocksH7()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H9", "H6", "H8");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().BeEquivalentTo(new[] { "H7" });
+    }
+
+    [Fact]
     public void ComputeReadyHandlers_AfterFullChainThroughH10_H11IsReady()
     {
         var run = MakeRun(RunStatus.Running,

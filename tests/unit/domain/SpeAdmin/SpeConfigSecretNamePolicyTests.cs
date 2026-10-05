@@ -31,6 +31,8 @@ public sealed class SpeConfigSecretNamePolicyTests
     [InlineData("spe-owning-app-acme/../redis")]  // no path character may reach the vault request
     [InlineData("spe-owning-app-acme?api-version=1")]
     [InlineData("spe-owning-app-a_b")]            // Key Vault allows letters, digits and hyphens only
+    [InlineData("spe-owning-app-secret\n")]       // round 41 item 5: '$' matched before a trailing newline; '\z' does not
+    [InlineData("spe-owning-app-secret\r\n")]
     public void ANameOutsideTheRule_IsRefused(string? name) =>
         SpeConfigSecretNamePolicy.IsAllowed(name).Should().BeFalse();
 

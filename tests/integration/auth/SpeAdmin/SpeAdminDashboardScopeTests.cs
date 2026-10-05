@@ -174,7 +174,7 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
     }
 
     [Fact]
-    public async Task Refresh_ForAPlatformOperator_CountsEveryContainerOnce_UnboundAsUnattributed_AndNoForeignContainer()
+    public async Task Refresh_ForAPlatformOperator_CountsEveryContainerOnce_AndNoUnboundOrForeignContainer()
     {
         _fixture.Reset();
         SeedTenant(callerUnit: Root);
@@ -186,9 +186,13 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
         metrics.GetProperty("containerCountByConfig").GetProperty(ConfigA.ToString()).GetInt32().Should().Be(2);
         metrics.GetProperty("containerCountByConfig").GetProperty(ConfigB.ToString()).GetInt32().Should().Be(1,
             "Config A and Config B list the same shared type — each container is counted ONCE, under its owner");
-        metrics.GetProperty("unattributedContainerCount").GetInt32().Should().Be(1, "c-unbound");
-        metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(4, "c-foreign belongs to no unit of this environment");
-        metrics.GetProperty("totalStorageUsedInBytes").GetInt64().Should().Be(100 + 50 + 1000 + 5);
+        metrics.GetProperty("unattributedContainerCount").GetInt32().Should().Be(1,
+            "c-rootless only — owner round 41 item 2: c-unbound is in no view, the platform operator's aggregate included " +
+            "(under Model 1 an unbound container of a shared type may be another customer's)");
+        metrics.GetProperty("unattributedStorageUsedInBytes").GetInt64().Should().Be(3);
+        metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(4,
+            "c-own, c-sub, c-other, c-rootless — c-foreign belongs to no unit of this environment, c-unbound to none at all");
+        metrics.GetProperty("totalStorageUsedInBytes").GetInt64().Should().Be(100 + 50 + 1000 + 3);
     }
 
     [Fact]
@@ -203,8 +207,8 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
 
         metrics.GetProperty("containerCountByConfig").GetProperty(ConfigB.ToString()).GetInt32().Should().Be(0);
         metrics.GetProperty("unattributedContainerCount").GetInt32().Should().Be(1,
-            "only c-unbound — a container whose binding could not be read is not 'unbound', it is unknown");
-        metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(3, "c-own, c-sub, c-unbound");
+            "only c-rootless — a container whose binding could not be read is not counted, and neither is c-unbound");
+        metrics.GetProperty("totalContainerCount").GetInt32().Should().Be(3, "c-own, c-sub, c-rootless");
         metrics.GetRawText().Should().Contain(SpeDashboardSyncService.BindingConcernPrefix);
         metrics.GetProperty("syncHealth").GetString().Should().Be("Degraded");
     }
@@ -310,6 +314,7 @@ public sealed class SpeAdminDashboardScopeTests : IClassFixture<AdminSurfaceHost
             ("c-other", UnitB.ToString(), 1000),
             ("c-unbound", null, 5),
             ("c-foreign", ForeignUnit.ToString(), 7),
+            ("c-rootless", Root.ToString(), 3),    // bound to this environment's root, where no config of type T sits
         };
 
         _fixture.Graph.StubGetExact(ContainersPath,

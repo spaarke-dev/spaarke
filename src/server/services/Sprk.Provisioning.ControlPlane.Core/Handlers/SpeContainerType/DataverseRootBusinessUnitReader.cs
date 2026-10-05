@@ -15,6 +15,14 @@
 // one-method reader with the SAME token idiom (DefaultAzureCredential with an
 // explicit TenantId — ADR-028 MI-outbound, §4D I5) and the SAME query.
 //
+// WHICH IDENTITY (task 165 round 41 item 5 — checked in live gate (d)): the
+// same DefaultAzureCredential(TenantId) and {env}/.default audience as H5's
+// DataverseWebApiHealthProbe. H5 completes only on a Reachable WhoAmI and H8 is
+// dispatched only after H5's CompletedPhase, so this identity has just been
+// answered by the environment; H10 writes app users with it too. A missing
+// security role (WhoAmI does not prove one) surfaces as Resumable
+// spe-root-business-unit-unresolved naming the HTTP status — never a silent stall.
+//
 // NOT under test in the CI unit suite (real Dataverse Web API calls) — parity
 // with DataverseWebApiAppUserCreator / DataverseWebApiHealthProbe. The handler
 // tests substitute a fake IDataverseRootBusinessUnitReader.

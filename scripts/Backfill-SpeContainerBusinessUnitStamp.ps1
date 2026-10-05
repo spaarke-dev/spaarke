@@ -145,6 +145,10 @@ $IsDryRun = (-not $Apply.IsPresent) -or $WhatIf.IsPresent -or $Verify.IsPresent
 . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
 $StampProperty = $SpeContainerStampProperty
 
+# ── The Key Vault secret-name allow-list: THE PowerShell copy of the BFF's rule (round 35 item 3; round 41 items 4-5).
+#    A config naming a secret outside it is SKIPPED and its secret is never read — as the BFF refuses it. ─────────────
+. (Join-Path $PSScriptRoot 'common/SpeConfigSecretNamePolicy.ps1')
+
 # ── The authoritative sources. MUST match the BFF's creation paths (SpeContainerStampScriptAgreementTests). ───────
 $SecureRootSets = [ordered]@{
     'sprk_matters'         = 'sprk_matterid'
@@ -201,6 +205,9 @@ function Get-GraphToken {
     $key = "$TenantId|$ClientId|$SecretName"
     if ($script:GraphTokens.ContainsKey($key) -and ((Get-Date) - $script:GraphTokens[$key].At).TotalMinutes -lt 45) {
         return $script:GraphTokens[$key].Token
+    }
+    if (-not (Test-SpeConfigSecretNameAllowed $SecretName)) {
+        throw "the config's secret name '$SecretName' is outside the BFF's allow-list ('$SpeConfigSecretNamePrefix…') — the vault was NOT read; repair it with Repair-SpeConfigSecretName.ps1"
     }
     $secret = az keyvault secret show --vault-name $KeyVaultName --name $SecretName --query value -o tsv 2>$null
     if (-not $secret) { throw "Key Vault '$KeyVaultName' returned no secret '$SecretName' (owning app $ClientId)." }

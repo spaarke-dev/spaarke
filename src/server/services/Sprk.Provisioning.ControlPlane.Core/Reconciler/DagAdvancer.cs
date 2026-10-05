@@ -17,13 +17,13 @@
 //     ├── H4 (KV secrets + T1 patch)
 //     │     ↓
 //     │     H3 (Entra app-reg — needs KV for secret storage)
-//     │       ├── H8 (SPE container-type)
+//     │       ├── H8 (SPE container-type — also waits for H5; H7 waits for H8)
 //     │       └── H9 (BFF deploy)
 //     └── H5 (Dataverse env create)
 //           ↓
 //           H6 (solution import)
 //             ↓
-//             H7 (env-var values)
+//             H7 (env-var values — also waits for H8: it writes H8's BOUND root container)
 //               ↓
 //               H10 (Dataverse App User + Graph parity)
 //                 ↓
@@ -135,7 +135,10 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH5] = new[] { HandlerH2a },
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
             [HandlerH6] = new[] { HandlerH5 },
-            [HandlerH7] = new[] { HandlerH6 },
+            // H8 too (unified-access-control-r2 task 165, owner round 41 item 1): H7 writes H8's root container into
+            // sprk_SharePointEmbeddedContainerId, and H8 hands it off only once it is BOUND to its business unit
+            // (CompletedPhase H8). Without this edge H7 ran while H8 waited out the 24h replication window.
+            [HandlerH7] = new[] { HandlerH6, HandlerH8 },
             // H5 too (unified-access-control-r2 task 165, owner round 35 item 1): H8 stamps the root container with the
             // customer environment's root business unit, which exists only once H5 has created the environment.
             [HandlerH8] = new[] { HandlerH3, HandlerH5 },

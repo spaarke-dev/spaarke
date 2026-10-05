@@ -6,16 +6,16 @@
 
 .DESCRIPTION
     sprk_specontainertypeconfig.sprk_keyvaultsecretname names the Key Vault secret the BFF reads, app-only, to act as a
-    config's owning app. Since round 35 item 3 the BFF resolves ONLY names under ONE pinned prefix
-    ($SpeConfigSecretNamePrefix below — MUST equal Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.RequiredPrefix;
-    SpeAdminContainerBindingGuardTests pins both). A config naming anything else is refused: config POST/PUT answer 400,
-    every route that would use its credential answers 409 'spe.admin.deny.config_secret_name_not_allowed', and the
-    secret is never read.
+    config's owning app. Since round 35 item 3 the BFF resolves ONLY names under ONE pinned prefix — the rule is
+    scripts/common/SpeConfigSecretNamePolicy.ps1 ($SpeConfigSecretNamePrefix, MUST equal
+    Sprk.Bff.Api.Services.SpeAdmin.SpeConfigSecretNamePolicy.RequiredPrefix; SpeAdminContainerBindingGuardTests pins
+    both). A config naming anything else is refused: config POST/PUT answer 400, every route that would use its
+    credential answers 409 'spe.admin.deny.config_secret_name_not_allowed', and the secret is never read.
 
     This script lists every config that does not conform — names only, never a secret value. Renaming is a MANUAL GATE
-    for an operator: put the owning app's client secret into the BFF Key Vault under a conforming name
-    (e.g. spe-owning-app-<customer>), then set the config's sprk_keyvaultsecretname to it (SPE Admin app -> Settings ->
-    the config, which PUTs /api/spe/configs/{id}; or a Dataverse PATCH), then re-run with -Verify.
+    for an operator, run with scripts/Repair-SpeConfigSecretName.ps1 (dry run, then -Apply, then -Verify): it stores
+    the config's owning-app client secret in the BFF Key Vault(s) under a conforming name and PATCHes the config to it.
+    Then re-run this script with -Verify.
 
 .PARAMETER EnvironmentUrl
     Dataverse environment URL, e.g. https://spaarkedev1.crm.dynamics.com
@@ -38,18 +38,9 @@ param(
 $ErrorActionPreference = 'Stop'
 $EnvironmentUrl = $EnvironmentUrl.TrimEnd('/')
 
-# ── THE pinned prefix. MUST equal SpeConfigSecretNamePolicy.RequiredPrefix (SpeAdminContainerBindingGuardTests). ─────
-$SpeConfigSecretNamePrefix = 'spe-owning-app-'
-
-# Key Vault's own name rule after the prefix (letters, digits, hyphens; 127 characters in all), case-insensitive — the
-# same expression the BFF builds.
-$allowed = '^' + [regex]::Escape($SpeConfigSecretNamePrefix) + '[A-Za-z0-9-]{1,' + (127 - $SpeConfigSecretNamePrefix.Length) + '}$'
-
-function Test-SecretNameAllowed {
-    param([AllowNull()][AllowEmptyString()][string]$Name)
-    if ([string]::IsNullOrEmpty($Name)) { return $false }
-    return [regex]::IsMatch($Name, $allowed, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
-}
+# ── THE rule: the ONE PowerShell copy of the BFF's allow-list (prefix + \z-anchored expression), pinned equal to the
+#    C# one by SpeAdminContainerBindingGuardTests. Never spelled again here.
+. (Join-Path $PSScriptRoot 'common/SpeConfigSecretNamePolicy.ps1')
 
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
 if (-not $token) { throw "No Dataverse token for $EnvironmentUrl. Run 'az login' and retry." }
@@ -63,7 +54,7 @@ while ($uri) {
     $uri = $page.'@odata.nextLink'
 }
 
-$nonConforming = @($configs | Where-Object { -not (Test-SecretNameAllowed $_.sprk_keyvaultsecretname) })
+$nonConforming = @($configs | Where-Object { -not (Test-SpeConfigSecretNameAllowed $_.sprk_keyvaultsecretname) })
 
 Write-Host ''
 Write-Host "SPE config Key Vault secret names — allowed prefix '$SpeConfigSecretNamePrefix' — $EnvironmentUrl"

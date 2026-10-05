@@ -113,10 +113,10 @@ public static class SearchContainersEndpoints
                 ct);
 
             // Task 165, owner round 20 item 2: the search spans every container the owning app can see — in Model 1
-            // other customers' too. Only containers the caller reaches are returned, and Graph's total (which counts
-            // the others) is reported only to a platform operator from whose page nothing was removed AND only when
-            // there is no further page: since round 35 item 2 not even a root-unit admin reaches an unbound or another
-            // environment's container, and a later page Graph counted but nobody judged may hold them.
+            // other customers' too. Only containers the caller reaches are returned, and Graph's total goes through
+            // the ONE shared rule (SpeAdminContainerTrim.ReportableGraphTotal, rounds 35/41): a platform operator, a
+            // page nothing was removed from, no further page. (The containers collection reports no total today —
+            // SearchContainersAsync returns null — so the rule's biting tests live with the rule and the item search.)
             var trim = await tenantScope.TrimToReachableContainersAsync(
                 context.User, config, searchPage.Items.Select(r => r.Id), deleted: false, ct);
             if (trim is null)
@@ -130,9 +130,8 @@ public static class SearchContainersEndpoints
                 Items: visible
                     .Select(r => new SearchContainerDto(r.Id, r.DisplayName, r.Description, r.ContainerTypeId))
                     .ToList(),
-                TotalCount: trim.IsPlatformOperator && visible.Count == searchPage.Items.Count && searchPage.NextSkipToken is null
-                    ? searchPage.TotalCount
-                    : null,
+                TotalCount: trim.ReportableGraphTotal(
+                    searchPage.TotalCount, searchPage.Items.Count, visible.Count, searchPage.NextSkipToken),
                 NextSkipToken: searchPage.NextSkipToken);
 
             logger.LogInformation(

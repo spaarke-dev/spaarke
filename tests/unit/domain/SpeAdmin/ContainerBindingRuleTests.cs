@@ -215,10 +215,30 @@ public sealed class ContainerBindingRuleTests
     }
 
     [Fact]
-    public void UnboundAndMalformedContainers_AreUnattributed()
+    public void UnboundAndMalformedContainers_AreCountedNowhere_NotEvenInTheOperatorsAggregate()
     {
-        AttributeContainer(SpeContainerBinding.Unbound, TypeT, Configs, Hierarchy).Should().Be(ContainerAttribution.Unattributed);
-        AttributeContainer(SpeContainerBinding.Malformed, TypeT, Configs, Hierarchy).Should().Be(ContainerAttribution.Unattributed);
+        // Owner round 41 item 2: under Model 1 an unbound container of a shared type may be another customer's.
+        AttributeContainer(SpeContainerBinding.Unbound, TypeT, Configs, Hierarchy).Should().Be(ContainerAttribution.Excluded);
+        AttributeContainer(SpeContainerBinding.Malformed, TypeT, Configs, Hierarchy).Should().Be(ContainerAttribution.Excluded);
+        AttributeContainer(SpeContainerBinding.Unbound, TypeT, Configs, hierarchy: null).Should().Be(ContainerAttribution.Excluded);
+    }
+
+    // ── the Graph search total (owner rounds 20 / 35 / 41) ──────────────────
+
+    [Fact]
+    public void GraphsSearchTotal_IsReportedOnlyToAPlatformOperator_ForAnUntrimmedPage_WithNoFurtherPage()
+    {
+        var reach = new HashSet<string>(StringComparer.Ordinal) { "a", "b" };
+        var platformOperator = new SpeAdminContainerTrim(reach, IsPlatformOperator: true);
+        var leafAdmin = new SpeAdminContainerTrim(reach, IsPlatformOperator: false);
+
+        platformOperator.ReportableGraphTotal(7, pageItemCount: 2, visibleCount: 2, nextSkipToken: null).Should().Be(7);
+
+        leafAdmin.ReportableGraphTotal(7, 2, 2, null).Should().BeNull("Graph's total counts other customers' hits");
+        platformOperator.ReportableGraphTotal(7, 3, 2, null).Should().BeNull("a hit was removed from this page");
+        platformOperator.ReportableGraphTotal(7, 2, 2, "page-2").Should().BeNull(
+            "a further page Graph counted but nobody judged may hold unbound or another environment's containers");
+        platformOperator.ReportableGraphTotal(null, 2, 2, null).Should().BeNull("Graph reported none");
     }
 
     [Fact]
