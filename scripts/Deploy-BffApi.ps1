@@ -266,6 +266,63 @@ if ($zipSize -gt 100) {
     Write-Host "  This may indicate stale publish artifacts. Consider a clean build." -ForegroundColor Yellow
 }
 
+# --- Pre-deploy: the SPE admin Spaarke-operator marker (unified-access-control-r2 task 165, owner round 49 item 1) ---
+# SpeAdmin__PlatformOperatorEnvironment=true lets the BFF's SPE admin routes that span the whole SharePoint Embedded
+# tenant or a whole container type (security alerts / secure score; container-type permissions / consumers / register)
+# serve a root-unit admin. It is a DEPLOYMENT setting — never a Dataverse column a customer admin could edit — and it is
+# set ONLY for a Spaarke-operated environment: config/environments.json -> environments.<Environment>
+# .speAdminPlatformOperatorEnvironment = true. Declared true: the setting is made true (slot and production — a swap
+# carries it). Declared false or absent: a live 'true' FAILS the deploy — a customer environment must never carry it.
+Write-Host ""
+Write-Host "[pre-deploy] SPE admin Spaarke-operator marker..." -ForegroundColor Cyan
+$markerName = "SpeAdmin__PlatformOperatorEnvironment"
+$markerDeclared = $false
+$markerConfigPath = Join-Path $RepoRoot "config/environments.json"
+if (Test-Path $markerConfigPath) {
+    $markerEntry = (Get-Content $markerConfigPath -Raw | ConvertFrom-Json).environments.$Environment
+    if ($null -ne $markerEntry -and $null -ne $markerEntry.PSObject.Properties['speAdminPlatformOperatorEnvironment']) {
+        $markerDeclared = [bool]$markerEntry.speAdminPlatformOperatorEnvironment
+    }
+}
+
+$markerSlots = @($null)
+if ($UseSlotDeploy) { $markerSlots += $SlotName }
+foreach ($markerSlot in $markerSlots) {
+    $slotArgs = if ($markerSlot) { @('--slot', $markerSlot) } else { @() }
+    $slotLabel = if ($markerSlot) { "slot '$markerSlot'" } else { "production slot" }
+    $ErrorActionPreference = "Continue"
+    $markerJson = az webapp config appsettings list --resource-group $ResourceGroupName --name $AppServiceName @slotArgs -o json 2>$null
+    $ErrorActionPreference = "Stop"
+    $markerLive = $null
+    if ($markerJson) {
+        $markerLive = @($markerJson | ConvertFrom-Json | Where-Object { $_.name -eq $markerName } | ForEach-Object { "$($_.value)" }) | Select-Object -First 1
+    }
+
+    if ($markerDeclared) {
+        if ("$markerLive".Trim() -ne 'true') {
+            az webapp config appsettings set --resource-group $ResourceGroupName --name $AppServiceName @slotArgs `
+                --settings "$markerName=true" --output none
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  FAILED to set $markerName=true on $slotLabel of '$AppServiceName'." -ForegroundColor Red
+                exit 1
+            }
+            Write-Host "  $markerName set to true on $slotLabel ('$Environment' is declared a Spaarke-operated environment)." -ForegroundColor Green
+        } else {
+            Write-Host "  $markerName is true on $slotLabel, as declared." -ForegroundColor Green
+        }
+    } elseif ("$markerLive".Trim() -eq 'true') {
+        Write-Host ""
+        Write-Host "  OPERATOR MARKER CHECK FAILED — '$AppServiceName' ($slotLabel) carries $markerName=true, but" -ForegroundColor Red
+        Write-Host "  '$Environment' is not declared a Spaarke-operated environment in config/environments.json." -ForegroundColor Red
+        Write-Host "  A customer environment must never carry it (it opens tenant-wide and type-wide SPE admin routes" -ForegroundColor Yellow
+        Write-Host "  to that environment's root admin). Remove it, or declare the environment if it IS Spaarke's own:" -ForegroundColor Yellow
+        Write-Host "    az webapp config appsettings delete -g $ResourceGroupName -n $AppServiceName $($slotArgs -join ' ') --setting-names $markerName" -ForegroundColor Gray
+        exit 1
+    } else {
+        Write-Host "  $markerName not set on $slotLabel — '$Environment' is not a Spaarke-operated environment (the routes refuse)." -ForegroundColor Gray
+    }
+}
+
 # --- Step 3: Deploy ---
 $stepNum++
 

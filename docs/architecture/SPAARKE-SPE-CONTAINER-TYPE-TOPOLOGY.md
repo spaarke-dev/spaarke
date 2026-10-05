@@ -331,12 +331,18 @@ an ArchTest pins both and fails on any creation site that does not stamp.
   unit); the L2 control plane's **H8** root container (the new environment's root business unit, after verification);
   `scripts/New-BusinessUnitContainer.ps1` (the business unit it is run for), `scripts/Provision-Customer.ps1` step 10 (the
   root business unit) and `scripts/Create-NewContainerType.ps1 -CreateTestContainer` (`-TestContainerBusinessUnitId`). A
-  stamp that does not read back removes the container again. **H8's 24h replication wait** (round 41 item 1): H8 binds
-  only a container it has verified addressable, so it RECORDS what it created in the run at once and every later entry
-  resumes with that container — it never creates a second container type or root container, and it hands the container
-  to H7 (`sprk_SharePointEmbeddedContainerId`) only once bound; H7 waits for H8 in the DAG. The guard follows every
-  route to the containers collection (round 41 item 5) — a builder held in a variable, a URI held in a variable, a splat,
-  raw HTTP, the Graph PowerShell cmdlet — not one spelling. Existing containers:
+  stamp that does not read back removes the container again. **H8's 24h replication wait** (rounds 41 + 49): H8 binds
+  only a container it has verified addressable, so it RECORDS what it created at once, in TYPED run fields
+  (`interStepState.containerTypeId` + `speContainerCreation` — round 41's gate-evidence record was stored by the Cosmos
+  serializer as `{"valueKind":1}` and lost), and every later entry resumes with that container. A recorded root container is
+  never created again; a recorded type gets no second type — its containers are listed and one already there is adopted
+  (every further one bound to the same unit, or removed) before a root container is created; a creation that got no
+  answer is recorded as in doubt (a type in doubt is QuarantineRequired until an operator checks — app-only cannot list
+  container types; a root container in doubt is waited for through the replication window). H8 hands the container to H7
+  (`sprk_SharePointEmbeddedContainerId`) only once bound; H7 waits for H8 in the DAG. The guard follows every route to the
+  containers collection (rounds 41 + 49) — a builder held in a variable, a URI held in a variable or a constant (in any
+  file, or a dot-sourced script), an absolute URL in a C# string, a generic `PostAsJsonAsync<T>`, an abbreviated
+  `-Meth Post`, a splat, raw HTTP, the Graph PowerShell cmdlet — not one spelling. Existing containers:
   `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1` (dry run / `-Apply` / `-Verify`) derives the owner only from
   authoritative records, takes an explicit `-Bind <containerId>=<businessUnitId>` for a container no record claims, and
   its `-Verify` lists — and fails on — every container still unbound.
@@ -360,6 +366,18 @@ owning app and its secret; the consuming app stays per customer. The app-only co
 consuming-app registrations, register) refuse a read or a write of a type that a config the admin cannot reach also
 carries (round 35 item 5 — the reads list every customer's consuming app). A config's owning-app secret name must start
 `spe-owning-app-` (round 35 item 3): the BFF resolves no other Key Vault secret.
+
+**Tenant-wide and type-wide routes are for Spaarke's own environments only** (owner round 49 item 1). Under Model 1 every
+customer environment's root admin is a "platform operator" in their own environment, so a root-unit check cannot confine a
+route whose answer spans the whole SharePoint Embedded tenant (security alerts, secure score) or a whole container type (its
+app permissions, consuming apps, registration). Those routes serve only a root-unit admin of a deployment that carries
+the BFF setting `SpeAdmin__PlatformOperatorEnvironment=true` — a DEPLOYMENT setting (Bicep
+`speAdminPlatformOperatorEnvironment`, `config/environments.json` → `scripts/Deploy-BffApi.ps1`), never a Dataverse column
+a customer admin could clear. It is set only for Spaarke-operated environments (dev, Spaarke's own operator environment);
+**customer environments never carry it** — customer provisioning does not emit it, a missing setting is `false`, and every
+other caller gets the same `403 spe.admin.deny.platform_operator_required`. The container-type routes that act with the
+CALLER's own delegated token (list / get / create types, settings, owners) are not gated: Graph authorizes them by the
+caller's own SharePoint Embedded administrator role, and the BFF lends no identity.
 
 ---
 

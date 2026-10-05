@@ -52,8 +52,14 @@ namespace Sprk.Bff.Api.Tests.Auth.SpeAdmin;
 /// <see cref="IDataverseIndexSyncService"/> by a recording fake.
 /// </para>
 /// </remarks>
-public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
+public class AdminSurfaceHostFixture : WorkspaceTestFixture
 {
+    /// <summary>
+    /// The value of <c>SpeAdmin:PlatformOperatorEnvironment</c> the host is started with, or null for no setting at all
+    /// (owner round 49 item 1). This host is a Spaarke-operated environment (dev) — <c>"true"</c>; the customer-environment
+    /// and unmarked hosts override it.
+    /// </summary>
+    protected virtual string? PlatformOperatorEnvironmentSetting => "true";
     internal const string RolesHeader = "X-Test-App-Roles";
     internal const string ScopesHeader = "X-Test-Scopes";
 
@@ -95,6 +101,14 @@ public sealed class AdminSurfaceHostFixture : WorkspaceTestFixture
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         base.ConfigureWebHost(builder);
+
+        if (PlatformOperatorEnvironmentSetting is { } marker)
+        {
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["SpeAdmin:PlatformOperatorEnvironment"] = marker,
+            }));
+        }
 
         builder.ConfigureTestServices(services =>
         {
@@ -480,4 +494,25 @@ public sealed class RecordingIndexSyncService : IDataverseIndexSyncService
         if (ThrowOnCall is { } ex) throw ex;
         return Task.FromResult(new IndexSyncStatus { IndexName = "spaarke-records-test", DocumentCount = 3, IsHealthy = true });
     }
+}
+
+/// <summary>
+/// A CUSTOMER environment's host (owner round 49 item 1): <c>SpeAdmin:PlatformOperatorEnvironment</c> is <c>false</c> — the
+/// tenant-wide and type-wide SPE admin routes are refused even for its root-unit admin.
+/// </summary>
+public sealed class AdminSurfaceCustomerEnvironmentHostFixture : AdminSurfaceHostFixture
+{
+    protected override string? PlatformOperatorEnvironmentSetting => "false";
+}
+
+/// <summary>A host with NO <c>SpeAdmin:PlatformOperatorEnvironment</c> setting at all — the default is false (fail closed).</summary>
+public sealed class AdminSurfaceUnmarkedHostFixture : AdminSurfaceHostFixture
+{
+    protected override string? PlatformOperatorEnvironmentSetting => null;
+}
+
+/// <summary>A host whose marker is not a boolean — it must not start (the options are validated on start).</summary>
+public sealed class AdminSurfaceMalformedMarkerHostFixture : AdminSurfaceHostFixture
+{
+    protected override string? PlatformOperatorEnvironmentSetting => "yes";
 }

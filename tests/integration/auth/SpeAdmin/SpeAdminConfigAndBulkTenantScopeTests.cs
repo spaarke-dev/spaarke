@@ -712,6 +712,9 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
     [InlineData("https://contoso.sharepoint.com")]
     public async Task Register_ToAHostThatIsNotASharePointAdminHost_Is400(string sharePointAdminUrl)
     {
+        // Register is a type-wide route: a root admin of a Spaarke-operated environment only (owner round 49 item 1).
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
         using var client = Admin();
 
         var problem = await Problem(
@@ -726,13 +729,17 @@ public sealed class SpeAdminConfigAndBulkTenantScopeTests : IClassFixture<AdminS
     [Fact]
     public async Task Register_ToASharePointAdminHost_PassesTheHostCheck()
     {
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
         using var client = Admin();
 
         var response = await client.PostAsJsonAsync(
             $"/api/spe/containertypes/{TypeA}/register?configId={ConfigA}",
             RegisterBody("https://contoso-admin.sharepoint.com"));
 
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("sharepoint_url_not_admin_host");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("sharepoint_url_not_admin_host");
+        body.Should().NotContain("spe.admin.deny.", "the request got past every SPE admin rule to the host check — " + body);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

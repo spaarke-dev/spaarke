@@ -71,6 +71,8 @@
       },
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": true,
+      "$comment_speAdminPlatformOperatorEnvironment": "Spaarke-OPERATED environment (unified-access-control-r2 task 165, owner round 49 item 1). Deploy-BffApi.ps1 sets App Service SpeAdmin__PlatformOperatorEnvironment=true on the slot(s) it deploys to, which lets the BFF's SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type (security alerts / secure score; container-type permissions / consumers / register) serve a root-unit admin. NEVER set this on a customer environment — the deploy FAILS when a customer environment carries the setting.",
       "$comment_migration": "Dev migrated 2026-05-24 from Windows spe-api-dev-67e2xz to Linux spaarke-bff-dev (canonical naming). Old env scheduled for decommission after stability period. See projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md."
     },
 
@@ -142,7 +144,9 @@
       "requiredCorsOrigins": [],
       "$comment_requiredCorsOrigins": "REQUIRED (may be empty). Origins that MUST appear in this environment's Cors__AllowedOrigins__N App Settings. List ONLY origins CorsModule's suffix rules do not already match — so NOT *.dynamics.com / *.powerapps.com / *.powerappsportals.com. In practice this means your Azure Static Web App front-ends (Office add-ins, external SPA). Deploy-BffApi.ps1 asserts these after every deploy and fails if one is missing. Leaving the key ABSENT makes the deploy warn that the environment is unaudited; an explicit empty array asserts 'this environment genuinely has no SWA front-ends'.",
       "dataverseRegion": "unitedstates",
-      "isLegacyNaming": false
+      "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": false,
+      "$comment_speAdminPlatformOperatorEnvironment": "A CUSTOMER environment is false (or leaves the key out) — ALWAYS. true is only for a Spaarke-operated environment (dev, Spaarke's own operator environment): it opens the SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type to that environment's root admin (unified-access-control-r2 task 165, owner round 49 item 1). Deploy-BffApi.ps1 fails a deploy to an environment that carries the setting without declaring it here."
     }
   }
 }

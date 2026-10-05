@@ -7,6 +7,14 @@
 > **Round 41 (2026-10-05, BINDING):** "Round 35 item 1 includes H8's replication-pending path, and task 165 fixes it. It is
 > not handed to another project." The resume defect this note first recorded as "observed, not changed" is FIXED — see
 > "Resume — what H8 created is recorded and reused" below. Nothing in this note is owed by this project.
+> **Round 49 (2026-10-05, BINDING) — the f2-v1 fix did NOT hold in production; corrected on `task/uac-r2-165-f2-v2`.**
+> Round 41's record kept the root container in the `h8-t6-verified` gate's `JsonElement` evidence, and the Cosmos SDK's
+> default (Newtonsoft) serializer stored that as `{"valueKind":1}`: every re-entry found only the type, created a SECOND
+> root container and left the first UNBOUND. The tests passed because their fake repository handed back the in-memory
+> object. Now: the record is TYPED (`InterStepState.SpeContainerCreation`), the H8 tests persist through the production
+> serializer, and no fault after a Graph write leaves an orphan type or an unbound root — see "Round 49" below. The same
+> serializer also lost EVERY gate's evidence and camel-cased the reconciler's retry-counter keys; both are fixed here too
+> (scope found by the production-serializer test, added under the standing directive).
 
 ## Why
 
@@ -30,6 +38,12 @@ container would have been invisible to that customer's own administrators until 
 | `Handlers/SpeContainerType/H8SpeContainerTypeHandler.cs` (round 41) | **(5c)** reads its own creation record (`ReadRecordedCreation`: `InterStepState.ContainerTypeId` + the `h8-t6-verified` gate's evidence `rootContainerId`) and withdraws any `SpeContainerId` written before completion; a recorded root container → **no `ProvisionAsync`**, resume at (7) with it; only a type recorded → `ProvisionAsync` with `ExistingContainerTypeId` (a root container only); a root container recorded without a type → QuarantineRequired `spe-creation-record-inconsistent`, nothing created. **(6b)** `RecordCreationAsync` persists the record IMMEDIATELY after creation (merged over a concurrent write, up to 5 attempts; a record that cannot be written → QuarantineRequired `spe-creation-record-not-persisted` naming both ids). **(7b)** the replication wait no longer writes `SpeContainerId`. **(7c)** a bind that removed the container keeps the type on record and drops the container. **(9)** `MarkCompleteAsync` is the ONLY writer of `SpeContainerId` (an ArchTest pins it). |
 | `ISpeContainerTypeProvisioner` / `GraphContainerTypeProvisioner` (round 41) | `SpeContainerTypeProvisionRequest.ExistingContainerTypeId` (create only a root container in the type this run already made — container types cannot be deleted); `SpeContainerTypeProvisionOutcome.Failure.CreatedContainerTypeId` (the type created before a later step failed, so the handler records it). The Graph part is `internal CreateAsync(graph, request)`, tested over the fake transport. |
 | `Handlers/EnvVarValues/H7DataverseEnvVarValuesHandler.cs` (round 41) | Refuses (`MissingUpstreamState`, Resumable) a `SpeContainerId` from a run where H8 has not completed — the handler's own fail-closed check behind the DAG edge. |
+| `Models/SpeContainerCreationRecord.cs` (new) + `InterStepState.SpeContainerCreation` (round 49) | H8's creation record as TYPED fields: `rootContainerId`, `additionalContainerIds`, `containerTypeInDoubtSince`, `rootContainerInDoubtSince`, `owningBusinessUnitId` (set on completion), `status`, `updatedAt`. Controlled schema extension (the `ImportedSolutions` / `SpeContainerId` precedent). The type stays `InterStepState.ContainerTypeId`. `ReadRecordedCreation` reads ONLY these typed fields (an ArchTest forbids `Evidence` / `JsonElement` in it); a pre-round-41 run's `SpeContainerId` (its only surviving record — its evidence was lost) is MOVED into the record at (5a). |
+| `GraphContainerTypeProvisioner.CreateAsync` (round 49) | Every fault after a Graph write was sent is a `Failure`, never an exception: an `ODataError` is Graph's answer (nothing in doubt); anything else — a client timeout (`LinkedTimeout`'s `OperationCanceledException`), the caller's cancellation, a dropped connection, a 2xx without an id — marks the write in flight `ContainerTypeInDoubt` or `RootContainerInDoubt` and reports the type it created. On a resume with a recorded type it LISTS the type's containers (`$filter=containerTypeId eq …`, every page; 404 = none visible yet) and ADOPTS the oldest (`Adopted`, the others in `AdditionalContainerIds`) before it creates one; with `RootContainerCreationInDoubt` and nothing listed it returns `RootContainerNotYetVisible` and creates nothing. `BindNewContainerAsync`: a DELETE answering 404 is "removed" (already gone). |
+| `H8SpeContainerTypeHandler` (round 49) | Records a failure's type / in-doubt state BEFORE anything else (with `CancellationToken.None`). A type in doubt with no recorded type → QuarantineRequired `spe-container-type-creation-in-doubt` (new code): no type is created until an operator checks with a DELEGATED SharePoint Embedded admin token (`GET /storage/fileStorage/containerTypes`), records a type it finds in `interStepState.containerTypeId`, and clears the quarantine (`ClearedAt` after the in-doubt time, by H8's quarantine). A root container in doubt within `RootContainerInDoubtWindow` (24h) → the provisioner must not create (WaitingOnGate if the type lists none). (7d) `BindAdditionalContainersAsync` binds every adopted further container to the root unit (or removes it) before the KV write; one that is neither stays on record and quarantines the run. A bind that removed the root container is recorded with the merge-safe record write. |
+| `Models/NewtonsoftJsonElementConverter.cs` (new) on `GateEntry.Evidence` (round 49) | Gate evidence is written as its JSON and read back as a `JsonElement` (date-shaped strings stay strings). Before it, EVERY gate's evidence was stored as `{"valueKind":1}` and read back as an Undefined element that `GET /api/runs/{id}` could not serialize (it threw). Old documents read back as `{"valueKind":1}` — valid. |
+| `Models/NewtonsoftVerbatimKeysDictionaryConverter.cs` (new) on `GateStates`, `HandlerRetryAttempts`, `RunParameters.NonSecret` / `.Secrets` (round 49 — scope found) | The SDK's camelCase option (Newtonsoft `CamelCasePropertyNamesContractResolver`, `ProcessDictionaryKeys = true`) LOWERED each dictionary key's first letter: `HandlerRetryAttempts["H9"]` came back as `"h9"`, so `HandlerOutcomeApplier` re-sent attempt 1 on every retry — the same MessageId, dropped by Service Bus duplicate detection (task 107's counter never counted); `RunParameters.NonSecret` documents "persisted verbatim" and was not for an upper-case key. Keys now persist verbatim; the retry counter compares case-insensitively so a run persisted before the fix still counts. |
+| `Modules/CosmosModule.cs` (round 49) | `internal static BuildCosmosClient(endpoint, credential)` — THE construction of the client (serializer, connection mode, retries); the DI registration calls it, and the tests take `BuildCosmosClient(…).ClientOptions.Serializer` as the production serializer (no connection is opened). |
 
 ## Tests (L2 project)
 
@@ -52,7 +66,24 @@ container would have been invisible to that customer's own administrators until 
   creation is quarantined naming both ids. `H7DataverseEnvVarValuesHandlerTests.ASpeContainerIdWrittenBeforeH8Completed_IsNeverConsumed_NoWriterCall`.
   `GraphContainerTypeProvisionerBindTests.AnExistingContainerType_IsReused_OnlyARootContainerIsCreatedInIt`,
   `…AFailureAfterTheTypeWasCreated_ReportsTheType_SoTheHandlerRecordsIt`.
-- Full L2 suite on this branch: see the 165 task note §12.
+- Round 49: the H8 tests' `FakeRepository` stores the JSON the PRODUCTION serializer writes and every read deserializes
+  a fresh run (`Models/ProductionCosmosSerializer` — `CosmosModule.BuildCosmosClient(…).ClientOptions.Serializer`), so
+  AC30-AC36 now see what Cosmos sees (with round 41's evidence record they FAIL: `provisioner.CallCount` 2). New AC41-AC50:
+  the record is a typed field in the stored JSON; a root-container POST with no answer is recorded and the resume waits
+  (in-window) or creates again (past the window); an adopted root container and every further container are bound before
+  the hand-off; a further container neither bound nor removed stays on record, quarantines, and is bound on resume; a
+  type in doubt is quarantined, a re-delivered dispatch creates nothing, and only an operator's clear lets a type be
+  created; a type the operator recorded is resumed; a pre-round-41 hand-off next to a different typed root is bound too;
+  a removal record survives a concurrent write; an unrecordable in-doubt record is quarantined.
+  `GraphContainerTypeProvisionerBindTests` (+10): a non-OData fault on the root-container POST (the verifier's probe), a
+  client-side timeout and the caller's cancellation are Failures with the container in doubt; a type POST with no answer
+  (dropped / 2xx without id) is a Failure with the type in doubt; an `ODataError` is nothing in doubt; on a resume a
+  container already in the type is adopted (one; several across pages, oldest first) and nothing created; a root container
+  in doubt that is not listed (200 empty / 404) is waited for; a failed list creates nothing; a DELETE 404 is "removed".
+  `Models/ProvisioningRunProductionSerializerTests` (8): a fully-populated run round-trips unchanged; evidence survives and
+  a read-back run serializes for `GET /api/runs/{id}`; a pre-converter document reads back; the typed record survives; the
+  retry counter keeps `"H12b"` and a legacy `"h9"` still counts; run-parameter keys persist verbatim.
+- Full L2 suite on this branch: see the 165 task note §12 / §13 / §14.
 
 ## Resume — what H8 created is recorded and reused (FIXED, round 41 item 1)
 
@@ -80,6 +111,23 @@ hand-off, CompletedPhase), or removed (round 41 item 1, round 35 item 1). While 
 the recorded container exists unbound, inside an incomplete H8 that will bind or remove it; the record names it, and the
 backfill's `-Verify` lists any unbound container an environment's configs reach.
 
+**Correction (round 49).** Steps 1-2 above were true of the in-memory run and FALSE in production: the record named the
+root container in the gate's `JsonElement` evidence, which the Cosmos serializer stored as `{"valueKind":1}`. Every claim
+above that a resume "never creates a second … root container" is true only from `task/uac-r2-165-f2-v2` on, where:
+1. the record is typed — `InterStepState.ContainerTypeId` + `InterStepState.SpeContainerCreation` — and H8 resumes only
+   from those fields; the tests persist through the production serializer;
+2. a resume with a recorded type and no recorded root container LISTS the type and adopts a container already there before
+   it creates one (and binds every further container it finds, or removes it);
+3. a creation that got no answer is recorded as in doubt: a container TYPE in doubt is QuarantineRequired until an operator
+   has checked with a delegated SharePoint Embedded admin token — app-only can neither list nor delete container types —
+   and a ROOT container in doubt is waited for (WaitingOnGate) through the replication window rather than created twice;
+4. every fault after a Graph write is returned as a `Failure` that says what may exist — an exception (a client timeout's
+   `OperationCanceledException` included) never escapes `CreateAsync`, so the handler always records before it fails.
+
+What the code still cannot see — said plainly: a container TYPE created by a POST whose answer was lost cannot be found by
+H8's app-only identity, so H8 never creates another type while one may exist; the operator's delegated check (the
+quarantine's diagnostic gives the exact request) is the only way to name it.
+
 ## Live verification (manual gate (d) of the task 165 note §12.9 / §13)
 
 - **The H8 bind** needs a real provisioning run (cert in the customer KV, 24h SPE replication). The wire shape is the one
@@ -98,5 +146,6 @@ backfill's `-Verify` lists any unbound container an environment's configs reach.
   L2's own identity, and if it were, H5's gate and H10's writes could not work either. So H8 is no worse placed than H5
   and H10: a stall there would be the whole pipeline's, not H8's. What a WhoAmI 200 does NOT prove is a security role
   that reads `businessunit`; that is the one thing left for gate (d): on the first real run, H8 completes without
-  `spe-root-business-unit-unresolved` (a 401/403 there names the status in the run's error), and the T6 gate evidence
-  carries `owningBusinessUnitId` = the environment's root unit.
+  `spe-root-business-unit-unresolved` (a 401/403 there names the status in the run's error), and the run's TYPED record
+  `interStepState.speContainerCreation.owningBusinessUnitId` = the environment's root unit (`status` = `bound`). The T6
+  gate evidence carries `owningBusinessUnitId` too — evidence now persists (round 49) — but the typed field is the check.

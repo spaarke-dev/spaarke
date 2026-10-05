@@ -62,9 +62,26 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
         { "GET", "/api/spe/containers/c-x?configId={cfg}", "" },
         { "POST", "/api/spe/search/items?configId={cfg}", "search" },
         { "POST", "/api/spe/bulk/delete", "bulk" },
-        { "GET", "/api/spe/containertypes/" + TypeT + "/consumers?configId={cfg}", "" },
         { "GET", "/api/spe/recyclebin?configId={cfg}", "" },
     };
+
+    [Fact]
+    public async Task ATypeWideCredentialRoute_ForARootAdminOfAnOperatorEnvironment_OnAConfigWhoseSecretNameIsNotAllowed_Is409()
+    {
+        // The type-wide routes are for a root admin of a Spaarke-operated environment only (owner round 49 item 1) — the
+        // leaf caller of this class is refused before the rule — so the secret-name rule is proven here for that caller.
+        _fixture.Reset();
+        Seed(callerUnit: Root);
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.SendAsync(Request("GET", "/api/spe/containertypes/" + TypeT + "/consumers?configId={cfg}", ConfigBad, "")),
+            HttpStatusCode.Conflict);
+
+        problem["errorCode"].GetString().Should().Be(Code);
+        _fixture.Dataverse.CallsOn(ConfigSet, "Retrieve").Should().BeEmpty("no handler resolved the config's credential");
+        _fixture.Graph.AllRequests.Should().BeEmpty();
+    }
 
     [Theory]
     [MemberData(nameof(CredentialRoutes))]
@@ -226,7 +243,7 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
         ["businessUnitId"] = UnitA.ToString(),
     };
 
-    private void Seed()
+    private void Seed(Guid? callerUnit = null)
     {
         var dv = _fixture.Dataverse;
         dv.Add("businessunits", new() { ["businessunitid"] = Root, ["_parentbusinessunitid_value"] = null });
@@ -236,7 +253,7 @@ public sealed class SpeAdminConfigSecretNameTests : IClassFixture<AdminSurfaceHo
         {
             ["azureactivedirectoryobjectid"] = AdminSurfaceHostFixture.CallerOid,
             ["systemuserid"] = Guid.Parse("5e5e5e5e-0000-0000-0000-000000000007"),
-            ["_businessunitid_value"] = UnitA,
+            ["_businessunitid_value"] = callerUnit ?? UnitA,
         });
 
         dv.Add(ConfigSet, ConfigRow(ConfigGood, UnitA, "spe-owning-app-unit-a"));

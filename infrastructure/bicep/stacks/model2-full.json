@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7375813717364040300"
+      "templateHash": "10835672865584851129"
     }
   },
   "parameters": {
@@ -94,6 +94,13 @@
       "defaultValue": "",
       "metadata": {
         "description": "Display name for the default communication mailbox"
+      }
+    },
+    "speAdminPlatformOperatorEnvironment": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "TRUE ONLY for a Spaarke-operated environment (dev, Spaarke's own operator environment) — NEVER for a customer stamp. Emits SpeAdmin__PlatformOperatorEnvironment=true, which lets the BFF's SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type (security alerts / secure score, container-type permissions / consumers / register) serve a root-unit admin (unified-access-control-r2 task 165, owner round 49 item 1). Default false: the setting is not emitted and the BFF refuses those routes (fail closed)."
       }
     },
     "bffUamiName": {
@@ -1575,29 +1582,7 @@
           },
           "vnetIntegrationSubnetId": "[if(parameters('enableVnet'), createObject('value', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('vnet-{0}', variables('baseName'))), '2025-04-01').outputs.snetAppId.value), createObject('value', ''))]",
           "appSettings": {
-            "value": {
-              "Customer__Id": "[parameters('customerId')]",
-              "DATAVERSE_URL": "[parameters('dataverseUrl')]",
-              "SPE_CONTAINER_TYPE_ID": "[parameters('containerTypeId')]",
-              "Redis__Enabled": "true",
-              "Redis__ConnectionString": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=redis-connection-string)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value)]",
-              "ConnectionStrings__ServiceBus": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=servicebus-connection-string)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value)]",
-              "ConnectionStrings__Storage": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=storage-connection-string)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value)]",
-              "OPENAI_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
-              "OPENAI_API_KEY": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=AzureOpenAI-ApiKey)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value)]",
-              "AI_SEARCH_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
-              "AI_SEARCH_API_KEY": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=AiSearch--AdminKey)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value)]",
-              "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
-              "ApplicationInsightsAgent_EXTENSION_VERSION": "~3",
-              "Communication__ArchiveContainerId": "[parameters('communicationArchiveContainerId')]",
-              "Communication__DefaultMailbox": "[parameters('communicationDefaultMailbox')]",
-              "Communication__WebhookNotificationUrl": "[format('https://{0}-api.azurewebsites.net/api/communications/incoming-webhook', variables('baseName'))]",
-              "Communication__WebhookClientState": "[format('@Microsoft.KeyVault(VaultName={0};SecretName=communication-webhook-secret)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value)]",
-              "Communication__ApprovedSenders__0__Email": "[parameters('communicationDefaultMailbox')]",
-              "Communication__ApprovedSenders__0__DisplayName": "[parameters('communicationDefaultDisplayName')]",
-              "Communication__ApprovedSenders__0__IsDefault": "true",
-              "ServiceBus__CommunicationQueueName": "sdap-communication"
-            }
+            "value": "[union(createObject('Customer__Id', parameters('customerId'), 'DATAVERSE_URL', parameters('dataverseUrl'), 'SPE_CONTAINER_TYPE_ID', parameters('containerTypeId'), 'Redis__Enabled', 'true', 'Redis__ConnectionString', format('@Microsoft.KeyVault(VaultName={0};SecretName=redis-connection-string)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value), 'ConnectionStrings__ServiceBus', format('@Microsoft.KeyVault(VaultName={0};SecretName=servicebus-connection-string)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value), 'ConnectionStrings__Storage', format('@Microsoft.KeyVault(VaultName={0};SecretName=storage-connection-string)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value), 'OPENAI_ENDPOINT', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value, 'OPENAI_API_KEY', format('@Microsoft.KeyVault(VaultName={0};SecretName=AzureOpenAI-ApiKey)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value), 'AI_SEARCH_ENDPOINT', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value, 'AI_SEARCH_API_KEY', format('@Microsoft.KeyVault(VaultName={0};SecretName=AiSearch--AdminKey)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value), 'APPLICATIONINSIGHTS_CONNECTION_STRING', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value, 'ApplicationInsightsAgent_EXTENSION_VERSION', '~3', 'Communication__ArchiveContainerId', parameters('communicationArchiveContainerId'), 'Communication__DefaultMailbox', parameters('communicationDefaultMailbox'), 'Communication__WebhookNotificationUrl', format('https://{0}-api.azurewebsites.net/api/communications/incoming-webhook', variables('baseName')), 'Communication__WebhookClientState', format('@Microsoft.KeyVault(VaultName={0};SecretName=communication-webhook-secret)', reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('keyVault-{0}', variables('baseName'))), '2025-04-01').outputs.keyVaultName.value), 'Communication__ApprovedSenders__0__Email', parameters('communicationDefaultMailbox'), 'Communication__ApprovedSenders__0__DisplayName', parameters('communicationDefaultDisplayName'), 'Communication__ApprovedSenders__0__IsDefault', 'true', 'ServiceBus__CommunicationQueueName', 'sdap-communication'), if(parameters('speAdminPlatformOperatorEnvironment'), createObject('SpeAdmin__PlatformOperatorEnvironment', 'true'), createObject()))]"
           },
           "tags": {
             "value": "[parameters('tags')]"

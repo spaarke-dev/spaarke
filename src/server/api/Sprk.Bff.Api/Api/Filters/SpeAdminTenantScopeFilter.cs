@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -42,7 +44,9 @@ public enum SpeAdminContainerLocation
 /// <remarks>
 /// There is no read/write split any more (round 35 item 5): the reads list every customer's consuming app and
 /// registrations — the per-customer values round 20 item 3 keeps exclusive — so a read needs what a write needs, the
-/// caller reaching EVERY config that carries the type.
+/// caller reaching EVERY config that carries the type. Owner round 49 item 1: these routes are moreover for a root-unit
+/// admin of a Spaarke-operated environment only (<see cref="SpeAdminOptions.PlatformOperatorEnvironment"/>), checked
+/// first — the type rule then still requires the type to be the config's own and every config of it reachable.
 /// </remarks>
 public sealed class SpeAdminContainerTypeScope
 {
@@ -55,10 +59,11 @@ public sealed class SpeAdminContainerTypeScope
 }
 
 /// <summary>
-/// Endpoint metadata: ONLY a platform operator — an SPE admin whose OWN business unit is the root — may call the route
-/// (owner round 35 item 4: the security-alerts and secure-score routes read the whole Microsoft 365 tenant through any
-/// config's app, so in a shared Model 1 tenant a leaf admin would read every customer's alerts and score). Decided by
-/// <see cref="SpeAdminTenantScopeFilter"/> through the SAME check as the environment write rule (round 16 item 4).
+/// Endpoint metadata: ONLY a platform operator of a SPAARKE-OPERATED environment — a deployment carrying
+/// <see cref="SpeAdminOptions.PlatformOperatorEnvironment"/>, and an SPE admin whose OWN business unit is the root — may
+/// call the route (owner round 35 item 4, tightened by round 49 item 1: the security-alerts and secure-score routes read
+/// the whole Microsoft 365 tenant through any config's app, and under Model 1 every customer environment has a root
+/// admin). Decided by <see cref="SpeAdminTenantScopeFilter"/> before anything is read.
 /// </summary>
 public sealed class SpeAdminPlatformOperatorOnly
 {
@@ -133,9 +138,9 @@ public static class SpeAdminTenantScopeFilterExtensions
     }
 
     /// <summary>
-    /// Marks a route (or a group) as platform-operator-only (round 35 item 4): the group's
-    /// <see cref="SpeAdminTenantScopeFilter"/> refuses, with ONE 403 before any other read, every caller whose own
-    /// business unit is not the root — the same check the environment write rule uses.
+    /// Marks a route (or a group) as platform-operator-only (round 35 item 4; round 49 item 1): the group's
+    /// <see cref="SpeAdminTenantScopeFilter"/> refuses, with ONE 403 before any other read, every caller unless this
+    /// deployment is a Spaarke-operated environment and the caller's own business unit is the root.
     /// </summary>
     public static TBuilder RequireSpeAdminPlatformOperator<TBuilder>(
         this TBuilder builder) where TBuilder : IEndpointConventionBuilder
@@ -167,7 +172,8 @@ public static class SpeAdminTenantScopeFilterExtensions
             var services = context.HttpContext.RequestServices;
             var filter = new SpeAdminTenantScopeFilter(
                 services.GetRequiredService<SpeAdminTenantScope>(),
-                services.GetService<ILogger<SpeAdminTenantScopeFilter>>());
+                services.GetService<ILogger<SpeAdminTenantScopeFilter>>(),
+                platformOperatorEnvironment: services.GetRequiredService<IOptions<SpeAdminOptions>>().Value.PlatformOperatorEnvironment);
 
             return await filter.InvokeAsync(context, next);
         });
@@ -234,9 +240,12 @@ public static class SpeAdminTenantScopeFilterExtensions
 /// refused with the same 503.
 /// </para>
 /// <para>
-/// <b>Platform-operator-only routes</b> (round 35 item 4): a route marked <see cref="SpeAdminPlatformOperatorOnly"/>
-/// (the security alerts and secure score) is refused with ONE 403 for every caller whose own business unit is not the
-/// root, FIRST, through the same check the environment write rule uses.
+/// <b>Tenant-wide and type-wide routes</b> (round 35 items 4 + 5; owner round 49 item 1): a route marked
+/// <see cref="SpeAdminPlatformOperatorOnly"/> (the security alerts and secure score) or <see cref="SpeAdminContainerTypeScope"/>
+/// (the app-only container-type permission, consumer and register routes) answers for the whole SharePoint Embedded
+/// tenant or a whole — possibly shared — container type. It is refused with ONE 403, FIRST, unless this deployment is a
+/// Spaarke-operated environment (<see cref="SpeAdminOptions.PlatformOperatorEnvironment"/>) AND the caller's own business
+/// unit is the root — under Model 1 every customer environment has a root admin, so the root check alone cannot confine them.
 /// </para>
 /// <para>
 /// <b>The config's Key Vault secret name</b> (round 35 item 3): on every configId route that uses the config's
@@ -284,13 +293,23 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
 
     private readonly SpeAdminTenantScope _tenantScope;
     private readonly ILogger<SpeAdminTenantScopeFilter>? _logger;
+    private readonly bool _platformOperatorEnvironment;
 
+    /// <param name="tenantScope">The boundary.</param>
+    /// <param name="logger">Optional logger.</param>
+    /// <param name="platformOperatorEnvironment">
+    /// <see cref="SpeAdminOptions.PlatformOperatorEnvironment"/> — whether this deployment is a Spaarke-operated
+    /// environment (owner round 49 item 1). Defaults to <c>false</c>: a filter built without it refuses the tenant-wide and
+    /// type-wide routes (fail closed).
+    /// </param>
     public SpeAdminTenantScopeFilter(
         SpeAdminTenantScope tenantScope,
-        ILogger<SpeAdminTenantScopeFilter>? logger = null)
+        ILogger<SpeAdminTenantScopeFilter>? logger = null,
+        bool platformOperatorEnvironment = false)
     {
         _tenantScope = tenantScope ?? throw new ArgumentNullException(nameof(tenantScope));
         _logger = logger;
+        _platformOperatorEnvironment = platformOperatorEnvironment;
     }
 
     public async ValueTask<object?> InvokeAsync(
@@ -299,14 +318,16 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
     {
         var http = context.HttpContext;
 
-        if (http.GetEndpoint()?.Metadata.GetMetadata<SpeAdminPlatformOperatorOnly>() is not null)
+        var metadata = http.GetEndpoint()?.Metadata;
+        if (metadata?.GetMetadata<SpeAdminPlatformOperatorOnly>() is not null
+            || metadata?.GetMetadata<SpeAdminContainerTypeScope>() is not null)
         {
-            // Round 35 item 4 — decided before anything else is read, so the answer is the same 403 whatever the
-            // request names (no configId oracle).
-            var operatorRefusal = await RequirePlatformOperatorAsync(
-                http,
-                PlatformOperatorRequiredCode,
-                "Only a platform operator (an administrator in the root business unit) may read tenant-wide security data.");
+            // Owner round 49 item 1 (supersedes round 35 item 4's root-only check for these routes): a route whose answer
+            // spans the whole SharePoint Embedded tenant (security alerts, secure score) or a whole container type (its
+            // app permissions, consuming apps, registration) is for a ROOT-unit admin of a SPAARKE-OPERATED environment
+            // only. Decided before anything else is read, so the answer is the same 403 whatever the request names (no
+            // configId or type oracle).
+            var operatorRefusal = await RequireSpaarkeOperatorAsync(http);
             if (operatorRefusal is not null)
             {
                 return operatorRefusal;
@@ -506,10 +527,35 @@ public class SpeAdminTenantScopeFilter : IEndpointFilter
         }
     }
 
+    /// <summary>The one detail of the Spaarke-operator refusal (owner round 49 item 1) — every refused caller reads the same words.</summary>
+    internal const string SpaarkeOperatorRequiredDetail =
+        "Only a platform operator of a Spaarke-operated environment (an administrator in its root business unit) may use " +
+        "routes whose answer spans the whole SharePoint Embedded tenant or a whole container type.";
+
     /// <summary>
-    /// THE platform-operator check (round 16 item 4's environment write rule; round 35 item 4's security routes): the
-    /// caller's OWN business unit must be the root. Anyone else gets ONE 403 with <paramref name="denyCode"/>; an
-    /// unreadable scope is the 503. Null to continue.
+    /// THE check for the tenant-wide and type-wide routes (owner round 49 item 1): this deployment must be a Spaarke-operated
+    /// environment (<see cref="SpeAdminOptions.PlatformOperatorEnvironment"/>, a deployment setting — read first, no I/O)
+    /// AND the caller a root-unit admin (<see cref="RequirePlatformOperatorAsync"/>). Every other caller — a root admin of a
+    /// customer environment, a leaf admin of an operator environment — gets the SAME 403. Null to continue.
+    /// </summary>
+    private async Task<IResult?> RequireSpaarkeOperatorAsync(HttpContext http)
+    {
+        if (!_platformOperatorEnvironment)
+        {
+            _logger?.LogWarning(
+                "SPE Admin tenant-/type-wide route DENIED: this deployment is not a Spaarke-operated environment " +
+                "(SpeAdmin:PlatformOperatorEnvironment is not true) ({DenyCode}). Path={Path} TraceId={TraceId}",
+                PlatformOperatorRequiredCode, http.Request.Path, http.TraceIdentifier);
+            return ProblemDetailsHelper.Forbidden(PlatformOperatorRequiredCode, SpaarkeOperatorRequiredDetail, http.TraceIdentifier);
+        }
+
+        return await RequirePlatformOperatorAsync(http, PlatformOperatorRequiredCode, SpaarkeOperatorRequiredDetail);
+    }
+
+    /// <summary>
+    /// THE platform-operator check (round 16 item 4's environment write rule; round 49 item 1's tenant-/type-wide routes,
+    /// after the deployment check): the caller's OWN business unit must be the root. Anyone else gets ONE 403 with
+    /// <paramref name="denyCode"/>; an unreadable scope is the 503. Null to continue.
     /// </summary>
     private async Task<IResult?> RequirePlatformOperatorAsync(HttpContext http, string denyCode, string detail)
     {

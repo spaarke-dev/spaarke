@@ -710,6 +710,11 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [InlineData("POST", "/api/spe/containertypes/{t}/register")]
     public async Task ATypeRouteNamingATypeThatIsNotTheConfigsOwn_IsTheUniformTypeNotFound(string method, string path)
     {
+        // Judged for the only caller the type-wide routes admit — a root admin of a Spaarke-operated environment (owner
+        // round 49 item 1): the route's type must still be the config's own.
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        StubContainers();
         using var client = Admin();
 
         var problem = await Problem(await client.SendAsync(TypeRequest(method, path, TypeX, ConfigA)));
@@ -729,7 +734,8 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
 
         var problem = await Problem(await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA)), HttpStatusCode.Forbidden);
 
-        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.container_type_shared");
+        // Owner round 49 item 1: a leaf admin is refused by the operator rule, before the type is even looked at.
+        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.platform_operator_required");
         _fixture.Graph.AllRequests.Should().BeEmpty();
     }
 
@@ -744,16 +750,38 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
 
         var problem = await Problem(await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA)), HttpStatusCode.Forbidden);
 
-        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.container_type_shared");
+        // Owner round 49 item 1: a leaf admin is refused by the operator rule, before the type is even looked at.
+        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.platform_operator_required");
         HandlerConfigReads().Should().Be(0, "the handler never ran");
+        _fixture.Graph.AllRequests.Should().BeEmpty();
+    }
+
+    [Theory]
+    [InlineData("GET", "/api/spe/containertypes/{t}/permissions")]
+    [InlineData("POST", "/api/spe/containertypes/{t}/consumers")]
+    public async Task ARootAdmin_OnATypeAConfigOutsideTheHierarchyAlsoCarries_IsStill403Shared(string method, string path)
+    {
+        // Round 35 item 5's every-config rule keeps its own reach for the root admin: a config whose business unit is not
+        // in this environment's hierarchy (a removed or foreign unit) is one even the root does not reach.
+        _fixture.Reset();
+        SeedTenant(callerUnit: Root);
+        _fixture.Dataverse.Add(ConfigSet, ConfigRow(Guid.Parse("cf000000-0000-0000-0000-0000000000f0"),
+            Guid.Parse("1f000000-0000-0000-0000-0000000000ff"), TypeT));
+        StubContainers();
+        using var client = Admin();
+
+        var problem = await Problem(await client.SendAsync(TypeRequest(method, path, TypeT, ConfigA)), HttpStatusCode.Forbidden);
+
+        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.container_type_shared");
         _fixture.Graph.AllRequests.Should().BeEmpty();
     }
 
     public static TheoryData<string, string, string> AdminsWhoReachEveryConfigOfTheType() => new()
     {
-        // (caller unit, Config B's type, why)
+        // (caller unit, Config B's type, why) — owner round 49 item 1: only a root admin of a Spaarke-operated environment
+        // reaches the type-wide routes at all.
         { "10000000-0000-0000-0000-000000000000", TypeT, "a root-unit admin reaches both configs of the shared type" },
-        { "1a000000-0000-0000-0000-000000000000", TypeX, "type T is carried only by Unit A's own config" },
+        { "10000000-0000-0000-0000-000000000000", TypeX, "a root-unit admin reaches the type only Unit A's config carries" },
     };
 
     [Theory]
@@ -788,17 +816,21 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     }
 
     [Fact]
-    public async Task ALeafAdmin_WritingATypeOnlyItsOwnConfigsCarry_PassesTheTypeRule()
+    public async Task ALeafAdmin_EvenOnATypeOnlyItsOwnConfigsCarry_IsRefused_TypeWideRoutesAreForTheOperatorsRootAdmin()
     {
-        // Config B moves to its own type: Unit A's type T is no longer shared.
+        // Config B moves to its own type: Unit A's type T is no longer shared — and a leaf admin is still refused (owner
+        // round 49 item 1 supersedes round 35 item 5's leaf-admin path: type-wide routes are platform-operator routes).
         _fixture.Reset();
         SeedTenant(callerUnit: UnitA, configBType: TypeX);
         StubContainers();
         using var client = Admin();
 
-        var response = await client.SendAsync(TypeRequest("POST", "/api/spe/containertypes/{t}/consumers", TypeT, ConfigA));
+        var problem = await Problem(
+            await client.SendAsync(TypeRequest("POST", "/api/spe/containertypes/{t}/consumers", TypeT, ConfigA)),
+            HttpStatusCode.Forbidden);
 
-        (await response.Content.ReadAsStringAsync()).Should().NotContain("spe.admin.deny.container_type");
+        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.platform_operator_required");
+        _fixture.Graph.AllRequests.Should().BeEmpty();
     }
 
     [Theory]
@@ -806,8 +838,8 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     [InlineData("POST", "/api/spe/containertypes/{t}/consumers")]
     public async Task ATypeRoute_WhenTheScopeCannotBeRead_Is503_AndNothingIsSent(string method, string path)
     {
-        // Through the UNIT-LESS Config N: the configId rule admits it without reading the hierarchy (the compatibility
-        // rule), so the 503 can only come from the container-type rule's own read.
+        // Through the UNIT-LESS Config N. The operator rule (owner round 49 item 1) reads the caller's scope first, so the
+        // fault is met there — the answer is the same 503, refused before anything is sent.
         _fixture.Dataverse.FaultQueriesOn("businessunits");
         using var client = Admin();
 
