@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using System.Text.RegularExpressions;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Xunit;
@@ -65,9 +66,22 @@ public sealed class SpeAdminContainerBindingGuardTests
     /// <summary>The collection URL spelled out (raw HTTP / Kiota request information / a script) — not an item URL.</summary>
     private static readonly Regex CollectionUrl = new(@"fileStorage/containers(?![/\w])", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    /// <summary>Signals that a C# method sends a POST.</summary>
+    /// <summary>
+    /// A literal that is just the collection's last segment — <c>"/containers"</c>, or <c>$"{base}/containers"</c>, optionally
+    /// with a query — the collection when the same file's strings name fileStorage (a base held elsewhere). Not
+    /// <c>"/search/containers"</c> or <c>"/api/spe/containers"</c>, which are other paths.
+    /// </summary>
+    private static readonly Regex RelativeCollectionPath = new(
+        @"^\$*@?\$*""(?:\{[^{}""]*\})?/containers(?:[?#][^""]*)?""$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// Signals that a C# member sends a POST: <c>PostAsync(</c> / <c>PostAsJsonAsync(</c> — with or without generic
+    /// arguments (round 49: <c>PostAsJsonAsync&lt;object&gt;(…)</c> was missed) — <c>HttpMethod.Post</c>,
+    /// <c>Method.POST</c>, or a <c>"POST"</c> literal (e.g. <c>new HttpMethod("POST")</c>).
+    /// </summary>
     private static readonly Regex CSharpPostSignal = new(
-        @"\.\s*Post(?:AsJson)?Async\s*\(|HttpMethod\s*\.\s*Post\b|Method\s*\.\s*POST\b|""POST""", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        @"\.\s*Post(?:AsJson)?Async\s*(?:<(?>[^<>()]+|<(?<g>)|>(?<-g>))*(?(g)(?!))>)?\s*\(|HttpMethod\s*\.\s*Post\b|Method\s*\.\s*POST\b|""POST""",
+        RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     /// <summary>
     /// Creation sites whose binding is a LATER step of the same handler run, not the creating method — key: the creating
@@ -84,17 +98,20 @@ public sealed class SpeAdminContainerBindingGuardTests
     [Fact(DisplayName = "Every SPE container created anywhere in src/ is bound to its business unit")]
     public void EveryContainerCreationPath_BindsTheNewContainer()
     {
-        var files = SourceFiles(Path.Combine(RepoRoot, "src"), "*.cs")
-            .Select(f => (Rel: Rel(f), Analysis: AnalyseCSharp(StripComments(File.ReadAllText(f)))))
-            .ToList();
+        // Production sources: every .cs under src/ except test projects (*.Tests) — tests/ is never scanned, and the L2
+        // tests that happen to live under src/ drive fake Graph transports that legitimately POST to the collection.
+        var analyses = AnalyseCSharpFiles(SourceFiles(Path.Combine(RepoRoot, "src"), "*.cs")
+            .Where(f => !IsTestProjectFile(f))
+            .Select(f => (Rel: Rel(f), Source: File.ReadAllText(f)))
+            .ToList(), out var followed);
 
-        var creators = files.Where(f => f.Analysis.Creations.Count > 0).ToList();
+        var creators = analyses.Where(a => a.Value.Creations.Count > 0).Select(a => a.Key).ToList();
         Assert.True(creators.Count >= 3,
             "the scan must find the three C# creation paths (SpeAdminGraphService, ContainerOperations, the L2 H8 " +
             $"provisioner) — found {creators.Count}, so it would pass vacuously");
 
         var violations = new List<string>();
-        foreach (var (rel, analysis) in files)
+        foreach (var (rel, analysis) in analyses)
         {
             violations.AddRange(analysis.Opaque.Select(v => $"{rel}: {v}"));
             if (!DeferredBinders.ContainsKey(rel))
@@ -105,11 +122,12 @@ public sealed class SpeAdminContainerBindingGuardTests
 
         Assert.True(violations.Count == 0,
             "These create an SPE container without binding it to its owning business unit, or reach the containers " +
-            "collection in a form the guard cannot judge (owner rounds 20/35/41: call BindNewContainerAsync in the same " +
-            "method, and use the collection only as a chained .GetAsync( / .PostAsync( on graph.Storage.FileStorage.Containers):\n  " +
-            string.Join("\n  ", violations));
+            "collection in a form the guard cannot judge (owner rounds 20/35/41/49: call BindNewContainerAsync in the same " +
+            "member, and use the collection only as a chained .GetAsync( / .PostAsync( on graph.Storage.FileStorage.Containers):\n  " +
+            string.Join("\n  ", violations) +
+            "\n(names followed from a member that spells the collection URL: " + string.Join(", ", followed.Order()) + ")");
 
-        var stale = DeferredBinders.Keys.Where(k => !creators.Any(c => c.Rel == k)).ToList();
+        var stale = DeferredBinders.Keys.Where(k => !creators.Contains(k)).ToList();
         Assert.True(stale.Count == 0, "Deferred-binder entries naming no creation site — delete them: " + string.Join(", ", stale));
     }
 
@@ -133,10 +151,11 @@ public sealed class SpeAdminContainerBindingGuardTests
     [Fact(DisplayName = "The L2 H8 root container is bound by the handler after verification, before the KV write and the H7 handoff")]
     public void TheDeferredBinderIsReal()
     {
-        var provisioner = StripComments(File.ReadAllText(Path.Combine(RepoRoot,
+        var provisioner = LexCSharp(File.ReadAllText(Path.Combine(RepoRoot,
             "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SpeContainerType", "GraphContainerTypeProvisioner.cs")));
-        var handler = StripComments(File.ReadAllText(Path.Combine(RepoRoot,
+        var handlerSource = LexCSharp(File.ReadAllText(Path.Combine(RepoRoot,
             "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SpeContainerType", "H8SpeContainerTypeHandler.cs")));
+        var handler = handlerSource.Text;
 
         // The provisioner's bind step really stamps, reads back and removes.
         var bindStep = MethodBody(provisioner, "BindNewContainerAsync(");
@@ -146,23 +165,33 @@ public sealed class SpeAdminContainerBindingGuardTests
         Assert.Contains("BindNewContainerAsync(", MethodBody(provisioner, "BindRootContainerAsync("));
 
         // The handler reads its own creation record, creates only without one, RECORDS what it created, then verifies,
-        // binds, writes the KV secret and completes — in that order (owner round 41 item 1).
-        var handle = MethodBody(handler, "HandleAsync(");
+        // binds (the root, then every container adopted with it), writes the KV secret and completes — in that order
+        // (owner rounds 41 + 49).
+        var handle = MethodBody(handlerSource, "HandleAsync(");
         var recorded = handle.IndexOf("ReadRecordedCreation(", StringComparison.Ordinal);
         var provision = handle.IndexOf("_provisioner.ProvisionAsync(", StringComparison.Ordinal);
         var record = provision < 0 ? -1 : handle.IndexOf("RecordCreationAsync(", provision, StringComparison.Ordinal);
         var verify = handle.IndexOf("_verifier.VerifyAsync(", StringComparison.Ordinal);
         var bind = handle.IndexOf("_provisioner.BindRootContainerAsync(", StringComparison.Ordinal);
+        var bindAdopted = handle.IndexOf("BindAdditionalContainersAsync(", StringComparison.Ordinal);
         var kv = handle.IndexOf("_kvWriter.WriteAsync(", StringComparison.Ordinal);
         var complete = handle.IndexOf("MarkCompleteAsync(", StringComparison.Ordinal);
-        Assert.True(recorded > 0 && provision > recorded && record > provision && verify > record && bind > verify && kv > bind
-                    && complete > kv,
-            "H8 must read its creation record, create, record, verify, bind, write the KV secret, then complete (offsets: " +
-            $"read {recorded}, provision {provision}, record {record}, verify {verify}, bind {bind}, kv {kv}, complete {complete})");
+        Assert.True(recorded > 0 && provision > recorded && record > provision && verify > record && bind > verify
+                    && bindAdopted > bind && kv > bindAdopted && complete > kv,
+            "H8 must read its creation record, create, record, verify, bind (root, then adopted containers), write the KV " +
+            $"secret, then complete (offsets: read {recorded}, provision {provision}, record {record}, verify {verify}, " +
+            $"bind {bind}, bind adopted {bindAdopted}, kv {kv}, complete {complete})");
+
+        // The resume record is read from TYPED fields only — never from gate evidence (owner round 49 item 2: Newtonsoft
+        // stored a JsonElement as {"valueKind":1}).
+        var read = MethodBody(handlerSource, "RecordedCreation ReadRecordedCreation(");
+        Assert.Contains("SpeContainerCreation", read);
+        Assert.DoesNotContain("Evidence", read, StringComparison.Ordinal);
+        Assert.DoesNotContain("JsonElement", read, StringComparison.Ordinal);
 
         // The H7 hand-off (InterStepState.SpeContainerId) is given a container ONLY on completion — after the bind.
         var handOffs = Regex.Matches(handler, @"SpeContainerId\s*=(?!=)(?!\s*null\b)").Count;
-        Assert.True(handOffs == 1 && MethodBody(handler, "MarkCompleteAsync(").Contains("SpeContainerId = outputs.RootContainerId", StringComparison.Ordinal),
+        Assert.True(handOffs == 1 && MethodBody(handlerSource, "MarkCompleteAsync(").Contains("SpeContainerId = outputs.RootContainerId", StringComparison.Ordinal),
             $"InterStepState.SpeContainerId must be given a container in exactly one place, MarkCompleteAsync (found {handOffs})");
     }
 
@@ -186,21 +215,35 @@ public sealed class SpeAdminContainerBindingGuardTests
             }
             """;
         const string reads = """
-            public async Task<X> ListAsync()
+            public sealed class Reader
             {
-                var page = await graphClient.Storage.FileStorage
-                    .Containers
-                    .GetAsync(c => c.QueryParameters.Top = 5, ct);
-                var next = await graphClient.Storage.FileStorage.Containers.WithUrl($"{b}/storage/fileStorage/containers?$skiptoken={t}").GetAsync();
-                var item = await graphClient.Storage.FileStorage.Containers[id].Drive.GetAsync();
-                return page;
-            }
+                public async Task<X> ListAsync()
+                {
+                    var page = await graphClient.Storage.FileStorage
+                        .Containers
+                        .GetAsync(c => c.QueryParameters.Top = 5, ct);
+                    var next = await graphClient.Storage.FileStorage.Containers.WithUrl($"{b}/storage/fileStorage/containers?$skiptoken={t}").GetAsync();
+                    var item = await graphClient.Storage.FileStorage.Containers[id].Drive.GetAsync();
+                    return page;
+                }
 
-            public Task<T> CreateTypeAsync() => graphClient.Storage.FileStorage.ContainerTypes.PostAsync(t);
+                public Task<T> CreateTypeAsync() => graphClient.Storage.FileStorage.ContainerTypes.PostAsync(t);
+
+                // Uses the URL internally (a nextLink) and returns its own page — a caller that POSTs gets no URL from it.
+                public async Task Caller() { await ListAsync(); await http.PostAsync("https://login.microsoftonline.com/t/oauth2/v2.0/token", c); }
+            }
             """;
         const string namespaceOnly = """
             using Microsoft.Graph.Storage.FileStorage.Containers.Item.Permissions;
             public sealed class X { private Microsoft.Graph.Storage.FileStorage.Containers.Item.Drive.DriveRequestBuilder? _d; }
+            """;
+        // Strings that merely LOOK like code or comments are not code or comments.
+        const string stringsAreNotComments = """
+            public sealed class Log
+            {
+                private const string Note = "see https://learn.microsoft.com // not a comment";
+                public void Write() => _logger.Log("/* not a comment either */ GET https://graph.microsoft.com/v1.0/storage/fileStorage/containers");
+            }
             """;
         const string unbound = """
             public async Task<X> CreateAsync()
@@ -247,98 +290,747 @@ public sealed class SpeAdminContainerBindingGuardTests
                 await adapter.SendNoContentAsync(info);
             }
             """;
+        // Owner round 49 — the verifier's surviving C# shapes.
+        const string absoluteUrl = """
+            public async Task<HttpResponseMessage> CreateAsync()
+            {
+                return await http.PostAsync("https://graph.microsoft.com/v1.0/storage/fileStorage/containers", content);
+            }
+            """;
+        const string classLevelConstant = """
+            public sealed class Creator
+            {
+                private const string ContainersUrl = "https://graph.microsoft.com/v1.0/storage/fileStorage/containers";
+
+                public async Task<HttpResponseMessage> CreateAsync() => await http.PostAsync(ContainersUrl, content);
+            }
+            """;
+        const string genericPost = """
+            public async Task<HttpResponseMessage> CreateAsync()
+            {
+                return await http.PostAsJsonAsync<object>($"{baseUrl}/storage/fileStorage/containers", body);
+            }
+            """;
+        const string urlFromAHelper = """
+            public sealed class Creator
+            {
+                private static string Collection(string b) => $"{b}/storage/fileStorage/containers";
+
+                public async Task<HttpResponseMessage> CreateAsync() => await http.PostAsync(Collection(baseUrl), content);
+            }
+            """;
+        const string relativeToABase = """
+            public sealed class Creator
+            {
+                private const string FileStorageBase = "https://graph.microsoft.com/v1.0/storage/fileStorage";
+
+                public async Task<HttpResponseMessage> CreateAsync() =>
+                    await http.SendAsync(new HttpRequestMessage(HttpMethod.Post, $"{FileStorageBase}/containers"));
+            }
+            """;
+        const string usingDeclaration = """
+            public async Task CreateAsync()
+            {
+                using var response = await http.PostAsync("https://graph.microsoft.com/v1.0/storage/fileStorage/containers", content);
+            }
+            """;
+        const string topLevelStatements = """
+            var url = "https://graph.microsoft.com/v1.0/storage/fileStorage/containers";
+            var created = await http.PostAsync(url, content);
+            """;
 
         Assert.Empty(Problems(bound));
         Assert.Empty(Problems(boundViaWithUrl));
         Assert.Empty(Problems(reads));
         Assert.Empty(Problems(namespaceOnly));
+        Assert.Empty(Problems(stringsAreNotComments));
         foreach (var (name, seeded) in new[]
                  {
                      ("unbound", unbound), ("heldCollection", heldCollection), ("heldFileStorage", heldFileStorage),
                      ("passedAlong", passedAlong), ("constructed", constructed), ("rawHttp", rawHttp), ("kiota", kiota),
+                     ("absoluteUrl", absoluteUrl), ("classLevelConstant", classLevelConstant), ("genericPost", genericPost),
+                     ("urlFromAHelper", urlFromAHelper), ("relativeToABase", relativeToABase),
+                     ("usingDeclaration", usingDeclaration), ("topLevelStatements", topLevelStatements),
                  })
         {
             Assert.True(Problems(seeded).Count > 0, $"the analyser must flag the seeded '{name}' creation");
         }
 
+        // Across files: the URL constant in one file, the POST in another (a shared constants class).
+        var acrossFiles = AnalyseCSharpFiles(new[]
+        {
+            ("a/GraphPaths.cs", "public static class GraphPaths { public const string Containers = \"https://graph.microsoft.com/v1.0/storage/fileStorage/containers\"; }"),
+            ("b/Creator.cs", "public sealed class Creator { public Task<HttpResponseMessage> CreateAsync() => http.PostAsync(GraphPaths.Containers, content); }"),
+        });
+        Assert.True(acrossFiles["b/Creator.cs"].Unbound.Count > 0, "the analyser must follow a URL constant to another file");
+
         static List<string> Problems(string source)
         {
-            var analysis = AnalyseCSharp(StripComments(source));
+            var analysis = AnalyseCSharp(source);
             return analysis.Unbound.Concat(analysis.Opaque).ToList();
         }
     }
 
     /// <summary>What the guard finds in one C# file.</summary>
     /// <param name="Creations">Offsets of every container CREATE the guard recognises.</param>
-    /// <param name="Unbound">Creations whose method does not bind the new container.</param>
-    /// <param name="Opaque">Uses of the containers collection the guard cannot judge (held, passed, constructed).</param>
+    /// <param name="Unbound">Creations whose member does not bind the new container.</param>
+    /// <param name="Opaque">Uses of the containers collection the guard cannot judge (held, passed, constructed, or a collection URL outside any member).</param>
     private sealed record CSharpAnalysis(List<int> Creations, List<string> Unbound, List<string> Opaque);
 
-    private static CSharpAnalysis AnalyseCSharp(string code)
+    private static CSharpAnalysis AnalyseCSharp(string source) =>
+        AnalyseCSharpFiles(new[] { ("snippet.cs", source) })["snippet.cs"];
+
+    /// <summary>
+    /// The C# analyser over a set of files (owner rounds 41 + 49). Every file is LEXED (<see cref="LexCSharp"/>: comments
+    /// removed, string literals known — a URL's <c>//</c> is not a comment) and split into MEMBERS (<see cref="ParseMembers"/>:
+    /// methods, properties, fields, constants, top-level statements). Then:
+    /// <list type="number">
+    ///   <item>SDK: every <c>.FileStorage</c> member access must chain straight into <c>.Containers</c>/<c>.ContainerTypes</c>/…,
+    ///   and the containers COLLECTION builder only into <c>.GetAsync(</c>/<c>.PostAsync(</c> — a POST is a create; anything
+    ///   else (held, passed, constructed) is OPAQUE.</item>
+    ///   <item>Spelled URL: a member HOLDS the collection when one of its string literals is the collection URL (or a
+    ///   path ending at <c>/containers</c> in a file whose strings name fileStorage), or when it references a SYMBOL — the
+    ///   name of a member, in ANY file, that holds the collection and does not POST (a constant, a field, a property, a
+    ///   method that builds the URL). A holder that POSTs, or that calls a member that POSTs, is a create. A collection
+    ///   literal outside any member is OPAQUE.</item>
+    ///   <item>Every create must call <c>BindNewContainerAsync(</c> in the same member (or be a <see cref="DeferredBinders"/> site).</item>
+    /// </list>
+    /// </summary>
+    private static Dictionary<string, CSharpAnalysis> AnalyseCSharpFiles(IReadOnlyList<(string Rel, string Source)> files) =>
+        AnalyseCSharpFiles(files, out _);
+
+    private static Dictionary<string, CSharpAnalysis> AnalyseCSharpFiles(
+        IReadOnlyList<(string Rel, string Source)> files, out IReadOnlySet<string> followedSymbols)
     {
-        // using directives are not request builders (blanked, keeping offsets).
-        code = Regex.Replace(code, @"^[ \t]*using\s+[^;\n]+;", m => new string(' ', m.Length), RegexOptions.Multiline);
-
-        var creations = new List<int>();
-        var opaque = new List<string>();
-
-        foreach (Match m in FileStorageMember.Matches(code))
+        var parsed = files.Select(f =>
         {
-            if (GraphStorageNamespace.IsMatch(code[Math.Max(0, m.Index - 80)..m.Index]))
+            var lexed = LexCSharp(f.Source);
+            // using DIRECTIVES are not request builders (blanked, keeping offsets) — never a `using var x = …;` statement.
+            var code = Regex.Replace(lexed.Code,
+                @"^[ \t]*(?:global\s+)?using\s+(?:static\s+)?(?:\w+\s*=\s*)?[\w.]+(?:<[\w.,\s<>]*>)?\s*;",
+                m => new string(' ', m.Length), RegexOptions.Multiline);
+            var literals = lexed.Literals.Select(l => (l.Start, l.End, Text: lexed.Text[l.Start..l.End])).ToList();
+            var namesFileStorage = literals.Any(l => l.Text.Contains("filestorage", StringComparison.OrdinalIgnoreCase));
+            var members = ParseMembers(code);
+            var posting = CSharpPostSignal.Matches(lexed.Text)
+                .Select(m => MemberAt(members, m.Index))
+                .Where(i => i >= 0)
+                .ToHashSet();
+            return new ParsedCSharpFile(f.Rel, lexed.Text, code, members,
+                literals.Where(l => CollectionUrl.IsMatch(l.Text) || (namesFileStorage && RelativeCollectionPath.IsMatch(l.Text)))
+                    .Select(l => l.Start)
+                    .ToList(),
+                posting);
+        }).ToList();
+        var byRel = parsed.ToDictionary(p => p.Rel);
+
+        var analyses = parsed.ToDictionary(p => p.Rel, p => new CSharpAnalysis(new List<int>(), new List<string>(), new List<string>()));
+
+        // (1) The SDK builders.
+        foreach (var p in parsed)
+        {
+            var analysis = analyses[p.Rel];
+            foreach (Match m in FileStorageMember.Matches(p.Code))
             {
-                continue; // Microsoft.Graph.Storage.FileStorage… — the namespace, not the request builder
+                if (GraphStorageNamespace.IsMatch(p.Code[Math.Max(0, m.Index - 80)..m.Index]))
+                {
+                    continue; // Microsoft.Graph.Storage.FileStorage… — the namespace, not the request builder
+                }
+
+                var member = FileStorageMemberNext.Match(p.Code, m.Index + m.Length);
+                if (!member.Success)
+                {
+                    analysis.Opaque.Add($"line {LineOf(p.Code, m.Index)}: the FileStorage request builder is held or passed — chain it");
+                    continue;
+                }
+
+                if (member.Groups["member"].Value != "Containers")
+                {
+                    continue;
+                }
+
+                var afterCollection = member.Index + member.Length;
+                if (IndexerNext.IsMatch(p.Code, afterCollection))
+                {
+                    continue; // Containers[id] — one container, not the collection
+                }
+
+                var chain = CollectionChainNext.Match(p.Code, afterCollection);
+                if (!chain.Success)
+                {
+                    analysis.Opaque.Add($"line {LineOf(p.Code, m.Index)}: the containers COLLECTION builder is used other than in a chained " +
+                                        ".GetAsync( / .PostAsync( — a create through it could not be seen");
+                }
+                else if (chain.Groups["verb"].Value == "PostAsync")
+                {
+                    analysis.Creations.Add(m.Index);
+                }
             }
 
-            var member = FileStorageMemberNext.Match(code, m.Index + m.Length);
-            if (!member.Success)
+            foreach (Match m in Regex.Matches(p.Code, @"\bContainersRequestBuilder\b"))
             {
-                opaque.Add($"line {LineOf(code, m.Index)}: the FileStorage request builder is held or passed — chain it");
+                analysis.Opaque.Add($"line {LineOf(p.Code, m.Index)}: ContainersRequestBuilder named directly — use graph.Storage.FileStorage.Containers, chained");
+            }
+        }
+
+        // (2) The spelled-out collection URL. A member HOLDS the collection where its text carries it: a collection literal,
+        //     or a reference to a PROVIDER — a member whose VALUE is the collection URL (a constant, field or property
+        //     initialised with it; a method that RETURNS it). Providers are followed to a fixpoint, across files. A member
+        //     that merely USES the URL internally (a list method's nextLink) is not a provider: its callers do not get the URL.
+        var carriers = new Dictionary<(string Rel, int Member), List<int>>(); // offsets where the member carries the collection
+        void Carry(string rel, int index, int offset)
+        {
+            if (!carriers.TryGetValue((rel, index), out var offsets))
+            {
+                carriers[(rel, index)] = offsets = new List<int>();
+            }
+
+            offsets.Add(offset);
+        }
+
+        foreach (var p in parsed)
+        {
+            foreach (var literal in p.CollectionLiterals)
+            {
+                var index = MemberAt(p.Members, literal);
+                if (index < 0)
+                {
+                    analyses[p.Rel].Opaque.Add($"line {LineOf(p.Text, literal)}: the containers collection URL is spelled outside any " +
+                                               "member the guard can follow");
+                    continue;
+                }
+
+                Carry(p.Rel, index, literal);
+            }
+        }
+
+        // Every identifier in the files' CODE (string contents blanked) that is one of `names`, as (file, member, offset,
+        // name) — excluding a member's mention of its own name (its declaration, recursion). With `callsOnly`, only a call:
+        // the name followed by '(' (optionally by generic arguments first). One identifier scan per file.
+        IEnumerable<(string Rel, int Member, int Offset, string Name)> References(IReadOnlySet<string> names, bool callsOnly = false)
+        {
+            if (names.Count == 0)
+            {
+                yield break;
+            }
+
+            foreach (var p in parsed)
+            {
+                foreach (Match r in Identifier.Matches(p.Code))
+                {
+                    if (!names.Contains(r.Value) || (callsOnly && !CallFollows.IsMatch(p.Code, r.Index + r.Length)))
+                    {
+                        continue;
+                    }
+
+                    var index = MemberAt(p.Members, r.Index);
+                    if (index >= 0 && !p.Members[index].Names.Contains(r.Value))
+                    {
+                        yield return (p.Rel, index, r.Index, r.Value);
+                    }
+                }
+            }
+        }
+
+        var providers = new HashSet<string>(StringComparer.Ordinal);
+        for (var changed = true; changed;)
+        {
+            changed = false;
+            foreach (var ((rel, index), offsets) in carriers.ToList())
+            {
+                var p = byRel[rel];
+                if (IsProvider(p, index, offsets))
+                {
+                    foreach (var name in p.Members[index].Names)
+                    {
+                        changed |= providers.Add(name);
+                    }
+                }
+            }
+
+            foreach (var (rel, index, offset, _) in References(providers).ToList())
+            {
+                if (!carriers.TryGetValue((rel, index), out var offsets) || !offsets.Contains(offset))
+                {
+                    Carry(rel, index, offset);
+                    changed = true;
+                }
+            }
+        }
+
+        followedSymbols = providers;
+
+        // A carrier that POSTs is a create; so is a carrier that CALLS a member that posts (the URL passed along to it).
+        var postingNames = parsed
+            .SelectMany(p => p.Posting.SelectMany(i => p.Members[i].Names))
+            .ToHashSet(StringComparer.Ordinal);
+        var callers = References(postingNames, callsOnly: true)
+            .Select(r => (r.Rel, r.Member))
+            .ToHashSet();
+
+        foreach (var (rel, index) in carriers.Keys)
+        {
+            if (byRel[rel].Posting.Contains(index) || callers.Contains((rel, index)))
+            {
+                analyses[rel].Creations.Add(byRel[rel].Members[index].Start);
+            }
+        }
+
+        foreach (var p in parsed)
+        {
+            var analysis = analyses[p.Rel];
+            foreach (var creation in analysis.Creations)
+            {
+                var member = p.Members.FirstOrDefault(mm => creation >= mm.Start && creation < mm.End);
+                var body = member is null ? string.Empty : p.Text[member.Start..member.End];
+                if (!body.Contains("BindNewContainerAsync(", StringComparison.Ordinal))
+                {
+                    analysis.Unbound.Add($"the create at line {LineOf(p.Text, creation)} is not bound in its member" +
+                                         (member is null ? string.Empty : $" ({string.Join(", ", member.Names)})"));
+                }
+            }
+        }
+
+        return analyses;
+    }
+
+    private sealed record ParsedCSharpFile(
+        string Rel, string Text, string Code, List<CSharpMember> Members, List<int> CollectionLiterals, HashSet<int> Posting);
+
+    private static readonly Regex Identifier = new(@"(?<![\w@])[A-Za-z_]\w*", RegexOptions.Compiled);
+
+    private static readonly Regex CallFollows = new(@"\G\s*(?:<(?>[^<>();{}]+|<(?<g>)|>(?<-g>))*(?(g)(?!))>)?\s*\(", RegexOptions.Compiled);
+
+    /// <summary>The index of the member whose span holds <paramref name="offset"/>, or -1 (members are in file order and never overlap).</summary>
+    private static int MemberAt(List<CSharpMember> members, int offset)
+    {
+        int lo = 0, hi = members.Count - 1;
+        while (lo <= hi)
+        {
+            var mid = (lo + hi) / 2;
+            if (offset < members[mid].Start) hi = mid - 1;
+            else if (offset >= members[mid].End) lo = mid + 1;
+            else return mid;
+        }
+
+        return -1;
+    }
+
+    /// <summary>One member (or top-level statement) of a C# file: its declared name(s) and its span.</summary>
+    private sealed record CSharpMember(IReadOnlyList<string> Names, int Start, int End, bool IsMethod = false, bool ExpressionBodied = false);
+
+    /// <summary>
+    /// Whether a member that carries the collection at <paramref name="offsets"/> PROVIDES it as its value: a field,
+    /// constant or property does; a method does when it is expression-bodied or RETURNS it (a carrying offset inside a
+    /// <c>return …;</c>). A member that POSTs consumes the URL (it is a create), and a method that only uses the URL
+    /// internally (a list method's nextLink) hands nothing on — neither is a provider.
+    /// </summary>
+    private static bool IsProvider(ParsedCSharpFile p, int index, IEnumerable<int> offsets)
+    {
+        var member = p.Members[index];
+        if (p.Posting.Contains(index))
+        {
+            return false;
+        }
+
+        if (!member.IsMethod || member.ExpressionBodied)
+        {
+            return true;
+        }
+
+        foreach (var offset in offsets)
+        {
+            var before = p.Code[member.Start..Math.Min(offset, p.Code.Length)];
+            var returnAt = Regex.Matches(before, @"\breturn\b").LastOrDefault();
+            if (returnAt is not null && before.IndexOf(';', returnAt.Index) < 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>A C# file with its comments blanked (<see cref="Text"/>), and also its literal contents (<see cref="Code"/>).</summary>
+    /// <param name="Text">The source with every comment replaced by spaces (line breaks kept) — string literals intact.</param>
+    /// <param name="Code">As <paramref name="Text"/>, with the CONTENT of every string and char literal blanked too (interpolation holes are code and are kept).</param>
+    /// <param name="Literals">Every string literal's span (prefix to closing quote) in <paramref name="Text"/>.</param>
+    private sealed record CSharpSource(string Text, string Code, IReadOnlyList<(int Start, int End)> Literals);
+
+    /// <summary>
+    /// A small C# lexer (owner round 49 item 2: the old <c>//[^\n]*</c> comment stripper erased everything after
+    /// <c>https:</c> in a URL literal, so an absolute collection URL was never seen). Knows regular, verbatim, interpolated
+    /// (with nested holes), raw (<c>"""</c>, with <c>$$</c> holes) and char literals, and line and block comments. Offsets
+    /// are preserved in both outputs.
+    /// </summary>
+    private static CSharpSource LexCSharp(string source)
+    {
+        var text = source.ToCharArray();
+        var code = source.ToCharArray();
+        var literals = new List<(int, int)>();
+        var i = 0;
+        ScanCSharpCode(source, ref i, text, code, literals, inHole: false);
+        return new CSharpSource(new string(text), new string(code), literals);
+    }
+
+    private static void Blank(char[] target, string source, int from, int to)
+    {
+        for (var k = from; k < to && k < source.Length; k++)
+        {
+            if (source[k] is not ('\n' or '\r'))
+            {
+                target[k] = ' ';
+            }
+        }
+    }
+
+    /// <summary>Scans code; inside an interpolation hole it stops AT the <c>}</c> that closes the hole (not consumed).</summary>
+    private static void ScanCSharpCode(string s, ref int i, char[] text, char[] code, List<(int, int)> literals, bool inHole)
+    {
+        var depth = 0;
+        while (i < s.Length)
+        {
+            var c = s[i];
+            if (c == '/' && i + 1 < s.Length && s[i + 1] == '/')
+            {
+                var start = i;
+                while (i < s.Length && s[i] != '\n') i++;
+                Blank(text, s, start, i);
+                Blank(code, s, start, i);
                 continue;
             }
 
-            if (member.Groups["member"].Value != "Containers")
+            if (c == '/' && i + 1 < s.Length && s[i + 1] == '*')
+            {
+                var start = i;
+                i += 2;
+                while (i + 1 < s.Length && !(s[i] == '*' && s[i + 1] == '/')) i++;
+                i = Math.Min(s.Length, i + 2);
+                Blank(text, s, start, i);
+                Blank(code, s, start, i);
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                var start = i++;
+                if (i < s.Length && s[i] == '\\')
+                {
+                    i += 2;
+                    while (i < s.Length && s[i] != '\'' && s[i] != '\n') i++;
+                }
+                else
+                {
+                    i++;
+                }
+
+                if (i < s.Length && s[i] == '\'') i++;
+                Blank(code, s, start + 1, Math.Max(start + 1, i - 1));
+                continue;
+            }
+
+            if (TryScanCSharpString(s, ref i, text, code, literals))
             {
                 continue;
             }
 
-            var afterCollection = member.Index + member.Length;
-            if (IndexerNext.IsMatch(code, afterCollection))
+            if (inHole)
             {
-                continue; // Containers[id] — one container, not the collection
+                if (c == '{') depth++;
+                else if (c == '}')
+                {
+                    if (depth == 0) return;
+                    depth--;
+                }
             }
 
-            var chain = CollectionChainNext.Match(code, afterCollection);
-            if (!chain.Success)
-            {
-                opaque.Add($"line {LineOf(code, m.Index)}: the containers COLLECTION builder is used other than in a chained " +
-                           ".GetAsync( / .PostAsync( — a create through it could not be seen");
-            }
-            else if (chain.Groups["verb"].Value == "PostAsync")
-            {
-                creations.Add(m.Index);
-            }
+            i++;
         }
+    }
 
-        foreach (Match m in Regex.Matches(code, @"\bContainersRequestBuilder\b"))
+    private static bool TryScanCSharpString(string s, ref int i, char[] text, char[] code, List<(int, int)> literals)
+    {
+        // Prefix: $… then optional @, or @ then $…
+        var k = i;
+        var dollars = 0;
+        var verbatim = false;
+        if (k < s.Length && s[k] == '@')
         {
-            opaque.Add($"line {LineOf(code, m.Index)}: ContainersRequestBuilder named directly — use graph.Storage.FileStorage.Containers, chained");
+            verbatim = true;
+            k++;
         }
 
-        // The collection URL spelled out: a create when its method sends a POST.
-        foreach (Match m in CollectionUrl.Matches(code))
+        while (k < s.Length && s[k] == '$')
         {
-            if (CSharpPostSignal.IsMatch(EnclosingMethodBody(code, m.Index)))
+            dollars++;
+            k++;
+        }
+
+        if (!verbatim && k < s.Length && s[k] == '@')
+        {
+            verbatim = true;
+            k++;
+        }
+
+        if (k >= s.Length || s[k] != '"')
+        {
+            return false;
+        }
+
+        var start = i;
+        var quotes = 0;
+        while (k + quotes < s.Length && s[k + quotes] == '"') quotes++;
+
+        if (quotes >= 3 && !verbatim)
+        {
+            // Raw string literal: closes at the same number of quotes; holes open at `dollars` braces.
+            i = k + quotes;
+            var contentStart = i;
+            while (i < s.Length)
             {
-                creations.Add(m.Index);
+                if (s[i] == '"')
+                {
+                    var run = 0;
+                    while (i + run < s.Length && s[i + run] == '"') run++;
+                    if (run >= quotes)
+                    {
+                        Blank(code, s, contentStart, i);
+                        i += quotes;
+                        literals.Add((start, i));
+                        return true;
+                    }
+
+                    i += run;
+                    continue;
+                }
+
+                if (dollars > 0 && s[i] == '{')
+                {
+                    var run = 0;
+                    while (i + run < s.Length && s[i + run] == '{') run++;
+                    if (run >= dollars)
+                    {
+                        Blank(code, s, contentStart, i + run - dollars);
+                        i += run;
+                        ScanCSharpCode(s, ref i, text, code, literals, inHole: true);
+                        var closed = 0;
+                        while (i < s.Length && s[i] == '}' && closed < dollars)
+                        {
+                            i++;
+                            closed++;
+                        }
+
+                        contentStart = i;
+                        continue;
+                    }
+
+                    i += run;
+                    continue;
+                }
+
+                i++;
+            }
+
+            Blank(code, s, contentStart, i);
+            literals.Add((start, i));
+            return true;
+        }
+
+        // Regular / verbatim (both may be interpolated).
+        i = k + 1;
+        var segmentStart = i;
+        while (i < s.Length)
+        {
+            var c = s[i];
+            if (!verbatim && c == '\\')
+            {
+                i += 2;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                if (verbatim && i + 1 < s.Length && s[i + 1] == '"')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                Blank(code, s, segmentStart, i);
+                i++;
+                literals.Add((start, i));
+                return true;
+            }
+
+            if (dollars > 0 && c == '{')
+            {
+                if (i + 1 < s.Length && s[i + 1] == '{')
+                {
+                    i += 2;
+                    continue;
+                }
+
+                Blank(code, s, segmentStart, i);
+                i++;
+                ScanCSharpCode(s, ref i, text, code, literals, inHole: true);
+                if (i < s.Length) i++; // the closing '}'
+                segmentStart = i;
+                continue;
+            }
+
+            if (c == '\n' && !verbatim)
+            {
+                break; // unterminated — stop at the line end
+            }
+
+            i++;
+        }
+
+        Blank(code, s, segmentStart, i);
+        literals.Add((start, i));
+        return true;
+    }
+
+    private static readonly HashSet<string> CSharpKeywords = new(StringComparer.Ordinal)
+    {
+        "public", "private", "protected", "internal", "static", "readonly", "const", "new", "override", "virtual",
+        "abstract", "sealed", "async", "extern", "unsafe", "volatile", "partial", "required", "file", "event", "implicit",
+        "explicit", "operator", "return", "await", "var", "void", "using", "if", "for", "foreach", "while", "switch",
+        "catch", "lock", "fixed", "nameof", "typeof", "sizeof", "default", "get", "set", "init", "add", "remove", "this",
+        "base", "where", "in", "out", "ref", "params", "throw", "is", "as", "class", "struct", "record", "interface", "enum",
+    };
+
+    /// <summary>
+    /// The members of a file (from <see cref="CSharpSource.Code"/>): every declaration at namespace/type level — method,
+    /// constructor, property, field, constant, event — and every top-level statement, with its span and declared name(s).
+    /// </summary>
+    private static List<CSharpMember> ParseMembers(string code)
+    {
+        var members = new List<CSharpMember>();
+        var stack = new Stack<char>(); // 'C' container (namespace/type), 'M' member body, 'I' inner block
+        var declStart = 0;
+        var memberStart = -1;
+        string? memberHeader = null;
+        int topLevelStart = -1, topLevelEnd = -1;
+        bool InContainer() => stack.Count == 0 || stack.Peek() == 'C';
+
+        for (var i = 0; i < code.Length; i++)
+        {
+            var c = code[i];
+            if (c == '{')
+            {
+                if (InContainer())
+                {
+                    var header = code[declStart..i];
+                    if (IsContainerHeader(header))
+                    {
+                        stack.Push('C');
+                        declStart = i + 1;
+                    }
+                    else
+                    {
+                        stack.Push('M');
+                        memberStart = declStart;
+                        memberHeader = header;
+                    }
+                }
+                else
+                {
+                    stack.Push('I');
+                }
+            }
+            else if (c == '}')
+            {
+                var kind = stack.Count > 0 ? stack.Pop() : 'C';
+                if (kind == 'M' && InContainer())
+                {
+                    // A property's accessor block may be followed by an initializer: `{ get; } = "…";` — that ';' ends it.
+                    var j = i + 1;
+                    while (j < code.Length && char.IsWhiteSpace(code[j])) j++;
+                    if (j < code.Length && code[j] == '=' && (j + 1 >= code.Length || code[j + 1] != '='))
+                    {
+                        declStart = memberStart;
+                        continue;
+                    }
+
+                    Add(DescribeMember(memberHeader!, memberStart, i + 1));
+                    declStart = i + 1;
+                }
+                else if (kind == 'C')
+                {
+                    declStart = i + 1;
+                }
+            }
+            else if (c == ';' && InContainer())
+            {
+                var declaration = code[declStart..i];
+                var trimmed = StripAttributes(declaration).Trim();
+                if (trimmed.Length > 0
+                    && !Regex.IsMatch(trimmed, @"^(?:global\s+)?using\b|^namespace\b|^extern\s+alias\b"))
+                {
+                    Add(DescribeMember(declaration, declStart, i + 1));
+                }
+
+                declStart = i + 1;
             }
         }
 
-        var unbound = creations
-            .Where(i => !EnclosingMethodBody(code, i).Contains("BindNewContainerAsync(", StringComparison.Ordinal))
-            .Select(i => $"the create at line {LineOf(code, i)} is not bound in its method")
+        // Top-level statements (a declaration outside every namespace and type) are ONE body — Main's — so a URL in one
+        // statement and the POST in another are judged together. C# puts them before any type, so the span overlaps none.
+        if (topLevelStart >= 0)
+        {
+            members.Insert(0, new CSharpMember(new[] { "<top-level statements>" }, topLevelStart, topLevelEnd, IsMethod: true));
+        }
+
+        return members;
+
+        void Add(CSharpMember member)
+        {
+            if (stack.Count == 0)
+            {
+                topLevelStart = topLevelStart < 0 ? member.Start : Math.Min(topLevelStart, member.Start);
+                topLevelEnd = Math.Max(topLevelEnd, member.End);
+                return;
+            }
+
+            members.Add(member);
+        }
+    }
+
+    private static bool IsContainerHeader(string header) =>
+        Regex.IsMatch(StripAttributes(header), @"\b(?:namespace|class|struct|interface|enum|record)\s+@?[A-Za-z_][\w.]*");
+
+    private static string StripAttributes(string header) =>
+        Regex.Replace(header, @"^\s*(?:\[(?>[^\[\]]+|\[(?<a>)|\](?<-a>))*(?(a)(?!))\]\s*)+", string.Empty);
+
+    /// <summary>A member from its declaration text (up to its body): name(s), whether it is a method, whether expression-bodied.</summary>
+    private static CSharpMember DescribeMember(string declaration, int start, int end)
+    {
+        var (names, isMethod) = MemberNames(declaration);
+        return new CSharpMember(names, start, end, isMethod, ExpressionBodied: declaration.Contains("=>", StringComparison.Ordinal));
+    }
+
+    /// <summary>The name(s) a declaration introduces — a method's name, or a property's / field's declarator(s).</summary>
+    private static (IReadOnlyList<string> Names, bool IsMethod) MemberNames(string declaration)
+    {
+        var d = StripAttributes(declaration);
+        int Find(string pattern) => Regex.Match(d, pattern) is { Success: true } m ? m.Index : int.MaxValue;
+        var assign = Find(@"(?<![=!<>])=(?![=>])");
+        var arrow = Find(@"=>");
+        var brace = Find(@"\{");
+        var method = Regex.Matches(d, @"(?<name>@?[A-Za-z_]\w*)\s*(?:<(?>[^<>]+|<(?<g>)|>(?<-g>))*(?(g)(?!))>)?\s*\(")
+            .FirstOrDefault(m => !CSharpKeywords.Contains(m.Groups["name"].Value.TrimStart('@')));
+        if (method is not null && method.Index < Math.Min(assign, Math.Min(arrow, brace)))
+        {
+            return (new[] { method.Groups["name"].Value.TrimStart('@') }, true);
+        }
+
+        var names = Regex.Matches(d, @"(?<name>@?[A-Za-z_]\w*)\s*(?:(?<![=!<>])=(?![=>])|=>|\{|$)")
+            .Select(m => m.Groups["name"].Value.TrimStart('@'))
+            .Where(n => !CSharpKeywords.Contains(n))
+            .Distinct(StringComparer.Ordinal)
             .ToList();
-
-        return new CSharpAnalysis(creations, unbound, opaque);
+        return (names.Count > 0 ? names : new[] { "<statement>" }, false);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -356,15 +1048,93 @@ public sealed class SpeAdminContainerBindingGuardTests
     private static readonly Regex QuotedRelativeCollection = new(
         @"[""'][^""'\n]*/containers(?![/\w])[^""'\n]*[""']", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
-    /// <summary>Every way a script asks for a POST: -Method Post, a splat's Method = 'Post', az rest, curl, an enum, a helper's positional 'Post'.</summary>
+    /// <summary>
+    /// Every way a script asks for a POST: <c>-Method Post</c> and every abbreviation PowerShell accepts for it (round 49:
+    /// <c>-Meth Post</c> was missed — any unambiguous prefix of a parameter name binds it, so <c>-Me…</c>), <c>-CustomMethod
+    /// POST</c>, a splat's <c>Method = 'Post'</c>, <c>az rest --method post</c>, <c>curl -X POST</c>, an enum
+    /// (<c>[…]::Post</c>), an HttpClient's <c>.PostAsync(</c>, a helper's positional <c>'Post'</c>.
+    /// </summary>
     private static readonly Regex ScriptPostSignal = new(
-        @"-Method\s*:?\s*['""]?Post\b|\bMethod\s*=\s*['""]?Post\b|--method\s+['""]?post\b|-X\s+['""]?POST\b|\]::Post\b|(?<![\w-])['""]Post['""]",
+        @"-(?:Me|Cu)[a-z]*\s*:?\s*['""]?Post\b|\bMethod\s*=\s*['""]?Post\b|--method\s+['""]?post\b|-X\s+['""]?POST\b|\]::Post\b" +
+        @"|\.Post(?:AsJson)?Async\s*\(|(?<![\w-])['""]Post['""]",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    /// <summary>The URI a command names: <c>-Uri</c> or any abbreviation of it (<c>-Ur…</c>), with a space or a colon; <c>--uri</c>/<c>--url</c>.</summary>
     private static readonly Regex ScriptNamedUri = new(
-        @"(?:-Uri\s*:?|--ur[il])\s+(?<arg>""[^""]*""|'[^']*'|\$[\w:]+|\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        @"(?:-Ur[a-z]*(?:\s*:\s*|\s+)|--ur[il]\s+)(?<arg>""[^""]*""|'[^']*'|\$[\w:]+|\S+)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     private static readonly Regex ScriptQuotedPath = new(@"""[^""\n]*/[^""\n]*""|'[^'\n]*/[^'\n]*'", RegexOptions.Compiled);
+
+    /// <summary>A variable assigned the BARE collection URL (no query — a filtered GET of the collection is not a create target).</summary>
+    private static readonly Regex ScriptCollectionAssignment = new(
+        @"^\s*\$(?:script:|global:)?(?<name>\w+)\s*=\s*[""'][^""'\n]*fileStorage/containers[""']", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
+    /// <summary>A dot-sourced or imported script file named on a line (<c>. (Join-Path $PSScriptRoot 'x.ps1')</c>, <c>. "$PSScriptRoot/x.ps1"</c>, <c>Import-Module ./x.psm1</c>).</summary>
+    private static readonly Regex ScriptInclude = new(
+        @"^\s*(?:\.|Import-Module)\s+(?<rest>.+)$", RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.Multiline);
+
+    private static readonly Regex ScriptIncludedFile = new(@"[\w\-./\\]+\.psm?1", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+
+    /// <summary>
+    /// What a script sees besides its own text (owner round 49: a URL variable defined in a dot-sourced helper and POSTed
+    /// in the script was missed, because the script itself never named the collection).
+    /// </summary>
+    /// <param name="IncludedText">Every file the script dot-sources or imports (resolved against its folder, recursively), comment-stripped.</param>
+    /// <param name="CollectionVariables">Variables assigned the bare collection URL in ANY script — a script that uses one it never assigns gets the collection from elsewhere (fail closed).</param>
+    private sealed record ScriptContext(string IncludedText, IReadOnlySet<string> CollectionVariables)
+    {
+        public static ScriptContext None { get; } = new(string.Empty, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+    }
+
+    /// <summary>The context of every script in <paramref name="scripts"/> (full path → text), keyed by full path.</summary>
+    private static Dictionary<string, ScriptContext> ScriptContexts(IReadOnlyDictionary<string, string> scripts)
+    {
+        var collectionVariables = scripts.Values
+            .SelectMany(text => ScriptCollectionAssignment.Matches(StripPowerShellComments(text)).Select(m => m.Groups["name"].Value))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var byPath = scripts.ToDictionary(kv => NormalizeScriptPath(kv.Key), kv => kv.Value, StringComparer.OrdinalIgnoreCase);
+        return scripts.Keys.ToDictionary(
+            path => path,
+            path =>
+            {
+                var included = new StringBuilder();
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { NormalizeScriptPath(path) };
+                Include(path, depth: 0);
+                return new ScriptContext(included.ToString(), collectionVariables);
+
+                void Include(string from, int depth)
+                {
+                    if (depth > 4 || !byPath.TryGetValue(NormalizeScriptPath(from), out var text))
+                    {
+                        return;
+                    }
+
+                    var folder = Path.GetDirectoryName(NormalizeScriptPath(from)) ?? string.Empty;
+                    foreach (Match line in ScriptInclude.Matches(StripPowerShellComments(text)))
+                    {
+                        // $PSScriptRoot is the including script's folder; a path relative to it is relative to `folder`.
+                        var rest = Regex.Replace(line.Groups["rest"].Value, @"\$\{?PSScriptRoot\}?[/\\]?", string.Empty, RegexOptions.IgnoreCase);
+                        foreach (Match file in ScriptIncludedFile.Matches(rest))
+                        {
+                            var relative = file.Value.StartsWith("./", StringComparison.Ordinal) || file.Value.StartsWith(".\\", StringComparison.Ordinal)
+                                ? file.Value[2..]
+                                : file.Value;
+                            var target = NormalizeScriptPath(Path.Combine(folder, relative));
+                            if (seen.Add(target) && byPath.TryGetValue(target, out var includedText))
+                            {
+                                included.Append('\n').Append(StripPowerShellComments(includedText));
+                                Include(target, depth + 1);
+                            }
+                        }
+                    }
+                }
+            },
+            StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static string NormalizeScriptPath(string path) =>
+        Path.GetFullPath(path.Replace('/', Path.DirectorySeparatorChar).Replace('\\', Path.DirectorySeparatorChar));
 
     [Fact(DisplayName = "Every SPE container a script creates is bound to its business unit, or removed")]
     public void EveryScriptThatCreatesAContainer_BindsIt()
@@ -373,17 +1143,19 @@ public sealed class SpeAdminContainerBindingGuardTests
         var scripts = new[] { "scripts", "src" }
             .SelectMany(root => SourceFiles(Path.Combine(RepoRoot, root), "*.ps1")
                 .Concat(SourceFiles(Path.Combine(RepoRoot, root), "*.psm1")))
-            .Select(f => (Rel: Rel(f), Text: File.ReadAllText(f)))
-            .ToList();
+            .ToDictionary(f => f, File.ReadAllText, StringComparer.OrdinalIgnoreCase);
+        var contexts = ScriptContexts(scripts);
 
-        var creators = scripts.Where(s => ScriptCreations(s.Text).Count > 0).ToList();
+        var creators = scripts.Where(s => ScriptCreations(s.Value, contexts[s.Key]).Count > 0).ToList();
         Assert.True(creators.Count >= 3,
             "the scan must find the script creation paths (New-BusinessUnitContainer, Provision-Customer, " +
             $"Create-NewContainerType) — found {creators.Count}, so it would pass vacuously");
 
-        var violations = creators.SelectMany(s => UnboundScriptCreations(s.Text).Select(v => $"{s.Rel}: {v}")).ToList();
+        var violations = creators
+            .SelectMany(s => UnboundScriptCreations(s.Value, contexts[s.Key]).Select(v => $"{Rel(s.Key)}: {v}"))
+            .ToList();
         Assert.True(violations.Count == 0,
-            "These scripts create (or may create) an SPE container without binding it (owner rounds 35/41: call " + ScriptBinder +
+            "These scripts create (or may create) an SPE container without binding it (owner rounds 35/41/49: call " + ScriptBinder +
             " after the create, in the same function, and dot-source " + ScriptBindingModule + "):\n  " +
             string.Join("\n  ", violations));
     }
@@ -470,33 +1242,74 @@ public sealed class SpeAdminContainerBindingGuardTests
             . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
             $c = New-MgStorageFileStorageContainer -BodyParameter $b
             """;
+        // Owner round 49 — the verifier's surviving PowerShell shape: an abbreviated parameter name.
+        const string abbreviatedMethod = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $c = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" -Meth Post -Body $b
+            """;
+        const string abbreviatedUriAndColon = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $c = Invoke-WebRequest -Ur:"https://graph.microsoft.com/v1.0/storage/fileStorage/containers" -Me:Post -Body $b
+            """;
+        const string customMethod = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $c = Invoke-RestMethod -Uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containers" -CustomMethod 'POST' -Body $b
+            """;
+        const string httpClient = """
+            . (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+            $r = $client.PostAsync("https://graph.microsoft.com/v1.0/storage/fileStorage/containers", $content).Result
+            """;
 
-        Assert.Empty(UnboundScriptCreations(bound));
-        Assert.Empty(ScriptCreations(otherPosts));
-        Assert.Empty(ScriptCreations(notACreate));
+        Assert.Empty(UnboundScriptCreations(bound, ScriptContext.None));
+        Assert.Empty(ScriptCreations(otherPosts, ScriptContext.None));
+        Assert.Empty(ScriptCreations(notACreate, ScriptContext.None));
         foreach (var (name, seeded) in new[]
                  {
                      ("unbound", unbound), ("noModule", noModule), ("uriInVariable", uriInVariable),
                      ("uriBuiltFromABase", uriBuiltFromABase), ("splatted", splatted), ("uriFromAFunction", uriFromAFunction),
-                     ("azRest", azRest), ("sdkCmdlet", sdkCmdlet),
+                     ("azRest", azRest), ("sdkCmdlet", sdkCmdlet), ("abbreviatedMethod", abbreviatedMethod),
+                     ("abbreviatedUriAndColon", abbreviatedUriAndColon), ("customMethod", customMethod), ("httpClient", httpClient),
                  })
         {
-            Assert.True(UnboundScriptCreations(seeded).Count > 0, $"the analyser must flag the seeded '{name}' creation");
+            Assert.True(UnboundScriptCreations(seeded, ScriptContext.None).Count > 0, $"the analyser must flag the seeded '{name}' creation");
         }
+
+        // Owner round 49 — the verifier's cross-file shape: the URL variable defined in a dot-sourced helper, POSTed in a
+        // script that never names the collection. Flagged whether or not the helper's path can be resolved.
+        var helper = Path.Combine(RepoRoot, "scripts", "seeded", "common", "GraphUris.ps1");
+        var poster = Path.Combine(RepoRoot, "scripts", "seeded", "New-Thing.ps1");
+        var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [helper] = "$ContainersUri = \"https://graph.microsoft.com/v1.0/storage/fileStorage/containers\"\n",
+            [poster] = ". (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')\n. (Join-Path $PSScriptRoot 'common/GraphUris.ps1')\n" +
+                       "$c = Invoke-RestMethod -Uri $ContainersUri -Method Post -Body $b\n",
+        };
+        var resolved = ScriptContexts(files);
+        Assert.True(resolved[poster].IncludedText.Contains("ContainersUri", StringComparison.Ordinal), "the dot-sourced helper is read");
+        Assert.True(UnboundScriptCreations(files[poster], resolved[poster]).Count > 0,
+            "the analyser must follow a URL variable into the script that dot-sources it");
+        var unresolved = new ScriptContext(string.Empty, resolved[poster].CollectionVariables);
+        Assert.True(UnboundScriptCreations(files[poster], unresolved).Count > 0,
+            "a variable some script assigns the collection is the collection even where the helper cannot be resolved");
     }
 
     /// <summary>
-    /// The offsets of every container CREATE (or possible create) in a script. Fail closed (owner round 41 item 5): in a
-    /// script that names the containers collection anywhere, a POST whose URI the analyser cannot prove is another
-    /// endpoint — a variable it cannot resolve to literals, a splat, a function's result — counts as a create.
+    /// The offsets of every container CREATE (or possible create) in a script. Fail closed (owner rounds 41 + 49): in a
+    /// script that names the containers collection — itself, in a file it dot-sources, or through a variable some script
+    /// assigns the collection — a POST whose URI the analyser cannot prove is another endpoint (a variable it cannot resolve
+    /// to literals, a splat, a function's result) counts as a create.
     /// </summary>
-    private static List<int> ScriptCreations(string script)
+    private static List<int> ScriptCreations(string script, ScriptContext context)
     {
         var text = StripPowerShellComments(script);
+        var all = text + "\n" + context.IncludedText;
         var creations = ScriptSdkCreate.Matches(text).Select(m => m.Index).ToList();
 
-        var namesCollection = CollectionUrl.IsMatch(text)
-                              || (text.Contains("fileStorage", StringComparison.OrdinalIgnoreCase) && QuotedRelativeCollection.IsMatch(text));
+        var usesACollectionVariable = Regex.Matches(text, @"\$(?:script:|global:)?(?<name>\w+)")
+            .Any(m => context.CollectionVariables.Contains(m.Groups["name"].Value));
+        var namesCollection = CollectionUrl.IsMatch(all)
+                              || (all.Contains("fileStorage", StringComparison.OrdinalIgnoreCase) && QuotedRelativeCollection.IsMatch(all))
+                              || usesACollectionVariable;
         if (!namesCollection)
         {
             return creations;
@@ -504,7 +1317,7 @@ public sealed class SpeAdminContainerBindingGuardTests
 
         foreach (Match post in ScriptPostSignal.Matches(text))
         {
-            if (PostMayCreateAContainer(text, LogicalCommand(text, post.Index)))
+            if (PostMayCreateAContainer(all, LogicalCommand(text, post.Index), context.CollectionVariables))
             {
                 creations.Add(post.Index);
             }
@@ -514,7 +1327,7 @@ public sealed class SpeAdminContainerBindingGuardTests
     }
 
     /// <summary>Whether one POST command (in a script that names the collection) may create a container.</summary>
-    private static bool PostMayCreateAContainer(string script, string command)
+    private static bool PostMayCreateAContainer(string script, string command, IReadOnlySet<string> collectionVariables)
     {
         static bool IsCollection(string s) => CollectionUrl.IsMatch(s) || Regex.IsMatch(s, @"/containers(?![/\w])", RegexOptions.IgnoreCase);
 
@@ -529,9 +1342,16 @@ public sealed class SpeAdminContainerBindingGuardTests
 
             if (Regex.IsMatch(arg, @"^\$[\w:]+$"))
             {
-                // A variable: every assignment of it in the script must be a literal that is provably another endpoint.
-                var name = Regex.Escape(arg.TrimStart('$').Replace("script:", string.Empty, StringComparison.OrdinalIgnoreCase));
-                var assignments = Regex.Matches(script, $@"^\s*\$(?:script:)?{name}\s*=\s*(?<rhs>.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
+                // A variable: every assignment of it the script can see must be a literal that is provably another endpoint.
+                var bare = arg.TrimStart('$');
+                bare = Regex.Replace(bare, "^(?:script|global):", string.Empty, RegexOptions.IgnoreCase);
+                if (collectionVariables.Contains(bare))
+                {
+                    return true; // some script assigns it the collection
+                }
+
+                var name = Regex.Escape(bare);
+                var assignments = Regex.Matches(script, $@"^\s*\$(?:script:|global:)?{name}\s*=\s*(?<rhs>.+)$", RegexOptions.Multiline | RegexOptions.IgnoreCase);
                 if (assignments.Count == 0)
                 {
                     return true; // a parameter or computed elsewhere — unknown
@@ -556,11 +1376,11 @@ public sealed class SpeAdminContainerBindingGuardTests
         return literals.Count == 0 || literals.Any(IsCollection);
     }
 
-    private static List<string> UnboundScriptCreations(string script)
+    private static List<string> UnboundScriptCreations(string script, ScriptContext context)
     {
         var text = StripPowerShellComments(script);
         var violations = new List<string>();
-        var creations = ScriptCreations(script);
+        var creations = ScriptCreations(script, context);
         if (creations.Count > 0 && !text.Contains(ScriptBindingModule, StringComparison.OrdinalIgnoreCase))
         {
             violations.Add($"creates a container but does not dot-source {ScriptBindingModule}");
@@ -847,54 +1667,34 @@ public sealed class SpeAdminContainerBindingGuardTests
 
     private static string Rel(string path) => Path.GetRelativePath(RepoRoot, path).Replace('\\', '/');
 
+    /// <summary>A file of a test project (a directory named <c>*.Tests</c> on its path).</summary>
+    private static bool IsTestProjectFile(string path) =>
+        Rel(path).Split('/').Any(segment => segment.EndsWith(".Tests", StringComparison.OrdinalIgnoreCase));
+
     private static int LineOf(string text, int index) => text.AsSpan(0, Math.Min(index, text.Length)).Count('\n') + 1;
 
-    /// <summary>The brace-balanced body of the member declaration that precedes <paramref name="index"/>.</summary>
-    private static string EnclosingMethodBody(string code, int index)
+    /// <summary>
+    /// The text (comments blanked, strings intact) of the first member whose DECLARATION contains
+    /// <paramref name="signature"/> — members as <see cref="ParseMembers"/> finds them, so braces in string literals and
+    /// expression-bodied members cannot throw the span off.
+    /// </summary>
+    private static string MethodBody(CSharpSource source, string signature)
     {
-        var header = Regex.Matches(code, @"^[ \t]*(?:public|private|internal|protected)\b[^;{=]*\(", RegexOptions.Multiline)
-            .LastOrDefault(h => h.Index < index);
-        return header is null ? string.Empty : BraceBody(code, code.IndexOf('{', header.Index));
-    }
-
-    /// <summary>The body of the first member whose declaration contains <paramref name="signature"/>.</summary>
-    private static string MethodBody(string code, string signature)
-    {
-        var header = Regex.Matches(code, @"^[ \t]*(?:public|private|internal|protected)\b[^;{=]*\(", RegexOptions.Multiline)
-            .FirstOrDefault(h => code.AsSpan(h.Index, h.Length).Contains(signature, StringComparison.Ordinal))
-            ?? throw new InvalidOperationException($"No member '{signature}' — update this guard.");
-        return BraceBody(code, code.IndexOf('{', header.Index));
-    }
-
-    private static string BraceBody(string code, int start)
-    {
-        if (start < 0)
+        foreach (var member in ParseMembers(source.Code))
         {
-            return string.Empty;
-        }
-
-        var level = 0;
-        for (var i = start; i < code.Length; i++)
-        {
-            if (code[i] == '{')
+            var span = source.Code[member.Start..member.End];
+            var bodyAt = new[] { span.IndexOf('{'), span.IndexOf("=>", StringComparison.Ordinal) }.Where(x => x >= 0).DefaultIfEmpty(span.Length).Min();
+            if (span[..bodyAt].Contains(signature, StringComparison.Ordinal))
             {
-                level++;
-            }
-            else if (code[i] == '}')
-            {
-                level--;
-                if (level == 0)
-                {
-                    return code[start..(i + 1)];
-                }
+                return source.Text[member.Start..member.End];
             }
         }
 
-        return code[start..];
+        throw new InvalidOperationException($"No member '{signature}' — update this guard.");
     }
 
-    private static string StripComments(string source) =>
-        Regex.Replace(source, @"//[^\n]*|/\*.*?\*/", string.Empty, RegexOptions.Singleline);
+    /// <summary>The source with its C# comments blanked (string literals intact — a URL's <c>//</c> is not a comment).</summary>
+    private static string StripComments(string source) => LexCSharp(source).Text;
 
     /// <summary>Removes <c>&lt;# … #&gt;</c> blocks and <c>#</c> line comments (keeping line breaks so line numbers hold).</summary>
     private static string StripPowerShellComments(string script)
