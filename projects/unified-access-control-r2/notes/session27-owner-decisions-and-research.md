@@ -683,6 +683,14 @@ The owner chose **§6.5 path B, secure inline** (AskUserQuestion, 2026-10-04: "P
 3. **Seeding claims must be accurate.** The verifier's seeds X03, X07, X09 and X17 survived; X09 is confirmed over-retention. Each gets a test that bites.
 4. **The copy defect** (a doubled period in the Office "removed" refusal) is fixed.
 
+## Round 48 (2026-10-05). BINDING. Main-session decision under round 15. Task 132, the share-write eviction guard (re-verification of `task/uac-r2-132-f1-v1c-v1`).
+
+1. **Close the bypass CLASSES, not one shape at a time.** Each round, the verifier found one more way to reach `DataverseWebApiService`'s POA share writes around the evicting seam. The guard must instead forbid the mechanisms such a bypass needs, and the claims must state exactly what is covered.
+   - **(a) No `[UnsafeAccessor]` anywhere** in `src/server/**`. Spaarke has no legitimate use for it; it reaches private members regardless of visibility. An ArchTest (an IL scan for `UnsafeAccessorAttribute`) fails on any use. Seeded with seed U.
+   - **(b) No reflection over the Dataverse service types** in the BFF: `GetMethod(s)`, `GetMember(s)` or `InvokeMember` on `DataverseWebApiService` / `IDataverseService` types (or on a `Type` obtained from them), and no `MethodInfo.Invoke` or `CreateDelegate` against them. This uses the existing IL-scan infrastructure (`IlCallScan`). Seeded with seed R.
+   - **(c) The doc comments, the guard header and note §16.6/16.7** are rewritten to state exactly what is enforced: every compiled call path, plus a ban on `UnsafeAccessor` and on reflection over those types. Never "by construction" beyond that.
+   - **(d) The gate script's `ReassignMatter -Apply`** never overwrites a recorded `OriginalOwner`: a second run keeps the first original. Tested.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
