@@ -68,6 +68,9 @@ internal static class ComposeSyncEndpoints
         // Task 166 (S-65): AUTHORIZED in the handler by an OBO read of the named item in the named container
         // BEFORE the app-only delta runs — see CheckDocumentChangesAsync. The 404 is that refusal.
         group.MapPost("/document/{documentSpeId}/check-changes", CheckDocumentChangesAsync)
+            // uac-r2 task 171: ties the client-chosen {documentSpeId} to its sprk_document and requires "read" on it
+            // (then the bytes move app-only); an item with no row keeps the caller's OBO identity (Path B).
+            .AddComposeDocumentAuthorizationFilter("read")
             .WithName("ComposeCheckDocumentChanges")
             .WithSummary("Poll fallback: compare the stored SPE etag vs the current SPE etag for a Compose document (FR-26)")
             .RequireRateLimiting("ai-context")
@@ -232,7 +235,8 @@ internal static class ComposeSyncEndpoints
         string documentSpeId,
         [FromBody] CheckChangesBody? body,
         SpeSyncOrchestrator orchestrator,
-        // Task 166 (S-65): the SPE facade (ADR-007) — its OBO metadata read is the authorization decision.
+        // Task 166 (S-65): the SPE facade (ADR-007). Task 171: the authorization decision is the route filter's row
+        // decision (ComposeDocumentAuthorizationFilter) when the item has a sprk_document; otherwise the OBO read below.
         ISpeFileOperations spe,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
@@ -263,7 +267,7 @@ internal static class ComposeSyncEndpoints
             var driveId = await spe.ResolveDriveIdAsync(body.ContainerId, ct).ConfigureAwait(false);
             var item = string.IsNullOrWhiteSpace(driveId)
                 ? null
-                : await spe.GetFileMetadataAsUserAsync(httpContext, driveId, documentSpeId, ct).ConfigureAwait(false);
+                : await spe.GetMetadataForComposeAsync(httpContext, driveId, documentSpeId, ct).ConfigureAwait(false);
             visibleToCaller = item is not null;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

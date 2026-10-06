@@ -224,7 +224,7 @@ internal sealed class ComposeSaveStorageCoordinator
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
-        var stream = await _spe.DownloadFileVersionAsUserAsync(
+        var stream = await _spe.DownloadVersionForComposeAsync(
                 httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
             .ConfigureAwait(false);
 
@@ -286,21 +286,21 @@ internal sealed class ComposeSaveStorageCoordinator
             // transient path). Nothing to precondition on, so this stays the unchanged R1 blind PUT via
             // the etag-less overload rather than passing an explicit null through the If-Match one.
             using var blindStream = new MemoryStream(content, writable: false);
-            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, blindStream, cancellationToken)
+            return await _spe.ReplaceForComposeAsync(httpContext, driveId, itemId, blindStream, ifMatch: null, cancellationToken)
                 .ConfigureAwait(false);
         }
 
         try
         {
             using var stream = new MemoryStream(content, writable: false);
-            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, stream, ifMatch, cancellationToken)
+            return await _spe.ReplaceForComposeAsync(httpContext, driveId, itemId, stream, ifMatch, cancellationToken)
                 .ConfigureAwait(false);
         }
         // Only reachable with a non-empty `ifMatch` — the guard above returns for the blind-PUT case, so
         // this catch cannot fire on a request that never carried a precondition.
         catch (EtagPreconditionFailedException) when (rebaseOnConflict)
         {
-            var fresh = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, cancellationToken)
+            var fresh = await _spe.GetMetadataForComposeAsync(httpContext, driveId, itemId, cancellationToken)
                 .ConfigureAwait(false);
 
             _logger.LogWarning(
@@ -310,7 +310,7 @@ internal sealed class ComposeSaveStorageCoordinator
                 itemId, ifMatch, fresh?.ETag);
 
             using var retryStream = new MemoryStream(content, writable: false);
-            return await _spe.ReplaceFileContentAsUserAsync(
+            return await _spe.ReplaceForComposeAsync(
                     httpContext, driveId, itemId, retryStream, fresh?.ETag, cancellationToken)
                 .ConfigureAwait(false);
         }

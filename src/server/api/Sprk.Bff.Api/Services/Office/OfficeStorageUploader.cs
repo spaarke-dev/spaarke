@@ -187,19 +187,21 @@ public class OfficeStorageUploader
     /// <remarks>
     /// <para><b>Why item-keyed, and why this call.</b> <see cref="UploadToSpeAsync"/> is PATH-keyed: if the
     /// document had been renamed, or the user typed a different name, a path PUT would mint a SECOND item —
-    /// the rename-approximation of versioning that task 023 forbids. <see cref="SpeFileStore.ReplaceFileContentAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>
+    /// the rename-approximation of versioning that task 023 forbids. <see cref="SpeFileStore.ReplaceFileContentAsync(string, string, Stream, string?, CancellationToken)"/>
     /// PUTs to <c>/drives/{driveId}/items/{itemId}/content</c>, which SharePoint commits as a new version of
-    /// that same item. It is the call Compose's save-back already uses for "update in place, never mint a
+    /// that same item. It is the call Compose's save-back uses for "update in place, never mint a
     /// duplicate". ADR-007: it is the facade's; no Graph type crosses into this class.</para>
-    /// <para><b>Why the caller's identity (OBO).</b> The add-in user is, by construction, editing this
-    /// item — Word reached it in SPE as that user — so the delegated identity holds write on it, and SPE then
-    /// enforces that write itself, beneath the Dataverse <c>write</c> gate on the route. An app-only write
-    /// would bypass SPE's ACL and rest the whole decision on the filter.</para>
+    /// <para><b>Why app-only (unified-access-control-r2 task 171, owner round 69).</b> This used to write as the
+    /// caller (OBO) on the reasoning that Word reached the item as that user. That holds only where the user has a
+    /// container role; the add-in also saves a version of a document the user opened by download (a user flagged
+    /// external, or a secure document without a just-in-time grant), and SPE refused those with 403. The decision is
+    /// the route's Dataverse <c>write</c> gate (<c>OfficeVersionSaveAuthorizationFilter</c>), and
+    /// <c>OfficeService.ResolveVersionTargetAsync</c> verifies the row's pointer before this runs. Side effect: SPE's
+    /// own version history records the BFF application as the modifier; Spaarke's version list carries the person.</para>
     /// <para>Never throws for an SPE refusal: each typed refusal becomes a <see cref="VersionWriteResult"/> with
     /// a distinct code. A cancellation still propagates.</para>
     /// </remarks>
     public async Task<VersionWriteResult> WriteNewVersionAsync(
-        HttpContext httpContext,
         string driveId,
         string itemId,
         Stream content,
@@ -207,8 +209,8 @@ public class OfficeStorageUploader
     {
         try
         {
-            var saved = await _speFileStore.ReplaceFileContentAsUserAsync(
-                httpContext, driveId, itemId, content, cancellationToken);
+            var saved = await _speFileStore.ReplaceFileContentAsync(
+                driveId, itemId, content, ifMatch: null, cancellationToken);
 
             if (saved is null)
             {
@@ -247,8 +249,10 @@ public class OfficeStorageUploader
         }
         catch (UnauthorizedAccessException ex)
         {
+            // App-only since task 171, so a 403 here is SPE refusing the BFF identity (a registration problem), not the
+            // caller — the caller's Write was decided by the route filter. Kept on OFFICE_009 so the pane's message holds.
             _logger.LogWarning(ex,
-                "Version write refused: the caller may not write drive item {ItemId} on drive {DriveId}.",
+                "Version write refused: SharePoint Embedded denied the BFF identity on drive item {ItemId} on drive {DriveId}.",
                 itemId, driveId);
             return new VersionWriteResult(false, null, null, null, "OFFICE_009",
                 "You do not have permission to write this document's file.");

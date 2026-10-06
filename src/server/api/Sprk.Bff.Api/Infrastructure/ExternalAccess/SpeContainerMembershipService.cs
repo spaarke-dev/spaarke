@@ -365,6 +365,330 @@ public class SpeContainerMembershipService
     }
 
     // =========================================================================
+    // MARKED grants — unified-access-control-r2 task 171 (owner rounds 69 + 70)
+    //
+    // The ONLY code that grants a user an SPE container role. Two kinds, one mechanism:
+    //   * STANDING writers on an environment / business-unit container (round 70 option (c)) — every enabled,
+    //     internal person user of the business unit(s) that container serves, kept by SpeContainerMembershipSyncJob.
+    //   * JUST-IN-TIME writers on a per-record SECURE container (round 69 (2), round 70) — a user with Write on the
+    //     secure record, granted on an Office edit-open by OfficeEditAccessService and removed by the same job.
+    //
+    // How a grant is told apart from a hand-granted or owner role (step 0, no Dataverse schema): the grant is POSTed
+    // with Graph's default conflict behaviour (fail), so a user who ALREADY holds a role answers 409 and is never
+    // recorded — a role this code did not create is never removed. On 201 the permission id is recorded in ONE
+    // container custom property per grant (<prefix><systemuserid:N> = <permission id>). If that record cannot be
+    // written the permission is deleted again, so no unrecorded grant is ever left behind. Removal deletes only a
+    // permission whose id the marker names, and only while it is still a plain writer role.
+    // =========================================================================
+
+    /// <summary>Marker prefix of a STANDING business-unit writer grant (round 70).</summary>
+    public const string StandingWriterMarkerPrefix = "SprkStd";
+
+    /// <summary>Marker prefix of a just-in-time Office-edit writer grant on a secure container (round 69 / 70).</summary>
+    public const string JitWriterMarkerPrefix = "SprkJit";
+
+    /// <summary>The narrowest container role that lets Office edit a file (step 0 (b)).</summary>
+    internal const string WriterRole = "writer";
+
+    /// <summary>
+    /// <c>Prefer</c> value that makes a container-permission DELETE leave the identity's ITEM-level permissions alone
+    /// (by default the delete also removes access to every item in the container). A marked grant is a container role,
+    /// so that is all its removal takes away.
+    /// </summary>
+    internal const string OnlyContainerScopedPrefer = "onlyRemoveContainerScopedPermission";
+
+    /// <summary>The marker key for <paramref name="systemUserId"/> under <paramref name="prefix"/>.</summary>
+    public static string MarkerKey(string prefix, Guid systemUserId) => prefix + systemUserId.ToString("N");
+
+    /// <summary>The system user a marker key names, when <paramref name="key"/> is a marker key of <paramref name="prefix"/>.</summary>
+    public static bool TryParseMarkerKey(string? key, string prefix, out Guid systemUserId)
+    {
+        systemUserId = Guid.Empty;
+        return key is not null
+               && key.StartsWith(prefix, StringComparison.Ordinal)
+               && key.Length == prefix.Length + 32
+               && Guid.TryParseExact(key[prefix.Length..], "N", out systemUserId)
+               && systemUserId != Guid.Empty;
+    }
+
+    /// <summary>One user's role on a container, as Graph lists it.</summary>
+    public sealed record ContainerUserRole(string PermissionId, IReadOnlyList<string> Roles, string? UserPrincipalName, string? UserObjectId)
+    {
+        /// <summary>Is this the user named by <paramref name="upn"/> or <paramref name="objectId"/>?</summary>
+        public bool IsFor(string? upn, Guid? objectId)
+            => (!string.IsNullOrWhiteSpace(upn) && string.Equals(UserPrincipalName, upn, StringComparison.OrdinalIgnoreCase))
+               || (objectId is { } oid && oid != Guid.Empty && Guid.TryParse(UserObjectId, out var mine) && mine == oid);
+
+        /// <summary>Exactly one role, writer — the only shape a marked grant takes and the only one removal deletes.</summary>
+        public bool IsPlainWriter => Roles.Count == 1 && string.Equals(Roles[0], WriterRole, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// A container's user roles and the grant markers on it. <see cref="RolesComplete"/> false means the role list is a
+    /// PREFIX (the page bound was hit, or Graph returned no body): nothing may be concluded from an absence.
+    /// </summary>
+    public sealed record ContainerAccess(
+        IReadOnlyList<ContainerUserRole> Roles,
+        bool RolesComplete,
+        IReadOnlyDictionary<string, string> Markers);
+
+    /// <summary>The outcome of <see cref="GrantMarkedWriterAsync"/>.</summary>
+    public enum MarkedGrantOutcome
+    {
+        /// <summary>A new writer role was created and its marker recorded.</summary>
+        Granted,
+
+        /// <summary>The user already held a role (Graph 409). Nothing was created or recorded.</summary>
+        AlreadyHeld,
+
+        /// <summary>No grant stands: Graph refused it, or the marker could not be recorded and the grant was undone.</summary>
+        Failed,
+    }
+
+    /// <summary>The outcome of <see cref="RemoveMarkedGrantAsync"/>.</summary>
+    public enum MarkedRemovalOutcome
+    {
+        /// <summary>The marked writer role was deleted and its marker cleared.</summary>
+        Removed,
+
+        /// <summary>The permission no longer exists, or is no longer a plain writer role (someone changed it): only the marker was cleared.</summary>
+        MarkerCleared,
+
+        /// <summary>Nothing changed (a read or write failed); the next pass retries.</summary>
+        Failed,
+    }
+
+    /// <summary>
+    /// Reads <paramref name="containerId"/>'s user roles (paged, honest about completeness) and its grant markers
+    /// (<see cref="StandingWriterMarkerPrefix"/> / <see cref="JitWriterMarkerPrefix"/> custom properties).
+    /// Returns <see langword="null"/> when the container does not exist. Faults propagate.
+    /// </summary>
+    public virtual async Task<ContainerAccess?> ReadAccessAsync(string containerId, CancellationToken ct = default)
+    {
+        var markers = await ReadMarkersAsync(containerId, ct).ConfigureAwait(false);
+        if (markers is null)
+        {
+            return null;
+        }
+
+        var read = await ReadPermissionsAsync(_graphClientFactory.ForApp(), containerId, ct).ConfigureAwait(false);
+        var roles = read.Permissions
+            .Where(p => !string.IsNullOrEmpty(p.Id) && p.GrantedToV2?.User is not null)
+            .Select(p => new ContainerUserRole(
+                p.Id!,
+                (IReadOnlyList<string>)(p.Roles?.Where(r => !string.IsNullOrWhiteSpace(r)).ToList() ?? new List<string>()),
+                GetUpnFromPermission(p),
+                p.GrantedToV2!.User!.Id))
+            .ToList();
+
+        return new ContainerAccess(roles, read.EnumerationComplete, markers);
+    }
+
+    /// <summary>
+    /// Only the grant markers on <paramref name="containerId"/> (one container read) — the cheap first look the removal
+    /// pass takes at every secure container. <see langword="null"/> when the container does not exist; faults propagate.
+    /// </summary>
+    public virtual async Task<IReadOnlyDictionary<string, string>?> ReadMarkersAsync(string containerId, CancellationToken ct = default)
+    {
+        Microsoft.Graph.Models.FileStorageContainer? container;
+        try
+        {
+            container = await _graphClientFactory.ForApp().Storage.FileStorage.Containers[containerId]
+                .GetAsync(c => c.QueryParameters.Select = new[] { "id", "customProperties" }, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            return null;
+        }
+
+        if (container is null)
+        {
+            return null;
+        }
+
+        return SpeAdminGraphService.ReadCustomProperties(container)
+            .Where(p => p.Name.StartsWith(StandingWriterMarkerPrefix, StringComparison.Ordinal)
+                        || p.Name.StartsWith(JitWriterMarkerPrefix, StringComparison.Ordinal))
+            .GroupBy(p => p.Name, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.First().Value ?? string.Empty, StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Grants <paramref name="userPrincipalName"/> a WRITER role on <paramref name="containerId"/> and records it under
+    /// <c><paramref name="markerPrefix"/><paramref name="systemUserId"/></c>. Graph 409 (the user already holds a role)
+    /// is <see cref="MarkedGrantOutcome.AlreadyHeld"/> and records nothing. A marker that cannot be written undoes the
+    /// grant (<see cref="MarkedGrantOutcome.Failed"/>), so every grant this code leaves standing is removable.
+    /// </summary>
+    public virtual async Task<MarkedGrantOutcome> GrantMarkedWriterAsync(
+        string containerId,
+        string markerPrefix,
+        Guid systemUserId,
+        string userPrincipalName,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(containerId) || string.IsNullOrWhiteSpace(userPrincipalName) || systemUserId == Guid.Empty)
+        {
+            return MarkedGrantOutcome.Failed;
+        }
+
+        var graphClient = _graphClientFactory.ForApp();
+        string permissionId;
+        try
+        {
+            var created = await graphClient.Storage.FileStorage.Containers[containerId].Permissions
+                .PostAsync(new Permission
+                {
+                    Roles = [WriterRole],
+                    GrantedToV2 = new SharePointIdentitySet
+                    {
+                        User = new SharePointIdentity
+                        {
+                            AdditionalData = new Dictionary<string, object> { ["userPrincipalName"] = userPrincipalName },
+                        },
+                    },
+                }, cancellationToken: ct)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrEmpty(created?.Id))
+            {
+                _logger.LogError(
+                    "[SPE-MEMBERSHIP] Graph returned no permission id granting writer on {ContainerId} to user {SystemUserId}.",
+                    containerId, systemUserId);
+                return MarkedGrantOutcome.Failed;
+            }
+
+            permissionId = created.Id;
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 409)
+        {
+            // The user already holds a role on this container — hand-granted, an owner, or a grant of ours made
+            // concurrently. It is not recorded, so nothing here will ever remove it.
+            _logger.LogInformation(
+                "[SPE-MEMBERSHIP] User {SystemUserId} already holds a role on container {ContainerId}; nothing granted.",
+                systemUserId, containerId);
+            return MarkedGrantOutcome.AlreadyHeld;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "[SPE-MEMBERSHIP] Granting writer on container {ContainerId} to user {SystemUserId} failed.",
+                containerId, systemUserId);
+            return MarkedGrantOutcome.Failed;
+        }
+
+        var key = MarkerKey(markerPrefix, systemUserId);
+        try
+        {
+            await WriteMarkerAsync(graphClient, containerId, key, permissionId, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // An unrecorded grant could never be told apart from a hand-granted one, so it must not stand.
+            _logger.LogError(ex,
+                "[SPE-MEMBERSHIP] The grant on container {ContainerId} for user {SystemUserId} could not be recorded; undoing it.",
+                containerId, systemUserId);
+            try
+            {
+                await DeleteContainerScopedPermissionAsync(graphClient, containerId, permissionId, CancellationToken.None)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception undoEx)
+            {
+                _logger.LogCritical(undoEx,
+                    "[SPE-MEMBERSHIP] UNRECORDED writer permission {PermissionId} for user {SystemUserId} remains on container "
+                    + "{ContainerId} and could not be removed; an operator must remove it.",
+                    permissionId, systemUserId, containerId);
+            }
+
+            return MarkedGrantOutcome.Failed;
+        }
+
+        _logger.LogInformation(
+            "[SPE-MEMBERSHIP] Granted writer on container {ContainerId} to user {SystemUserId} ({Marker}).",
+            containerId, systemUserId, markerPrefix);
+        return MarkedGrantOutcome.Granted;
+    }
+
+    /// <summary>
+    /// Removes the grant the marker <paramref name="markerKey"/> records (permission <paramref name="permissionId"/>):
+    /// deletes it only while it is still a plain WRITER role, with <see cref="OnlyContainerScopedPrefer"/>, then clears
+    /// the marker. A permission that is gone, or was changed by someone else, only loses its marker.
+    /// </summary>
+    public virtual async Task<MarkedRemovalOutcome> RemoveMarkedGrantAsync(
+        string containerId,
+        string markerKey,
+        string permissionId,
+        ContainerAccess access,
+        CancellationToken ct = default)
+    {
+        var graphClient = _graphClientFactory.ForApp();
+        try
+        {
+            var current = access.Roles.FirstOrDefault(r => string.Equals(r.PermissionId, permissionId, StringComparison.Ordinal));
+            if (current is null && !access.RolesComplete)
+            {
+                // Not seen, but the list was not read to its end: unproven — leave both and retry next pass.
+                return MarkedRemovalOutcome.Failed;
+            }
+
+            var outcome = MarkedRemovalOutcome.MarkerCleared;
+            if (current is not null && current.IsPlainWriter)
+            {
+                await DeleteContainerScopedPermissionAsync(graphClient, containerId, permissionId, ct).ConfigureAwait(false);
+                outcome = MarkedRemovalOutcome.Removed;
+            }
+            else if (current is not null)
+            {
+                _logger.LogWarning(
+                    "[SPE-MEMBERSHIP] Permission {PermissionId} on container {ContainerId} is no longer a plain writer role "
+                    + "(someone changed it); it is no longer treated as this code's grant — only its marker is cleared.",
+                    permissionId, containerId);
+            }
+
+            await WriteMarkerAsync(graphClient, containerId, markerKey, value: null, ct).ConfigureAwait(false);
+            return outcome;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "[SPE-MEMBERSHIP] Removing marked grant {MarkerKey} (permission {PermissionId}) from container {ContainerId} failed.",
+                markerKey, permissionId, containerId);
+            return MarkedRemovalOutcome.Failed;
+        }
+    }
+
+    private static async Task WriteMarkerAsync(
+        GraphServiceClient graphClient, string containerId, string key, string? value, CancellationToken ct)
+    {
+        // PATCH /containers/{id}/customProperties merges; a null value REMOVES the property (both proven live,
+        // SpeAdminGraphService.UpdateCustomPropertiesAsync, 2026-08-28).
+        var body = new Dictionary<string, object?>
+        {
+            [key] = value is null ? null : new Dictionary<string, object> { ["value"] = value, ["isSearchable"] = false },
+        };
+        var url = $"{SpeAdminGraphService.ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/"
+                  + $"{Uri.EscapeDataString(containerId)}/customProperties";
+        using var _ = await SpeAdminGraphService.SendGraphJsonAsync(
+            graphClient, HttpMethod.Patch, url, System.Text.Json.JsonSerializer.Serialize(body), ct).ConfigureAwait(false);
+    }
+
+    private static async Task DeleteContainerScopedPermissionAsync(
+        GraphServiceClient graphClient, string containerId, string permissionId, CancellationToken ct)
+    {
+        try
+        {
+            await graphClient.Storage.FileStorage.Containers[containerId].Permissions[permissionId]
+                .DeleteAsync(rc => rc.Headers.Add("Prefer", OnlyContainerScopedPrefer), ct)
+                .ConfigureAwait(false);
+        }
+        catch (Microsoft.Graph.Models.ODataErrors.ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            // Already gone — the state the caller wanted.
+        }
+    }
+
+    // =========================================================================
     // Paged reading (task 024, finding M1)
     // =========================================================================
 

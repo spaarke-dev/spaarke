@@ -2234,7 +2234,7 @@ public sealed class SpeAdminGraphService
     /// translation the rest of this file depends on (ADR-007 §1, ADR-019). A hand-rolled HttpClient
     /// call here would surface raw status codes and bypass every one of those.
     /// </remarks>
-    private static async Task<JsonDocument?> SendGraphJsonAsync(
+    internal static async Task<JsonDocument?> SendGraphJsonAsync(
         GraphServiceClient graphClient, HttpMethod method, string url, string? body, CancellationToken ct)
     {
         var requestInfo = new RequestInformation
@@ -2567,7 +2567,7 @@ public sealed class SpeAdminGraphService
     /// The SDK stores each custom property entry in <c>CustomProperties.AdditionalData</c>, each value a Kiota
     /// <c>UntypedObject</c> with <c>value</c> and <c>isSearchable</c> fields.
     /// </remarks>
-    private static IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> ReadCustomProperties(
+    internal static IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> ReadCustomProperties(
         Microsoft.Graph.Models.FileStorageContainer container)
     {
         var customPropsAdditional = container.CustomProperties?.AdditionalData;

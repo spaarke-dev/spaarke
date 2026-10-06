@@ -108,7 +108,7 @@ public static partial class ProblemDetailsHelper
         var code = GetErrorCode(errorCode, status);
         var detail = (status == 403 && code.Contains("Authorization_RequestDenied", StringComparison.OrdinalIgnoreCase))
             ? "missing graph app role (filestoragecontainer.selected) for the api identity."
-            : status == 403 ? "api identity lacks required container-type permission for this operation."
+            : status == 403 ? SpeAccessDeniedDetail(errorMessage)
             : Redact(errorMessage) ?? "Graph API error";
 
         return Results.Problem(
@@ -120,6 +120,24 @@ public static partial class ProblemDetailsHelper
                 ["graphErrorCode"] = code,
                 ["graphRequestId"] = graphRequestId
             });
+    }
+
+    /// <summary>
+    /// The detail for a Graph 403 that is NOT <c>Authorization_RequestDenied</c> (uac-r2 task 171, step 6): SharePoint
+    /// Embedded refused the caller on this container or item, and Graph's own message (redacted) is passed through.
+    /// </summary>
+    /// <remarks>
+    /// It used to say "api identity lacks required container-type permission for this operation." That named the app's
+    /// container-type registration for what is almost always a MEMBERSHIP denial (a delegated caller with no role on the
+    /// container — Graph says just "Access denied"), and it sent the 2026-10-06 upload403 investigation to the wrong
+    /// place. The missing-app-role case keeps its own text above, because there the cause IS the app's grant.
+    /// </remarks>
+    public static string SpeAccessDeniedDetail(string? graphMessage)
+    {
+        var said = Redact(graphMessage);
+        return string.IsNullOrWhiteSpace(said)
+            ? "SharePoint Embedded denied access to this container or item."
+            : $"SharePoint Embedded denied access to this container or item: {said}";
     }
 
     public static IResult ValidationProblem(Dictionary<string, string[]> errors)
