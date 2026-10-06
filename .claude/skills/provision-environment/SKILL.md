@@ -340,12 +340,8 @@ $l2UamiSpId        = az ad sp show --id $l2UamiClientId --query id -o tsv
 $sbNamespace       = $constants.name_templates.sbNamespace -replace '\{env\}', $env
 $artifactsStorage  = az storage account show -g $platformRg -n ($constants.name_templates.artifactsStorageName -replace '\{env\}', $env) --query id -o tsv 2>$null
 $acrId             = az acr show -g $platformRg -n ($constants.name_templates.acrName -replace '\{env\}', $env) --query id -o tsv 2>$null
-$bffAppServiceRg   = $constants.name_templates.bffAppServiceRg   -replace '\{env\}', $env    # added task 212 Gap C — BFF in DIFFERENT rg from L2 (rg-spaarke-{env} vs rg-spaarke-platform-{env})
-$bffAppServiceName = $constants.name_templates.bffAppServiceName -replace '\{env\}', $env    # added task 212 Gap C — explicit template instead of prefix-search
-$bffAppServiceId   = az webapp show -g $bffAppServiceRg -n $bffAppServiceName --query id -o tsv 2>$null    # was: `az webapp list -g $platformRg --query "[?starts_with(name,'sprksharedprod-api')|| starts_with(name,'spaarke-bff-$env')]"` (hardcoded RG + prefix search; wrong RG per LIVE audit); fixed 2026-08-30 task 213.6 per task 212 Gap C
 $kvResourceId      = az keyvault show -g $platformRg -n ($constants.name_templates.platformKvName -replace '\{env\}', $env) --query id -o tsv 2>$null
 $containerTypeId   = $constants.per_env_constants.$env.containerTypeId
-$bffAppId          = $constants.per_env_constants.$env.bffApiAppId   # renamed 2026-08-30 task 212 from bffMultiTenantAppId (Entra-strict-wrong name — BFFs are single-tenant per topology doc §3A rows 4-6 + ADR-028 line 239 RESOLVED note)
 $adminDvUrl        = $constants.name_templates.registryDvUrl.$env
 $openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
 
@@ -396,10 +392,8 @@ foreach ($prereq in $manifest.prereqs) {
     -replace '\{sbNamespace\}',        $sbNamespace `
     -replace '\{artifactsStorageId\}', $artifactsStorage `
     -replace '\{acrId\}',              $acrId `
-    -replace '\{bffAppServiceId\}',    $bffAppServiceId `
     -replace '\{kvResourceId\}',       $kvResourceId `
     -replace '\{containerTypeId\}',    $containerTypeId `
-    -replace '\{bffAppId\}',           $bffAppId `
     -replace '\{adminDvUrl\}',         $adminDvUrl
 
   # --- PLX-14 author-time sanity check ---
@@ -450,37 +444,34 @@ foreach ($prereq in $manifest.prereqs) {
 - Recipe MUST NOT rely on the classifier to interpret empty output as failure. Wave 4 SESSION 15 REMOVED the defense-in-depth expect-field classifier (PRQ-06) — assertion semantics live in the recipe itself; classifier trust falls back to exit code.
 - `check_recipe.expect` is a HUMAN-readable description of what success looks like — no longer machine-enforced. Ambiguous prose expects are fine.
 - Multi-line shell scripts (`for/if/echo/exit`) are supported natively via the `bash -c` wrapper.
-- **Placeholders currently substituted** (SKILL-08 + PLX-01..14 SESSION 15 extension — 17 tokens):
-  - Runtime-derived from az: `{subId}`, `{sub}`, `{l2UamiPrincipalId}`, `{l2UamiClientId}`, `{l2UamiSpId}`, `{artifactsStorageId}`, `{acrId}`, `{bffAppServiceId}`, `{kvResourceId}`
+- **Placeholders currently substituted** (SKILL-08 + PLX-01..14 SESSION 15 extension; `{bffAppServiceId}` + `{bffAppId}` removed by T227a — there is no shared BFF):
+  - Runtime-derived from az: `{subId}`, `{sub}`, `{l2UamiPrincipalId}`, `{l2UamiClientId}`, `{l2UamiSpId}`, `{artifactsStorageId}`, `{acrId}`, `{kvResourceId}`
   - Interpolated from name_templates: `{sbNamespace}`
-  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` + `{bffAppId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
+  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
   - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
 - **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
 
-#### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type / BFF-app (added 2026-08-30 task 213.6)
+#### 0.5c. SPE topology verify — HARD STOP on missing owning-app / container-type (added 2026-08-30 task 213.6; BFF-app checks removed by T227a)
 
-Per **[SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md](../../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) §3A** (owner-attested authoritative 2026-08-30), each env×model tier has THREE prerequisite Entra + SPE artifacts that MUST exist BEFORE any customer dispatch of that tier can proceed:
+Per **[SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md](../../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) §3A** (owner-attested authoritative 2026-08-30), two Entra + SPE artifacts MUST exist BEFORE any customer dispatch can proceed:
 
 1. **Owning app-reg** — permanent 1:1 with container-type per topology doc §R1. Registered by [`Register-EntraAppRegistrations.ps1 -CreateOwningApp <tier>`](../../../scripts/Register-EntraAppRegistrations.ps1) per task 213.4, OR manually per [SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Step 1](../../../docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md#step-1--register-the-owning-app-reg-entra-single-tenant).
 2. **Container-type** — 1 of 25 tenant-cap per §R2. Created via delegated flow (SPE Admin app / VS Code extension / SharePoint admin center) per §R5; app-only 403 per §7. Runbook step 3.
-3. **BFF app-reg** — shared across all customers of the tier per §3A rows 4-6. Registered by `Register-EntraAppRegistrations.ps1 -CreateBffApp <tier>`. Runbook step 6.
 
-Step 0.5c verifies all three exist BEFORE Step 1 intake fires. Each check HARD STOPs on failure with actionable message pointing at the runbook step to fix.
+There is **no shared BFF app-reg** to check (D-12/D-13, T227a): each customer's BFF app registration is created by **H3** during the run, and **H8** grants it and the stamp UAMI access to the container-type registration (T227b). The registration itself is verified by H0's `SpeOwnerCredential` check, which signs in as the owning app — the operator's Azure CLI token is not consented for registration reads.
+
+Step 0.5c verifies both exist BEFORE Step 1 intake fires. Each check HARD STOPs on failure with actionable message pointing at the runbook step to fix.
 
 ```powershell
 # --- Prereq: $env is populated (Step 0.5a fail-fast guarantees this for batch mode) ---
 Write-Host "=== Step 0.5c SPE topology verify (task 213.6) ===" -ForegroundColor Cyan
 
 # --- (1) Owning app-reg exists ---
-# containerTypeId + bffApiAppId come from Step 0.5b constants block. The owning-app-reg id is
+# containerTypeId comes from the Step 0.5b constants block. The owning-app-reg id is
 # NOT stored in spaarke-constants.yaml — it's the app-reg that OWNS the container-type. Derive
 # it by querying the container-type's owningAppId (delegated Graph call).
 if ([string]::IsNullOrWhiteSpace($containerTypeId)) {
   Write-Error "[skill-config] Step 0.5c HARD STOP (task 213.6): per_env_constants.$env.containerTypeId is null. Cannot verify SPE topology without a container-type GUID. Run docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 1-8 before dispatch, then re-run this skill."
-  exit 1
-}
-if ([string]::IsNullOrWhiteSpace($bffAppId)) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP (task 213.6): per_env_constants.$env.bffApiAppId is null. Cannot verify SPE topology without a BFF app-reg GUID. Run runbook step 6 before dispatch."
   exit 1
 }
 
@@ -532,41 +523,12 @@ if ($owningAppId) {
   Write-Host "  [PASS] Owning app-reg $owningAppId ($owningAppCheck) exists in Spaarke tenant" -ForegroundColor Green
 }
 
-# --- (4) BFF app-reg exists in Spaarke tenant ---
-$bffAppCheck = az ad app show --id $bffAppId --query "{displayName:displayName,signInAudience:signInAudience}" -o json 2>&1
-if ($LASTEXITCODE -ne 0) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP: BFF app-reg $bffAppId does NOT exist in Spaarke tenant. Run runbook step 6 to register, then re-populate constants and re-run this skill."
-  exit 1
-}
-$bffAppJson = $bffAppCheck | ConvertFrom-Json
-# BFF app-reg MUST be single-tenant per topology doc §3A rows 4-6 (only Model 2 OWNING app is multi-tenant per row 3)
-if ($bffAppJson.signInAudience -ne 'AzureADMyOrg') {
-  Write-Error "[skill-config] Step 0.5c HARD STOP: BFF app-reg $bffAppId ($($bffAppJson.displayName)) has signInAudience='$($bffAppJson.signInAudience)' — MUST be 'AzureADMyOrg' (single-tenant) per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A rows 4-6. Only the Model 2 OWNING app (row 3) is Entra-multitenant, NEVER a BFF. Fix the app-reg or point constants at the correct single-tenant BFF."
-  exit 1
-}
-Write-Host "  [PASS] BFF app-reg $bffAppId ($($bffAppJson.displayName), single-tenant $($bffAppJson.signInAudience)) exists in Spaarke tenant" -ForegroundColor Green
-
-# --- (5) BFF app-reg is granted on the container-type registration (per topology doc §3A "How a BFF gets container access without owning anything") ---
-# ⚠️ STALE until T227 (G2/G9): one shared bffApiAppId predates D-13 (one BFF app registration PER CUSTOMER), and the
-# beta path below is not the v1.0 registration resource (GET /storage/fileStorage/containerTypeRegistrations/{id}).
-# T227 redesigns this check with the per-customer grant; do not "fix" it piecemeal.
-$regResp = curl -sS -H "Authorization: Bearer $graphToken" `
-  "https://graph.microsoft.com/beta/storage/fileStorage/containerTypes/$containerTypeId/registrations"
-$grants = ($regResp | ConvertFrom-Json).value.applicationPermissionGrants | Where-Object { $_.appId -eq $bffAppId }
-if (-not $grants -or $grants.Count -eq 0) {
-  Write-Error "[skill-config] Step 0.5c HARD STOP: BFF app-reg $bffAppId is NOT granted on the container-type $containerTypeId registration. Grant it as the owning app with Graph v1.0 PUT /storage/fileStorage/containerTypeRegistrations/{id}/applicationPermissionGrants/{bffAppId} (per-customer BFF grants are T227 — see the topology runbook). Without this grant, H8 (container creation) fails at dispatch time."
-  exit 1
-}
-Write-Host "  [PASS] BFF app-reg $bffAppId is granted on container-type $containerTypeId registration (applicationPermissions: $($grants[0].applicationPermissions -join ','), delegatedPermissions: $($grants[0].delegatedPermissions -join ','))" -ForegroundColor Green
-
 Write-Host "  [ALL PASS] SPE topology verified — proceeding to Step 0.5d report" -ForegroundColor Green
 ```
 
 **Escalation triggers for Step 0.5c**:
 - Container-type 404 that persists >30 min past creation → escalate; container-type creation may have failed silently.
 - Owning app-reg missing but container-type exists → BROKEN topology state (immutable binding to deleted app-reg per §R1); container-type is now unusable. Cannot recover without container-type replacement (which itself is undeletable for `standard` per §R3). This is an operator emergency — escalate.
-- BFF app-reg signInAudience wrong → configuration error, fixable via Portal. Point constants at the correct app-reg OR fix the misconfigured one.
-- Grant not found on registration → runnable fix (step 6 sub-step); operator can re-run.
 
 **BAT mode note**: Step 0.5c HARD STOPs in both interactive and batch mode. In batch mode, writes `runs/pre-dispatch-topology-gap.json` with the failure details for audit-trail parity with 0d BAT-04 pattern (implementation deferred to task 213.6.1 if needed — for now, the Write-Error path exits non-zero which batch dispatch treats as failed prereq).
 
@@ -578,7 +540,6 @@ Present results as a checklist. Any `Passed = $false` triggers HARD STOP with th
 EXTERNAL PREREQUISITES (from scripts/provisioning-prereqs/prereqs.yaml)
   [PASS] PRQ-T-01 SPE container-type registered on Spaarke tenant
   [PASS] PRQ-T-02 SPE container-type application permissions granted
-  [PASS] PRQ-T-07 Multitenant BFF app-reg (Model 1 tier only)
   [PASS] PRQ-S-01 Azure subscription billing-agreement type known
   [PASS] PRQ-S-02 Azure subscription has a Support Plan (Basic or better)
   [FAIL] PRQ-S-03 Resource-provider registration for required namespaces
@@ -1721,13 +1682,16 @@ Interactive-mode sub-flows below assume a live operator; batch mode returns befo
 🔔 MANUAL GATE: Customer admin consent required (Model 2)
 
   Handler: H0.5 consent-callback
-  Reason:  The multi-tenant BFF app-reg needs admin consent on the customer's
+  Reason:  The customer's BFF app-reg (created by H3) needs admin consent on the customer's
            Entra tenant before H5 can create a Dataverse Application User.
 
   ACTION FOR CUSTOMER ADMIN (send this URL to the customer — skill substitutes {tokens} before display):
     URL construction:
-      $bffAppId = $constants.per_env_constants.$env.bffApiAppId   # from spaarke-constants.yaml per PLX-13; renamed 2026-08-30 task 212 (was bffMultiTenantAppId)
-      $callback = "$($constants.spaarke.bffProdBase)/api/onboarding/consent-callback"
+      # T227a: there is no shared BFF app id or base URL in spaarke-constants.yaml. Model 2 is out of scope (D-12);
+      # if it returns, take the customer's BFF app id from the run (H3's InterStepState.BffAppRegId via GET /api/runs/{runId})
+      # and the callback base from the customer stamp's BFF host name.
+      $bffAppId = '<customer BFF app id from the run>'
+      $callback = "https://<customer stamp BFF host>/api/onboarding/consent-callback"
       $consentUrl = "https://login.microsoftonline.com/$tenantId/adminconsent" +
                     "?client_id=$bffAppId&redirect_uri=$([Uri]::EscapeDataString($callback))&state=$runId"
       Write-Host $consentUrl

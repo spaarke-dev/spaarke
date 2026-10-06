@@ -94,12 +94,6 @@
       "populatedBy": "az acr show -g rg-spaarke-platform-{env} -n sprk{env}acr --query id -o tsv",
       "note": "RBAC scope for PRQ-E-06 (AcrPull for L2 worker sidecar image pulls)."
     },
-    "bffAppServiceId": {
-      "source": "runtime-az",
-      "shape": "Azure resource id of the BFF App Service (per-env)",
-      "populatedBy": "az webapp list -g rg-spaarke-platform-{env} --query \"[?starts_with(name,'sprksharedprod-api') || starts_with(name,'spaarke-bff-{env}')].id\" -o tsv",
-      "note": "RBAC scope for PRQ-E-07 (Website Contributor for slot swaps)."
-    },
     "kvResourceId": {
       "source": "runtime-az",
       "shape": "Azure resource id of the platform Key Vault",
@@ -111,12 +105,6 @@
       "shape": "SPE container-type GUID",
       "populatedBy": "spaarke-constants.yaml per_env_constants.dev.containerTypeId (operator MUST populate before first Step 0.5 run)",
       "note": "SPE container-type on the Spaarke tenant. Never changes once created (owner directive 2026-08-24 SPE never_delete). If null, SKILL.md Step 0.5b hard-stops with a targeted operator-facing error."
-    },
-    "bffAppId": {
-      "source": "constants-per-env-operator",
-      "shape": "Entra app registration appId for the BFF (per-tenancy tier)",
-      "populatedBy": "spaarke-constants.yaml per_env_constants.dev.bffApiAppId (RENAMED 2026-08-30 task 212 from bffMultiTenantAppId — BFFs are single-tenant per topology doc §3A rows 4-6). Populated by task 213 after one-time topology setup (SPE container-type + owning app-reg + BFF app-reg creation via delegated flow).",
-      "note": "One per tenancy tier, shared across all Model 1 customers. Currently referenced only in PRQ-T-02 tightening (Wave 4 deferred)."
     },
     "dvUrl": {
       "source": "runtime-context",

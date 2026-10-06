@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — No shared BFF app registration in the provisioning skill (T227a, plan G2)
+
+`customer-provisioning-orchestration-r1` T227a.
+
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 0.5b no longer derives `{bffAppServiceId}` / `{bffAppId}`;
+  Step 0.5c no longer hard-stops on a null `bffApiAppId` or checks a shared BFF app and its grant (each customer's
+  BFF app is created by H3; H8 grants it — T227b); Step 5a (Model 2) no longer reads removed constants.
+
 ###### 2026-10-06 — One OpenAI deployment set for stamps; no recompose (T247, plan G27)
 
 `customer-provisioning-orchestration-r1` T247.

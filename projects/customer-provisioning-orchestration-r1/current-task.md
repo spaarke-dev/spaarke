@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-06 SESSION 38 — T246 ✅, **T247 ✅** (see its POML notes). Next: **T227a** → 227b → 227c (POMLs created 2026-10-06 from the T227 fact sheet). Older header text below is history.
+> **Last Updated**: 2026-10-06 SESSION 38 — T246 ✅, **T247 ✅** (see its POML notes). **T227a ✅**. Next: **227b** → 227c. Older header text below is history.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,10 +40,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T227a** — retire shared BFF app-reg paths (G2) (`tasks/227a-retire-shared-bff-app-regs.poml`); then 227b (H8 grants, G9), 227c (H8 container-id secrets, G18). |
+| **Task** | **T227b** — H8 container-type grants (G9) (`tasks/227b-h8-container-type-grants.poml`); then 227c. |
 | **Step** | 0 — not started. |
 | **Status** | pending. Owner item unchanged: W7. |
-| **Next Action** | Run task-execute on `tasks/227a-retire-shared-bff-app-regs.poml`. The fact sheet (file:line evidence for G2/G9/G18) is summarised in each POML `<context>`. |
+| **Next Action** | Run task-execute on `tasks/227b-h8-container-type-grants.poml` (FULL rigor). |
 | **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a→b→c) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 

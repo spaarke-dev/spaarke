@@ -31,9 +31,12 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 6
+manifest_version: 7
 last_updated: 2026-10-02
 author_task: customer-provisioning-orchestration-r1 / task 202
+# manifest_version 7 (2026-10-06, customer-provisioning-orchestration-r1 T227a): PRQ-C-05 RETIRED (Model 2 only,
+# out of scope per D-12; its check needed the customer's BFF app id, which H3 creates during the run, so no
+# pre-run recipe can hold it — the shared `bffApiAppId` constant it read is removed).
 # manifest_version 6 (2026-10-04, customer-provisioning-orchestration-r1 T251): PRQ-E-15 ADDED (Exchange admin app +
 # narrowed Exchange role, one-time per tenant); PRQ-C-08 reworded — the group now scopes H14a's Exchange RBAC for
 # Applications role assignments (owner D26), not an ApplicationAccessPolicy.
@@ -499,18 +502,20 @@ prereqs:
     remediation: Wait for quota window; no bump path.
 
   - id: PRQ-C-05
-    name: Customer admin consent granted for that customer's BFF app registration (Model 2 only)
+    name: 'RETIRED — customer admin consent for the customer BFF app registration (Model 2 only)'
     scope: once_per_customer
-    frequency: once per customer tenant
-    owner: customer tenant admin (via H0.5 consent-capture URL)
-    consequence_of_absence: H0.5 consent-callback times out; H10 admin-consent verification fails.
-    check_recipe:
-      cli: |
-        az rest --method get \
-          --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{bffAppId}')/appRoleAssignments" \
-          --headers "Authorization=Bearer $customerTenantToken"
-      expect: non-empty in customer tenant
-    remediation: Skill Step 5a auto-emits consent URL + polls callback (H0.5). Model 1 does NOT require H0.5 admin consent at all — the stamp lives in Spaarke's own Azure tenant, and each customer has their own single-tenant BFF app registration there (D-13). Admin consent is one of only two things that genuinely differ between the models (the other is Azure Lighthouse delegation), and both apply to Model 2 only.
+    status: retired
+    retired_on: 2026-10-06
+    retired_by: customer-provisioning-orchestration-r1 T227a (D-12)
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None for Model 1 (it never needed admin consent). Model 2 is out of scope (D-12). The check read a shared
+      `bffApiAppId` constant; the customer's BFF app registration is created by H3 during the run, so a pre-run
+      recipe cannot know its id. If Model 2 returns, the consent check belongs to H0.5 / H10 at run time.
+    remediation: |
+      Nothing to do.
+    related_findings: [D-12, D-13, G2]
 
   - id: PRQ-C-06
     name: Dataverse org-settings contract satisfied (maxuploadfilesize ≥ 25MB)

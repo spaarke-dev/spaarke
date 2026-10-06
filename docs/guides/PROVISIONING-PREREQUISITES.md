@@ -1,9 +1,11 @@
 # PROVISIONING-PREREQUISITES — canonical prerequisite reference
 
 > **Version**: 5 · **Last Updated**: 2026-10-02
-> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 5)
+> **Machine-parseable source of truth**: [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) (manifest_version 7)
 > **Owner**: `customer-provisioning-orchestration-r1` task 202
 > **Consumers**: `/provision-environment` skill Step 0.5 (via task 203 wiring); human operators reading this file.
+>
+> **v7 (2026-10-06, `customer-provisioning-orchestration-r1` T227a)**: `PRQ-C-05` **retired** — Model 2 only (out of scope, D-12), and its check read a shared BFF app id that no longer exists (each customer's BFF app registration is created by H3 during the run).
 >
 > **v6 (2026-10-04, `customer-provisioning-orchestration-r1` T251)**: `PRQ-E-15` **added** — the Exchange admin app
 > (`Spaarke Exchange Admin`, federated credential trusting the L2 Worker UAMI, no secret or certificate) and its narrowed
@@ -163,7 +165,7 @@ Grouped by scope. Programmatic check recipes in the YAML.
 | PRQ-C-02 | OpenAI model GA per region for pinned versions | Spaarke admin | `ServiceModelDeprecated` at H2a deploy |
 | PRQ-C-03 | Global resource-name availability (SB / Cog Svc / Storage) | Spaarke admin | F10 — `NamespaceUnavailable` mid-deploy (~16m35s) |
 | PRQ-C-04 | Dataverse env-creation rate quota | Spaarke admin | H5 fails with rate-limit; waits for quota window |
-| PRQ-C-05 | Customer admin consent for that customer's BFF app registration (**Model 2 only** — Model 1 requires no H0.5 consent) | Customer tenant admin | H0.5 timeout; H10 verification fails |
+| ~~PRQ-C-05~~ | **Retired 2026-10-06 (T227a).** Model 2 only (out of scope, D-12), and the customer's BFF app registration does not exist before the run (H3 creates it), so no pre-run check could hold its id. | — | — |
 | PRQ-C-06 | Dataverse org-settings contract (`maxuploadfilesize ≥ 25MB`) | Spaarke admin (via H6) | F14 — SpaarkeMaster import fails 5min in |
 | PRQ-C-07 | Required Applications manifest (Power BI Anchor + others) | Spaarke admin (via H6) | F13 — SpaarkeMaster import fails on Power BI dep |
 | PRQ-C-08 | Exchange mail-enabled security group scoping the stamp identity's Exchange mailbox roles (direct members only) — its id is the intake value `exchangePolicyScopeGroupId` (T245c; RBAC for Applications since T251) | Exchange admin of the stamp's tenant | `POST /api/runs` 400 `h14a-missing-policy-scope-group-id`; a wrong id → H14a fails, Mail.* calls 403 (T4) |

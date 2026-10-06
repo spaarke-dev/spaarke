@@ -79,11 +79,6 @@
       "shape": "Azure resource id",
       "populatedBy": "az acr show -g rg-spaarke-platform-prod -n sprkprodacr --query id -o tsv"
     },
-    "bffAppServiceId": {
-      "source": "runtime-az",
-      "shape": "Azure resource id",
-      "populatedBy": "az webapp list --resource-group rg-spaarke-platform-prod ..."
-    },
     "kvResourceId": {
       "source": "runtime-az",
       "shape": "Azure resource id",
@@ -93,11 +88,6 @@
       "source": "constants-per-env-operator",
       "shape": "SPE container-type GUID",
       "populatedBy": "spaarke-constants.yaml per_env_constants.prod.containerTypeId (operator MUST populate)"
-    },
-    "bffAppId": {
-      "source": "constants-per-env-operator",
-      "shape": "Entra appId",
-      "populatedBy": "spaarke-constants.yaml per_env_constants.prod.bffApiAppId (RENAMED 2026-08-30 task 212 from bffMultiTenantAppId — BFFs are single-tenant per topology doc §3A rows 4-6)"
     },
     "dvUrl": {
       "source": "runtime-context",

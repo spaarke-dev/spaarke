@@ -204,8 +204,12 @@ shared token audience: a token minted for Customer A's BFF is structurally valid
 | 1 | `Spaarke SPE Trial 1 Owner` | Owns container type `Spaarke Trial 1` | 1 — fixed by R1 |
 | 2 | `Spaarke SPE Model 1 Owner` | Owns `Spaarke Model 1` | 1 — fixed by R1 |
 | 3 | `Spaarke SPE Model 2 Owner` | Owns `Spaarke Model 2`. **Multi-tenant** — customers consent to this | 1 — fixed by R1 |
-| 4 | `Spaarke BFF — Trial 1` | BFF identity, trial environment | 1 |
-| 5…n | `Spaarke BFF — {Customer}` | BFF identity **per customer, in BOTH models** | **1 per customer** |
+| 4…n | `spaarke-bff-api-{customerId}` | BFF identity **per customer** — created by **H3** during the customer's run; **H8** grants it (and the stamp UAMI) on the container-type registration | **1 per customer** |
+
+> 🟡 **Corrected 2026-10-06 (T227a).** Row 4 `Spaarke BFF — Trial 1` is removed: the shared trial tier is retired
+> (D-12) and the script path that created it (`Register-EntraAppRegistrations.ps1 -CreateBffApp`) is deleted. The
+> per-customer row now carries the name H3 actually creates (`spaarke-bff-api-{customerId}`, not
+> `Spaarke BFF — {Customer}`). Rows 1 and 3 describe container types no stamp uses today (Model 2 is out of scope).
 
 > 🟡 **Corrected 2026-09-28 (D-12).** This table previously carried a singleton row
 > `Spaarke BFF — Model 1` — *"BFF identity, shared Model 1 environment"* — and scoped per-customer BFF

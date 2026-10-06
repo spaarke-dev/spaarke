@@ -182,42 +182,19 @@ param(
 
     # ── SPE topology app-registrations — added 2026-08-30, task 213.4 ──
     # Creates the container-type OWNING app-reg for the named tier per
-    # SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A rows 1-3. Owning apps are permanent-1:1
-    # with their container-type (topology §R1) — this switch is used ONCE per tier
-    # during the operator's one-time SPE topology setup (runbook Step 1). Model 2's
-    # owning app is the ONLY multi-tenant app-reg in Spaarke's topology (§3A row 3);
-    # all other owning apps are single-tenant. When set: skips the prod BFF-API
+    # SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A. Owning apps are permanent-1:1
+    # with their container-type (topology §R1) — this switch is used ONCE
+    # during the operator's one-time SPE topology setup (runbook Step 1). The owning
+    # app is single-tenant. When set: skips the prod BFF-API
     # flow (implicit -SkipBffApi) + skips secret minting (topology apps are secret-free
     # per ADR-028 A4). NOT combinable with -CreateFederatedCredential / -FicOnly.
-    [ValidateSet('Trial1','Model1','Model2')]
+    # Task 227a (D-12): only the Model 1 tier exists — Trial 1 is retired and Model 2 is out of scope.
+    [ValidateSet('Model1')]
     [string]$CreateOwningApp = "",
 
-    # ── SPE topology BFF app-registrations — added 2026-08-30, task 213.4 ──
-    # ── Model 2 semantics corrected 2026-08-31, task 213.4-correction ──
-    # Creates the tier-appropriate BFF app-reg. All BFF app-regs are single-tenant
-    # (`AzureADMyOrg`) per project CLAUDE.md §MUST rule.
-    #
-    # Model 1 / Trial 1: ONE shared BFF app-reg for the shared environment
-    # (multiple customers use the same env → they use the same BFF app-reg).
-    # Do NOT pass -CustomerName (the shared env has no single "customer" identity).
-    #
-    # Model 2: ONE BFF app-reg per Model 2 stamp — every Model 2 environment
-    # IS a customer (Model 2 has no shared-env concept). -CustomerName is
-    # MANDATORY for Model 2; without it the script HARD-FAILS (there is no
-    # "shared Model 2 BFF" architecturally).
-    #
-    # Container access is granted separately at runbook Step 6 (registration-level
-    # `applicationPermissionGrants` on the container-type registration) — NOT via
-    # declared app-reg permissions. See topology doc §3A "How a BFF gets container
-    # access without owning anything — VERIFIED".
-    [ValidateSet('Trial1','Model1','Model2')]
-    [string]$CreateBffApp = "",
-
-    # Per-stamp identifier for Model 2 BFF app-regs (Model 2 stamp = customer).
-    # MANDATORY when -CreateBffApp Model2. FORBIDDEN when -CreateBffApp Trial1
-    # or Model1 (those tiers are shared, no per-stamp identity applies).
-    # Display name becomes "Spaarke BFF - {CustomerName}".
-    [string]$CustomerName = "",
+    # Task 227a (D-12/D-13): the shared-tier -CreateBffApp / -CustomerName parameters are removed.
+    # H3 (GraphAppRegistrationProvisioner) creates each customer's BFF app registration,
+    # spaarke-bff-api-{customerId}; H8 grants it access to the container type.
 
     # ── `acct` optional claim — added 2026-10-01, unified-access-control-r2 task 141 ──
     # Inert unless specified. See .PARAMETER AcctClaimOnly.
@@ -250,40 +227,20 @@ if ($FicOnly) {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SPE topology mode (customer-provisioning-orchestration-r1 task 213.4, 2026-08-30) —
-# -CreateOwningApp / -CreateBffApp create the topology app-regs per
+# -CreateOwningApp creates the container-type owning app-reg per
 # SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A. Bypasses the prod BFF-API flow
 # and forces secret-free (topology apps never receive minted secrets from this
 # script — ADR-028 A4 for BFF identities; E-1 owning-app secrets, if ever
 # needed, are managed via a separate operator flow, not auto-minted here).
 # ─────────────────────────────────────────────────────────────────────────────
-$TopologyMode = ([string]::IsNullOrEmpty($CreateOwningApp) -eq $false) -or `
-                ([string]::IsNullOrEmpty($CreateBffApp) -eq $false)
+$TopologyMode = ([string]::IsNullOrEmpty($CreateOwningApp) -eq $false)
 
 if ($TopologyMode) {
     if ($CreateFederatedCredential -or $FicOnly) {
-        throw "-CreateOwningApp / -CreateBffApp cannot be combined with -CreateFederatedCredential or -FicOnly in the same invocation. Run the script twice if both actions are needed: once to create the topology app-reg, again to add a FIC to it (passing -FederatedCredentialAppId with the newly-created app's ID)."
+        throw "-CreateOwningApp cannot be combined with -CreateFederatedCredential or -FicOnly in the same invocation. Run the script twice if both actions are needed: once to create the topology app-reg, again to add a FIC to it (passing -FederatedCredentialAppId with the newly-created app's ID)."
     }
     if ($AllowClientSecretMint) {
-        throw "-AllowClientSecretMint cannot be combined with -CreateOwningApp / -CreateBffApp. Topology app-regs are created secret-free per ADR-028 A4 (BFF identities) + KV credential-lifecycle rules 1-2 (.claude/constraints/provisioning.md § KV credential lifecycle). E-1 container-type owning-app secrets, if ever required, are managed via a separate operator flow."
-    }
-    # Model 2 semantics (owner correction 2026-08-31, task 213.4-correction):
-    # Model 2 has NO shared-environment concept — every Model 2 stamp IS a customer.
-    # Therefore `-CreateBffApp Model2` REQUIRES -CustomerName (there is no
-    # architecturally-valid "shared Model 2 BFF app-reg" to fall back to).
-    if ($CreateBffApp -eq "Model2" -and [string]::IsNullOrWhiteSpace($CustomerName)) {
-        throw "-CreateBffApp Model2 REQUIRES -CustomerName. Model 2 has no shared-environment concept — every Model 2 stamp IS a customer, so every Model 2 BFF app-reg is per-stamp. There is no 'shared Model 2 BFF' architecturally. Re-invoke with -CustomerName '<stamp-identifier>' (e.g., 'Acme', 'Contoso'). See scripts/Register-EntraAppRegistrations.ps1 header comments on -CreateBffApp for the Model 1 / Trial 1 (shared) vs Model 2 (per-stamp) contract."
-    }
-    # Symmetric guard: -CustomerName is meaningless for Trial 1 / Model 1 (shared
-    # environments — one BFF app-reg, no per-customer split). Reject rather than
-    # silently ignore so the operator gets a clear error when the wrong tier is picked.
-    if ($CreateBffApp -in @("Trial1","Model1") -and -not [string]::IsNullOrWhiteSpace($CustomerName)) {
-        throw "-CustomerName is not valid with -CreateBffApp $CreateBffApp. Trial 1 and Model 1 are SHARED environments — ONE BFF app-reg serves all customers of that tier. -CustomerName is only valid with -CreateBffApp Model2 (where every stamp is a customer). Re-invoke without -CustomerName, or switch to -CreateBffApp Model2 if you meant a Model 2 stamp."
-    }
-    # Same rule for owning apps: -CustomerName is never meaningful for owning
-    # apps regardless of tier (all 3 owning apps are one-per-tier, per topology
-    # doc §R1's permanent 1:1 container-type binding). Reject to prevent confusion.
-    if (-not [string]::IsNullOrWhiteSpace($CreateOwningApp) -and -not [string]::IsNullOrWhiteSpace($CustomerName)) {
-        throw "-CustomerName is not valid with -CreateOwningApp. Owning apps are permanent + 1:1 with their container-type (topology doc §R1) — one per tier, never per-customer. Re-invoke without -CustomerName."
+        throw "-AllowClientSecretMint cannot be combined with -CreateOwningApp. Topology app-regs are created secret-free per ADR-028 A4 (BFF identities) + KV credential-lifecycle rules 1-2 (.claude/constraints/provisioning.md § KV credential lifecycle). E-1 container-type owning-app secrets, if ever required, are managed via a separate operator flow."
     }
     $SkipBffApi = $true          # implicit — skip the prod BFF-API flow
     $SkipClientSecret = $true    # forced — topology apps are secret-free
@@ -1231,14 +1188,13 @@ anything works.
 # ─────────────────────────────────────────────────────────────────────────────
 # SPE Topology App Registration functions — task 213.4 (2026-08-30)
 #
-# Creates the 6 app-regs per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md SS3A:
-#   Rows 1-3: OWNING apps (permanent-1:1 with a container-type; SS3A row 3 Model 2 = multi-tenant)
-#   Rows 4-6: BFF apps    (shared per tier for Trial 1 + Model 1; per-customer for Model 2)
+# Creates the container-type OWNING app-reg per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md SS3A
+# (Model 1 only since task 227a — Trial 1 retired, Model 2 out of scope; permanent 1:1 with
+# its container type). Per-customer BFF app-regs are created by H3, not here.
 #
 # ORTHOGONAL to the FIC helpers above — these do not participate in the FIC flow.
 # See docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md for the operator workflow
-# that wraps these functions (Step 1 = New-SpaarkeSpeContainerTypeOwningApp,
-# Step 6 = New-SpaarkeSpeBffApp).
+# that wraps these functions (Step 1 = New-SpaarkeSpeContainerTypeOwningApp).
 # ─────────────────────────────────────────────────────────────────────────────
 
 function Get-SpeTopologyOwningAppDisplayName {
@@ -1253,54 +1209,9 @@ function Get-SpeTopologyOwningAppDisplayName {
         MUST match topology doc SS3A row 1 verbatim.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][ValidateSet('Trial1','Model1','Model2')][string]$Tier)
+    param([Parameter(Mandatory = $true)][ValidateSet('Model1')][string]$Tier)
 
-    switch ($Tier) {
-        'Trial1' { return "Spaarke SPE Trial 1 Owner" }
-        'Model1' { return "Spaarke SPE Model 1 Owner" }
-        'Model2' { return "Spaarke SPE Model 2 Owner" }
-    }
-}
-
-function Get-SpeTopologyBffAppDisplayName {
-    <#
-    .SYNOPSIS
-        Returns the exact display name for the BFF app-reg of a given tier, per topology
-        doc SS3A rows 4-6.
-    .DESCRIPTION
-        Model 1 and Trial 1 are SHARED environments — ONE BFF app-reg serves all
-        customers of the tier ('Spaarke BFF - Model 1' / 'Spaarke BFF - Trial 1').
-        Model 2 is per-stamp (every Model 2 environment IS a customer) — CustomerName
-        MANDATORY, display name becomes 'Spaarke BFF - {CustomerName}'.
-
-        Corrected 2026-08-31 per owner clarification: the earlier 'shared Model 2
-        BFF placeholder' path was architecturally wrong (Model 2 has no shared-env
-        concept). Model 2 without CustomerName now hard-throws upstream (see
-        topology-mode gate block in param handling).
-
-        Uses ASCII hyphen '-' (not em dash) to keep display names shell-safe across
-        PowerShell / az CLI / portal rendering; topology doc §3A shows em dashes for
-        visual readability but the actual Entra display name uses ASCII throughout the
-        codebase.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][ValidateSet('Trial1','Model1','Model2')][string]$Tier,
-        [string]$CustomerName = ""
-    )
-
-    switch ($Tier) {
-        'Trial1' { return "Spaarke BFF - Trial 1" }
-        'Model1' { return "Spaarke BFF - Model 1" }
-        'Model2' {
-            if ([string]::IsNullOrWhiteSpace($CustomerName)) {
-                # Defensive — upstream gate should have already thrown; this is a
-                # last-resort catch if a caller invokes this helper directly.
-                throw "Get-SpeTopologyBffDisplayName: Tier=Model2 requires non-empty CustomerName. Model 2 has no shared-BFF path."
-            }
-            return "Spaarke BFF - $CustomerName"
-        }
-    }
+    return "Spaarke SPE Model 1 Owner"
 }
 
 function Get-SpeTopologyOwningAppSignInAudience {
@@ -1317,9 +1228,8 @@ function Get-SpeTopologyOwningAppSignInAudience {
         to cross-tenant consent.
     #>
     [CmdletBinding()]
-    param([Parameter(Mandatory = $true)][ValidateSet('Trial1','Model1','Model2')][string]$Tier)
+    param([Parameter(Mandatory = $true)][ValidateSet('Model1')][string]$Tier)
 
-    if ($Tier -eq 'Model2') { return 'AzureADMultipleOrgs' }
     return 'AzureADMyOrg'
 }
 
@@ -1351,7 +1261,7 @@ function New-SpaarkeSpeContainerTypeOwningApp {
     #>
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory = $true)][ValidateSet('Trial1','Model1','Model2')][string]$Tier,
+        [Parameter(Mandatory = $true)][ValidateSet('Model1')][string]$Tier,
         [Parameter(Mandatory = $true)][string]$TenantId,
         [switch]$DryRun
     )
@@ -1359,9 +1269,9 @@ function New-SpaarkeSpeContainerTypeOwningApp {
     $displayName    = Get-SpeTopologyOwningAppDisplayName -Tier $Tier
     $signInAudience = Get-SpeTopologyOwningAppSignInAudience -Tier $Tier
 
-    Write-Header "SPE OWNING APP — $displayName (topology doc SS3A row $(switch ($Tier) { 'Trial1' {1}; 'Model1' {2}; 'Model2' {3} }))"
+    Write-Header "SPE OWNING APP — $displayName (topology doc SS3A)"
     Write-Info "Tier            : $Tier"
-    Write-Info "signInAudience  : $signInAudience$(if ($Tier -eq 'Model2') { '  <- MULTI-TENANT (only Model 2 owning app is multi-tenant per SS3A row 3)' })"
+    Write-Info "signInAudience  : $signInAudience"
     Write-Info "Tenant          : $TenantId"
 
     $result = [pscustomobject]@{
@@ -1390,9 +1300,6 @@ function New-SpaarkeSpeContainerTypeOwningApp {
         if ($existing[0].signInAudience -ne $signInAudience) {
             Write-Warn "signInAudience DRIFT: existing='$($existing[0].signInAudience)' expected='$signInAudience'."
             Write-Warn "This may indicate the app-reg was created by a different flow. Verify manually."
-            if ($Tier -eq 'Model2' -and $existing[0].signInAudience -ne 'AzureADMultipleOrgs') {
-                Write-Warn "  Model 2 owning app MUST be multi-tenant. Fix via Portal -> Manifest -> signInAudience = 'AzureADMultipleOrgs'."
-            }
         }
         return $result
     }
@@ -1454,190 +1361,10 @@ function New-SpaarkeSpeContainerTypeOwningApp {
     Write-Host "  NEXT STEPS FOR '$displayName' (per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md):" -ForegroundColor Cyan
     Write-Host "    Step 2. Grant admin consent for the 2 API permissions (Portal blue button)." -ForegroundColor White
     Write-Host "    Step 3. Create the container-type via a DELEGATED flow (SPE Admin app / VS Code / SharePoint admin center) —" -ForegroundColor White
-    Write-Host "            passing owningAppId='$($result.AppId)' + billingClassification='standard' (Trial1/Model1) or 'directToCustomer' (Model2)." -ForegroundColor White
+    Write-Host "            passing owningAppId='$($result.AppId)' + billingClassification='standard'." -ForegroundColor White
     Write-Host "    Step 4. Attach the Azure billing profile (standard classification only)." -ForegroundColor White
     Write-Host "    Step 5. Wait for replication (~2 min empirical, 24h Microsoft SLO)." -ForegroundColor White
-    Write-Host "    Step 6. Register the tier's BFF app-reg via: -CreateBffApp $Tier" -ForegroundColor White
-    Write-Host ""
-
-    return $result
-}
-
-function New-SpaarkeSpeBffApp {
-    <#
-    .SYNOPSIS
-        Idempotently creates the BFF app-reg for a given tier per topology doc SS3A
-        rows 4-6.
-    .DESCRIPTION
-        Creation order (mirrors the prod BFF-API flow but WITHOUT client-secret minting
-        or Key Vault writes — topology BFF apps are secret-free per ADR-028 A4):
-          1. Idempotency check by display name.
-          2. Create app-reg (signInAudience=AzureADMyOrg — BFF apps are ALWAYS single-tenant
-             per project CLAUDE.md SS MUST rule + topology doc SS3A rows 4-6).
-          3. Add Graph delegated permissions (mirror prod: Files.ReadWrite.All, Sites.ReadWrite.All,
-             User.Read, Mail.Send).
-          4. Add Dynamics CRM delegated permission (mirror prod: user_impersonation).
-          5. Set Application ID URI + expose 'user_impersonation' scope (mirror prod).
-          6. Create service principal.
-
-        DELIBERATELY NOT DONE (per constraints):
-          - No client secret minted (KV credential-lifecycle rule 1 — BFF-*-ClientSecret
-            in ANY casing is a plain ADR-028 A4 violation).
-          - No FIC added (added via a separate script invocation with -CreateFederatedCredential).
-          - No KV writes (H4 handler writes per-customer KV entries at provisioning time).
-          - No redirect URIs (BFF is a confidential-client that mints tokens via FIC/MI;
-            no OAuth code flow needed).
-          - Container access is NOT declared here — it comes from Step 6 of the runbook
-            (registration-level `applicationPermissionGrants` on the container-type
-            registration, per topology doc SS3A "How a BFF gets container access without
-            owning anything — VERIFIED").
-
-    .OUTPUTS
-        PSCustomObject: AppId, ObjectId, DisplayName, SignInAudience, AlreadyExisted, Tier.
-    #>
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)][ValidateSet('Trial1','Model1','Model2')][string]$Tier,
-        [Parameter(Mandatory = $true)][string]$TenantId,
-        [string]$CustomerName = "",
-        [switch]$DryRun
-    )
-
-    $displayName = Get-SpeTopologyBffAppDisplayName -Tier $Tier -CustomerName $CustomerName
-
-    Write-Header "SPE BFF APP — $displayName (topology doc SS3A row $(switch ($Tier) { 'Trial1' {4}; 'Model1' {5}; 'Model2' {6} }))"
-    Write-Info "Tier            : $Tier$(if ($Tier -eq 'Model2' -and -not [string]::IsNullOrWhiteSpace($CustomerName)) { " (customer='$CustomerName' — per-customer BFF per SS3A row 6)" })"
-    Write-Info "signInAudience  : AzureADMyOrg  <- BFF apps are ALWAYS single-tenant (project CLAUDE.md SS MUST rule)"
-    Write-Info "Tenant          : $TenantId"
-
-    $result = [pscustomobject]@{
-        AppId          = $null
-        ObjectId       = $null
-        DisplayName    = $displayName
-        SignInAudience = 'AzureADMyOrg'
-        AlreadyExisted = $false
-        Tier           = $Tier
-        Role           = 'Bff'
-        AppIdUri       = $null
-    }
-
-    # 1. Idempotency
-    Write-Step 1 "Checking whether '$displayName' already exists"
-    $existing = az ad app list --display-name $displayName --output json 2>$null | ConvertFrom-Json
-    if ($existing -and $existing.Count -gt 0) {
-        Write-Warn "App registration '$displayName' already exists (AppId: $($existing[0].appId))"
-        Write-Info "Skipping creation — this is idempotent. To modify permissions, use the Portal."
-        $result.AppId          = $existing[0].appId
-        $result.ObjectId       = $existing[0].id
-        $result.AlreadyExisted = $true
-        $result.AppIdUri       = "api://$($result.AppId)"
-
-        if ($existing[0].signInAudience -ne 'AzureADMyOrg') {
-            Write-Warn "signInAudience DRIFT: existing='$($existing[0].signInAudience)' expected='AzureADMyOrg'."
-            Write-Warn "  BFF apps MUST be single-tenant (project CLAUDE.md SS MUST rule)."
-            Write-Warn "  Fix via Portal -> Manifest -> signInAudience = 'AzureADMyOrg'."
-        }
-        return $result
-    }
-
-    if ($DryRun) {
-        Write-Info "DRY RUN: Would create app '$displayName' with signInAudience='AzureADMyOrg'"
-        Write-Info "DRY RUN: Would add Graph delegated: Files.ReadWrite.All, Sites.ReadWrite.All, User.Read, Mail.Send"
-        Write-Info "DRY RUN: Would add Dynamics CRM delegated: user_impersonation"
-        Write-Info "DRY RUN: Would set Application ID URI: api://<app-id> + expose user_impersonation scope"
-        Write-Info "DRY RUN: Would create service principal"
-        Write-Info "DRY RUN: Would NOT mint client secret (secret-free per ADR-028 A4)"
-        Write-Info "DRY RUN: Would NOT write to Key Vault (H4 handles per-customer at provisioning time)"
-        $result.AppId    = "00000000-0000-0000-0000-000000000000"
-        $result.AppIdUri = "api://00000000-0000-0000-0000-000000000000"
-        return $result
-    }
-
-    # 2. Create app-reg. Single-tenant, no redirect URIs.
-    Write-Step 2 "Creating app registration '$displayName' (signInAudience=AzureADMyOrg, secret-free)"
-    $createdApp = az ad app create `
-        --display-name $displayName `
-        --sign-in-audience AzureADMyOrg `
-        --output json 2>&1 | ConvertFrom-Json
-
-    if ($LASTEXITCODE -ne 0 -or -not $createdApp) {
-        throw "Failed to create app registration '$displayName'. Azure CLI may require Application Administrator role."
-    }
-
-    $result.AppId    = $createdApp.appId
-    $result.ObjectId = $createdApp.id
-    $result.AppIdUri = "api://$($result.AppId)"
-    Write-Success "Created app: $displayName (AppId: $($result.AppId))"
-
-    # 3. Add Graph delegated permissions (mirror prod BFF-API flow at lines 1259-1262).
-    Write-Step 3 "Adding Graph delegated permissions (Files/Sites/User/Mail)"
-    az ad app permission add --id $result.AppId `
-        --api $GraphApiId `
-        --api-permissions "$($GraphFilesReadWriteAll)=Scope $($GraphSitesReadWriteAll)=Scope $($GraphUserRead)=Scope $($GraphMailSend)=Scope" `
-        --output none 2>&1
-
-    # 4. Add Dynamics CRM delegated permission (mirror prod).
-    Write-Step 4 "Adding Dynamics CRM delegated permission (user_impersonation)"
-    az ad app permission add --id $result.AppId `
-        --api $DynamicsCrmApiId `
-        --api-permissions "$($DynamicsCrmUserImpersonation)=Scope" `
-        --output none 2>&1
-
-    Write-Success "API permissions added"
-
-    # 5. Set Application ID URI + expose user_impersonation scope (mirror prod at 1281-1318).
-    Write-Step 5 "Setting Application ID URI + exposing user_impersonation scope"
-    az ad app update --id $result.AppId --identifier-uris $result.AppIdUri --output none 2>&1
-
-    $scopeId = [guid]::NewGuid().ToString()
-    $apiDefinition = @{
-        oauth2PermissionScopes = @(
-            @{
-                adminConsentDescription = "Allow the application to access $displayName on behalf of the signed-in user."
-                adminConsentDisplayName = "Access $displayName"
-                id                      = $scopeId
-                isEnabled               = $true
-                type                    = "User"
-                userConsentDescription  = "Allow the application to access $displayName on your behalf."
-                userConsentDisplayName  = "Access $displayName"
-                value                   = "user_impersonation"
-            }
-        )
-    } | ConvertTo-Json -Depth 4
-
-    $apiPath = [System.IO.Path]::GetTempFileName()
-    try {
-        $apiDefinition | Out-File -FilePath $apiPath -Encoding utf8
-        az rest --method PATCH `
-            --uri "https://graph.microsoft.com/v1.0/applications/$($result.ObjectId)" `
-            --headers "Content-Type=application/json" `
-            --body "@$apiPath" `
-            --output none 2>&1
-    } finally {
-        Remove-Item $apiPath -ErrorAction SilentlyContinue
-    }
-    Write-Success "Application ID URI set: $($result.AppIdUri) + exposed scope: user_impersonation"
-
-    # 6. Service principal.
-    Write-Step 6 "Creating service principal"
-    $sp = az ad sp create --id $result.AppId --output json 2>$null | ConvertFrom-Json
-    if ($sp) {
-        Write-Success "Service principal created (ObjectId: $($sp.id))"
-    } else {
-        Write-Info "Service principal may already exist"
-    }
-
-    # NEXT STEPS
-    Write-Host ""
-    Write-Host "  NEXT STEPS FOR '$displayName' (per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md):" -ForegroundColor Cyan
-    Write-Host "    Step 6b. Grant admin consent (Portal blue button):" -ForegroundColor White
-    Write-Host "             https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationMenuBlade/~/CallAnAPI/appId/$($result.AppId)" -ForegroundColor White
-    Write-Host "    Step 6c. Register this BFF app on the container-type registration (grants container access without ownership):" -ForegroundColor White
-    Write-Host "             POST /beta/storage/fileStorage/containerTypeRegistrations/<containerTypeId>/applicationPermissionGrants" -ForegroundColor White
-    Write-Host "             Body: { appId: '$($result.AppId)', applicationPermissions: ['Full'], delegatedPermissions: ['Full'] }" -ForegroundColor White
-    Write-Host "    Step 7.  Populate spaarke-constants.yaml per_env_constants.<env>.bffApiAppId = '$($result.AppId)'" -ForegroundColor White
-    Write-Host "    Step 8.  Add a FIC for the BFF's UAMI (secret-free per ADR-028 A4):" -ForegroundColor White
-    Write-Host "             ./Register-EntraAppRegistrations.ps1 -FicOnly -FederatedCredentialAppId $($result.AppId) -UamiResourceId <arm-id> -TenantId $TenantId" -ForegroundColor White
+    Write-Host "    Per customer: H3 creates the customer's BFF app registration and H8 grants it (and the stamp UAMI) access." -ForegroundColor White
     Write-Host ""
 
     return $result
@@ -1782,14 +1509,11 @@ if (-not $DryRun -and -not $FicOnly -and -not $TopologyMode) {
 # ─────────────────────────────────────────────────────────────────────────────
 # SPE Topology mode — task 213.4 (2026-08-30)
 #
-# When -CreateOwningApp or -CreateBffApp is set, this block runs BEFORE the
+# When -CreateOwningApp is set, this block runs BEFORE the
 # prod BFF-API flow and exits cleanly. The prod flow is skipped via the
 # implicit -SkipBffApi set in the mode gate above.
 #
-# Ordering: OWNING app first (per runbook Step 1 — the container-type creation
-# in Step 3 needs the owning-app's GUID), then BFF app (runbook Step 6).
-# Both can be created in a single invocation for convenience, though the
-# runbook's canonical flow calls them separately.
+# The container-type creation (runbook Step 3) needs the owning app's GUID.
 # ─────────────────────────────────────────────────────────────────────────────
 
 if ($TopologyMode) {
@@ -1806,14 +1530,6 @@ if ($TopologyMode) {
             -DryRun:$DryRun)
     }
 
-    if ($CreateBffApp) {
-        $topologyResults += (New-SpaarkeSpeBffApp `
-            -Tier $CreateBffApp `
-            -CustomerName $CustomerName `
-            -TenantId $TenantId `
-            -DryRun:$DryRun)
-    }
-
     Write-Header "TOPOLOGY SUMMARY"
     if ($DryRun) {
         Write-Host "  *** DRY RUN — No changes were made ***" -ForegroundColor Magenta
@@ -1822,7 +1538,7 @@ if ($TopologyMode) {
     Write-Host "  Tenant ID : $TenantId" -ForegroundColor White
     Write-Host ""
     foreach ($r in $topologyResults) {
-        $roleTag = if ($r.Role -eq 'Owning') { 'OWNING app (SS3A)' } else { 'BFF app (SS3A)' }
+        $roleTag = 'OWNING app (SS3A)'
         Write-Host "  [$($r.Tier)] $roleTag  '$($r.DisplayName)'" -ForegroundColor Green
         Write-Host "    AppId          : $($r.AppId)" -ForegroundColor White
         Write-Host "    ObjectId       : $($r.ObjectId)" -ForegroundColor White

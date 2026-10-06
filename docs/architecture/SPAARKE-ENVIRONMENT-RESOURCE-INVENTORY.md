@@ -73,7 +73,7 @@ Created by the operator before the provisioning run; the run verifies them and n
 | Resource | Deployment | Naming / identity | Created by | Status vs target |
 |---|---|---|---|---|
 | Customer Dataverse environment | Dedicated | See manual prerequisites | Operator creates; H5 verifies/adopts | 🔲 T228 |
-| App user — the customer's **BFF app registration** (D-13) | Dedicated | `systemuser` where `applicationid` = the customer's `Spaarke BFF - {CustomerName}` appId; System Administrator, root BU | **H10** | ✅ H3 creates one app registration per customer unconditionally (task 222, `H3EntraAppRegHandler.cs`) |
+| App user — the customer's **BFF app registration** (D-13) | Dedicated | `systemuser` where `applicationid` = the customer's `spaarke-bff-api-{customerId}` appId; System Administrator, root BU | **H10** | ✅ H3 creates one app registration per customer unconditionally (task 222, `H3EntraAppRegHandler.cs`) |
 | App user — the customer's **UAMI** | Dedicated | `systemuser` where `azureactivedirectoryobjectid` = UAMI **principalId** (never clientId); System Administrator, root BU | **H10** post-step; trap **T2** query verifies exactly one row | ✅ per-customer UAMI `mi-spaarke-{customerId}-prod` (`customer.bicep:214`) |
 | Graph app-role grants on the UAMI (~15) | Dedicated | Per [`GraphAppRoles.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs) | **H10** (trap **T3**) | ✅ — 11 of 14 null `AppRoleId` GUIDs must be completed before the first production customer (project MUST rule) |
 | Custom security roles `Spaarke User`, `Spaarke AI Analysis User`, `Spaarke AI Analysis Admin` | Dedicated (shipped in the solution) | Defined in the solution package | **H6** (solution import) | 🔲 **T218** — the package that ships them is being redefined (D7) |
@@ -127,7 +127,7 @@ T228 lands.
 |---|---|---|---|---|---|
 | Container | Resource group | Dedicated | `rg-spaarke-{customerId}-prod` (`customer.bicep:135`) | H2a | ✅ |
 | Identity | User-assigned managed identity (bound to both App Service slots; T5 fix) | Dedicated | `mi-spaarke-{customerId}-prod` (`:214`) | H2a | ✅ |
-| Identity | BFF Entra app registration (D-13) + FIC `spaarke-uami-trust` | Dedicated | `Spaarke BFF - {CustomerName}` | **H3** | ✅ task 222 |
+| Identity | BFF Entra app registration (D-13) + FIC `spaarke-uami-trust` | Dedicated | `spaarke-bff-api-{customerId}` | **H3** | ✅ task 222 |
 | Secrets | Key Vault (RBAC, soft-delete 90d, purge protection) | Dedicated | `sprk-{customerId}-prod-kv`, capped at 24 chars (`:150`) | H2a; **H4** populates | ✅ |
 | Observability | Log Analytics + App Insights | Dedicated | `sprk-{customerId}-prod-logs` / `-insights` (`:174-177`) | H2a (`modules/monitoring.bicep`) | ✅ |
 | Data | Storage account (+ containers `temp-files`, `document-processing`, `ai-chunks`) — **shared-key access disabled** (T244, owner D13); callers use the blob endpoint with an identity (the stamp UAMI holds Storage Blob Data Contributor) | Dedicated | `sprk{customerId}prodsa`, ≤24 chars, no hyphens (`:141`) | H2a | ✅ |
@@ -245,8 +245,8 @@ they are defects, not options.
 | `rg-spaarke-shared-{env}` and the per-tenant RGs of `model1-shared.bicep` | Bicep + `prereqs.yaml` cleared ✅ T225a. Live: `rg-spaarke-shared-prod` (`sprksharedprod-api` stopped 2026-09-30) | T225a ✅ · decommission T241 — the shared-tier **resources** only: `rg-spaarke-shared-prod` itself is kept (owner D23) because it holds the permanent `Spaarke Model 1` billing account (SharePoint Embedded section) |
 | `sprkshared{env}-*` / `sprksharedprod-*` services (plan, OpenAI, AI Search, Redis, Service Bus, Storage, DocIntel) | none in code (stack deleted ✅ T225a; `service_ref`s + H4-shared removed ✅ T226) | T225a ✅ · decommission T241 |
 | `sprk-{env}-shared-bff-uami` | none (caller stack deleted; `bff-runtime-rbac.bicep` names only the stamp UAMI) | T225a ✅ |
-| Shared BFF App Service `spaarke-bff-{env}` in `rg-spaarke-{env}` as a customer runtime | `spaarke-constants.yaml` `bffAppServiceRg` / `bffAppServiceName` → the skill's `{bffAppServiceId}` token (no prereq recipe uses it since T225a re-pointed PRQ-E-05 at the stamp) | T227 |
-| Shared BFF app registrations `Spaarke BFF - Trial 1` / `Spaarke BFF - Model 1` | `Register-EntraAppRegistrations.ps1:1243-1272`; `spaarke-constants.yaml:101-124` | T227 |
+| Shared BFF App Service `spaarke-bff-{env}` in `rg-spaarke-{env}` as a customer runtime | none in code: `bffAppServiceRg` / `bffAppServiceName` and the skill's `{bffAppServiceId}` token removed | T227a ✅ |
+| Shared BFF app registrations `Spaarke BFF - Trial 1` / `Spaarke BFF - Model 1` | none in code: `-CreateBffApp`, `bffApiAppId` / `bffProdBase`, SKILL Step 0.5c BFF checks and PRQ-C-05 removed | T227a ✅ |
 | H0 `shared-trial` cost tier; `Model1MarginalEnvelopeUsd` (marginal-on-shared-platform) | `H0Options`, `H13AcceptanceOptions` | T229 |
 | H13 I2 probe against a shared AI Search `tenantId`-filter template | `AiSearchTenantFilterInvariantProbe` Model 1 branch | ✅ T225b (2026-10-02) — one path on the stamp's own service |
 | Prompt Flow secrets (`PromptFlow-Endpoint`, `PromptFlow-Key`) | `manifest.yaml:502-528` | T226 (D5 — BFF readers removed 2026-08-21) |

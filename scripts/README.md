@@ -320,28 +320,18 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
 - Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
 
-**SPE topology mode** (added 2026-08-30, task 213.4 — creates the container-type OWNING and BFF app-regs per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)):
+**SPE topology mode** (added 2026-08-30, task 213.4; trimmed by task 227a — creates the Model 1 container-type OWNING app-reg per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)). Per-customer BFF app-regs are created by H3 (`spaarke-bff-api-{customerId}`) and granted container-type access by H8 — there is no shared-tier BFF app (D-12/D-13):
 
 ```powershell
 # ONE-TIME operator setup (NOT per-customer). Follow the 8-step runbook:
 #   docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
 
-# Owning app-reg (permanent 1:1 with a container-type; SS3A rows 1-3)
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1
+# Owning app-reg (permanent 1:1 with the "Spaarke Model 1" container type)
 .\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model2
-
-# BFF app-reg — shared per tier (Trial 1 + Model 1); per-customer for Model 2 (SS3A rows 4-6)
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Trial1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model1
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model2 -CustomerName Acme
-
-# Both in one invocation:
-.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1 -CreateBffApp Trial1
 ```
 
 Topology-mode behavior (idempotent; safe to re-run):
-- Model 2 owning app is the ONLY multi-tenant app-reg (`AzureADMultipleOrgs`); all others single-tenant (`AzureADMyOrg`).
+- The owning app is single-tenant (`AzureADMyOrg`).
 - **NO client secret minted** on any topology app-reg (ADR-028 A4 + KV credential-lifecycle rule 1).
 - **NO Key Vault writes** (H4 handler owns per-customer KV wiring at provisioning time).
 - Not combinable with `-CreateFederatedCredential` / `-FicOnly` / `-AllowClientSecretMint` (throws with actionable message).

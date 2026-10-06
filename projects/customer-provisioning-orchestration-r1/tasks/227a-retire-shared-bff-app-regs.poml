@@ -4,7 +4,7 @@
     <title>Retire the shared "Spaarke BFF - Trial 1 / Model 1" app-registration paths and their constants (plan G2)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (gap G2)</phase>
     <gate>startable now (T247 ✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>PowerShell + YAML + skill text; no .cs change. Failure mode: /provision-environment hard-stops on a constant (bffApiAppId) no Model 1 stamp has.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -78,5 +78,25 @@
   </acceptance-criteria>
 
   <notes>
+    COMPLETED 2026-10-06 (STANDARD).
+    - Register-EntraAppRegistrations.ps1: -CreateBffApp, -CustomerName, Get-SpeTopologyBffAppDisplayName and
+      New-SpaarkeSpeBffApp deleted; -CreateOwningApp and the owning-app helpers accept Model1 only (Model 2
+      multi-tenant branches removed). Parses; -CreateOwningApp Trial1 is rejected by parameter validation.
+    - spaarke-constants.yaml: bffApiAppId, bffProdBase, name_templates.bffAppServiceRg/bffAppServiceName removed;
+      trial-era comments replaced. context-defaults.{dev,prod}.json: bffAppServiceId / bffAppId removed.
+    - SKILL: Step 0.5b derivations + substitutions; Step 0.5c BFF checks (4)(5) + null hard stop removed;
+      Step 5a reads no removed constant; stale PRQ-T-07 sample line removed.
+    - Deviation from the constraint "registration check uses the v1.0 GET": not added. The operator's Azure CLI
+      token is not consented for SPE registration reads (the container-type GET already returns 403, observed
+      T248), and H0's SpeOwnerCredential check GETs the v1.0 registration as the owning app. An operator check
+      that always 403s is not needed (owner rule: needed -> build, else remove).
+    - PRQ-C-05 (Model 2 only) retired with the existing status: retired convention (manifest v7): it read the
+      shared bffApiAppId; the customer's BFF app id only exists once H3 runs. validate.ps1 OK (35 prereqs).
+    - Docs: topology §3A (row 4 removed; per-customer row named spaarke-bff-api-{customerId}, H3/H8),
+      runbook Steps 7 + 9, inventory (identity rows, Retired table), PROVISIONING-PREREQUISITES (v7), scripts/README.
+    - Remaining grep hits are other identifiers: customer.bicep `bffAppServiceName` (the stamp's App Service),
+      client JS `bffApiAppId` cache key for env var sprk_BffApiAppId, H7 comments, retirement notes,
+      runs/pre-dispatch-readiness-gap-report.md (historical run report).
+    - validate-recipe-authoring.ps1 FAILs on other prereqs are pre-existing and not run in CI.
   </notes>
 </task>
