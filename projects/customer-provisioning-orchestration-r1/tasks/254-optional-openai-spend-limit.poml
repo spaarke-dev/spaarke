@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="254" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Optional per-customer OpenAI spend limit (G37, owner decision 2026-10-06): no cap by default; an operator can set or change a monthly limit for a customer at intake or later, and a customer over its limit gets a clean 429</title>
+    <phase>Model 1 dedicated-stamp remediation — gap G37</phase>
+    <gate>after 230b</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Intake + H4b settings + BFF exception mapping (BFF §10) + operator procedure; tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touches the BFF error pipeline and a Spaarke-billing control.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot path + skill (main session).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, bff-api, model1-dedicated, cost, testing</tags>
+    <deps>230b</deps>
+  </metadata>
+
+  <prompt>Let an operator cap a customer's monthly OpenAI spend when needed, without ever capping by default.</prompt>
+
+  <role>SPAARKE platform developer (L2 intake + H4b, BFF metering).</role>
+
+  <goal>
+    Owner, 2026-10-06: "we do not want to prevent a customer from activating and working, but we do want to have the ability
+    to have a cap if necessary; i.e., no cap but allow for a per customer spend limit if desired." The BFF already has the
+    gate (Services/Ai/Metering: `TenantBudget:Tenants:{tenantId}` = `Model1Gated` + `MonthlyBudgetUsd` → TenantBudgetExceededException);
+    nothing configures it. After this task: a run without a limit writes nothing (uncapped); a run with the optional intake value
+    writes the entry on both slots; the operator can add, change or remove the limit later by a documented, idempotent procedure;
+    and an over-limit AI call returns 429 ProblemDetails with Retry-After (today the exception reaches the global handler → 500).
+  </goal>
+
+  <context>
+    <background>
+      Found by T229 (2026-10-06): the gate's rationale was the retired shared OpenAI quota; under D-12 a Model 1 stamp's OpenAI bill
+      is Spaarke's. TenantBudgetExceededException derives from InvalidOperationException and only a TenantBudgetResults helper
+      maps it to 429 — no endpoint uses it (task-077 follow-on #1 never landed), and MiddlewarePipelineExtensions.UseExceptionHandler
+      has no mapping for it. Settings flow: intake → IntakeParameterCatalog → H4b per_env_settings (manifest.yaml) → App Service.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Metering/*; Infrastructure/DI/MiddlewarePipelineExtensions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/IntakeParameterCatalog.cs; Api/Api/RunsEndpoints.cs; Handlers/BulkAppSettings/**; scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file>scripts/provisioning-prereqs/intake.schema.json; .claude/skills/provision-environment/SKILL.md; docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner">Default is NO cap: no setting is written unless the operator supplies a limit. Never block activation or provisioning on it.</constraint>
+    <constraint source="BFF §10">Global-handler mapping (or the endpoint filter pattern) with tests; publish size vs fresh master; CVE check.</constraint>
+    <constraint source="parity">Intake schema + POST /api/runs agree on the optional value (positive decimal); a later change uses the same setting names.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">BFF: TenantBudgetExceededException → 429 ProblemDetails (+ Retry-After to the next UTC month start); tests.</step>
+    <step order="2">Intake: optional `openAiMonthlyLimitUsd`; catalog + schema + endpoint validation; H4b writes the two TenantBudget settings for the run's tenant on both slots only when present; tests.</step>
+    <step order="3">Operator procedure (guide + skill + script if needed): add / change / remove a limit on an existing stamp, both slots, idempotent.</step>
+    <step order="4">Verify; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Without the intake value nothing TenantBudget-related is written; with it both slots get TenancyMode=Model1Gated and the limit.</criterion>
+    <criterion testable="true">An AI call over the limit returns 429 ProblemDetails with Retry-After; under the limit, and for unconfigured tenants, behaviour is unchanged.</criterion>
+    <criterion testable="true">The documented procedure changes or removes a limit on an existing stamp.</criterion>
+  </acceptance-criteria>
+
+  <notes/>
+</task>
