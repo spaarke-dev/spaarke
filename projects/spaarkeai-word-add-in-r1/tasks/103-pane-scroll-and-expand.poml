@@ -25,7 +25,7 @@
 
   <context>
     <background>
-      - **Owner (round 6)**: (5) remove the add-in's main scroll bar (scroll with the wheel); (6) a **<>**
+      - **Owner (round 6)**: (5) remove the add-in's main scroll bar (scroll with the wheel); (6) a **&lt;&gt;**
         expand/collapse button at the top, next to the menu down arrow, that widens the add-in to 3x.
       - **Constraints stated to the owner** (note §2): the down arrow and X are Office's title bar — the button goes in
         the add-in toolbar beside the "⋮" menu. Width is set with `Office.extensionLifeCycle.taskpane.setWidth`
