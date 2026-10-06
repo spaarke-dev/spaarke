@@ -1143,7 +1143,7 @@ if (-not $script:SkipInteractiveIntake) {
 
 > **CRITICAL architectural correction (EXEC-02 / SKILL-03 / ISH-03 fix, SESSION 15 Wave 4)**: Step 2 is now CLIENT-SIDE ONLY. Earlier drafts of this skill POSTed to `/api/runs` with a fictional `mode:"preflight"` field — but `CreateRunRequest` (`RunsEndpoints.cs:861-880`) accepts NO `mode` field, silently DROPPED both `tenantId` (I1 invariant violation) and `mode`, and unconditionally enqueued H0 → the full H1..H14 cascade via the reconciler. Step 3's confirmation gate was therefore theatrical: by the time the operator typed "proceed with provisioning," H1-H2a had already fired. The redesign: Step 2 stays client-side (validates + shows plan); Step 3 gate fires BEFORE any L2 POST; Step 4 issues the SINGLE actual POST to `/api/runs`.
 >
-> **BEFORE this step**, if the target Azure subscription was created within the last 90 days (i.e. "fresh sub"), invoke **Step 2.5 (Fresh-Sub Deployment Feasibility Check)** first. Fresh subs have region/quota/model gotchas that L2's H0 handler does NOT currently check for; skipping Step 2.5 leads to preflight failure loops that the operator cannot escape without editing Bicep. See "Fresh-Sub Automation Gaps" section at end of this file for the full evidence base (customer-provisioning-orchestration-r1 lessons learned 2026-08-22).
+> **BEFORE this step**, if the target Azure subscription was created within the last 90 days (i.e. "fresh sub"), invoke **Step 2.5 (Fresh-Sub Deployment Feasibility Check)** first. Fresh subs have region/quota/model gotchas; L2's H0 now checks OpenAI quota and model pins in `openAiLocation` (task 247), but not the other Step 2.5 findings (App Service quota, provider registration, global names). See "Fresh-Sub Automation Gaps" section at end of this file for the full evidence base (customer-provisioning-orchestration-r1 lessons learned 2026-08-22).
 
 Step 2 performs **client-side validation only** (no L2 POST). It:
 - Re-validates intake JSON against `intake.schema.json` (idempotent with Step 1.0 batch validate; belt-and-suspenders for interactive mode)
@@ -1237,9 +1237,10 @@ az deployment group what-if --resource-group $tempRg --template-file .claude/ski
 
 **F4 — OpenAI region GA availability**:
 ```powershell
-# Confirm all pinned models are GA in the intended sharedOpenAiLocation
-az cognitiveservices model list --location $sharedOpenAiLocation --query "[?kind=='OpenAI' && model.name=='$pinnedModelName']" -o table
-# Empty result → model not offered in this region; pivot sharedOpenAiLocation (canonical: westus3 when primary is westus2)
+# Confirm all pinned models are GA in the stamp's openAiLocation (customer.bicep param; default westus3)
+az cognitiveservices model list --location $openAiLocation --subscription $subId --query "[?kind=='OpenAI' && model.name=='$pinnedModelName']" -o table
+# Empty result → model not offered in this region; pick another openAiLocation (westus2 offers NO OpenAI models — checked 2026-10-06)
+# L2's H0 runs this check itself (openai-pin-freshness, against PinnedModelCatalog.Models).
 ```
 
 **F5 — Auto-allocated TPM detection**:
@@ -1247,8 +1248,8 @@ az cognitiveservices model list --location $sharedOpenAiLocation --query "[?kind
 az rest --method get --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.CognitiveServices/locations/$openAiRegion/usages?api-version=2023-05-01" `
   --query "value[?limit != '0']" -o json
 ```
-- Enumerate what's already granted
-- If pinned deployment set exceeds auto-granted TPM AND no auto-file-support-ticket flow available → auto-recompose deployment set to use ONLY auto-granted resources (documented downgrade with operator notification)
+- Enumerate what's already granted. L2's H0 runs this check itself (azure-openai-tpm-headroom, per Azure quota name, against `PinnedModelCatalog`).
+- **No recompose (task 247, owner 2026-10-06).** The stamp deployment set is fixed: the BFF calls every deployment by NAME (`gpt-4o`, `gpt-4o-mini`, `text-embedding-3-large`), so dropping or swapping one deploys a stamp that fails at runtime. The set uses DataZoneStandard, which fresh subscriptions auto-grant (westus3, 2026-10-06: gpt-4o 300, gpt4.1-mini 2000, text-embedding-3-large 1000 — vs. a 150/200/350 request). A shortfall fails H0 before anything deploys; the fix is a quota increase or another `openAiLocation`.
 
 **F6 — Provider registration retry-verify loop**:
 ```powershell
@@ -1269,9 +1270,7 @@ foreach ($ns in $requiredProviders) {
 **F7 — Fresh-sub UX preamble**:
 - Warn operator: "Portal Usage+Quotas dropdown will show empty until resources exist; use https://ai.azure.com Quotas for OpenAI TPM visibility"
 
-**F8 — Auto-file support ticket** (advanced, requires `Microsoft.Support/*` permissions on the sub):
-- If NO auto-grant path exists for a required resource AND operator has Support Plan → auto-file via `az support in-subscription tickets create`
-- If no Support Plan → HALT with actionable operator guidance
+**F8 — Support ticket: NOT USED** (owner: an ordinary stamp must deploy without a Microsoft support case). The deployment set is chosen to fit fresh-subscription auto-grants (F5), so no ticket path is needed.
 
 **F10 — Global resource-name availability pre-check** (added 2026-08-22 after F10 discovery):
 ```powershell
@@ -1285,11 +1284,7 @@ az cognitiveservices account check-domain-availability --subdomain-name $openAiN
 ```
 what-if does NOT run these checks — only actual create-time validation catches global-namespace conflicts. This gap wasted 16m35s on this session's first deploy attempt. Skill Step 2.5 MUST run these before invoking `az deployment sub create`.
 
-**F9 — Support Plan check**:
-```powershell
-$plan = az rest --method get --url "https://management.azure.com/subscriptions/$subId/providers/Microsoft.Resources/checkResourceName?api-version=2020-10-01" 2>&1
-# Check if sub has Support Plan attached; downgrade approach if not (never queue ticket-dependent action)
-```
+**F9 — Support Plan check: NOT USED** (no ticket-dependent action exists — see F8).
 
 **Auto-remediation vs HALT decision matrix**:
 | Finding | Auto-remediate? | Fallback |
@@ -1297,22 +1292,20 @@ $plan = az rest --method get --url "https://management.azure.com/subscriptions/$
 | F1 (pin stale) | NO (requires operator ADR-020 sign-off on new pin) | HALT + recommend bump |
 | F2 (SKU wrong) | YES (bicepparam auto-generation) | Log the change |
 | F3 (region quota wall) | YES (fallback to westus2) | Log region pivot with rationale |
-| F4 (OpenAI region absence) | YES (fallback sharedOpenAiLocation to westus3) | Log the split |
-| F5 (auto-quota mismatch) | YES (recompose deployment set to auto-granted subset) | Notify operator: MVP downgrade with upgrade path |
+| F4 (OpenAI region absence) | YES (`openAiLocation` defaults to westus3; westus2 has no OpenAI models) | Log the split |
+| F5 (auto-quota mismatch) | NO (task 247: the set is fixed — the BFF calls each deployment by name) | HALT at H0 naming the Azure quotas that fall short; raise quota or change `openAiLocation` |
 | F6 (provider reg hang) | Retry 5 min, then HALT | Portal link |
 | F7 (UX preamble) | Informational — always show | N/A |
-| F8 (support ticket needed) | YES if Support Plan available | HALT if not |
-| F9 (no support plan) | Downgrade to no-ticket-dependent approach | N/A |
+| F8 / F9 (support ticket / plan) | Not used — no support case (owner) | N/A |
 
 **Skill output on completion of Step 2.5**:
 ```
 FRESH-SUB FEASIBILITY (customer-provisioning-orchestration-r1 lessons):
   [PASS/AUTO-FIX/HALT] F1 OpenAI pin freshness: 3 of 3 pins GA in westus3
   [AUTO-FIX] F3 Primary region: eastus quota wall detected → auto-pivoted to westus2
-  [AUTO-FIX] F4 OpenAI region: gpt-5 absent in westus2 → sharedOpenAiLocation=westus3
-  [AUTO-FIX] F5 Auto-quota: gpt-5.4 GlobalStandard=0 TPM → recomposed to gpt-5-mini (500 TPM auto-granted)
+  [PASS] F4 OpenAI region: openAiLocation=westus3 (westus2 offers no OpenAI models)
+  [PASS] F5 DataZoneStandard quota in westus3 covers gpt-4o 150 / gpt4.1-mini 200 / text-embedding-3-large 350
   [PASS] F6 All required providers registered
-  [PASS] F9 Support Plan available (Basic) — support-ticket path enabled if needed
 
 Proceeding to Step 2 (L2 H0 preflight)...
 ```
@@ -2735,12 +2728,12 @@ The first live Model 1 Prod stand-up (2026-08-22, sub `cd95fcec-...`) surfaced 9
 | F1 | OpenAI model version pins age ~4-6 months; Microsoft blocks new deploys of Deprecating pins | Pre-deploy `az cognitiveservices model list` check; HALT + operator sign-off for pin bump (ADR-020) | MVP: informational; TODO: fully automated with operator confirmation |
 | F2 | gpt-5.x family REQUIRES GlobalStandard SKU; module hardcoded 'Standard' broke this | Per-deployment `sku` field in openai module (safe-access default 'Standard') — DONE this session | ✅ Module fix committed in `798f61c9` |
 | F3 | East US fresh subs have 0 App Service quota AND Portal auto-denies quota request | Preflight test-deploy in candidate region; auto-fallback to westus2 (Spaarke canonical) | MVP: manual; TODO: automated region auto-selection |
-| F4 | West US 2 has NO gpt-5 family; West US 3 has all | Detect gpt-5 GA per region; auto-set `sharedOpenAiLocation` = westus3 when primary is westus2 | MVP: bicepparam manual; TODO: auto-composed |
-| F5 | Fresh subs auto-grant mini/embedding TPM generously (500+); frontier tiers (gpt-5.4, gpt-5-pro) = 0 | Query auto-grants; recompose deployment set from what's granted; deferred upgrade path documented | MVP: manual (this session recomposed); TODO: auto-compose from `az cognitiveservices usage list` |
+| F4 | West US 2 has NO gpt-5 family; West US 3 has all (2026-10-06: West US 2 offers no OpenAI models at all) | customer.bicep `openAiLocation` (default westus3) splits the OpenAI account from the primary region | ✅ Template default; H0 checks quota + pins in `openAiLocation` (task 247) |
+| F5 | Fresh subs auto-grant mini/embedding TPM generously (500+); frontier tiers (gpt-5.4, gpt-5-pro) = 0; Standard gpt-4o = 0 | Choose a deployment set that fits the auto-grants (DataZoneStandard gpt-4o / gpt-4.1-mini / text-embedding-3-large); no recompose — the BFF calls each deployment by name | ✅ Task 247: fixed set + H0 quota check per Azure quota name |
 | F6 | `az provider register` reports success but state stays NotRegistered on fresh subs | Retry-verify loop 5 min; HALT with Portal link if not registered | TODO: not implemented |
 | F7 | Portal Usage+Quotas provider dropdown empty on fresh subs (only shows providers with existing resources) | Preemptive operator warning + link to https://ai.azure.com Quotas | MVP: informational only |
-| F8 | Portal auto-denies fresh-sub quota requests + pushes to Support Ticket | Auto-file via `az support in-subscription tickets create` REST API if Support Plan available | TODO: not implemented — advanced; requires operator to have `Microsoft.Support/*` role |
-| F9 | Support Plan availability varies; skill must not queue ticket-dependent actions on plan-less sub | Check Support Plan presence in Step 2.5; downgrade approach if absent | TODO: not implemented |
+| F8 | Portal auto-denies fresh-sub quota requests + pushes to Support Ticket | Avoid needing one: the deployment set fits auto-grants (F5) | ✅ Not used — no support case (owner) |
+| F9 | Support Plan availability varies; skill must not queue ticket-dependent actions on plan-less sub | No ticket-dependent action exists (F8) | ✅ Not needed |
 | F10 | Global resource-name reservations not caught by what-if (Service Bus `-sb` suffix, etc.) — burned 16m35s on this session's first deploy | Run `az {svc} check-name` for every resource with global namespace BEFORE `az deployment sub create` | Bicep fix committed; skill automation TODO |
 | F11 | Cognitive Services accounts hold a 3-5 min soft-lock after failed deploys (invisible to `provisioningState`); back-to-back retries fail with RequestConflict even when everything reads Succeeded | Detect RequestConflict on CogSvc writes + linear backoff retry (30s → 90s → 180s → 300s) | TODO: not implemented — burned 3 failed retries this session; 3-min explicit `sleep 180` broke through |
 | F12 | `Build-SpaarkeMaster.ps1` was calling `AddSolutionComponent AddRequiredComponents=$false` → managed export had 105 self-referencing "leaky" deps against `solution="Active"`. Fresh env installs failed with 240 total MissingDependency (105 Cat B + 135 Cat A first-party) | Line 138 changed to `$true`; rebuilt in spaarkedev1 → 485 components (was 386); re-export → 77 MissingDep, ALL Category A (Cat B eliminated) | ✅ Script fix committed on this branch; longer-term automation TODO: nightly smoke-install job on rebuilt .zip to a throwaway env + CI assert `MissingDependency solution="Active"` count == 0 |

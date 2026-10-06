@@ -797,12 +797,13 @@ Every Model 2 customer environment deploys a dedicated, isolated set of Azure re
 
 ### 7.4 Azure OpenAI Model Deployments
 
-| Deployment Name | Model | Version | Capacity (TPM) | Purpose |
-|----------------|-------|---------|----------------|---------|
-| `gpt-4o` | gpt-4o | 2024-08-06 | 150 | Primary analysis, complex reasoning |
-| `gpt-4o-mini` | gpt-4o-mini | 2024-07-18 | 200 | High-volume analysis, playbook execution |
-| `spaarke-gpt4o-mini` | gpt-4o-mini | 2024-07-18 | 30 | Isolated Layer 2 classification workloads |
-| `text-embedding-3-large` | text-embedding-3-large | 1 | 350 | 3072-dim embeddings for all vector indexes |
+| Deployment Name | Model | Version | SKU | Capacity (TPM) | Purpose |
+|----------------|-------|---------|-----|----------------|---------|
+| `gpt-4o` | gpt-4o | 2024-11-20 | DataZoneStandard | 150 | Primary analysis, complex reasoning |
+| `gpt-4o-mini` | **gpt-4.1-mini** | 2025-04-14 | DataZoneStandard | 200 | High-volume analysis, playbook execution, chat (`AzureOpenAI:ChatModelName`) |
+| `text-embedding-3-large` | text-embedding-3-large | 1 | DataZoneStandard | 350 | 3072-dim embeddings for all vector indexes |
+
+**Updated 2026-10-06 (task 247, owner).** The BFF calls deployments by name, so names stay fixed while the models behind them change: gpt-4o-mini 2024-07-18 is Deprecating (Azure blocks new deployments), so `gpt-4o-mini` runs gpt-4.1-mini. DataZoneStandard keeps prompts in the US data zone and fits fresh-subscription auto-grants (Standard gpt-4o is 0). `spaarke-gpt4o-mini` was dropped — no BFF code read `ClassificationModelName`. Source of truth: `openai.bicep`, mirrored by `PinnedModelCatalog.cs` (forcing test). Pins retire 2027-04-14.
 
 Model version pinning per ADR-020. Embedding model change requires full AI Search re-index.
 
@@ -1880,6 +1881,7 @@ Before every U3 (Bicep infra) upgrade, run `az deployment group what-if` to dete
 - **NEW: Terraform Power Platform provider directory** (v3, `infrastructure/terraform/dataverse/`): separate IaC dialect from Bicep; scoped strictly to Dataverse env + application user lifecycle per §4A.
 - **NEW: Per-tenant token-metering layer** (v3, D19): either APIM gateway or app-level custom App-Insights metric keyed on `tenantId`. Placement TBD in D-phase implementation; either way, minimal BFF DI impact (single tracker service).
 - **B04 multi-tenant Dataverse routing — documented exception (Path A per CLAUDE.md §6.5)** — `src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs:62`'s single-URL shape (`configuration["Dataverse:ServiceUrl"]` read once at DI-setup) is **correct-by-design for the shared-BFF pattern**, NOT a Model-1 multi-tenancy defect. Per owner Q1 SESSION 11 (2026-08-26 — BINDING; see `current-task.md` Locked owner decisions + Two-stage E2E model): Model 1 uses **ONE shared Dataverse env per shared BFF app-reg per Azure env**, with multiple *customers* segregated at the data layer (customer records, Business Units, SPE containers) *within* that shared env — NOT via multiple Dataverse environments. The URL is genuinely per-env; there is no runtime cross-tenant DV routing decision being taken. Stage-2 per-customer segregation (SPE containers, search-index params, DV Business Units) is a future r2 customer-onboarding workflow, out of r1 scope. Model 2's `customer.bicep`-provisioned BFF likewise has env=customer 1:1, so its single-URL shape is trivially correct. The §4D I1–I5 invariants enforce logical isolation of the multiple customer records that share one Dataverse env in Model 1. NO code change to `DataverseServiceClientImpl.cs`; NO new ADR amendment; NO new DI seam. Full rationale + rejected alternatives (Path B/Path C) in spec.md §ADR Tensions row for ADR-027+ADR-028 B04. Task 202 punch list row B04; task 204b (this task) formalized the exception in this bullet.
+- **ADR-020 deployment name vs model — documented exception (Path A per CLAUDE.md §6.5, task 247, owner 2026-10-06)** — the stamp deployment named `gpt-4o-mini` runs model **gpt-4.1-mini 2025-04-14**. ADR-020 forbids changing semantics without versioning; the model version stays pinned (the inspector still rejects an unpinned one), but the name no longer states the model. Why not rename (Path C, rejected): the BFF hard-codes `gpt-4o-mini` across its AI code and `AzureOpenAI:ChatModelName`, so a rename is a coordinated BFF change for no behavioural gain; gpt-4o-mini 2024-07-18 is Deprecating and cannot be deployed on a new stamp. Why not amend ADR-020 (Path B, rejected): the deviation is one deployment in one project, not a general rule. Where the real model is recorded: `openai.bicep` (with rationale), `PinnedModelCatalog.cs` (`ModelId`), the resource inventory and §7.4. H12c's `sprk_aimodeldeployment` rows carry the deployment name only — nothing reads a model id from them.
 
 ---
 

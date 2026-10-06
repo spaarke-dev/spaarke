@@ -784,7 +784,7 @@ Each phase invokes one or more handlers. Post-Phase-D, `/provision-environment` 
 **H0** runs unconditionally; **H0.5** runs only for Model 2 self-service (consent-capture branch).
 
 **[GATE]** — H0 must pass:
-- Azure OpenAI regional TPM headroom sufficient for +1 provision (150+200+30+350 per-model TPM sum)
+- Azure OpenAI regional TPM headroom for the stamp deployment set, per Azure quota name, in `openAiLocation` (default westus3): DataZoneStandard gpt-4o 150, gpt-4.1-mini 200, text-embedding-3-large 350 (task 247)
 - Dataverse env-creation rate quota (`pac admin quota`)
 - Subscription vCPU quota
 - SPE owner check (`SpeOwnerCredential`): owner entry configured, owning-app token obtained through the federated credential, container type registered

@@ -13,6 +13,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;
@@ -155,6 +156,46 @@ public sealed class ArmTemplateInspectorTests
         sent.Should().NotBeEmpty();
         sent.Should().OnlyContain(name => declared.Contains(name),
             "every parameter the runner sends must be declared by customer.json, or ARM rejects the deployment");
+    }
+
+    /// <summary>
+    /// Task 247: H0 checks quota and model availability against <see cref="PinnedModelCatalog"/>, and H12c writes its
+    /// rows from it — so it must be exactly what customer.json deploys. Compares every deployment (name, model,
+    /// version, SKU, capacity) in both directions, and the OpenAI region default. customer.bicep passes no
+    /// <c>deployments</c> to the openai module, so the module's compiled default is what ARM creates.
+    /// </summary>
+    [Fact]
+    public void PinnedModelCatalog_MatchesTheCompiledCustomerTemplate()
+    {
+        using var template = JsonDocument.Parse(File.ReadAllText(Path.Combine(RepoRoot(), "infrastructure", "bicep", "customer.json")));
+        var root = template.RootElement;
+
+        var openAiModule = root.GetProperty("resources").EnumerateArray().Single(r =>
+            r.TryGetProperty("properties", out var p) && p.TryGetProperty("template", out var t)
+            && t.TryGetProperty("parameters", out var ps) && ps.TryGetProperty("deployments", out _)
+            && ps.TryGetProperty("openAiName", out _));
+        openAiModule.GetProperty("properties").GetProperty("parameters").TryGetProperty("deployments", out _)
+            .Should().BeFalse("customer.bicep must not override the module's deployment set — PinnedModelCatalog mirrors the default");
+
+        var templateDeployments = openAiModule.GetProperty("properties").GetProperty("template").GetProperty("parameters")
+            .GetProperty("deployments").GetProperty("defaultValue").EnumerateArray()
+            .Select(d => (
+                Name: d.GetProperty("name").GetString(),
+                Model: d.GetProperty("model").GetString(),
+                Version: d.GetProperty("version").GetString(),
+                Sku: d.GetProperty("sku").GetString(),
+                Capacity: d.GetProperty("capacity").GetInt32()))
+            .ToList();
+        var catalogDeployments = PinnedModelCatalog.Deployments
+            .Select(d => (Name: (string?)d.Name, Model: (string?)d.ModelId, Version: (string?)d.Version, Sku: (string?)d.Sku, d.Capacity))
+            .ToList();
+
+        catalogDeployments.Should().BeEquivalentTo(templateDeployments,
+            "PinnedModelCatalog.Deployments and openai.bicep's `deployments` default must list the same deployments");
+        PinnedModelCatalog.Deployments.Should().OnlyContain(d => d.QuotaName.StartsWith($"OpenAI.{d.Sku}.", StringComparison.Ordinal),
+            "H0 checks quota by QuotaName — a SKU change must change the quota name with it");
+        root.GetProperty("parameters").GetProperty("openAiLocation").GetProperty("defaultValue").GetString()
+            .Should().Be(PinnedModelCatalog.DefaultOpenAiLocation);
     }
 
     private static string RepoRoot()

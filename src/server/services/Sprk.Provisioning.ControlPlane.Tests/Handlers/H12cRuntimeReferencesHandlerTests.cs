@@ -109,8 +109,10 @@ public sealed class H12cRuntimeReferencesHandlerTests
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        writer.LastRequest!.Deployments.Select(d => d.ModelId).Should().BeEquivalentTo(
+        writer.LastRequest!.Deployments.Select(d => d.Name).Should().BeEquivalentTo(
             new[] { "gpt-4o", "gpt-4o-mini", "text-embedding-3-large" });
+        // Task 247: the registry row records the model the deployment actually runs.
+        writer.LastRequest.Deployments.Single(d => d.Name == "gpt-4o-mini").ModelId.Should().Be("gpt-4.1-mini");
     }
 
     // ---------- AC-5 Idempotency ----------
@@ -614,7 +616,7 @@ public sealed class H12cRuntimeReferencesHandlerTests
             }
 
             var outcome = NextOutcome ?? new ModelDeploymentReferenceWriteOutcome.Success(
-                request.Deployments.Select(d => d.ModelId).ToList());
+                request.Deployments.Select(d => d.Name).ToList());
             return Task.FromResult(outcome);
         }
     }

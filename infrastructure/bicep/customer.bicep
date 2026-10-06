@@ -373,10 +373,10 @@ module cosmosDb 'modules/cosmos-db.bicep' = {
 // Order step 10 — UAMI (task 127's `uami` module) granted Cognitive Services
 // User RBAC (built-in role a97b65f3-24c7-4388-baec-2e87135dc908) via the
 // module's existing `userAssignedIdentityPrincipalId` param. NO `deployments`
-// override is passed — the module's own default array (gpt-4o:150,
-// gpt-4o-mini:200, spaarke-gpt4o-mini:30, text-embedding-3-large:350) is the
-// exact spec.md FR-01 / NFR-12 TPM budget and design.md §7.4's 4-row table,
-// byte-for-byte verified consistent. `openAiEndpoint` output name is
+// override is passed — the module's own default array is the stamp set
+// (task 247: DataZoneStandard gpt-4o 150, gpt-4o-mini → gpt-4.1-mini 200,
+// text-embedding-3-large 350), mirrored by L2's PinnedModelCatalog and checked
+// against this template by ArmTemplateInspectorTests. `openAiEndpoint` output name is
 // LOAD-BEARING — ArmDeploymentRunner.MapOutputs (task 123) reads it exactly.
 // ============================================================================
 

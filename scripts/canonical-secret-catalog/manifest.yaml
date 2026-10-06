@@ -897,3 +897,16 @@ per_env_settings:
       and Testing the BFF refuses to start without it (it used to fall back to
       a hard-coded dev endpoint). customer.bicep sets the same value on
       deploy; H4b keeps it on upgrades.
+
+  - key: 'AzureOpenAI__ChatModelName'
+    per_env_source: 'literal'
+    literal_value: 'gpt-4o-mini'
+    iOptionsModule: 'AiModule'
+    required: true
+    notes: >-
+      Task 247 (plan G27). The deployment NAME the BFF's IChatClient calls.
+      AiModule registers no IChatClient unless both AzureOpenAI:Endpoint and
+      this are set, so a stamp without it has no chat. The `gpt-4o-mini`
+      deployment runs gpt-4.1-mini (openai.bicep / PinnedModelCatalog) — the
+      name is what the BFF addresses, so it stays. Global literal: every
+      stamp deploys the same set.

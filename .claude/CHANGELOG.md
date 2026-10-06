@@ -7,6 +7,16 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — One OpenAI deployment set for stamps; no recompose (T247, plan G27)
+
+`customer-provisioning-orchestration-r1` T247.
+
+- **`.claude/patterns/provisioning/openai-quota-region-composition.md`**: rewritten. The stamp set is fixed (the BFF calls
+  deployments by name), mirrored by `PinnedModelCatalog.cs` and pinned by a forcing test; DataZoneStandard; OpenAI in
+  `openAiLocation`; no support case. The old gpt-5 tiers, support-ticket quota bumps and "MVP fallback" are gone.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 2.5 F5 no longer auto-recomposes the deployment set (a
+  shortfall HALTs at H0); F8/F9 support-ticket steps marked not used; `sharedOpenAiLocation` → `openAiLocation`.
+
 ###### 2026-10-06 — Customer stamps get their own keyless Content Safety (T246, plan G26)
 
 `customer-provisioning-orchestration-r1` T246.

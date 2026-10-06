@@ -7,10 +7,9 @@
 //   2. Validate private endpoint connectivity from App Service VNet integration
 //   3. Set disablePublicNetworkAccess=true to lock down
 //
-// Model upgrade strategy (documented per task 046 step 5):
-//   - gpt-4o: Pin to specific version. Upgrade by adding new deployment name
-//     (e.g. gpt-4o-2025) then switching app config, then removing old deployment.
-//   - gpt-4o-mini: Same pin-and-rotate strategy.
+// Model upgrade strategy (task 247 supersedes task 046's add-a-new-name rotation):
+//   - Chat deployments: KEEP the deployment names (the BFF hard-codes them) and change
+//     the model/version behind them, in this file and PinnedModelCatalog.cs together.
 //   - text-embedding-3-large: Version locked. Changing embedding model requires
 //     full re-indexing of AI Search. Plan ~2h downtime window for re-index.
 //   - text-embedding-3-small: DEPRECATED and removed from Bicep. Migration to
@@ -111,9 +110,8 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
 // ============================================================================
 
 // Deployment SKU is per-deployment optional (default 'Standard' preserves prior
-// caller behavior). gpt-5.x family REQUIRES 'GlobalStandard' (gpt-5-pro literally
-// supports no other SKU); gpt-4o family supports 'Standard'. Add `sku: 'GlobalStandard'`
-// to a deployment object to override. The pinned set is this module's `deployments` default (customer.bicep
+// caller behavior); every stamp deployment sets DataZoneStandard (task 247). gpt-5.x
+// family REQUIRES 'GlobalStandard' (gpt-5-pro literally supports no other SKU). The pinned set is this module's `deployments` default (customer.bicep
 // passes none); the gpt-5.x tier example lived in the retired model1-shared.bicep (task 225a). Discovered 2026-08-22 during Model 1 Prod
 // stand-up (customer-provisioning-orchestration-r1) — preflight rejects with
 // "InvalidResourceProperties: The specified SKU 'Standard' of account deployment

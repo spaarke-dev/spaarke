@@ -104,6 +104,7 @@ $settings = @(
     "AzureAd__ClientId=$BffAppClientId",
     "AzureAd__TenantId=$(Format-KvRef 'TenantId')",
     "AzureAd__TenantId=$TenantId",
+    "AzureOpenAI__ChatModelName=gpt-4o-mini",
     "AzureOpenAI__Endpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
     "Communication__ArchiveContainerId=$(Format-KvRef 'SPE-CommunicationArchiveContainerId')",
     "Communication__DefaultMailbox=$(Format-KvRef 'Communication-DefaultMailbox')",

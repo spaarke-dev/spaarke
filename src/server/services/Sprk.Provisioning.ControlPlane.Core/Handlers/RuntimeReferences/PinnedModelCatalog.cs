@@ -66,19 +66,11 @@ public enum ModelProvider
 }
 
 /// <summary>
-/// A single pinned model entry: the model identifier as it appears in both
-/// <c>sprk_aimodeldeployment.sprk_name</c> (the alternate-key-style lookup
-/// field <c>scripts/Deploy-Playbook.ps1</c> already queries by) and
-/// <c>sprk_modelid</c>, plus its ADR-020-pinned version + capability.
+/// A distinct pinned model (model + ADR-020 version) that the stamp deployments run — what H0's
+/// pin-freshness probe checks against the region's model list.
 /// </summary>
-/// <param name="ModelId">
-/// Azure OpenAI model identifier, e.g. <c>gpt-4o</c>. Written to BOTH
-/// <c>sprk_name</c> and <c>sprk_modelid</c> — <c>sprk_name</c> is the field
-/// every existing seeder/playbook-deploy script looks up by
-/// (<c>scripts/Deploy-Playbook.ps1</c> line 635); keeping the two fields
-/// identical avoids introducing a second addressing scheme.
-/// </param>
-/// <param name="PinnedVersion">ADR-020-pinned model version string (e.g. <c>2024-08-06</c>, or <c>1</c> for the embedding model's initial GA version).</param>
+/// <param name="ModelId">Azure OpenAI model identifier (ARM model-list <c>model.name</c>), e.g. <c>gpt-4.1-mini</c>.</param>
+/// <param name="PinnedVersion">ADR-020-pinned model version string (e.g. <c>2025-04-14</c>, or <c>1</c> for the embedding model's initial GA version).</param>
 /// <param name="Capability">Model capability — drives <c>sprk_capability</c>.</param>
 public sealed record PinnedModel(string ModelId, string PinnedVersion, ModelCapability Capability);
 

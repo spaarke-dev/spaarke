@@ -5,8 +5,8 @@
 // join point requiring BOTH H12a + H12b + H2a OpenAI).
 //
 // PURPOSE:
-//   Populates sprk_aimodeldeployment runtime-reference rows (the 3 ADR-020
-//   pinned models — see PinnedModelCatalog.cs) with the correct Azure OpenAI
+//   Populates sprk_aimodeldeployment runtime-reference rows (one per stamp
+//   OpenAI deployment — see PinnedModelCatalog.cs) with the correct Azure OpenAI
 //   endpoint URI: the customer stamp's own OpenAI endpoint from H2a's Bicep
 //   output (InterStepState.OpenAiEndpoint), for both tenancy models (task 225b,
 //   D-12 — the retired Model 1 branch pointed rows at a shared platform OpenAI
@@ -26,9 +26,9 @@
 //   - ADR-004: idempotent handler contract.
 //   - ADR-010: DI minimalism — IModelDeploymentReferenceWriter seam earns
 //     keep: production Dataverse Web API impl + test fake from day 1.
-//   - ADR-020: written rows reference the 3 pinned model deployments
-//     (gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large 1)
-//     — see PinnedModelCatalog.cs.
+//   - ADR-020: written rows reference the stamp's pinned deployments
+//     (PinnedModelCatalog.Deployments — task 247: sprk_name = deployment name,
+//     sprk_modelid = the model it runs).
 //   - ADR-036: 3-level idempotency stack (Service Bus MessageId dedup +
 //     Redis idempotency at Level 2 (not yet in L2) + handler body durable
 //     dedup at Level 3 via CompletedPhases scan).
@@ -297,7 +297,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         // (8) One row per stamp deployment, keyed by deployment NAME (what callers address — task 247:
         //     the `gpt-4o-mini` deployment runs model gpt-4.1-mini) + invoke the writer.
         var deployments = PinnedModelCatalog.Deployments
-            .Select(d => new ModelDeploymentReference(d.Name, d.Capability, endpoint, meteringDescription))
+            .Select(d => new ModelDeploymentReference(d.Name, d.ModelId, d.Capability, endpoint, meteringDescription))
             .ToList();
 
         ModelDeploymentReferenceWriteOutcome outcome;
