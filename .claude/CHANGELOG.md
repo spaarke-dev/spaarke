@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Non-secret values from later handlers are settings, not vault secrets (T227c, plan G18)
+
+`customer-provisioning-orchestration-r1` T227c.
+
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`** rule 4: a non-secret value a later handler
+  produces goes in `per_env_settings` with a `from-{handler}-output` source and an H4b ← handler DAG edge (the SPE
+  container id moved there), not in the vault.
+
 ###### 2026-10-06 — SPE app-only isolation is in code (T227b, owner D28)
 
 `customer-provisioning-orchestration-r1` T227b.

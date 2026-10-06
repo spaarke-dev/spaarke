@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "16895129151186069652"
+      "templateHash": "818648987108958966"
     }
   },
   "parameters": {
@@ -3838,7 +3838,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "8055898094389550450"
+              "templateHash": "9104462299996660782"
             }
           },
           "parameters": {
@@ -4138,26 +4138,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'SPE-CommunicationArchiveContainerId')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-CommunicationArchiveContainerId')]",
-              "properties": {
-                "value": "[parameters('secretValues')['SPE-CommunicationArchiveContainerId']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-bicep-output"
-              },
-              "tags": {
-                "canonicalName": "SPE-CommunicationArchiveContainerId",
-                "category": "spe",
-                "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'SPE-ContainerTypeId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4171,26 +4151,6 @@
               },
               "tags": {
                 "canonicalName": "SPE-ContainerTypeId",
-                "category": "spe",
-                "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
-              "condition": "[contains(parameters('secretValues'), 'SPE-DefaultContainerId')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-DefaultContainerId')]",
-              "properties": {
-                "value": "[parameters('secretValues')['SPE-DefaultContainerId']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-bicep-output"
-              },
-              "tags": {
-                "canonicalName": "SPE-DefaultContainerId",
                 "category": "spe",
                 "rotation": "N/A",
                 "neverDelete": "false",
@@ -4238,9 +4198,7 @@
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",
                 "Email-WebhookSigningKey",
-                "SPE-CommunicationArchiveContainerId",
                 "SPE-ContainerTypeId",
-                "SPE-DefaultContainerId",
                 "TenantId"
               ]
             }

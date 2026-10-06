@@ -288,34 +288,6 @@ secrets:
       - 'DEFAULT_CT_ID'
     tags: ['spe', 'public', 'topology-scoped']
 
-  - canonical_name: 'SPE-DefaultContainerId'
-    category: 'spe'
-    purpose: 'SPE default container ID (per-customer root container for uploaded files).'
-    consumers:
-      - 'BFF: Email:DefaultContainerId'
-    rotation_cadence: 'N/A'
-    never_delete: false
-    exception_note: ''
-    aliases: []
-    value_source: 'from-bicep-output'
-    app_settings:
-      - 'Email__DefaultContainerId'
-    tags: ['spe', 'public']
-
-  - canonical_name: 'SPE-CommunicationArchiveContainerId'
-    category: 'spe'
-    purpose: 'SPE communication-archive container ID (archived email / communication payloads).'
-    consumers:
-      - 'BFF: Communication:ArchiveContainerId'
-    rotation_cadence: 'N/A'
-    never_delete: false
-    exception_note: ''
-    aliases: []
-    value_source: 'from-bicep-output'
-    app_settings:
-      - 'Communication__ArchiveContainerId'
-    tags: ['spe', 'public', 'communication']
-
   # ==========================================================================
   # AI services (endpoints + keys)
   # ==========================================================================
@@ -897,6 +869,28 @@ per_env_settings:
       and Testing the BFF refuses to start without it (it used to fall back to
       a hard-coded dev endpoint). customer.bicep sets the same value on
       deploy; H4b keeps it on upgrades.
+
+  - key: 'EmailProcessing__DefaultContainerId'
+    per_env_source: 'from-h8-output:spe_container_id'
+    iOptionsModule: 'EmailProcessingOptions'
+    required: true
+    notes: >-
+      Task 227c (plan G18). The customer's SPE container (H8 creates one per
+      customer — owner D28: one container type per model, one container per
+      customer). A plain setting: a container id is not a secret. It used to be
+      the KV secret SPE-DefaultContainerId (from-bicep-output), which nothing
+      could write — H8 runs after H4 — so H4 quarantined every fresh stamp; and
+      it was wired to Email__DefaultContainerId, a key no BFF code reads (the
+      BFF reads EmailProcessing:DefaultContainerId). H4b runs after H8.
+
+  - key: 'Communication__ArchiveContainerId'
+    per_env_source: 'from-h8-output:spe_container_id'
+    iOptionsModule: 'CommunicationOptions'
+    required: true
+    notes: >-
+      Task 227c (plan G18). Archived communications go to the same per-customer
+      container (one container per customer, owner D28). Was the KV secret
+      SPE-CommunicationArchiveContainerId, which nothing wrote.
 
   - key: 'AzureOpenAI__ChatModelName'
     per_env_source: 'literal'

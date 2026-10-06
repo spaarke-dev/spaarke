@@ -254,7 +254,7 @@ Options class: `EmailProcessingOptions` (`Configuration/EmailProcessingOptions.c
 | Setting | Default | Location | Description |
 |---------|---------|----------|-------------|
 | `Email:Enabled` | `true` | Env Var | Master switch |
-| `Email:DefaultContainerId` | -- | Env Var | SPE container ID for email docs |
+| `EmailProcessing:DefaultContainerId` | -- | App setting (stamps: H4b, from H8's container — T227c) | SPE container ID for email docs (`Email:DefaultContainerId` was never read) |
 | `Email:ProcessInbound` | `true` | appsettings | Process received emails |
 | `Email:ProcessOutbound` | `true` | appsettings | Process sent emails |
 | `Email:MaxAttachmentSizeMB` | `25` | appsettings | Max per-attachment size |

@@ -59,6 +59,9 @@ public static class PerEnvSourceCatalog
         // T245b: the Dataverse environment URL — a plain app setting (it was a KV secret H4 could never
         // write: H5 runs after H4). H4b ← H5 in the DAG.
         Output("from-h5-output:dataverse_env_url", HandlerIds.H5, nameof(InterStepState.DataverseEnvUrl), r => r.InterStepState.DataverseEnvUrl),
+        // T227c (G18): the customer's SPE container — a plain setting (EmailProcessing__DefaultContainerId,
+        // Communication__ArchiveContainerId). It was a KV secret nothing could write (H8 runs after H4). H4b ← H8.
+        Output("from-h8-output:spe_container_id", HandlerIds.H8, nameof(InterStepState.SpeContainerId), r => r.InterStepState.SpeContainerId),
         Intake("from-intake-parameter:tenant_id", IntakeParameterCatalog.TenantId),
         Intake("from-intake-parameter:container_type_id", IntakeParameterCatalog.ContainerTypeId),
         // T238 (D-14): the run's own customerId — the POST /api/runs body field, validated there by

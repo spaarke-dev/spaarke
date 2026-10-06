@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227e" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H8 reuses the customer's existing container (re-runs and later runs); remove the unread SPE-ContainerTypeId secret / DEFAULT_CT_ID</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (found by the T227c code review, 2026-10-06)</phase>
+    <gate>after 227c (✅)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handler code (H8 + Graph), KV manifest/catalog contract, tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded handler change with a named lookup; catalog removal follows the T227c precedent.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>provisioning, provisioning-handler, l2-controlplane, spe, key-vault, model1-dedicated, testing</tags>
+    <deps>227c</deps>
+  </metadata>
+
+  <prompt>Make H8 create a customer's container only once, ever; and remove the container-type KV secret nothing reads.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Microsoft Graph SPE, canonical secret catalog).</role>
+
+  <goal>
+    (1) H8 never creates a second container for a customer: before creating, it looks for the customer's existing
+    container (the run's InterStepState.SpeContainerId when a WaitingOnGate re-run already created one; otherwise the
+    container of this container type whose displayName is the customer's — the owning app's app-only listing, as H13 T6
+    does) and reuses it. Since T227c, H4b points the BFF at H8's container, so a second container would silently move
+    the customer to an empty one. (2) SPE-ContainerTypeId (KV, app setting DEFAULT_CT_ID) and the from-topology-constants
+    machinery are removed if nothing reads them (T227c adr-check W4: DEFAULT_CT_ID appears only in appsettings.template.json
+    and appsettings.tokens.md; SharePointEmbedded__ContainerTypeId is the plain setting the BFF reads).
+  </goal>
+
+  <context>
+    <background>
+      T227c code review #3: H8 always POSTs a new container — its idempotency is per run (CompletedPhases). A ReplicationPending
+      re-run (WaitingOnGate, no CompletedPhase) creates another; an upgrade/second run creates another. Fresh first runs are
+      unaffected unless replication lag is hit (near-instant in practice). Legacy scripts/Provision-Customer.ps1 reads
+      SPE-ContainerTypeId from KV — check whether that script is still a supported path before removing the secret.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/{H8SpeContainerHandler,GraphContainerProvisioner,ISpeContainerProvisioner}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/GraphContainersListAppOnlyProbe.cs (listing pattern)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (SPE-ContainerTypeId); Handlers/KvSecretsPopulation/** (FromTopologyConstants)</file>
+      <file>src/server/api/Sprk.Bff.Api/appsettings.template.json, appsettings.tokens.md (DEFAULT_CT_ID)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="data">Never delete or replace an existing customer container. Two containers matching the customer → fail Resumable naming both (operator decides), never pick one silently.</constraint>
+    <constraint source="tests">Real Graph SDK against a scripted HttpMessageHandler (GraphContainerProvisionerGrantTests pattern).</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">H8: find-or-create (InterStepState.SpeContainerId first, then listing by display name); tests incl. re-run after ReplicationPending and a second run.</step>
+    <step order="2">Remove SPE-ContainerTypeId + DEFAULT_CT_ID (+ from-topology-constants if then unused) if nothing reads them; regenerate catalog; recompile customer.json.</step>
+    <step order="3">Verify; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">A WaitingOnGate re-run and a later run for the same customer create no second container (tests).</criterion>
+    <criterion testable="true">Two matching containers → Resumable failure naming both; nothing created.</criterion>
+    <criterion testable="true">`git grep DEFAULT_CT_ID` and the catalog have no unread container-type secret (or a recorded reason to keep it).</criterion>
+    <criterion testable="true">ControlPlane.Tests, Worker build, ArchTests pass; catalog -Verify OK.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+  </notes>
+</task>

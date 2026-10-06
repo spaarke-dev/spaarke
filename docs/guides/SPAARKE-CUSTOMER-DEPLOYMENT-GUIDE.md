@@ -487,12 +487,12 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 ### 5.1 Handler dependency DAG
 
 Authoritative source: `DagAdvancer.HandlerDependencies` (a handler is ready when every handler listed for it has
-completed). As of task 245b:
+completed). As of task 227c:
 
 ```
 H1   <- H0                 H2a  <- H1                 H2b  <- H2a
 H4   <- H2a                H5   <- H2a                H3   <- H4
-H4b  <- H4, H3, H5         H6   <- H5, H3             H8   <- H3
+H4b  <- H4, H3, H5, H8     H6   <- H5, H3             H8   <- H3
 H9   <- H3, H4b            H7   <- H6, H8, H9         H10  <- H7
 H11  <- H10                H12a <- H11                H12b <- H11
 H12c <- H12a, H12b, H2a    H14  <- H12c, H9           H13  <- H14

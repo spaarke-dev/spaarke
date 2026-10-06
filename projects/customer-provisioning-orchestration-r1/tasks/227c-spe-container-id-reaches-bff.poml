@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="227c" project="customer-provisioning-orchestration-r1">
   <metadata>
-    <title>H8 writes the SPE container-id secrets; H4 stops quarantining on them; BFF reads the right key (plan G18)</title>
+    <title>The customer's SPE container id reaches the BFF as plain H4b settings from H8 (no vault); H13 I4 checks it (plan G18)</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (gap G18)</phase>
     <gate>after 227b</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>L2 handler code, manifest/catalog generator contract, DAG edge, contract tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -61,7 +61,8 @@
   </knowledge>
 
   <decisions>
-    <decision date="2026-10-06" by="agent, from evidence">One container per customer: H8 writes InterStepState.SpeContainerId to both secrets (dev convention, COMMUNICATION-DEPLOYMENT-GUIDE.md:271). No new Graph surface.</decision>
+    <decision date="2026-10-06" by="owner (D28)">One container type per model, one container per customer (per Dataverse environment) — both container settings name H8's one container.</decision>
+    <decision date="2026-10-06" by="agent, from evidence (deviation from constraint 'precedent' and steps 1-3)">No Key Vault at all: a container id is not a secret. Both secrets leave the catalog and become per_env_settings (from-h8-output:spe_container_id) that H4b writes, with H4b ← H8 in the DAG — the T242/T245b/T246 plain-setting precedent. This removes the written-by-h8 source, H8's vault write and its overwrite rule, which were needed only because the value was put in the vault. H9 still waits for H8 (H9 ← H4b ← H8).</decision>
   </decisions>
 
   <constraints>
@@ -80,14 +81,39 @@
   </steps>
 
   <acceptance-criteria>
-    <criterion testable="true">H4 test: a fresh manifest run attempts neither container-id secret.</criterion>
-    <criterion testable="true">H8 test: after creating/verifying the container, both secrets are written with InterStepState.SpeContainerId; a re-run writes nothing; an existing different value fails Resumable.</criterion>
-    <criterion testable="true">DAG test includes H9 ← H8.</criterion>
+    <criterion testable="true">The manifest has neither container-id secret, so H4 cannot attempt or quarantine on them; H4b writes both settings from H8's SpeContainerId (H4b catalog test).</criterion>
+    <criterion testable="true">DAG test: H4b (and so H9) waits for H8.</criterion>
     <criterion testable="true">RunContextContractTests.PinnedManifestGaps is empty; the positive control still proves the scanner flags an unwired secret.</criterion>
-    <criterion testable="true">I4 probe test: literal container-type id equal to the run's passes; different value fails.</criterion>
+    <criterion testable="true">I4 probe tests: the run's container type + H8's container in both settings passes; another container fails CATASTROPHIC; missing / blank / other container type fails; run values missing is InfraFault.</criterion>
     <criterion testable="true">Catalog -Verify OK; ControlPlane.Tests, Worker build, ArchTests pass.</criterion>
   </acceptance-criteria>
 
   <notes>
+    COMPLETED 2026-10-06 (FULL).
+    - manifest.yaml: SPE-DefaultContainerId + SPE-CommunicationArchiveContainerId removed from secrets; per_env_settings
+      EmailProcessing__DefaultContainerId (the key the BFF reads — Email__DefaultContainerId was dead) and
+      Communication__ArchiveContainerId from from-h8-output:spe_container_id. Catalog regenerated (-Verify OK); generated
+      kv-secrets module and customer.json recompiled without the two secrets; generator allow-list + PerEnvSourceCatalog.
+    - DAG: H4b ← H8 (H9 transitively). HandlerRunInputs H4b += SpeContainerId. RunContextContractTests: PinnedManifestGaps
+      empty; positive control re-seeded with a synthetic pinned gap.
+    - H13 I4 (SpeContainerTenantDerivationInvariantProbe) rewritten: it required SharePointEmbedded__ContainerTypeId to be a
+      KV reference (H4b writes a literal — every stamp would fail) and never checked the customer's container. Now it
+      compares: container type = the run's; both container settings = H8's container (another id = CATASTROPHIC, D28).
+      InvariantVerificationRequest gained optional ContainerTypeId / SpeContainerId; H13 passes them.
+    - Tests: DagAdvancerTests (H4b waits for H8), H4bBulkAppSettingsHandlerTests (catalog row), probe tests rewritten.
+      ControlPlane.Tests 2124/0/1.
+    - Docs: inventory SPE rows, plan G18, manifest-driven-secret-catalog pattern rule 4, customer.bicep comment.
+    - Legacy scripts Configure-ProductionAppSettings.ps1 / Seed-ProductionKeyVault.ps1 (retired shared production stack):
+      marked LEGACY; the dead Email__DefaultContainerId key fixed to EmailProcessing__DefaultContainerId.
+    - Step 9.5: adr-check 0 violations — W1 spec FR-31 / design §4D I4 wording amended (container id = stamp app settings,
+      verified by H13); W2 resolver bypass (BFF reads EmailProcessing:DefaultContainerId directly; ITenantContainerResolver
+      reads an unwritten StagingContainerId) -> recorded on T227d; W3 legacy scripts marked; W4 unread SPE-ContainerTypeId
+      secret / DEFAULT_CT_ID -> T227e. code-review 0 critical — #1 deployment-guide + design DAG updated; #2 probe header +
+      E2EAcceptanceModule comment rewritten; #3 H8 always creates a new container (re-run after WaitingOnGate / later run
+      would leave an orphan and repoint the BFF) -> T227e; #4 H13 test asserts the invariant request carries both values;
+      #5 H13 input comment; #6 a container setting still a KV reference fails without the CATASTROPHIC label (+ test);
+      #9 CONFIGURATION-MATRIX key; #10 POML renamed (was 227c-h8-writes-container-id-secrets.poml). Not done: #7 colon form
+      for container settings, #8 staging slot not read (recorded in the probe header).
+    - ControlPlane.Tests 2125/0/1, Worker build 0 warnings, ArchTests 363/363, bicep-e2e-dry-run PASS, catalog -Verify OK.
   </notes>
 </task>

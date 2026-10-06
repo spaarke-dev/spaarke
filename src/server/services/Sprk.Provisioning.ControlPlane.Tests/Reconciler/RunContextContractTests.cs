@@ -501,8 +501,8 @@ public sealed class RunContextContractTests
         // T245b: Dataverse-ServiceUrl moved to H4b per_env_settings (from-h5-output). T225b (owner D18): the
         // Spaarke-shared vendor keys (Bing Search, LlamaParse) left the catalog. T246 (plan G26): ContentSafety-ApiKey
         // left too — each stamp has its own keyless Content Safety account, reached with the UAMI.
-        "SPE-DefaultContainerId→T227",                 // from-bicep-output, but containers are created at runtime (H8,
-        "SPE-CommunicationArchiveContainerId→T227",    // after H4) — customer.bicep has no value to write (plan G18)
+        // T227c (G18): SPE-DefaultContainerId / SPE-CommunicationArchiveContainerId left the catalog — the container id is
+        // a plain H4b setting from H8's output (from-h8-output:spe_container_id). No manifest gaps remain.
         // T225b (G21): Dataverse-ClientSecret / BFF-API-ClientSecret are no longer gaps — new stamps are secret-free
         // by default (KvSecretsPopulationOptions.RequireSecretFreeIdentity), so H4 omits both and never needs a value.
     ];
@@ -573,15 +573,16 @@ public sealed class RunContextContractTests
             new("Generated-One", KvSecretOperation.Upsert, KvSecretValueSource.Generated),
             new("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter),
             new(GraphAppRegistrationProvisioner.ClientIdSecretName, KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg),
-            new("SPE-DefaultContainerId", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),   // a pinned, owned gap
+            new("Pinned-Gap", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),   // a pinned, owned gap
         ];
         var intakeMap = new Dictionary<string, string>(StringComparer.Ordinal) { ["TenantId"] = IntakeParameterCatalog.TenantId };
         var bicepWrites = new HashSet<string>(StringComparer.Ordinal) { "From-Bicep" };
+        var pinnedOwners = new Dictionary<string, string>(StringComparer.Ordinal) { ["Pinned-Gap"] = "T999" };
 
-        var (problems, gaps) = ClassifyManifestEntries(sanctioned, intakeMap, H3WrittenSecretNames, bicepWrites, PinnedManifestGapOwners());
+        var (problems, gaps) = ClassifyManifestEntries(sanctioned, intakeMap, H3WrittenSecretNames, bicepWrites, pinnedOwners);
 
         problems.Should().BeEmpty();
-        gaps.Should().BeEquivalentTo(["SPE-DefaultContainerId→T227"]);
+        gaps.Should().BeEquivalentTo(["Pinned-Gap→T999"]);
     }
 
     /// <summary>The KV secrets H3's provisioner commits itself; H4 skips their <c>written-by-h3</c> entries.</summary>

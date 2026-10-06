@@ -140,15 +140,18 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH4H3AndH5_UnlocksH4b()
+    public void ComputeReadyHandlers_AfterH4H3H5AndH8_UnlocksH4b()
     {
-        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
-        var withH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        var withoutH5 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H8");
+        var withoutH8 = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        var withAll = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H8");
 
         _sut.ComputeReadyHandlers(withoutH5).Should().NotContain("H4b",
             "T245b: Dataverse__ServiceUrl / __EnvironmentUrl are H5's DataverseEnvUrl");
-        _sut.ComputeReadyHandlers(withH5).Should().Contain("H4b",
-            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL) have all run.");
+        _sut.ComputeReadyHandlers(withoutH8).Should().NotContain("H4b",
+            "T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId are H8's SpeContainerId");
+        _sut.ComputeReadyHandlers(withAll).Should().Contain("H4b",
+            "H4b's producers (H4 for the populated KV, H3 for BffAppRegId, H5 for the Dataverse URL, H8 for the container) have all run.");
     }
 
     [Fact]

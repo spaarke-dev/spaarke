@@ -43,6 +43,12 @@
       ForApp() today (count): GraphUserService 7, IncomingCommunicationProcessor 7, SpeFileStore 7, DriveItemOperations 7,
       SpeContainerMembershipService 5, GraphSubscriptionManager 4, MailboxVerificationService 3, ContainerOperations 3, … — only
       the SPE ones matter (mail / user / subscription calls are not SPE).
+      T227c adr-check W2 (pre-existing): ITenantContainerResolver (OptionsTenantContainerResolver) reads
+      SharePointEmbedded:StagingContainerId, which nothing writes, while BFF call sites read
+      configuration["EmailProcessing:DefaultContainerId"] directly (ChatDocumentEndpoints.cs:1653,
+      ChatWordExportEndpoints.cs:265) — the "single ITenantContainerResolver" rule (FR-31) is not met. The stamp's own
+      container is EmailProcessing__DefaultContainerId = Communication__ArchiveContainerId = H8's container (T227c);
+      the guard should resolve "own container" through one place, and that place should be the resolver.
     </background>
     <relevant-files>
       <file>src/server/api/Sprk.Bff.Api/Infrastructure/Graph/{SpeFileStore,ContainerOperations,DriveItemOperations,UploadSessionManager,GraphClientFactory}.cs</file>

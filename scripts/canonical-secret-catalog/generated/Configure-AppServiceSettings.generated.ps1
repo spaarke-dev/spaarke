@@ -72,6 +72,9 @@ param(
     [string]$ServiceBusFqns,
 
     [Parameter(Mandatory = $true)]
+    [string]$SpeContainerId,
+
+    [Parameter(Mandatory = $true)]
     [string]$TenantId,
 
     [Parameter(Mandatory = $true)]
@@ -106,7 +109,7 @@ $settings = @(
     "AzureAd__TenantId=$TenantId",
     "AzureOpenAI__ChatModelName=gpt-4o-mini",
     "AzureOpenAI__Endpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
-    "Communication__ArchiveContainerId=$(Format-KvRef 'SPE-CommunicationArchiveContainerId')",
+    "Communication__ArchiveContainerId=$SpeContainerId",
     "Communication__DefaultMailbox=$(Format-KvRef 'Communication-DefaultMailbox')",
     "Communication__WebhookClientState=$(Format-KvRef 'Communication-WebhookClientState')",
     "Communication__WebhookNotificationUrl=$(Format-KvRef 'Communication-WebhookUrl')",
@@ -124,9 +127,9 @@ $settings = @(
     "DocumentIntelligence__DocIntelEndpoint=$(Format-KvRef 'DocumentIntelligence-Endpoint')",
     "DocumentIntelligence__Enabled=true",
     "DocumentIntelligence__OpenAiEndpoint=$(Format-KvRef 'AzureOpenAI-Endpoint')",
-    "Email__DefaultContainerId=$(Format-KvRef 'SPE-DefaultContainerId')",
     "Email__WebhookSecret=$(Format-KvRef 'Email-WebhookSecret')",
     "Email__WebhookSigningKey=$(Format-KvRef 'Email-WebhookSigningKey')",
+    "EmailProcessing__DefaultContainerId=$SpeContainerId",
     "Graph__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "Graph__Credentials__Order__0=ManagedIdentityFederated",
     "Graph__Credentials__RequireSecretFreeIdentity=true",

@@ -423,7 +423,12 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     AiSearchEndpoint: aiSearchEndpoint,
                     CosmosEndpoint: cosmosEndpoint,
                     BffApiUrl: bffApiUrl,
-                    ProvisioningScriptsDirectory: scriptsDirectory),
+                    ProvisioningScriptsDirectory: scriptsDirectory,
+                    // T227c: I4 checks the BFF is configured with this run's container type and H8's container.
+                    ContainerTypeId: parameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var i4ContainerTypeId)
+                        ? i4ContainerTypeId?.Trim() ?? string.Empty
+                        : string.Empty,
+                    SpeContainerId: run.InterStepState.SpeContainerId?.Trim() ?? string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

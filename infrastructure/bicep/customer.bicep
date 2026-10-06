@@ -777,11 +777,9 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //        resource. manifest value_source = from-topology-constants: H4 writes it
 //        from the run's containerTypeId parameter (the /provision-environment skill
 //        reads it from spaarke-constants.yaml).
-//   SPE-DefaultContainerId, SPE-CommunicationArchiveContainerId
-//     -> per-customer SPE containers created at RUNTIME (H8); no ARM-deploy-time
-//        value exists. KNOWN GAP (plan G18): the manifest still labels both
-//        from-bicep-output and nothing writes them, so H4 quarantines on a fresh
-//        customer until the H8 write path is wired.
+//   (T227c / G18: SPE-DefaultContainerId and SPE-CommunicationArchiveContainerId
+//    left the catalog — the customer's container is created at runtime by H8 and
+//    reaches the BFF as plain app settings H4b writes from H8's output.)
 //   BFF-API-ClientId, BFF-API-Audience
 //     -> H3 creates the per-customer BFF app-registration at RUNTIME and writes
 //        ClientId/Audience to this vault itself (manifest value_source

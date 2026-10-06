@@ -37,9 +37,7 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
-| `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
 | `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
-| `SPE-DefaultContainerId` | spe | N/A | - | from-bicep-output |
 | `TenantId` | identity | N/A | - | from-intake-parameter |
 
 ## Per-secret detail
@@ -281,19 +279,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **App-setting keys**:
   - `Email__WebhookSigningKey`
 
-### `SPE-CommunicationArchiveContainerId`
-
-- **Category**: spe
-- **Purpose**: SPE communication-archive container ID (archived email / communication payloads).
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: communication, public, spe
-- **Consumers**:
-  - BFF: Communication:ArchiveContainerId
-- **App-setting keys**:
-  - `Communication__ArchiveContainerId`
-
 ### `SPE-ContainerTypeId`
 
 - **Category**: spe
@@ -307,19 +292,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - BFF: DEFAULT_CT_ID / SharePointEmbedded:ContainerTypeId
 - **App-setting keys**:
   - `DEFAULT_CT_ID`
-
-### `SPE-DefaultContainerId`
-
-- **Category**: spe
-- **Purpose**: SPE default container ID (per-customer root container for uploaded files).
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: public, spe
-- **Consumers**:
-  - BFF: Email:DefaultContainerId
-- **App-setting keys**:
-  - `Email__DefaultContainerId`
 
 ### `TenantId`
 

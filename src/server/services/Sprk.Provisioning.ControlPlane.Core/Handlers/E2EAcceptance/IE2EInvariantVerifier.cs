@@ -56,6 +56,8 @@ public interface IE2EInvariantVerifier
 /// <param name="CosmosEndpoint">Customer Cosmos endpoint URI (H2a output) for I3.</param>
 /// <param name="BffApiUrl">BFF API URL for I4 (SPE container resolver diagnostic).</param>
 /// <param name="ProvisioningScriptsDirectory">Path to <c>scripts/</c> on disk for I1 grep probe.</param>
+/// <param name="ContainerTypeId">The run's SPE container type (intake) — I4 checks the BFF is configured with it (task 227c).</param>
+/// <param name="SpeContainerId">The customer's container H8 created — I4 checks the BFF's container settings name it (task 227c).</param>
 public sealed record InvariantVerificationRequest(
     string CustomerId,
     string RunId,
@@ -64,7 +66,9 @@ public sealed record InvariantVerificationRequest(
     string AiSearchEndpoint,
     string CosmosEndpoint,
     string BffApiUrl,
-    string ProvisioningScriptsDirectory);
+    string ProvisioningScriptsDirectory,
+    string ContainerTypeId = "",
+    string SpeContainerId = "");
 
 /// <summary>
 /// The 5 §4D tenant-isolation invariants, enumerated (matches design.md §4D

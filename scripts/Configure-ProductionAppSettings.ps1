@@ -1,3 +1,6 @@
+# LEGACY (2026-10-06, T227c): targets the retired shared production stack
+# (docs/assessments/azure-prod-stack-decommission-2026-08-31.md), not customer stamps. Stamp settings and secrets
+# come from scripts/canonical-secret-catalog (H4 / H4b); its SPE container ids are plain H4b settings, not KV secrets.
 <#
 .SYNOPSIS
     Configure production App Service app settings with Key Vault references.
@@ -122,7 +125,8 @@ $settings = @(
     "ApplicationInsights__ConnectionString=$(KVRef 'AppInsights-ConnectionString')",
 
     # --- Email ---
-    "Email__DefaultContainerId=$(KVRef 'SPE-DefaultContainerId')",
+    # The BFF reads EmailProcessing:DefaultContainerId (EmailProcessingOptions); Email__DefaultContainerId was never read (T227c).
+    "EmailProcessing__DefaultContainerId=$(KVRef 'SPE-DefaultContainerId')",
     "Email__WebhookSecret=$(KVRef 'Email-WebhookSecret')",
 
     # --- Communication ---

@@ -154,6 +154,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.ContentSafetyEndpoint)),   // T246: AiSafety__ContentSafety__Endpoint
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
                 RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),   // T245b: Dataverse__ServiceUrl / __EnvironmentUrl
+                RunInput.Output(nameof(InterStepState.SpeContainerId)),    // T227c: EmailProcessing__DefaultContainerId / Communication__ArchiveContainerId
                 // (+ intake tenantId / containerTypeId above; customer_id reads run.CustomerId — run
                 //  identity, which RunInputSource has no kind for and needs no declaration.)
             ],
@@ -241,6 +242,7 @@ public static class HandlerRunInputs
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.MiObjectId)),
                 // T248: T6 looks for H8's container in the owning app's app-only listing (absent → T6 InfraFault).
+                // T227c: I4 compares the BFF's container settings with it (absent → I4 InfraFault).
                 RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
                 RunInput.Intake(IntakeParameterCatalog.ExchangePolicyScopeGroupId, required: false),   // T251: T4 scope
             ],

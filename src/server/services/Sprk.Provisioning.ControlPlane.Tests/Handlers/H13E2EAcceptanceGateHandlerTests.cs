@@ -263,6 +263,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         trapRequest.AppServiceName.Should().Be(AppServiceName);
         trapRequest.KeyVaultName.Should().Be(KeyVaultName, "the trap probes check the CUSTOMER vault (H2a output)");
         trapRequest.ContainerTypeId.Should().Be("ct-from-intake", "T6 selects the SPE owning-app credential by container type (task 245b)");
+        seams.Invariants.LastRequest!.ContainerTypeId.Should().Be("ct-from-intake", "I4 compares the BFF's container type with the run's (task 227c)");
+        seams.Invariants.LastRequest.SpeContainerId.Should().Be(run.InterStepState.SpeContainerId ?? string.Empty,
+            "I4 compares the BFF's container settings with H8's container (task 227c)");
         seams.Cost.LastRequest!.ResourceGroupName.Should().Be(ResourceGroupName);
 
         var columns = seams.RegistryClient.LastColumns!;
@@ -1032,9 +1035,12 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             return new FakeInvariantVerifier(new InvariantCatalogVerificationResult(outcomes));
         }
 
+        public InvariantVerificationRequest? LastRequest { get; private set; }
+
         public Task<InvariantCatalogVerificationResult> VerifyAllAsync(InvariantVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return Task.FromResult(_result);
         }
     }

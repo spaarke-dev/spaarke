@@ -143,6 +143,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
             ["customer_id"] = ("-CustomerId", CustomerId),   // T238: the run's own customerId, verbatim
             ["dataverse_env_url"] = ("-DataverseEnvUrl", "https://acme.crm.dynamics.com/"),   // T245b: H5's DataverseEnvUrl
+            ["spe_container_id"] = ("-SpeContainerId", "b!h8-created-customer-container"),   // T227c: H8's SpeContainerId
         };
         expected.Keys.Should().BeEquivalentTo(PerEnvSourceCatalog.BySourceKey.Keys,
             "a source added to PerEnvSourceCatalog needs a row here");
@@ -789,6 +790,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000";   // H2a output (task 242 — Redis__Endpoint)
         s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)
+        s.SpeContainerId = "b!h8-created-customer-container";   // H8 output (task 227c — EmailProcessing__DefaultContainerId)
         return run;
     }
 

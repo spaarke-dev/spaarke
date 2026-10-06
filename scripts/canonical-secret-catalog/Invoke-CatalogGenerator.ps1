@@ -161,6 +161,7 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:content_safety_endpoint',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',
+    'from-h8-output:spe_container_id',
     'from-intake-parameter:tenant_id',
     'from-intake-parameter:container_type_id',
     'from-intake-parameter:customer_id'

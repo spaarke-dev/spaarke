@@ -1,3 +1,6 @@
+# LEGACY (2026-10-06, T227c): targets the retired shared production stack
+# (docs/assessments/azure-prod-stack-decommission-2026-08-31.md), not customer stamps. Stamp settings and secrets
+# come from scripts/canonical-secret-catalog (H4 / H4b); its SPE container ids are plain H4b settings, not KV secrets.
 <#
 .SYNOPSIS
     Seed the production Key Vault with required secrets for BFF API startup.

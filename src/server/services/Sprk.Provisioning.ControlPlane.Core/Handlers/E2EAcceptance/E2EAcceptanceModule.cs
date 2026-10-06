@@ -183,10 +183,10 @@ public static class E2EAcceptanceModule
         // I4 (task 204c B07 — Wave G-7 replacement of task 176, 2026-08-26).
         // INDEPENDENT re-verification variant: reads DEPLOYED App Service
         // config directly via ARM `Microsoft.Web/sites/{name}/config/appsettings/list`
-        // and classifies the `SharePointEmbedded__ContainerTypeId` value
-        // (`@Microsoft.KeyVault(...)` reference → Passed; canonical `b!` SPE
-        // container-id literal → Failed CATASTROPHIC; empty / non-KV-ref
-        // string → Failed). Task 204c dispatch directive: "do NOT trust
+        // and compares the SPE settings with the run's own values (task 227c):
+        // container type = the run's; EmailProcessing__DefaultContainerId and
+        // Communication__ArchiveContainerId = H8's container (another id →
+        // Failed CATASTROPHIC, owner D28). Task 204c dispatch directive: "do NOT trust
         // RunStatus.HandlerReports; re-read the underlying Azure/Cosmos/
         // Graph/SPE surface directly" — task 176's BFF-diagnostic pattern
         // trusts the BFF's own self-report and cannot detect a compromised
