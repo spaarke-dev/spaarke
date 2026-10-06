@@ -1083,6 +1083,12 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 - **Users flagged external** are never members of an environment/BU container. Every non-edit byte path stays broker-only (app-only after the Dataverse check) on all containers.
 - **Accepted consequence:** for non-secure documents, Dataverse privileges finer than "internal user" are not enforced on a direct SharePoint/Office path.
 
+## Round 71 (2026-10-06). BINDING. OWNER decision. Grants whose record is gone.
+
+- **Problem:** deleting a root record leaves its contact grants (`sprk_externalrecordaccess`, including Assigned-To auto-grants) ACTIVE with an empty record lookup. The lookup can only clear its link on delete, because of the Dataverse one-cascade-parent limit.
+- **Owner: "yes add this check/deactivation".** The existing `ExternalAccessReconciliationJob` gains rule R4: it deactivates an active grant whose record is gone, through the same lifecycle path as R1-R3. Ledger rows get the equivalent cleanup in `AssignedAccessReconciliationJob` if that is a small extension.
+- **The rule honours the job's mode.** On dev it only reports until the owner decides `ExternalAccess:Reconciliation:WritesEnabled` (task 137).
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
