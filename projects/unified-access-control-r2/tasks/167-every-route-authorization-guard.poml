@@ -4,7 +4,7 @@
     <title>The every-route authorization guard (owner round 9 item 3): extend task 074's RouteAuthorizationGuardTests so EVERY BFF route file is governed and every route declares a per-resource check, an admin policy, or a reasoned waiver; the 82 sweep findings (90 route keys) start as Pending waivers owned by their fix tasks 159-166</title>
     <phase>Session 27, owner round 9 (2026-10-03): the route authorization sweep</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies tests/** (root CLAUDE.md §8 TEST-MODIFYING override: code-review + adr-check run unconditionally). The guard decides which BFF routes the build accepts as authorized; a false "gated" verdict hides a disclosure.</rigor-reason>
     <model-tier>opus</model-tier>
