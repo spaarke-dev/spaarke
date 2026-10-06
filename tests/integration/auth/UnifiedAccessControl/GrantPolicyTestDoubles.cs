@@ -319,18 +319,18 @@ internal static class GrantPolicyTestDoubles
 
         /// <summary>A CONTACT subject denied on one specific record.</summary>
         public void DenyContactOnRecord(Guid contactId, Guid recordId)
-            => _entries.Add(($"sprk_subjectcontact eq {contactId}", WithContact(RecordRow(recordId), contactId)));
+            => _entries.Add(($"_sprk_subjectcontact_value eq {contactId}", WithContact(RecordRow(recordId), contactId)));
 
         /// <summary>An ORGANIZATION subject (every member, or an org grantee) denied on one specific record.</summary>
         public void DenyOrganizationOnRecord(Guid organizationId, Guid recordId)
-            => _entries.Add(($"sprk_subjectorganization eq {organizationId}", WithOrganization(RecordRow(recordId), organizationId)));
+            => _entries.Add(($"_sprk_subjectorganization_value eq {organizationId}", WithOrganization(RecordRow(recordId), organizationId)));
 
         /// <summary>Task 143: a SYSTEMUSER subject (<c>sprk_subjectsystemuser</c>) denied on one specific record.</summary>
         public Guid DenySystemUserOnRecord(Guid systemUserId, Guid recordId)
         {
             var row = RecordRow(recordId);
             row._sprk_subjectsystemuser_value = systemUserId;
-            _entries.Add(($"sprk_subjectsystemuser eq {systemUserId}", row));
+            _entries.Add(($"_sprk_subjectsystemuser_value eq {systemUserId}", row));
             return row.sprk_noaccessentryid!.Value;
         }
 
@@ -339,14 +339,14 @@ internal static class GrantPolicyTestDoubles
 
         /// <summary>Task 143: a CONTACT subject denied on every record referencing an organization (ethical wall).</summary>
         public void DenyContactOnOrganization(Guid contactId, Guid objectOrganizationId)
-            => _entries.Add(($"sprk_subjectcontact eq {contactId}", WithContact(OrganizationRow(objectOrganizationId), contactId)));
+            => _entries.Add(($"_sprk_subjectcontact_value eq {contactId}", WithContact(OrganizationRow(objectOrganizationId), contactId)));
 
         /// <summary>Task 143: a SYSTEMUSER subject denied on every record referencing an organization.</summary>
         public void DenySystemUserOnOrganization(Guid systemUserId, Guid objectOrganizationId)
         {
             var row = OrganizationRow(objectOrganizationId);
             row._sprk_subjectsystemuser_value = systemUserId;
-            _entries.Add(($"sprk_subjectsystemuser eq {systemUserId}", row));
+            _entries.Add(($"_sprk_subjectsystemuser_value eq {systemUserId}", row));
         }
 
         private static NoAccessEntryRow WithContact(NoAccessEntryRow row, Guid contactId)
