@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
@@ -178,7 +179,7 @@ public class SpeAppOnlyContainerIsolationTests
     {
         "ListChildren", "Download", "Delete", "Metadata", "Versions", "Preview", "QuickXorHash",
         "UploadSmall", "ContainerDrive", "DriveSubscription", "DriveDelta",
-        "MembershipGrant", "MembershipRevoke", "MembershipList",
+        "MembershipGrant",
     };
 
     [Theory]
@@ -209,8 +210,6 @@ public class SpeAppOnlyContainerIsolationTests
             "DriveSubscription" => () => store.CreateDriveRootSubscriptionAsync(ForeignContainer, "https://hook.test", "state", DateTimeOffset.UtcNow.AddDays(1)),
             "DriveDelta" => () => store.EnumerateDriveDeltaAsync(ForeignContainer, null),
             "MembershipGrant" => () => membership.GrantMembershipAsync(ForeignContainer, "x@contoso.test", ExternalAccessLevel.ViewOnly),
-            "MembershipRevoke" => () => membership.RevokeMembershipAsync(ForeignContainer, "x@contoso.test"),
-            "MembershipList" => () => membership.ListExternalMembersAsync(ForeignContainer),
             _ => throw new ArgumentOutOfRangeException(nameof(path), path, null),
         };
 
@@ -222,20 +221,54 @@ public class SpeAppOnlyContainerIsolationTests
     }
 
     [Fact]
-    public async Task CreateContainer_MarksTheNewContainerAsThisCustomers()
+    public async Task MembershipRevokeAndRemove_ForeignContainer_FailEveryContact_WithoutThrowing_NoContentCall()
     {
-        var graph = new RoutedGraph()
-            .Respond("POST", "/v1.0/storage/fileStorage/containers", """{"id":"new-container","displayName":"Matter 1"}""")
-            .Respond("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", "{}");
+        // Revoke and closure report per contact and must keep going (their grant-cache invalidation still runs), so a
+        // refusal is a failed result here, not an exception — and still nothing but the ownership read reaches Graph.
+        var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
+        var membership = new SpeContainerMembershipService(Guard(graph), NullLogger<SpeContainerMembershipService>.Instance);
+
+        var revoked = await membership.RevokeMembershipAsync(ForeignContainer, "x@contoso.test");
+        var removed = await membership.RemoveMembershipsAsync(ForeignContainer, new[] { "x@contoso.test", "y@contoso.test" });
+
+        revoked.Success.Should().BeFalse();
+        removed.Should().HaveCount(2).And.OnlyContain(r => !r.Value.Success);
+        graph.Requests.Should().OnlyContain(r => r.Method == "GET" && r.Path == $"/v1.0/storage/fileStorage/containers/{ForeignContainer}");
+    }
+
+    [Fact]
+    public async Task CreateContainer_BindsThenMarksTheNewContainerAsThisCustomers()
+    {
+        var businessUnit = Guid.NewGuid();
+        var graph = NewContainerGraph("Matter 1", businessUnit);
         var containers = new ContainerOperations(new StubFactory(graph.Client), Guard(graph), NullLogger<ContainerOperations>.Instance);
 
-        var created = await containers.CreateContainerAsync(Guid.NewGuid(), "Matter 1");
+        var created = await containers.CreateContainerAsync(Guid.NewGuid(), "Matter 1", businessUnit);
 
         created!.Id.Should().Be("new-container");
         graph.Requests.Select(r => $"{r.Method} {r.Path}").Should().Equal(
             "POST /v1.0/storage/fileStorage/containers",
-            "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties");
+            "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties",   // business-unit stamp (uac-r2 165)
+            "GET /v1.0/storage/fileStorage/containers/new-container",                      // stamp read back
+            "PATCH /v1.0/storage/fileStorage/containers/new-container/customProperties");  // ownership marker (T227d)
+        graph.Requests[^1].Body.Should().Contain(SpeContainerOwnershipGuard.MarkerPropertyName).And.Contain(Customer);
     }
+
+    /// <summary>Graph for a create: POST answers <c>new-container</c>; its business-unit stamp reads back.</summary>
+    private static RoutedGraph NewContainerGraph(string displayName, Guid businessUnit)
+        => new RoutedGraph()
+            .Respond("POST", "/v1.0/storage/fileStorage/containers", $$$"""{"id":"new-container","displayName":"{{{displayName}}}"}""")
+            .Respond("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", "{}")
+            .Respond("GET", "/v1.0/storage/fileStorage/containers/new-container",
+                System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+                {
+                    ["id"] = "new-container",
+                    ["customProperties"] = new Dictionary<string, object>
+                    {
+                        [Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName] =
+                            new { value = businessUnit.ToString("D"), isSearchable = false },
+                    },
+                }));
 
     [Theory]
     [InlineData("https://graph.microsoft.com/v1.0/drives/other-drive/items/root/delta?token=abc")]
@@ -420,15 +453,30 @@ public class SpeAppOnlyContainerIsolationTests
     }
 
     [Fact]
+    public async Task SpeAdmin_BulkJob_ForeignContainer_IsTheSameItemErrorAsOutOfScope_NoContentCall()
+    {
+        // A bulk delete / permission job names caller-chosen containers: another customer's gets exactly the item error a
+        // container outside the caller's business units gets — the batch reveals nothing and touches nothing of it.
+        var graph = new RoutedGraph().Container(ForeignContainer, marker: OtherCustomer);
+        var bulk = new BulkOperationService(SpeAdmin(graph), NullLogger<BulkOperationService>.Instance);
+
+        var (client, error) = await bulk.ClientForContainerAsync(Config(), ForeignContainer, Guid.NewGuid(), CancellationToken.None);
+
+        client.Should().BeNull();
+        error!.ErrorMessage.Should().Be(BulkOperationService.ContainerNotInScopeError);
+        graph.Requests.Should().OnlyContain(r => r.Method == "GET" && r.Path == $"/v1.0/storage/fileStorage/containers/{ForeignContainer}");
+    }
+
+    [Fact]
     public async Task SpeAdmin_CreateContainer_MarksTheNewContainerAsThisCustomers()
     {
-        var graph = new RoutedGraph()
-            .Respond("POST", "/v1.0/storage/fileStorage/containers", """{"id":"new-container","displayName":"New"}""")
-            .Respond("PATCH", "/v1.0/storage/fileStorage/containers/new-container/customProperties", "{}");
+        var businessUnit = Guid.NewGuid();
+        var graph = NewContainerGraph("New", businessUnit);
 
-        await SpeAdmin(graph).CreateContainerForConfigAsync(Config(), Config().ContainerTypeId, "New", null);
+        await SpeAdmin(graph).CreateContainerForConfigAsync(Config(), Config().ContainerTypeId, "New", null, businessUnit);
 
-        graph.Requests.Should().Contain(r => r.Method == "PATCH" && r.Path.EndsWith("/new-container/customProperties"));
+        graph.Requests.Should().Contain(r => r.Method == "PATCH" && r.Path.EndsWith("/new-container/customProperties")
+            && r.Body!.Contains(SpeContainerOwnershipGuard.MarkerPropertyName));
     }
 
     // ─────────────────────────────────────────────────────────────────────────

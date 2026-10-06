@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Tests.Api.Memory;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Test pattern mirrors <see cref="Workspace.WorkspaceStateEndpointsTests"/>:
+/// Test pattern mirrors the (task-166-retired) workspace-state endpoint contract tests:
 /// in-process <see cref="WebApplicationFactory{TEntryPoint}"/>, fake auth handler
 /// emitting <c>oid</c> + <c>tid</c>, mocked <see cref="IPinnedContextRepository"/>.
 /// </para>
@@ -42,8 +42,8 @@ namespace Sprk.Bff.Api.Tests.Api.Memory;
 /// <list type="bullet">
 ///   <item>200 GET path with seed data + filter</item>
 ///   <item>201 POST path; 400 when title missing or pinType invalid</item>
-///   <item>200 PUT path; 404 when pin not found; 403 when caller does not own</item>
-///   <item>204 DELETE path; 404 when pin not found; 403 when caller does not own</item>
+///   <item>200 PUT path; 404 when pin not found; 404 when caller does not own (uac-r2 task 166: uniform)</item>
+///   <item>204 DELETE path; 404 when pin not found; 404 when caller does not own (uac-r2 task 166: uniform)</item>
 ///   <item>Per-tenant isolation: caller from tenant A cannot see tenant B pins
 ///   (verified at GET level — tenantId is the partition key and the endpoint scopes by
 ///   the caller's tid claim, so a tenant-A caller's GetByUserAsync is invoked with
@@ -324,8 +324,12 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
         _fixture.RepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<PinnedContextItem>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    /// <summary>
+    /// ✅ FLIPPED BY uac-r2 TASK 166 (owner round 12 item 4) — was <c>UpdatePin_NotOwned_Returns403</c>. Another
+    /// user's pin is answered exactly as an unknown one: the 404/403 split confirmed that a pin existed under that id.
+    /// </summary>
     [Fact]
-    public async Task UpdatePin_NotOwned_Returns403()
+    public async Task UpdatePin_NotOwned_Returns404()
     {
         _fixture.RepositoryMock.Reset();
         var existing = BuildPin("pin-other", PinnedMemoryEndpointsTestFixture.TestTenantId, "DIFFERENT-USER-OID", PinType.UserPreference);
@@ -338,7 +342,7 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
 
         var response = await client.PutAsJsonAsync("/api/memory/pins/pin-other", request);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         _fixture.RepositoryMock.Verify(r => r.UpdateAsync(It.IsAny<PinnedContextItem>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -416,8 +420,11 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
             Times.Never);
     }
 
+    /// <summary>
+    /// ✅ FLIPPED BY uac-r2 TASK 166 (owner round 12 item 4) — was <c>DeletePin_NotOwned_Returns403</c>.
+    /// </summary>
     [Fact]
-    public async Task DeletePin_NotOwned_Returns403()
+    public async Task DeletePin_NotOwned_Returns404()
     {
         _fixture.RepositoryMock.Reset();
         var existing = BuildPin("pin-stranger", PinnedMemoryEndpointsTestFixture.TestTenantId, "OTHER-USER", PinType.UserPreference);
@@ -429,7 +436,7 @@ public class PinnedMemoryEndpointsContractTests : IClassFixture<PinnedMemoryEndp
 
         var response = await client.DeleteAsync("/api/memory/pins/pin-stranger");
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         _fixture.RepositoryMock.Verify(
             r => r.DeleteAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);

@@ -1,9 +1,11 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Services.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -13,9 +15,19 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// container type configs to specific organizational units.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Follows ADR-001: Minimal API — static method handler, no controllers.
 /// Authorization is inherited from the /api/spe route group
 /// (RequireAuthorization + SpeAdminAuthorizationFilter applied at group level, task 009).
+/// </para>
+/// <para>
+/// <b>Projected onto the caller's reach</b> (unified-access-control-r2 task 165, follow-up f2). The list used to be every
+/// business unit in the environment, so a leaf (customer) admin read every other customer's unit name. It now holds
+/// the caller's own unit and its descendants — exactly the units the caller may assign a config to
+/// (<c>POST/PUT /api/spe/configs</c> refuse any other) — derived from the caller's token, never a parameter
+/// (the <c>ListConfigsAsync</c> precedent). A platform operator (root unit) still sees every unit. A caller who cannot
+/// be resolved to a Dataverse user sees none; a hierarchy read fault is the shared 503, never the unprojected list.
+/// </para>
 /// </remarks>
 public static class BusinessUnitEndpoints
 {
@@ -26,9 +38,10 @@ public static class BusinessUnitEndpoints
     {
         group.MapGet("/businessunits", ListBusinessUnitsAsync)
             .WithName("ListSpeBusinessUnits")
-            .WithDescription("List all Dataverse business units for BU-scoped container type config assignment.")
+            .WithDescription("List the Dataverse business units the caller administers (their own unit and its descendants) for BU-scoped container type config assignment.")
             .Produces<BusinessUnitDto[]>(StatusCodes.Status200OK)
-            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError)
+            .Produces<ProblemDetails>(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -39,10 +52,30 @@ public static class BusinessUnitEndpoints
     /// </summary>
     private static async Task<IResult> ListBusinessUnitsAsync(
         DataverseWebApiClient dataverseClient,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
+        HttpContext context,
         CancellationToken ct)
     {
         logger.LogInformation("Listing Dataverse business units for SPE Admin UI");
+
+        // The caller's reach FIRST, from the token — fail closed: a fault is the 503, never the whole table.
+        IReadOnlyCollection<Guid> accessible;
+        try
+        {
+            accessible = await tenantScope.GetAccessibleBusinessUnitsAsync(context.User, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex, "Could not read the caller's business-unit scope — refusing the business-unit list (unverifiable).");
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+        }
+
+        if (accessible.Count == 0)
+        {
+            // An unresolvable caller administers no unit.
+            return TypedResults.Ok(Array.Empty<BusinessUnitDto>());
+        }
 
         try
         {
@@ -52,6 +85,7 @@ public static class BusinessUnitEndpoints
                 cancellationToken: ct);
 
             var dtos = rows
+                .Where(r => accessible.Contains(r.BusinessUnitId))
                 .Select(r => new BusinessUnitDto(
                     Id: r.BusinessUnitId,
                     Name: r.Name ?? string.Empty,

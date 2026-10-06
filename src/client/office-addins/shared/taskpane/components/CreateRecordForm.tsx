@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   makeStyles,
   tokens,
@@ -76,7 +76,12 @@ const useStyles = makeStyles({
   errorRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
   fieldError: { color: tokens.colorPaletteRedForeground1, fontSize: tokens.fontSizeBase200 },
   note: { color: tokens.colorNeutralForeground3 },
-  actions: { display: 'flex', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
+  actions: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    flexWrap: 'wrap',
+  },
 });
 
 /** A contact as the shared LookupField shows it: "Name (email)" disambiguates two people with one name (task 091). */
@@ -181,6 +186,21 @@ export const CreateRecordForm: React.FC<CreateRecordFormProps> = ({
   const [practiceAreaError, setPracticeAreaError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
+
+  // Task 101 (owner UAT round 6 item 1): the picker's type pill can change while the form is open. Name, Description
+  // and Assigned To exist on every type and carry over; the type-only values (Matter Type, Practice Area, Project Type)
+  // and their messages do not. The required fields and reference lists follow `type` on their own.
+  const previousType = useRef(type);
+  useEffect(() => {
+    if (previousType.current === type) return;
+    previousType.current = type;
+    setMatterTypeId('');
+    setPracticeAreaId('');
+    setProjectTypeId('');
+    setMatterTypeError(null);
+    setPracticeAreaError(null);
+    setCreateError(null);
+  }, [type]);
 
   // The prefill can arrive after the form opened (it is loaded when "+ New" is first pressed). It fills the field only
   // until the user has touched it — a choice the user made (including clearing it) is never overwritten.
@@ -352,12 +372,13 @@ export const CreateRecordForm: React.FC<CreateRecordFormProps> = ({
         </Text>
       )}
 
+      {/* Task 101 (owner item 3): Cancel left (secondary), Create right (primary) — the Save tab's footer pattern. */}
       <div className={styles.actions}>
+        <Button appearance="secondary" onClick={onCancel} disabled={creating}>
+          Cancel
+        </Button>
         <Button appearance="primary" onClick={() => void handleSubmit()} disabled={!canCreate}>
           {creating ? <Spinner size="tiny" /> : 'Create'}
-        </Button>
-        <Button appearance="subtle" onClick={onCancel} disabled={creating}>
-          Cancel
         </Button>
       </div>
     </div>

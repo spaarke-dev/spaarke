@@ -54,8 +54,36 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// </summary>
 public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
 {
-    /// <summary>The attribute whose presence makes an entity securable.</summary>
+    /// <summary>
+    /// The attribute whose presence makes an entity securable — except on the entities in
+    /// <see cref="FlagIsNotASecurityInput"/>.
+    /// </summary>
     public const string SecureFlagAttribute = "sprk_issecure";
+
+    /// <summary>
+    /// Entities that CARRY <see cref="SecureFlagAttribute"/> but whose value is NOT a security input, so they are
+    /// never securable (unified-access-control-r2 task 150; owner round 10 item 11, 2026-10-03: "invoices follow
+    /// their matter").
+    /// </summary>
+    /// <remarks>
+    /// <para><b><c>sprk_invoice</c>.</b> Live dev metadata reports the column on the invoice table (the task 151 live
+    /// gate) and, until task 150, that made an invoice a securable entity in its own right: an invoice flagged
+    /// <c>true</c> under an ORDINARY matter refused every upload (no container of its own), and one flagged
+    /// <c>false</c> was read for its flag before its matter was. The owner's rule is that an invoice is secure exactly
+    /// when the record it is filed under is: <see cref="RecordContainerResolver"/>'s ancestor walk decides, through
+    /// the invoice's typed matter / project lookups (<c>RecordContainerResolver.ChildAncestorLinks</c>). The entity
+    /// stays KNOWN (<see cref="EntitySecurability.NotSecurable"/>), so its row is still read for those links. The
+    /// column itself is field-secured like the three roots' (<c>scripts/Set-SecureFlagFieldSecurity.ps1</c>), so no
+    /// user can change a value nothing reads any more.</para>
+    ///
+    /// <para><b>Why a named exception in a metadata-derived set.</b> The set is derived so a NEW carrier of the column
+    /// is secured without a code change (fail closed). This list is the opposite direction and therefore only ever
+    /// holds an entity the OWNER has ruled is not secured by its own flag; adding one is an owner decision, not a
+    /// cleanup. It is applied to the live answer AND to a cached value, so a catalog cached by a build from before this
+    /// rule (6h TTL) is not read with the invoice still securable.</para>
+    /// </remarks>
+    internal static readonly IReadOnlySet<string> FlagIsNotASecurityInput =
+        new HashSet<string>(StringComparer.Ordinal) { "sprk_invoice" };
 
     /// <summary>
     /// The cached value's format version. Bump it AND the <see cref="CacheKey"/> suffix together whenever
@@ -276,7 +304,8 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
             known.Add(logicalName);
 
             // Entities WITHOUT the attribute come back with an empty attribute collection. Presence of the
-            // attribute is the securability signal.
+            // attribute is the securability signal — except where the owner ruled its value is not a security input
+            // (FlagIsNotASecurityInput, task 150: an invoice follows its matter).
             if (entity.Attributes is null || entity.Attributes.Length == 0)
             {
                 continue;
@@ -285,7 +314,7 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
             var carriesFlag = entity.Attributes.Any(a =>
                 string.Equals(a?.LogicalName, SecureFlagAttribute, StringComparison.OrdinalIgnoreCase));
 
-            if (carriesFlag)
+            if (carriesFlag && !FlagIsNotASecurityInput.Contains(logicalName))
             {
                 securable.Add(logicalName);
             }
@@ -384,6 +413,10 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
 
         var known = new HashSet<string>(entry.Known.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.Ordinal);
         var securable = new HashSet<string>(entry.Securable.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.Ordinal);
+
+        // Task 150: a value cached before the owner's invoice rule (or by an older build still running beside this one)
+        // lists sprk_invoice as securable. The rule applies to it too, rather than waiting out the TTL.
+        securable.ExceptWith(FlagIsNotASecurityInput);
 
         // A non-empty securable set that is a subset of the known set implies the known set is non-empty too,
         // so these two conditions cover all three rules.

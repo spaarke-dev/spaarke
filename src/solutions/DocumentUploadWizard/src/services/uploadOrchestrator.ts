@@ -35,6 +35,7 @@ import {
     MultiFileUploadService,
     NavMapClient,
     DocumentRecordService,
+    withBffChildCreates,
     consoleLogger,
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
@@ -214,10 +215,15 @@ export async function orchestrateUpload(
         onUnauthorized: config.onUnauthorized,
     });
 
+    // UAC-r2 task 147 r1 (owner round 28 item 1): the document rows are created through the BFF (G5) — the server decides
+    // their owner (the Secure Record Owners team when the parent is secure); nothing is created as the user.
     const documentRecordService = new DocumentRecordService({
-        dataverseClient: config.dataverseClient,
+        dataverseClient: withBffChildCreates(config.dataverseClient, authenticatedFetch, config.bffBaseUrl),
         navMapClient,
         getEntityConfig: config.entityConfigResolver,
+        // unified-access-control-r2 task 166 f1: the row is created WITHOUT its SPE pointer; the BFF attaches the
+        // uploaded file (POST /api/v1/documents/{id}/file) and stamps the pointer after verifying it.
+        attachFile: (documentId, file) => sdapClient.attachDocumentFile(documentId, file),
         logger,
     });
 

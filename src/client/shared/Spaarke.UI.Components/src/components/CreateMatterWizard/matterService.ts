@@ -32,6 +32,7 @@ import type {
 } from '../../services/EntityCreationService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
 import { cleanGuid, discoverNavProps, toNavPropMap } from '../../services/PolymorphicResolverService';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // ---------------------------------------------------------------------------
 // Contact type (used by AssignCounselStep search results)
@@ -345,6 +346,12 @@ export class MatterService {
         warnings: [],
       };
     }
+
+    // -- Step 1b (task 142, owner Q5 + R3): the matter's "Assigned *" people get their access NOW --
+    // A client create runs no BFF writer, so this one call is its L1 trigger: the server reads the matter's own
+    // Assigned columns and grants Collaborate (or shares to a linked internal user). Never throws, never fails the
+    // wizard — a failed call is logged and the reconciliation job grants within minutes.
+    await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'matter', matterId);
 
     // -- Step 2: Upload files to SPE via BFF + create document records --
     //

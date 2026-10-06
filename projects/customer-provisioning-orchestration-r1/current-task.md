@@ -41,16 +41,18 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **T227f** — retire the unused tenant-container resolver: `ITenantContainerResolver` + its diagnostic endpoint, the unregistered L2 `SpeContainerResolverInvariantProbe`, `StagingContainerId`; amend FR-31 / project MUST row / design §4D I4; lower the ADR010 ceiling by one (`tasks/227f-retire-tenant-container-resolver.poml`). |
-| **Step** | 0 — not started. |
+| **Step** | 0 — not started. (SESSION 38 merged origin/master — uac-r2 #1312 — into the branch with T227e; see the T227e outcome below.) |
 | **Status** | pending. Owner items: W7; **dev rollout of T227d** — set `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (values in the 227d POML notes; live change, ask first). |
 | **Next Action** | Run task-execute on `tasks/227f-retire-tenant-container-resolver.poml`, then T228. |
 | **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a ✅ b ✅ c ✅ d ✅ e ✅ → f) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 ### T227e outcome (SESSION 38)
 
-- H8 finds before it creates (`FindOrCreateContainerAsync`): run state, then the type's containers by H8's display name / H8's description for this customer, owned = `spaarkeCustomerId` marker == customer, or unmarked with H8's description. 2+ → Resumable `spe-duplicate-customer-containers`. Marker written after verification; reused inactive container activated. Never rename the customer's container (constraint added).
-- Removed: KV `SPE-ContainerTypeId`, `from-topology-constants`, BFF `DEFAULT_CT_ID` (dev still has a plain, unread `DEFAULT_CT_ID` — harmless leftover). ArchTest `SpeContainerMarkerParityTests` pins the marker name across BFF and L2.
-- T186 live unknowns added: does the containers listing return `description`; `$select=id,description,customProperties` on a container GET.
+- Merged origin/master (unified-access-control-r2 #1312, task 165: H8 creation record + resume + in-doubt quarantine + root-business-unit bind; "never guess by listing"). T227e re-applied on it: a LATER run reuses the container the environment records (`sprk_SharePointEmbeddedContainerId`, H7) as `adopted` — never removed by a failed bind (`RemoveIfNotBound=false`); record vs environment disagreeing → Resumable naming both; `spaarkeCustomerId` marker after the bind. T227b grants re-applied; DAG H8 ← H3, H5. v1's listing lookup dropped.
+- Marker name = one source-linked constant `src/server/shared/Contracts/SpeContainerCustomerMarker.cs` (BFF guard + L2); ArchTest `SpeContainerMarkerParityTests`.
+- BFF T227d reconciled with uac-r2 (create = bind then mark; new DriveItemOperations reads + binding read through the guard; bulk per-container client; dashboard filtered). ArchTests BootedBff sets the Content Safety endpoint (T246).
+- Removed: KV `SPE-ContainerTypeId`, `from-topology-constants`, BFF `DEFAULT_CT_ID` (dev still has a plain, unread `DEFAULT_CT_ID` — harmless).
+- T186 live unknowns added: Worker identity reads `environmentvariabledefinitions` in the customer env; marker PATCH right after the bind PATCH.
 
 ### T227d outcome (SESSION 38)
 

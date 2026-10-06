@@ -19,7 +19,8 @@ namespace Sprk.Bff.Api.Api.Finance;
 ///   - ProblemDetails for error responses (ADR-019)
 ///
 /// <para><b>Per-record authorization (unified-access-control-r2 task 130, defect C8).</b>
-/// RequireAuthorization() alone only asks "are you anyone?" — the BFF registers no default/fallback policy.
+/// RequireAuthorization() alone only asks "are you anyone?" — neither the default policy nor the authorization
+/// FallbackPolicy (an authenticated user, UAC-r2 task 167) asks anything more.
 /// The service reads invoices/budgets APP-ONLY and writes the rollup APP-ONLY, so before this task any
 /// signed-in user could read a walled-off matter's spend, budget and 12-month timeline and force a write to
 /// it. Each route now carries a FinanceAuthorizationFilter requiring Read on the parent record AS THE

@@ -50,7 +50,7 @@
  *      inline memo content (see `projects/record-header-and-notepad-r2/design.md`
  *      §6.2). If R2 doesn't need inline memo rendering, this trigger doesn't
  *      fire from that project.
- *   2. `src/solutions/EventDetailSidePane/**/MemoSection.tsx` — currently
+ *   2. `src/solutions/EventDetailSidePane/.../MemoSection.tsx` — currently
  *      duplicates similar CRUD logic. If someone touches EventDetailSidePane's
  *      memo path for any reason, migrate it to this hook as part of the same
  *      change; that IS the second-consumer trigger. R1 was blocked from
@@ -81,6 +81,7 @@ import { SUPPORTED_MEMO_PARENTS } from '@spaarke/ui-components/hooks/toolbarLaun
 
 import type { Memo, MemoRaw } from '../types/memo';
 import { discoverMemoNavProps } from './discoverMemoNavProps';
+import { createMemoThroughBff } from '../services/memoWrites';
 
 // ---------------------------------------------------------------------------
 // Debounce duration
@@ -242,18 +243,49 @@ function flattenMemo(raw: MemoRaw): Memo {
       | string
       | undefined) ?? '';
   const cbFallbackId = (rawAny._createdby_value as string | undefined) ?? '';
+  // UAC-r2 task 147 r1 (owner round 28 item 1): "who created it" is sprk_createdbyperson, else createdby. A memo the BFF
+  // created as the application has the application as createdby; the person who asked is sprk_createdbyperson.
+  const personId = (rawAny[CREATOR_PERSON_VALUE] as string | undefined) ?? '';
+  const personName =
+    (rawAny[`${CREATOR_PERSON_VALUE}@OData.Community.Display.V1.FormattedValue`] as string | undefined) ?? '';
   return {
     sprk_memoid: raw.sprk_memoid,
     sprk_name: raw.sprk_name,
     sprk_memobody: raw.sprk_memobody,
     sprk_regardingrecordid: raw.sprk_regardingrecordid,
-    createdby: {
-      id: cb?.systemuserid ?? cbFallbackId,
-      name: cb?.fullname ?? cbFallbackName,
-    },
+    createdby: personId
+      ? { id: personId, name: personName }
+      : {
+          id: cb?.systemuserid ?? cbFallbackId,
+          name: cb?.fullname ?? cbFallbackName,
+        },
     createdon: raw.createdon,
     modifiedon: raw.modifiedon,
   };
+}
+
+/** The read form of the BFF-stamped creator-person lookup (task 147 r1). */
+const CREATOR_PERSON_VALUE = '_sprk_createdbyperson_value';
+
+/**
+ * The memo list query. With `withCreatorPerson`, the creator-person lookup rides along; without it, the pre-task-147
+ * shape (used once if Dataverse says the column does not exist yet — the schema step is a manual gate, and the list must
+ * keep working while it is pending).
+ */
+function memoListQuery(filter: string, withCreatorPerson: boolean): string {
+  return (
+    '?$select=sprk_memoid,sprk_name,sprk_memobody,sprk_regardingrecordid,createdon,modifiedon' +
+    (withCreatorPerson ? `,${CREATOR_PERSON_VALUE}` : '') +
+    '&$expand=createdby($select=fullname,systemuserid)' +
+    `&$filter=${filter}` +
+    '&$orderby=createdon desc'
+  );
+}
+
+/** True when a list query failed because the creator-person column is not on `sprk_memo` yet. */
+function isMissingCreatorPersonColumn(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? '');
+  return /sprk_createdbyperson/i.test(message);
 }
 
 // ---------------------------------------------------------------------------
@@ -312,12 +344,13 @@ export function useSprkMemoRepository(
     }
     try {
       const filter = `_${lookupField}_value eq ${regardingId}`;
-      const query =
-        '?$select=sprk_memoid,sprk_name,sprk_memobody,sprk_regardingrecordid,createdon,modifiedon' +
-        '&$expand=createdby($select=fullname,systemuserid)' +
-        `&$filter=${filter}` +
-        '&$orderby=createdon desc';
-      const result = await webApi.retrieveMultipleRecords('sprk_memo', query);
+      let result: { entities: Record<string, unknown>[] };
+      try {
+        result = await webApi.retrieveMultipleRecords('sprk_memo', memoListQuery(filter, true));
+      } catch (err) {
+        if (!isMissingCreatorPersonColumn(err)) throw err;
+        result = await webApi.retrieveMultipleRecords('sprk_memo', memoListQuery(filter, false));
+      }
       const list: Memo[] = (result.entities as unknown as MemoRaw[]).map(flattenMemo);
       setMemos(list);
       // Preserve the current selection if still present; otherwise pick top.
@@ -442,8 +475,9 @@ export function useSprkMemoRepository(
         entityLookupHint
       );
 
-      // 4. Create.
-      const created = await webApi.createRecord('sprk_memo', entity);
+      // 4. Create — through the BFF (UAC-r2 task 147 r1, owner round 28 item 1): the server decides the memo's owner (the
+      //    Secure Record Owners team under a secure record); a refusal surfaces the server's message in the error state.
+      const created = { id: await createMemoThroughBff(entity) };
 
       // 5. Refetch list so the new record appears with its full server-side
       //    fields (createdon, createdby.fullname, etc.), then focus it.

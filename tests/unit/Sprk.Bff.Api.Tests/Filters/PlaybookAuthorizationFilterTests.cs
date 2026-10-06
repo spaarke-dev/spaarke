@@ -1,412 +1,249 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Spaarke.Core.Auth;
+using Spaarke.Core.Auth.Rules;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Tests.Api.Ai;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Filters;
 
 /// <summary>
-/// Unit tests for PlaybookAuthorizationFilter - authorization for Playbook endpoints.
-/// Tests owner-only and shared access modes.
+/// PlaybookAuthorizationFilter on its SIBLING routes (PUT/share/unshare/canvas/node writes → OwnerOnly; GET by id,
+/// sharing, canvas, clone, validate, run history → OwnerOrSharedOrPublic).
 /// </summary>
+/// <remarks>
+/// unified-access-control-r2 task 164, owner round 12 item 6: OwnerOnly used to compare the caller's Entra
+/// <c>oid</c> with the playbook's <c>_ownerid_value</c> (a Dataverse systemuserid), and the shared branch passed
+/// the oid to a teammemberships query keyed by systemuserid — two GUID spaces, so OwnerOnly denied everyone and
+/// OwnerOrSharedOrPublic reduced to "public". These tests pin the corrected identity: the caller's systemuserid
+/// (WhoAmI over OBO) for OwnerOnly, and the playbook-use decision (public, or the caller's own Dataverse Read on
+/// the row) for OwnerOrSharedOrPublic. The decision is evaluated by the REAL <see cref="AuthorizationService"/>
+/// over a recording <see cref="IAccessDataSource"/>; the routes of task 164's own findings are covered through the
+/// real host in <see cref="PlaybookRouteAuthorizationContractTests"/>.
+/// </remarks>
 [Trait("status", "repaired")]
 public class PlaybookAuthorizationFilterTests
 {
-    private readonly Mock<IPlaybookService> _playbookServiceMock;
-    private readonly Mock<IPlaybookSharingService> _sharingServiceMock;
-    private readonly Mock<ILogger<PlaybookAuthorizationFilter>> _loggerMock;
+    private const string Playbooks = "sprk_analysisplaybooks";
 
-    private static readonly Guid TestUserId = Guid.Parse("11111111-1111-1111-1111-111111111111");
-    private static readonly Guid OtherUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid CallerOid = Guid.Parse("11111111-1111-1111-1111-111111111111");
+    private static readonly Guid CallerSystemUserId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+    private static readonly Guid OtherSystemUserId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid TestPlaybookId = Guid.Parse("33333333-3333-3333-3333-333333333333");
 
-    public PlaybookAuthorizationFilterTests()
-    {
-        _playbookServiceMock = new Mock<IPlaybookService>();
-        _sharingServiceMock = new Mock<IPlaybookSharingService>();
-        _loggerMock = new Mock<ILogger<PlaybookAuthorizationFilter>>();
-    }
+    private readonly Mock<IPlaybookService> _playbookService = new(MockBehavior.Strict);
+    private readonly PlaybookRouteAuthorizationContractTests.RecordingAccessDataSource _access = new();
+    private readonly PlaybookRouteAuthorizationContractTests.RecordingSystemUserProbe _probe = new() { SystemUserId = CallerSystemUserId };
 
     private PlaybookAuthorizationFilter CreateFilter(PlaybookAuthorizationMode mode) =>
-        new(_playbookServiceMock.Object, _sharingServiceMock.Object, _loggerMock.Object, mode);
-
-    private static ClaimsPrincipal CreateUser(Guid userId)
-    {
-        var claims = new List<Claim>
-        {
-            new("oid", userId.ToString()), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC")
-        };
-        var identity = new ClaimsIdentity(claims, "TestAuth");
-        return new ClaimsPrincipal(identity);
-    }
-
-    private static ClaimsPrincipal CreateUserWithOidClaim(Guid userId)
-    {
-        var claims = new List<Claim>
-        {
-            new("oid", userId.ToString())
-        };
-        var identity = new ClaimsIdentity(claims, "TestAuth");
-        return new ClaimsPrincipal(identity);
-    }
-
-    private static ClaimsPrincipal CreateAnonymousUser()
-    {
-        return new ClaimsPrincipal(new ClaimsIdentity());
-    }
-
-    private PlaybookResponse CreatePlaybook(Guid ownerId, bool isPublic = false) => new()
-    {
-        Id = TestPlaybookId,
-        Name = "Test Playbook",
-        OwnerId = ownerId,
-        IsPublic = isPublic
-    };
-
-    #region PlaybookAuthorizationMode Tests
+        new(
+            _playbookService.Object,
+            NullLogger<PlaybookAuthorizationFilter>.Instance,
+            mode,
+            new AuthorizationService(
+                _access,
+                new IAuthorizationRule[] { new OperationAccessRule(NullLogger<OperationAccessRule>.Instance) },
+                NullLogger<AuthorizationService>.Instance));
 
     [Fact]
-    public void PlaybookAuthorizationMode_OwnerOnly_HasCorrectValue()
+    public void PlaybookAuthorizationMode_ValuesAreAppendedNeverRenumbered()
     {
         Assert.Equal(0, (int)PlaybookAuthorizationMode.OwnerOnly);
-    }
-
-    [Fact]
-    public void PlaybookAuthorizationMode_OwnerOrSharedOrPublic_HasCorrectValue()
-    {
         Assert.Equal(1, (int)PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
+        Assert.Equal(2, (int)PlaybookAuthorizationMode.UniformById);
+        Assert.Equal(3, (int)PlaybookAuthorizationMode.Run);
     }
 
-    #endregion
-
-    #region Constructor Tests
-
+    // ── OwnerOnly ─────────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public void Constructor_WithAllParameters_CreatesFilter()
+    public async Task OwnerOnly_CallerSystemUserIdIsTheOwner_Allows_EvenThoughTheOidDiffers()
     {
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        Assert.NotNull(filter);
-    }
+        PlaybookOwnedBy(CallerSystemUserId);
 
-    #endregion
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOnly);
 
-    #region OwnerOnly Mode Tests
-
-    [Fact]
-    public async Task OwnerOnly_WithOwner_ShouldAllowAccess()
-    {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        var playbook = CreatePlaybook(TestUserId);
-
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
-
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-        var nextCalled = false;
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ =>
-        {
-            nextCalled = true;
-            return ValueTask.FromResult<object?>("success");
-        });
-
-        // Assert
         Assert.True(nextCalled);
         Assert.Equal("success", result);
     }
 
     [Fact]
-    public async Task OwnerOnly_WithNonOwner_ShouldDenyAccess()
+    public async Task OwnerOnly_OwnerIdEqualToTheCallersOid_IsNotOwnership()
     {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        var playbook = CreatePlaybook(OtherUserId); // Different owner
+        // The pre-task-164 comparison: _ownerid_value is a systemuserid, so an oid-shaped value matching it
+        // proves nothing about the caller.
+        PlaybookOwnedBy(CallerOid);
 
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOnly);
 
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ => ValueTask.FromResult<object?>("should not reach"));
-
-        // Assert
-        Assert.IsType<ProblemHttpResult>(result);
+        Assert.False(nextCalled);
+        Assert.Equal(403, Assert.IsType<ProblemHttpResult>(result).StatusCode);
     }
 
     [Fact]
-    public async Task OwnerOnly_WithPublicPlaybook_NonOwner_ShouldDenyAccess()
+    public async Task OwnerOnly_OtherOwner_Denies403()
     {
-        // Arrange - OwnerOnly ignores public flag
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        var playbook = CreatePlaybook(OtherUserId, isPublic: true);
+        PlaybookOwnedBy(OtherSystemUserId);
 
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOnly);
 
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ => ValueTask.FromResult<object?>("should not reach"));
-
-        // Assert - Should deny because OwnerOnly mode requires ownership
-        Assert.IsType<ProblemHttpResult>(result);
-    }
-
-    #endregion
-
-    #region OwnerOrSharedOrPublic Mode Tests
-
-    [Fact]
-    public async Task OwnerOrSharedOrPublic_WithOwner_ShouldAllowAccess()
-    {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
-        var playbook = CreatePlaybook(TestUserId, isPublic: false);
-
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
-
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-        var nextCalled = false;
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ =>
-        {
-            nextCalled = true;
-            return ValueTask.FromResult<object?>("success");
-        });
-
-        // Assert
-        Assert.True(nextCalled);
+        Assert.False(nextCalled);
+        Assert.Equal(403, Assert.IsType<ProblemHttpResult>(result).StatusCode);
     }
 
     [Fact]
-    public async Task OwnerOrSharedOrPublic_WithPublicPlaybook_ShouldAllowAccess()
+    public async Task OwnerOnly_UnresolvableCallerSystemUserId_Denies403()
     {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
-        var playbook = CreatePlaybook(OtherUserId, isPublic: true);
+        PlaybookOwnedBy(CallerSystemUserId);
+        _probe.SystemUserId = null;
 
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOnly);
 
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-        var nextCalled = false;
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ =>
-        {
-            nextCalled = true;
-            return ValueTask.FromResult<object?>("success");
-        });
-
-        // Assert
-        Assert.True(nextCalled);
+        Assert.False(nextCalled);
+        Assert.Equal(403, Assert.IsType<ProblemHttpResult>(result).StatusCode);
     }
 
     [Fact]
-    public async Task OwnerOrSharedOrPublic_WithSharedAccess_ShouldAllowAccess()
+    public async Task OwnerOnly_UnknownPlaybook_Is404()
     {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
-        var playbook = CreatePlaybook(OtherUserId, isPublic: false);
-
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
-
-        _sharingServiceMock
-            .Setup(s => s.UserHasSharedAccessAsync(
-                TestPlaybookId,
-                TestUserId,
-                PlaybookAccessRights.Read,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-        var nextCalled = false;
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ =>
-        {
-            nextCalled = true;
-            return ValueTask.FromResult<object?>("success");
-        });
-
-        // Assert
-        Assert.True(nextCalled);
-    }
-
-    [Fact]
-    public async Task OwnerOrSharedOrPublic_WithNoAccess_ShouldDenyAccess()
-    {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
-        var playbook = CreatePlaybook(OtherUserId, isPublic: false);
-
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
-
-        _sharingServiceMock
-            .Setup(s => s.UserHasSharedAccessAsync(
-                TestPlaybookId,
-                TestUserId,
-                PlaybookAccessRights.Read,
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ => ValueTask.FromResult<object?>("should not reach"));
-
-        // Assert
-        Assert.IsType<ProblemHttpResult>(result);
-    }
-
-    #endregion
-
-    #region Edge Cases
-
-    [Fact]
-    public async Task Filter_WithNoUserClaim_ShouldReturn401()
-    {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        var user = CreateAnonymousUser();
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ => ValueTask.FromResult<object?>("should not reach"));
-
-        // Assert
-        Assert.IsType<ProblemHttpResult>(result);
-    }
-
-    [Fact]
-    public async Task Filter_WithInvalidPlaybookId_ShouldReturn400()
-    {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContextWithInvalidPlaybookId(user);
-        var context = CreateInvocationContext(httpContext);
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ => ValueTask.FromResult<object?>("should not reach"));
-
-        // Assert
-        Assert.IsType<ProblemHttpResult>(result);
-    }
-
-    [Fact]
-    public async Task Filter_WithNonExistentPlaybook_ShouldReturn404()
-    {
-        // Arrange
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
+        _playbookService.Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((PlaybookResponse?)null);
 
-        var user = CreateUser(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOnly);
 
-        // Act
-        var result = await filter.InvokeAsync(context, _ => ValueTask.FromResult<object?>("should not reach"));
-
-        // Assert
+        Assert.False(nextCalled);
         Assert.IsType<NotFound>(result);
     }
 
+    // ── OwnerOrSharedOrPublic: the playbook-use decision ─────────────────────────────────────
+
     [Fact]
-    public async Task Filter_WithOidClaim_ShouldExtractUserId()
+    public async Task Access_PublicPlaybook_Allows_WithoutAnyRightsQuery()
     {
-        // Arrange - Uses "oid" claim instead of NameIdentifier
-        var filter = CreateFilter(PlaybookAuthorizationMode.OwnerOnly);
-        var playbook = CreatePlaybook(TestUserId);
+        Playbook(isPublic: true);
 
-        _playbookServiceMock
-            .Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbook);
+        var (_, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
 
-        var user = CreateUserWithOidClaim(TestUserId);
-        var httpContext = CreateHttpContext(user, TestPlaybookId);
-        var context = CreateInvocationContext(httpContext);
+        Assert.True(nextCalled);
+        Assert.Empty(_access.Calls);
+    }
+
+    [Fact]
+    public async Task Access_PrivatePlaybookTheCallerCanReadInDataverse_Allows()
+    {
+        // Ownership, a team GrantAccess share and role depth all surface as Read in the caller's own answer.
+        Playbook(isPublic: false);
+        _access.Grant(Playbooks, TestPlaybookId, AccessRights.Read);
+
+        var (_, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
+
+        Assert.True(nextCalled);
+        Assert.Contains(_access.Calls, c => c.Set == Playbooks && c.Id == TestPlaybookId && c.HasToken);
+    }
+
+    [Fact]
+    public async Task Access_PrivatePlaybookWithoutRead_Denies403()
+    {
+        Playbook(isPublic: false);
+        _access.Grant(Playbooks, TestPlaybookId, AccessRights.AppendTo);
+
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
+
+        Assert.False(nextCalled);
+        Assert.Equal(403, Assert.IsType<ProblemHttpResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task Access_AccessSeamFault_Denies403_NeverAllows()
+    {
+        Playbook(isPublic: false);
+        _access.ThrowOnEveryCall = new HttpRequestException("RetrievePrincipalAccess failed");
+
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
+
+        Assert.False(nextCalled);
+        Assert.Equal(403, Assert.IsType<ProblemHttpResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task Access_UnknownPlaybook_Is404()
+    {
+        _playbookService.Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PlaybookResponse?)null);
+
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOrSharedOrPublic);
+
+        Assert.False(nextCalled);
+        Assert.IsType<NotFound>(result);
+    }
+
+    // ── Caller identity and route id ─────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task NoOidClaim_Is401()
+    {
+        var (result, nextCalled) = await InvokeAsync(
+            PlaybookAuthorizationMode.OwnerOnly, user: new ClaimsPrincipal(new ClaimsIdentity()));
+
+        Assert.False(nextCalled);
+        Assert.Equal(401, Assert.IsType<ProblemHttpResult>(result).StatusCode);
+    }
+
+    [Fact]
+    public async Task NonGuidRouteId_Is400()
+    {
+        var (result, nextCalled) = await InvokeAsync(PlaybookAuthorizationMode.OwnerOnly, routeId: "not-a-guid");
+
+        Assert.False(nextCalled);
+        Assert.Equal(400, Assert.IsType<ProblemHttpResult>(result).StatusCode);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────────────────────────────
+
+    private void PlaybookOwnedBy(Guid ownerId) =>
+        _playbookService.Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse { Id = TestPlaybookId, Name = "Test Playbook", OwnerId = ownerId, IsPublic = false });
+
+    private void Playbook(bool isPublic) =>
+        _playbookService.Setup(s => s.GetPlaybookAsync(TestPlaybookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PlaybookResponse { Id = TestPlaybookId, Name = "Test Playbook", OwnerId = OtherSystemUserId, IsPublic = isPublic });
+
+    private async Task<(object? Result, bool NextCalled)> InvokeAsync(
+        PlaybookAuthorizationMode mode, ClaimsPrincipal? user = null, string? routeId = null)
+    {
+        var services = new ServiceCollection()
+            .AddSingleton<CallerRecordAccessProbe>(_probe)
+            .BuildServiceProvider();
+        var httpContext = new DefaultHttpContext
+        {
+            User = user ?? new ClaimsPrincipal(new ClaimsIdentity(
+                new[] { new Claim("oid", CallerOid.ToString()), new Claim(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid") },
+                "TestAuth")),
+            RequestServices = services,
+        };
+        httpContext.Request.RouteValues["id"] = routeId ?? TestPlaybookId.ToString();
+        httpContext.Request.Headers.Authorization = "Bearer caller-token";
+
+        var context = new Mock<EndpointFilterInvocationContext>();
+        context.Setup(c => c.HttpContext).Returns(httpContext);
+
         var nextCalled = false;
-
-        // Act
-        var result = await filter.InvokeAsync(context, _ =>
+        var result = await CreateFilter(mode).InvokeAsync(context.Object, _ =>
         {
             nextCalled = true;
             return ValueTask.FromResult<object?>("success");
         });
 
-        // Assert
-        Assert.True(nextCalled);
+        return (result, nextCalled);
     }
-
-    #endregion
-
-    #region Helper Methods
-
-    private static HttpContext CreateHttpContext(ClaimsPrincipal user, Guid playbookId)
-    {
-        var httpContext = new DefaultHttpContext
-        {
-            User = user
-        };
-        httpContext.Request.RouteValues["id"] = playbookId.ToString();
-        return httpContext;
-    }
-
-    private static HttpContext CreateHttpContextWithInvalidPlaybookId(ClaimsPrincipal user)
-    {
-        var httpContext = new DefaultHttpContext
-        {
-            User = user
-        };
-        httpContext.Request.RouteValues["id"] = "not-a-guid";
-        return httpContext;
-    }
-
-    private static EndpointFilterInvocationContext CreateInvocationContext(HttpContext httpContext)
-    {
-        var contextMock = new Mock<EndpointFilterInvocationContext>();
-        contextMock.Setup(c => c.HttpContext).Returns(httpContext);
-        return contextMock.Object;
-    }
-
-    #endregion
 }

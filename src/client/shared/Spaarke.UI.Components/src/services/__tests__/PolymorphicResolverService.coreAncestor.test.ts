@@ -28,6 +28,7 @@ import {
   CORE_RECORD_ENTITIES,
   CHILD_RECORD_ENTITIES,
   CORE_ANCESTOR_LOOKUPS,
+  INTERMEDIATE_ROOT_COLUMNS,
   isCoreRecordEntity,
   isChildRecordEntity,
   deriveCoreAncestorStamps,
@@ -198,6 +199,7 @@ describe('FR-26 taxonomy', () => {
       'sprk_event',
       'sprk_todo',
       'sprk_analysis',
+      'sprk_memo',
     ]);
   });
 
@@ -277,6 +279,25 @@ describe('deriveCoreAncestorStamps', () => {
         recordId: MATTER_ID,
       },
     ]);
+  });
+
+  it('derivesTheProjectAncestorFromAMemoTarget', async () => {
+    // unified-access-control-r2 task 147: sprk_memo is a CHILD. A record filed
+    // under a memo inherits the memo's own core ancestor and no longer reads as
+    // unclassified.
+    const { webApi, calls } = buildWebApi({ _sprk_regardingproject_value: PROJECT_ID });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_memo',
+      COMM_ID,
+      metadataFetchStub({ sprk_memo: COMMUNICATION_CORE_COLUMNS })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps.map(s => [s.entityType, s.lookupAttribute, s.recordId])).toEqual([
+      ['sprk_project', 'sprk_regardingproject', PROJECT_ID],
+    ]);
+    expect(calls.filter(c => c.query.includes('_value')).map(c => c.entity)).toEqual(['sprk_memo']);
   });
 
   it('selectsOnlyTheAncestorColumnsThatExistOnTheTarget', async () => {
@@ -392,6 +413,354 @@ describe('deriveCoreAncestorStamps', () => {
 
     expect(result.stamps[0].recordId).toBe(MATTER_ID);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Intermediate targets — task 169 mirrors server task 156's
+// CoreAncestorResolver.IntermediateRootColumns (owner round 8, 156 item 13a)
+// ---------------------------------------------------------------------------
+
+const INVOICE_ID = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+const BUDGET_ID = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+const DOC_ID = '99999999-9999-9999-9999-999999999999';
+const WA_ID = '77777777-7777-7777-7777-777777777777';
+const WA_ID_2 = '88888888-8888-8888-8888-888888888888';
+const PROJECT_ID_2 = '66666666-6666-6666-6666-666666666666';
+
+/** The six root columns of `sprk_document` (the project / matter / work assignment document links). */
+const DOCUMENT_ROOT_COLUMNS = [
+  'sprk_matter',
+  'sprk_relatedmatter',
+  'sprk_project',
+  'sprk_relatedproject',
+  'sprk_workassignment',
+  'sprk_relatedworkassignment',
+];
+
+/**
+ * What the metadata endpoint lists for `sprk_document` in this suite: its root
+ * columns PLUS lookups that are not root columns of a document (a non-root link,
+ * the excluded related service request, a `sprk_regarding{core}`-named column
+ * and `ownerid`). Only the six root columns may be read.
+ */
+const DOCUMENT_METADATA_COLUMNS = [
+  ...DOCUMENT_ROOT_COLUMNS,
+  'sprk_invoice',
+  'sprk_relatedservicerequest',
+  'sprk_regardingmatter',
+  'ownerid',
+];
+
+const DOCUMENT_TARGET: IRegardingTargetDescriptor = {
+  entityType: 'sprk_document',
+  entitySet: 'sprk_documents',
+  lookupAttribute: 'sprk_regardingdocument',
+  navPropHint: 'document',
+};
+
+describe('INTERMEDIATE_ROOT_COLUMNS — table closure', () => {
+  it('coversEveryChildEntityAsAnIntermediate', () => {
+    const intermediates = new Set(INTERMEDIATE_ROOT_COLUMNS.map(r => r.intermediate));
+    for (const child of CHILD_RECORD_ENTITIES) {
+      expect(intermediates.has(child)).toBe(true);
+    }
+  });
+
+  it('makesNoCoreEntityAnIntermediate', () => {
+    const intermediates = new Set(INTERMEDIATE_ROOT_COLUMNS.map(r => r.intermediate));
+    for (const core of CORE_RECORD_ENTITIES) {
+      expect(intermediates.has(core)).toBe(false);
+    }
+  });
+
+  it('pointsEveryRowAtACoreRootWithAStampColumn', () => {
+    for (const row of INTERMEDIATE_ROOT_COLUMNS) {
+      expect(CORE_RECORD_ENTITIES).toContain(row.rootEntity);
+      expect(CORE_ANCESTOR_LOOKUPS.some(c => c.entityType === row.rootEntity)).toBe(true);
+    }
+  });
+
+  it('listsNoIntermediateColumnPairTwice', () => {
+    const pairs = INTERMEDIATE_ROOT_COLUMNS.map(r => `${r.intermediate}|${r.column}`);
+    expect(new Set(pairs).size).toBe(pairs.length);
+  });
+});
+
+describe('deriveCoreAncestorStamps — intermediate targets', () => {
+  it('derivesAnInvoicesMatterFromItsTypedLookup', async () => {
+    const { webApi } = buildWebApi({ _sprk_matter_value: MATTER_ID, _sprk_project_value: null });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_invoice',
+      INVOICE_ID,
+      metadataFetchStub({ sprk_invoice: ['sprk_matter', 'sprk_project'] })
+    );
+
+    expect(result.status).toBe('derived');
+    // Written on the CHILD's stamp column, never on the invoice's own column name.
+    expect(result.stamps).toEqual([
+      {
+        entityType: 'sprk_matter',
+        entitySet: 'sprk_matters',
+        lookupAttribute: 'sprk_regardingmatter',
+        recordId: MATTER_ID,
+      },
+    ]);
+  });
+
+  it('derivesABudgetsProjectFromItsTypedLookup', async () => {
+    const { webApi } = buildWebApi({ _sprk_matter_value: null, _sprk_project_value: PROJECT_ID });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_budget',
+      BUDGET_ID,
+      metadataFetchStub({ sprk_budget: ['sprk_matter', 'sprk_project'] })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps).toEqual([
+      {
+        entityType: 'sprk_project',
+        entitySet: 'sprk_projects',
+        lookupAttribute: 'sprk_regardingproject',
+        recordId: PROJECT_ID,
+      },
+    ]);
+  });
+
+  it('stampsADocumentsRelatedMatterOnTheChildsRegardingMatterColumn', async () => {
+    const { webApi } = buildWebApi({ _sprk_relatedmatter_value: MATTER_ID });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_document',
+      DOC_ID,
+      metadataFetchStub({ sprk_document: DOCUMENT_METADATA_COLUMNS })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps).toHaveLength(1);
+    expect(result.stamps[0]).toEqual({
+      entityType: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      lookupAttribute: 'sprk_regardingmatter',
+      recordId: MATTER_ID,
+    });
+    expect(result.stamps[0].lookupAttribute).not.toBe('sprk_relatedmatter');
+    expect(result.stamps[0].lookupAttribute).not.toBe('sprk_matter');
+  });
+
+  it('derivesOneStampPerRootTypeWhenAnInvoiceNamesBothAMatterAndAProject', async () => {
+    const { webApi } = buildWebApi({ _sprk_matter_value: MATTER_ID, _sprk_project_value: PROJECT_ID });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_invoice',
+      INVOICE_ID,
+      metadataFetchStub({ sprk_invoice: ['sprk_matter', 'sprk_project'] })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps.map(s => [s.entityType, s.lookupAttribute, s.recordId]).sort()).toEqual(
+      [
+        ['sprk_matter', 'sprk_regardingmatter', MATTER_ID],
+        ['sprk_project', 'sprk_regardingproject', PROJECT_ID],
+      ].sort()
+    );
+  });
+
+  it.each(['sprk_agreement', 'sprk_reportcard'])(
+    'derives%sProjectFromItsRegardingProjectWithoutBecomingAChild',
+    async intermediate => {
+      const { webApi } = buildWebApi({ _sprk_regardingmatter_value: null, _sprk_regardingproject_value: PROJECT_ID });
+      const result = await deriveCoreAncestorStamps(
+        webApi,
+        intermediate,
+        BUDGET_ID,
+        metadataFetchStub({ [intermediate]: ['sprk_regardingmatter', 'sprk_regardingproject'] })
+      );
+
+      expect(result.status).toBe('derived');
+      expect(result.stamps).toEqual([
+        {
+          entityType: 'sprk_project',
+          entitySet: 'sprk_projects',
+          lookupAttribute: 'sprk_regardingproject',
+          recordId: PROJECT_ID,
+        },
+      ]);
+      // Being an intermediate does not move the access taxonomy.
+      expect(isChildRecordEntity(intermediate)).toBe(false);
+    }
+  );
+
+  it('readsExactlyTheDocumentsRootColumnsInOneRead', async () => {
+    const { webApi, calls } = buildWebApi({ _sprk_matter_value: MATTER_ID });
+    await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_document',
+      DOC_ID,
+      metadataFetchStub({ sprk_document: DOCUMENT_METADATA_COLUMNS })
+    );
+
+    const ancestorReads = calls.filter(c => c.query.includes('_value'));
+    expect(ancestorReads).toHaveLength(1); // one hop
+    expect(ancestorReads[0].entity).toBe('sprk_document');
+
+    const select = /\$select=([^&]*)/.exec(ancestorReads[0].query)?.[1] ?? '';
+    expect(select.split(',').sort()).toEqual(DOCUMENT_ROOT_COLUMNS.map(c => `_${c}_value`).sort());
+    expect(select).not.toContain('sprk_regarding');
+    expect(select).not.toContain('servicerequest');
+    expect(select).not.toContain('_sprk_invoice_value');
+    expect(select).not.toContain('ownerid');
+  });
+
+  it.each([
+    ['matter', { _sprk_matter_value: MATTER_ID, _sprk_relatedmatter_value: MATTER_ID_2 }],
+    ['project', { _sprk_project_value: PROJECT_ID, _sprk_relatedproject_value: PROJECT_ID_2 }],
+    ['work assignment', { _sprk_workassignment_value: WA_ID, _sprk_relatedworkassignment_value: WA_ID_2 }],
+  ])('failsClosedWhenADocumentNamesTwoDifferent %s records', async (_label, row) => {
+    const { webApi } = buildWebApi(row);
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_document',
+      DOC_ID,
+      metadataFetchStub({ sprk_document: DOCUMENT_METADATA_COLUMNS })
+    );
+
+    expect(result.status).toBe('error');
+    expect(result.stamps).toEqual([]);
+    expect(result.error).toContain('sprk_document');
+    expect(result.error).toContain('two different');
+  });
+
+  it('namesTheTargetTheRootTypeAndBothColumnsInTheAmbiguityError', async () => {
+    const { webApi } = buildWebApi({ _sprk_matter_value: MATTER_ID, _sprk_relatedmatter_value: MATTER_ID_2 });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_document',
+      DOC_ID,
+      metadataFetchStub({ sprk_document: DOCUMENT_METADATA_COLUMNS })
+    );
+
+    expect(result.error).toContain(`sprk_document(${DOC_ID})`);
+    expect(result.error).toContain('sprk_matter records');
+    expect(result.error).toContain('sprk_matter and sprk_relatedmatter');
+  });
+
+  it('refusesToBuildAPayloadForADocumentNamingTwoDifferentMatters', async () => {
+    const { webApi } = buildWebApi({ _sprk_matter_value: MATTER_ID, _sprk_relatedmatter_value: MATTER_ID_2 });
+    const result = await buildRegardingSelectionPayload(
+      webApi,
+      hostTodoNavProps(),
+      CATALOG,
+      DOCUMENT_TARGET,
+      DOC_ID,
+      'Engagement letter',
+      undefined,
+      metadataFetchStub({ sprk_document: DOCUMENT_METADATA_COLUMNS })
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.payload).toBeUndefined();
+    expect(result.ancestor.status).toBe('error');
+  });
+
+  it('stampsOnceWhenADocumentNamesTheSameMatterTwiceInDifferentSpellings', async () => {
+    // A matter id with hex LETTERS, so upper-casing really changes the spelling.
+    const LETTERED_MATTER_ID = 'abcdef12-3456-7890-abcd-ef1234567890';
+    const { webApi } = buildWebApi({
+      _sprk_matter_value: `{${LETTERED_MATTER_ID.toUpperCase()}}`,
+      _sprk_relatedmatter_value: LETTERED_MATTER_ID,
+    });
+    const result = await deriveCoreAncestorStamps(
+      webApi,
+      'sprk_document',
+      DOC_ID,
+      metadataFetchStub({ sprk_document: DOCUMENT_METADATA_COLUMNS })
+    );
+
+    expect(result.status).toBe('derived');
+    expect(result.stamps).toEqual([
+      {
+        entityType: 'sprk_matter',
+        entitySet: 'sprk_matters',
+        lookupAttribute: 'sprk_regardingmatter',
+        recordId: LETTERED_MATTER_ID,
+      },
+    ]);
+  });
+
+  describe('fails closed on a new intermediate (budget)', () => {
+    const budgetColumns = { sprk_budget: ['sprk_matter', 'sprk_project'] };
+
+    it('errorsWhenMetadataDiscoveryFails', async () => {
+      const { webApi, calls } = buildWebApi({ _sprk_matter_value: MATTER_ID });
+      const result = await deriveCoreAncestorStamps(
+        webApi,
+        'sprk_budget',
+        BUDGET_ID,
+        metadataFetchStub({}, { failFor: ['sprk_budget'] })
+      );
+
+      expect(result.status).toBe('error');
+      expect(result.stamps).toEqual([]);
+      expect(calls).toHaveLength(0);
+    });
+
+    it('errorsWhenTheAncestorReadThrows', async () => {
+      const { webApi } = buildWebApi(null, { throwOnAncestorRead: true });
+      const result = await deriveCoreAncestorStamps(webApi, 'sprk_budget', BUDGET_ID, metadataFetchStub(budgetColumns));
+
+      expect(result.status).toBe('error');
+      expect(result.stamps).toEqual([]);
+      expect(result.error).toContain('Dataverse 503');
+    });
+
+    it('errorsWhenTheReadReturnsNoRow', async () => {
+      // A budget the user cannot read comes back as no row.
+      const { webApi } = buildWebApi(null);
+      const result = await deriveCoreAncestorStamps(webApi, 'sprk_budget', BUDGET_ID, metadataFetchStub(budgetColumns));
+
+      expect(result.status).toBe('error');
+      expect(result.stamps).toEqual([]);
+    });
+
+    it('answersNoAncestorWithoutAReadWhenTheBudgetCarriesNoRootColumn', async () => {
+      const { webApi, calls } = buildWebApi({ _sprk_matter_value: MATTER_ID });
+      const result = await deriveCoreAncestorStamps(
+        webApi,
+        'sprk_budget',
+        BUDGET_ID,
+        metadataFetchStub({ sprk_budget: ['ownerid'] })
+      );
+
+      expect(result.status).toBe('no-ancestor');
+      expect(result.stamps).toEqual([]);
+      expect(calls.filter(c => c.query.includes('_value'))).toHaveLength(0);
+    });
+
+    it('answersNoAncestorWhenBothRootColumnsAreNull', async () => {
+      const { webApi } = buildWebApi({ _sprk_matter_value: null, _sprk_project_value: null });
+      const result = await deriveCoreAncestorStamps(webApi, 'sprk_budget', BUDGET_ID, metadataFetchStub(budgetColumns));
+
+      expect(result.status).toBe('no-ancestor');
+      expect(result.stamps).toEqual([]);
+      expect(result.error).toBeUndefined();
+    });
+  });
+
+  it.each(['sprk_organization', 'contact', 'account'])(
+    'leaves %s unclassified with no read and no metadata call',
+    async entity => {
+      const { webApi, calls } = buildWebApi({ _sprk_regardingmatter_value: MATTER_ID });
+      const fetchSpy = jest.fn(metadataFetchStub({ [entity]: COMMUNICATION_CORE_COLUMNS }));
+      const result = await deriveCoreAncestorStamps(webApi, entity, PROJECT_ID, fetchSpy as unknown as typeof fetch);
+
+      expect(result.status).toBe('unclassified');
+      expect(result.stamps).toEqual([]);
+      expect(calls).toHaveLength(0);
+      expect(fetchSpy).not.toHaveBeenCalled();
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------

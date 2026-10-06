@@ -16,9 +16,9 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services;
+using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Engine.Rungs;
@@ -231,6 +231,7 @@ public class InboundPipelineTests
                 _dataverseServiceMock.Object,
                 AssociationTestSupport.Mapper(),
                 Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
                 Mock.Of<ILogger<IncomingAssociationResolver>>()),
             new GraphMessageNormalizer(),
             new GraphMessageToEmlConverter(),
@@ -242,6 +243,7 @@ public class InboundPipelineTests
             Mock.Of<ITextExtractor>(),
             Options.Create(new AttachmentMatchOptions { Enabled = false }),
             CreateConfiguration(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<IncomingCommunicationProcessor>>());
     }
 

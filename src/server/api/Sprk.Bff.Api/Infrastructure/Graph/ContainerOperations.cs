@@ -33,9 +33,16 @@ public class ContainerOperations
         _metadataCache = metadataCache; // Optional: cache can be null if not configured
     }
 
+    /// <summary>
+    /// Creates an SPE container and binds it to <paramref name="owningBusinessUnitId"/> before returning
+    /// (<see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp"/>; unified-access-control-r2 task 165,
+    /// owner round 20 item 1). A container whose stamp cannot be written and read back is soft-deleted again and the
+    /// call throws — no container this path makes is left active and unbound.
+    /// </summary>
     public async Task<ContainerDto?> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
+        Guid owningBusinessUnitId,
         string? description = null,
         CancellationToken ct = default)
     {
@@ -45,6 +52,11 @@ public class ContainerOperations
         var activity = Activity.Current;
         activity?.SetTag("operation", "CreateContainer");
         activity?.SetTag("containerTypeId", containerTypeId.ToString());
+
+        if (owningBusinessUnitId == Guid.Empty)
+        {
+            throw new ArgumentException("A container is created only with its owning business unit.", nameof(owningBusinessUnitId));
+        }
 
         _logger.LogInformation("Creating SPE container {DisplayName} with type {ContainerTypeId}",
             displayName, containerTypeId);
@@ -75,6 +87,8 @@ public class ContainerOperations
             _logger.LogInformation("Successfully created SPE container {ContainerId} with display name {DisplayName}",
                 createdContainer.Id, displayName);
 
+            await BindNewContainerAsync(graphClient, createdContainer.Id!, owningBusinessUnitId, ct);
+
             // Without the marker this stamp could not reach its own new container (task 227d).
             await _ownership.MarkOwnedAsync(createdContainer.Id!, ct);
 
@@ -98,6 +112,48 @@ public class ContainerOperations
         {
             _logger.LogError(ex, "Unexpected error creating container: {Error}", ex.Message);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Stamps the just-created container, reads the stamp back, and on any failure soft-deletes it and throws
+    /// <see cref="InvalidOperationException"/> (the caller's existing "container could not be created" path).
+    /// </summary>
+    private async Task BindNewContainerAsync(
+        GraphServiceClient graphClient, string containerId, Guid owningBusinessUnitId, CancellationToken ct)
+    {
+        try
+        {
+            await SpeAdminGraphService.WriteBusinessUnitStampAsync(graphClient, containerId, owningBusinessUnitId, ct);
+
+            var readBack = await SpeAdminGraphService.ReadContainerBindingAsync(graphClient, containerId, deleted: false, ct);
+            if (readBack?.Binding.BusinessUnitId != owningBusinessUnitId)
+            {
+                throw new InvalidOperationException("The business-unit stamp did not read back after the write.");
+            }
+
+            _logger.LogInformation("Container {ContainerId} bound to business unit {BusinessUnitId}",
+                containerId, owningBusinessUnitId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "Container {ContainerId} was created but could not be bound to business unit {BusinessUnitId} — removing it.",
+                containerId, owningBusinessUnitId);
+
+            try
+            {
+                await graphClient.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: CancellationToken.None);
+            }
+            catch (Exception deleteEx)
+            {
+                _logger.LogCritical(deleteEx,
+                    "Container {ContainerId} is UNBOUND and could not be removed; no admin route reaches it until the backfill " +
+                    "binds it (-Bind) or an operator removes it.", containerId);
+            }
+
+            throw new InvalidOperationException(
+                $"The SPE container '{containerId}' was created but could not be bound to its owning business unit, so it was removed.", ex);
         }
     }
 

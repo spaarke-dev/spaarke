@@ -123,8 +123,13 @@ public static class GraphModule
             var httpClient = factory.CreateClient("DataverseWebApi");
             var config = sp.GetRequiredService<IConfiguration>();
             var logger = sp.GetRequiredService<ILogger<DataverseWebApiService>>();
+            // unified-access-control-r2 task 132 (round 55): the client notifies this observer after every POA share
+            // write — the access-cache invalidator, registered unconditionally by MembershipModule. Required: a missing
+            // registration fails resolution loudly rather than leaving share writes that evict nothing.
+            var shareWriteObserver = sp.GetRequiredService<IRecordShareWriteObserver>();
             // auth-v4 task 022 — as above, for the managed-identity-disabled branch.
-            return new DataverseWebApiService(httpClient, config, logger, sp.GetService<IConfidentialClientProvider>());
+            return new DataverseWebApiService(
+                httpClient, config, logger, shareWriteObserver, sp.GetService<IConfidentialClientProvider>());
         });
 
         // Narrow interface forwarding registrations (ADR-010: forwarding delegates don't count as new types).

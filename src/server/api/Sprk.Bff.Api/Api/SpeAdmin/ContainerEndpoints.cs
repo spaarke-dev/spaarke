@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -33,6 +34,12 @@ public static class ContainerEndpoints
 {
     // Maximum display name length enforced by SharePoint Embedded (Graph API).
     private const int MaxDisplayNameLength = 256;
+
+    /// <summary>Deny code: the new container's owning business unit could not be determined (task 165).</summary>
+    internal const string ContainerOwnerUnresolvedCode = "spe.admin.deny.container_owner_unresolved";
+
+    /// <summary>A created container could not be bound to its owning business unit (task 165).</summary>
+    internal const string ContainerStampFailedCode = "spe.containers.business_unit_stamp_failed";
 
     /// <summary>
     /// Registers the container list, get-by-ID, and create endpoints on the provided route group.
@@ -194,6 +201,7 @@ public static class ContainerEndpoints
         [FromQuery] int? top,
         [FromQuery] string? skipToken,
         SpeAdminGraphService graphService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -225,10 +233,22 @@ public static class ContainerEndpoints
             var page = await graphService.ListContainersPageForConfigAsync(
                 config, config.ContainerTypeId, top, skipToken, ct);
 
+            // Task 165, owner round 20 item 2: one container type can serve several customers (Model 1), so a page of
+            // the type's containers holds other customers' too. Only the containers the caller reaches are returned
+            // (each container's binding is read — Graph does not return it on a list); the paging token is unchanged.
+            var trim = await tenantScope.TrimToReachableContainersAsync(
+                context.User, config, page.Items.Select(c => c.Id), deleted: false, ct);
+            if (trim is null)
+            {
+                return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+            }
+
+            var visible = page.Items.Where(c => trim.Reachable.Contains(c.Id)).ToList();
+
             var result = new ContainerListResponse(
-                page.Items.Select(ContainerDto.FromSummary).ToList(),
+                visible.Select(ContainerDto.FromSummary).ToList(),
                 page.NextSkipToken,
-                page.Items.Count);
+                visible.Count);
 
             logger.LogInformation(
                 "ListContainers: returned {Count} containers for configId {ConfigId}, TraceId={TraceId}",
@@ -331,11 +351,7 @@ public static class ContainerEndpoints
                     "GetContainer: container '{ContainerId}' not found for configId {ConfigId}, TraceId={TraceId}",
                     containerId, configGuid, context.TraceIdentifier);
 
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -362,11 +378,7 @@ public static class ContainerEndpoints
                 "GetContainer: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Not Found",
-                detail: $"Container '{containerId}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
         }
         catch (SpaarkeStorageException ex)
         {
@@ -411,6 +423,7 @@ public static class ContainerEndpoints
         [FromQuery] string? configId,
         CreateContainerRequest request,
         SpeAdminGraphService graphService,
+        SpeAdminTenantScope tenantScope,
         SpeAuditService auditService,
         ILogger<Program> logger,
         HttpContext context,
@@ -466,12 +479,37 @@ public static class ContainerEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
-            // Create the container in SharePoint Embedded via Graph API.
+            // Task 165, owner round 20 item 1: the container is bound to its owning business unit at creation — the
+            // config's own unit, or for a config with no unit the creating admin's own unit. Decided BEFORE any Graph
+            // write, so an owner that cannot be determined creates nothing.
+            Guid? owningUnit;
+            try
+            {
+                owningUnit = await tenantScope.ResolveContainerOwnerAsync(context.User, configGuid, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex,
+                    "CreateContainer: the owning business unit for configId {ConfigId} could not be read — refusing. TraceId={TraceId}",
+                    configGuid, context.TraceIdentifier);
+                return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+            }
+
+            if (owningUnit is not { } owner || owner == Guid.Empty)
+            {
+                return ProblemDetailsHelper.Forbidden(
+                    ContainerOwnerUnresolvedCode,
+                    "The business unit that would own the new container could not be determined, so no container was created.",
+                    context.TraceIdentifier);
+            }
+
+            // Create the container in SharePoint Embedded via Graph API — stamped with its owning unit before it returns.
             var created = await graphService.CreateContainerForConfigAsync(
                 config,
                 config.ContainerTypeId,
                 request.DisplayName,
                 request.Description,
+                owner,
                 ct);
 
             logger.LogInformation(
@@ -479,16 +517,49 @@ public static class ContainerEndpoints
                 created.Id, created.DisplayName, configGuid, context.TraceIdentifier);
 
             // Audit log — fire-and-forget; audit failure must never block the primary response.
+            // The owning business unit is recorded too: the audit row is one of the authoritative records
+            // scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 derives a container's owner from (task 165).
             _ = auditService.LogOperationAsync(
                 operation: "CreateContainer",
                 category: "ContainerCreated",
                 targetResource: created.Id,
                 responseStatus: StatusCodes.Status201Created,
                 configId: configGuid,
+                businessUnitId: owner,
                 cancellationToken: CancellationToken.None);
 
             var dto = ContainerDto.FromSummary(created);
             return TypedResults.Created($"/api/spe/containers/{created.Id}", dto);
+        }
+        catch (SpeAdminGraphService.ContainerBindingException ex)
+        {
+            logger.LogError(
+                ex, "CreateContainer: container {ContainerId} could not be bound (removed: {Removed}), configId {ConfigId}, TraceId={TraceId}",
+                ex.ContainerId, ex.Removed, configGuid, context.TraceIdentifier);
+
+            // Removed: nothing remains active — the create simply did not happen, retry later (503). Not removed: an
+            // unbound container exists that NO admin route reaches (round 35 item 2); name it so it can be reconciled.
+            return ex.Removed
+                ? Results.Problem(
+                    title: "Service Unavailable",
+                    detail: "The container could not be bound to its owning business unit, so it was not kept. Try again shortly.",
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = ContainerStampFailedCode,
+                        ["traceId"] = context.TraceIdentifier
+                    })
+                : Results.Problem(
+                    title: "Internal Server Error",
+                    detail: "The container was created but could not be bound to its owning business unit, and could not be " +
+                            "removed. No administrator can reach it until the backfill binds it (-Bind) or an operator removes it.",
+                    statusCode: StatusCodes.Status500InternalServerError,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = ContainerStampFailedCode,
+                        ["containerId"] = ex.ContainerId,
+                        ["traceId"] = context.TraceIdentifier
+                    });
         }
         catch (SpeAdminGraphService.ConfigNotFoundException ex)
         {
@@ -601,11 +672,7 @@ public static class ContainerEndpoints
 
             if (!found)
             {
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -778,11 +845,7 @@ public static class ContainerEndpoints
 
             if (!found)
             {
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -1017,11 +1080,7 @@ public static class ContainerEndpoints
                     "{Operation}: container '{ContainerId}' not found, configId {ConfigId}, TraceId={TraceId}",
                     operation, containerId, configGuid, context.TraceIdentifier);
 
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -1097,11 +1156,7 @@ public static class ContainerEndpoints
                 "{Operation}: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 operation, containerId, configGuid, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Not Found",
-                detail: $"Container '{containerId}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
         }
         catch (SpaarkeStorageException ex)
         {

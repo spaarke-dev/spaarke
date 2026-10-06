@@ -6,15 +6,14 @@ namespace Sprk.Bff.Api.Services.Dataverse.FetchXml;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Used by <c>DataverseAuthorizationFilter</c> when <c>EntitySource.FromFetchXmlBody</c> is in effect
-/// (FR-BFF-04 / <c>POST /api/dataverse/fetch</c>) to prevent privilege bypass via crafted FetchXML
-/// containing <c>&lt;link-entity&gt;</c> elements that target entities the caller has no Read privilege
-/// on. See <c>010-authorization-filter-shape.md §5</c> for the security rationale.
+/// Used by the external module seam's FetchXML guard
+/// (<c>ExternalModuleDataEndpoints.EvaluateFetchXmlGuard</c>, <c>POST /api/v1/external/api/dataverse/fetch</c>)
+/// to reject crafted FetchXML whose <c>&lt;link-entity&gt;</c> elements reach outside the module's record
+/// entity. See <c>010-authorization-filter-shape.md §5</c> for the original security rationale.
 /// </para>
 /// <para>
-/// Interface is owned by task 011 (consumed by <c>DataverseAuthorizationFilter</c>). The concrete
-/// <c>FetchXmlEntityExtractor</c> implementation is owned by task 013 (only the FetchService is a runtime
-/// consumer at endpoint level). DI resolves at runtime — no compile-time coupling.
+/// Its first consumer, <c>DataverseAuthorizationFilter</c>'s <c>FromFetchXmlBody</c> mode on the internal
+/// <c>POST /api/dataverse/fetch</c>, was DELETED with that route (unified-access-control-r2 task 160).
 /// </para>
 /// </remarks>
 internal interface IFetchXmlEntityExtractor
@@ -29,8 +28,8 @@ internal interface IFetchXmlEntityExtractor
     /// </returns>
     /// <exception cref="FetchXmlParseException">
     /// Thrown when the XML is malformed or the FetchXML schema invariants are violated
-    /// (e.g., missing root <c>&lt;entity&gt;</c> element with <c>name</c> attribute). The filter
-    /// converts this to a 400 ProblemDetails with <c>errorCode=DV_FETCHXML_MALFORMED</c>.
+    /// (e.g., missing root <c>&lt;entity&gt;</c> element with <c>name</c> attribute). The caller
+    /// converts this to a 400 ProblemDetails.
     /// </exception>
     IReadOnlySet<string> ExtractEntities(string fetchXml);
 }

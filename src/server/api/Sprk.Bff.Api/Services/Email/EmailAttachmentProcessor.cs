@@ -38,14 +38,21 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         "image/png", "image/gif", "image/jpeg", "image/jpg", "image/bmp", "image/webp"
     };
 
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     public EmailAttachmentProcessor(
         SpeFileStore speFileStore,
         IDocumentDataverseService documentService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IOptions<EmailProcessingOptions> options,
         ILogger<EmailAttachmentProcessor> logger)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _documentService = documentService ?? throw new ArgumentNullException(nameof(documentService));
+        // unified-access-control-r2 task 146: an attachment document is owned by its parent email document's team and
+        // the record it is associated with (secure-if-any) — the named Secure team for a secure record. This writer has
+        // NO acting user (the resolver's remarks name it), so with no parent at all the document is not created.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
@@ -266,12 +273,39 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         Guid documentId;
         try
         {
+            // Task 146: owned by the team the ONE resolver names over the parent email document and the associated
+            // record (secure-if-any). A REFUSAL returns null — this method's per-attachment failure contract — and
+            // creates no row (the bytes above are already in the container this request named, as on any record
+            // failure). A Dataverse fault falls to the catch below, the same contract.
+            var associatedLogicalName = string.IsNullOrWhiteSpace(request.AssociatedEntityType)
+                ? null
+                : Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.ToTargetLogicalName(request.AssociatedEntityType);
+            var owner = await _ownership.ResolveOwnerAsync(
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForParents(new[]
+                {
+                    request.ParentDocumentId != Guid.Empty
+                        ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_document", request.ParentDocumentId)
+                        : null,
+                    associatedLogicalName is not null && request.AssociatedEntityId is { } associatedId
+                        ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(associatedLogicalName, associatedId)
+                        : null,
+                }),
+                cancellationToken);
+            if (!owner.IsOwned)
+            {
+                _logger.LogWarning(
+                    "Attachment '{FileName}' document NOT created: no owner — {Reason} ({Code}) (task 146).",
+                    attachment.FileName, owner.Reason, owner.RefusalCode);
+                return null;
+            }
+
             // Create initial document record
             var createRequest = new CreateDocumentRequest
             {
                 Name = attachment.FileName,
                 ContainerId = request.ContainerId,
-                Description = $"Email attachment from email {request.EmailId}"
+                Description = $"Email attachment from email {request.EmailId}",
+                OwningTeamId = owner.OwningTeamId,
             };
 
             documentIdStr = await _documentService.CreateDocumentAsync(createRequest, cancellationToken);

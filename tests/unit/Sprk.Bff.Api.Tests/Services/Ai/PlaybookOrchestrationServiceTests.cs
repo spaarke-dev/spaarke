@@ -95,6 +95,247 @@ public class PlaybookOrchestrationServiceTests
 
     private static ResolvedScopes CreateEmptyScopes() => new([], [], []);
 
+    #region Run owner (unified-access-control-r2 task 164, sweep #78)
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExecuteAsync_RecordsTheHttpCallersOid_AsTheRunOwner_AndTheRunUserIsOnlyTheServerResolvedSystemUserId(bool entryRouteResolvedTheRunUser)
+    {
+        // Arrange — one node whose executor captures the context it is handed. Owner round 16 item 3 (task 164 r1): the
+        // run's user (UserId, the eq-userid / run.userId systemuserid) is the value the HTTP entry route resolved for the
+        // authenticated caller (PlaybookRunRequest.RunUserId), and nothing else — never the Entra oid.
+        const string callerOid = "6f0c1a52-0000-4000-8000-000000000164";
+        var callerSystemUserId = Guid.NewGuid();
+        var playbookId = Guid.NewGuid();
+        var actionId = Guid.NewGuid();
+        var node = CreateNode("Extract Entities", actionId);
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        _scopeResolverMock.Setup(x => x.ResolveNodeScopesAsync(node.Id, It.IsAny<CancellationToken>())).ReturnsAsync(CreateEmptyScopes());
+        _scopeResolverMock.Setup(x => x.GetActionAsync(actionId, It.IsAny<CancellationToken>())).ReturnsAsync(CreateAction(actionId));
+        NodeExecutionContext? seen = null;
+        var executor = new Mock<INodeExecutor>();
+        executor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Callback<NodeExecutionContext, CancellationToken>((ctx, _) => seen = ctx)
+            .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.AiAnalysis)).Returns(executor.Object);
+        var httpContext = new DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                new[] { new System.Security.Claims.Claim("oid", callerOid) }, "TestAuth"))
+        };
+
+        var request = CreateRequest(playbookId) with { RunUserId = entryRouteResolvedTheRunUser ? callerSystemUserId : null };
+
+        // Act
+        var runId = Guid.Empty;
+        await foreach (var evt in _service.ExecuteAsync(request, httpContext, CancellationToken.None))
+        {
+            if (evt.Type == PlaybookEventType.RunStarted)
+            {
+                runId = evt.RunId;
+            }
+        }
+
+        // Assert — the owner is on its own property; UserId is exactly the server-resolved systemuserid (or unset).
+        var status = await _service.GetRunStatusAsync(runId, CancellationToken.None);
+        status!.StartedByOid.Should().Be(callerOid);
+        seen.Should().NotBeNull();
+        seen!.UserId.Should().Be(entryRouteResolvedTheRunUser ? callerSystemUserId : null);
+        seen.UserId.Should().NotBe(Guid.Parse(callerOid), "an Entra oid must never reach the eq-userid substitution");
+    }
+
+    [Fact]
+    public void PlaybookRunStatus_Json_NeverCarriesTheRunOwner()
+    {
+        var status = new PlaybookRunStatus
+        {
+            RunId = Guid.NewGuid(),
+            PlaybookId = Guid.NewGuid(),
+            State = PlaybookRunState.Running,
+            StartedAt = DateTimeOffset.UtcNow,
+            StartedByOid = "6f0c1a52-0000-4000-8000-000000000164",
+        };
+
+        var camel = System.Text.Json.JsonSerializer.Serialize(
+            status, new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase });
+        var plain = System.Text.Json.JsonSerializer.Serialize(status);
+
+        camel.Should().NotContain("6f0c1a52-0000-4000-8000-000000000164").And.NotContainEquivalentOf("startedByOid");
+        plain.Should().NotContain("6f0c1a52-0000-4000-8000-000000000164");
+    }
+
+    #endregion
+
+    #region Query-text substitution point (unified-access-control-r2 task 164 r1, owner round 16 item 3)
+
+    private (PlaybookNodeDto Node, Mock<INodeExecutor> Executor, Func<string?> SeenConfig) QueryDataverseNode(Guid playbookId, string configJson)
+    {
+        var node = new PlaybookNodeDto
+        {
+            Id = Guid.NewGuid(),
+            Name = "Query New Events",
+            ActionId = Guid.Empty,
+            OutputVariable = "newEvents",
+            ExecutionOrder = 1,
+            DependsOn = [],
+            IsActive = true,
+            NodeType = NodeType.Workflow,
+            SprkExecutortype = ExecutorType.QueryDataverse,
+            ConfigJson = configJson,
+        };
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([node]);
+        string? seen = null;
+        var executor = new Mock<INodeExecutor>();
+        executor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        executor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Callback<NodeExecutionContext, CancellationToken>((ctx, _) => seen = ctx.Node.ConfigJson)
+            .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { count = 0 }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.QueryDataverse)).Returns(executor.Object);
+        return (node, executor, () => seen);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_QueryDataverseNode_ReceivesFetchXmlWhoseSubstitutedValuesAreEscaped()
+    {
+        var playbookId = Guid.NewGuid();
+        var (_, _, seenConfig) = QueryDataverseNode(playbookId,
+            "{\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch><entity name='sprk_event'><filter>" +
+            "<condition attribute='sprk_tone' operator='eq' value='{{tone}}'/></filter></entity></fetch>\"}");
+        const string injected = "x'/><condition attribute='ownerid' operator='ne' value='y";
+        var request = CreateRequest(playbookId) with { Parameters = new Dictionary<string, string> { ["tone"] = injected } };
+
+        await foreach (var _ in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+        }
+
+        seenConfig().Should().NotBeNull("the node ran");
+        using var doc = System.Text.Json.JsonDocument.Parse(seenConfig()!);
+        var fetchXml = doc.RootElement.GetProperty("fetchXml").GetString()!;
+        var conditions = System.Xml.Linq.XDocument.Parse(fetchXml).Descendants("condition").ToList();
+        conditions.Should().ContainSingle();
+        conditions[0].Attribute("value")!.Value.Should().Be(injected);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AQueryDataverseNodeAfterAStructuredNode_RendersItsIds_TheNotificationPlaybookShape()
+    {
+        // The live notification playbooks: a LookupUserMembership-style node outputs ids, and the Query Dataverse node
+        // joins them into FetchXML ({{joinIds myMatters.ids}}). The escaped context must keep that working.
+        var playbookId = Guid.NewGuid();
+        var matterIds = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
+        var source = new PlaybookNodeDto
+        {
+            Id = Guid.NewGuid(), Name = "My Matters", ActionId = Guid.Empty, OutputVariable = "myMatters", ExecutionOrder = 1,
+            DependsOn = [], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.AiCompletion,
+        };
+        var query = new PlaybookNodeDto
+        {
+            Id = Guid.NewGuid(), Name = "Query Matter Activity", ActionId = Guid.Empty, OutputVariable = "activity", ExecutionOrder = 2,
+            DependsOn = [source.Id], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.QueryDataverse,
+            ConfigJson = "{\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch><entity name='sprk_event'><filter>" +
+                         "<condition attribute='sprk_regardingmatter' operator='in' value='{{joinIds myMatters.ids}}'/></filter></entity></fetch>\"}",
+        };
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([source, query]);
+        var sourceExecutor = new Mock<INodeExecutor>();
+        sourceExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        sourceExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NodeOutput.Ok(source.Id, source.OutputVariable, new { ids = matterIds }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.AiCompletion)).Returns(sourceExecutor.Object);
+        string? seen = null;
+        var queryExecutor = new Mock<INodeExecutor>();
+        queryExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        queryExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Callback<NodeExecutionContext, CancellationToken>((ctx, _) => seen = ctx.Node.ConfigJson)
+            .ReturnsAsync(NodeOutput.Ok(query.Id, query.OutputVariable, new { count = 0 }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.QueryDataverse)).Returns(queryExecutor.Object);
+
+        await foreach (var _ in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+        {
+        }
+
+        seen.Should().NotBeNull("the query node ran");
+        seen.Should().Contain(string.Join(",", matterIds));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_AFanOutQueryDataverseNode_ReceivesEscapedValuesInEveryIteration()
+    {
+        // The fan-out path renders each iteration's config itself; a query-text executor renders it position-aware too.
+        var playbookId = Guid.NewGuid();
+        const string injected = "x'/><condition attribute='ownerid' operator='ne' value='y";
+        var source = new PlaybookNodeDto
+        {
+            Id = Guid.NewGuid(), Name = "Source", ActionId = Guid.Empty, OutputVariable = "src", ExecutionOrder = 1,
+            DependsOn = [], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.AiCompletion,
+        };
+        var query = new PlaybookNodeDto
+        {
+            Id = Guid.NewGuid(), Name = "Query Each", ActionId = Guid.Empty, OutputVariable = "each", ExecutionOrder = 2,
+            DependsOn = [source.Id], IsActive = true, NodeType = NodeType.Workflow, SprkExecutortype = ExecutorType.QueryDataverse,
+            ConfigJson = "{\"iteration\":{\"iterateOver\":\"{{src.names}}\",\"itemAlias\":\"name\"},\"entityLogicalName\":\"sprk_matter\"," +
+                         "\"fetchXml\":\"<fetch><entity name='sprk_matter'><filter><condition attribute='sprk_mattername' operator='eq' value='{{name}}'/></filter></entity></fetch>\"}",
+        };
+        _nodeServiceMock.Setup(x => x.GetNodesAsync(playbookId, It.IsAny<CancellationToken>())).ReturnsAsync([source, query]);
+        var sourceExecutor = new Mock<INodeExecutor>();
+        sourceExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        sourceExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(NodeOutput.Ok(source.Id, source.OutputVariable, new { names = new[] { injected, "Acme" } }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.AiCompletion)).Returns(sourceExecutor.Object);
+        var seen = new List<string>();
+        var queryExecutor = new Mock<INodeExecutor>();
+        queryExecutor.Setup(x => x.Validate(It.IsAny<NodeExecutionContext>())).Returns(NodeValidationResult.Success());
+        queryExecutor.Setup(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()))
+            .Callback<NodeExecutionContext, CancellationToken>((ctx, _) => seen.Add(ctx.Node.ConfigJson!))
+            .ReturnsAsync(NodeOutput.Ok(query.Id, query.OutputVariable, new { count = 0 }));
+        _executorRegistryMock.Setup(x => x.GetExecutor(ExecutorType.QueryDataverse)).Returns(queryExecutor.Object);
+
+        var events = new List<string>();
+        await foreach (var evt in _service.ExecuteAsync(CreateRequest(playbookId), _mockHttpContext, CancellationToken.None))
+        {
+            events.Add($"{evt.Type}:{evt.NodeName}:{evt.Error}");
+        }
+
+        // The upstream node's structured output sits in the template context as a self-referencing dictionary
+        // (PlaybookTemplateContextBuilder's dual shape); the escaped copy must handle it, or every iteration fails.
+        seen.Should().HaveCount(2, "one query per iteration item (events: {0})", string.Join(" | ", events));
+        var values = seen.Select(config =>
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(config);
+            var fetchXml = doc.RootElement.GetProperty("fetchXml").GetString()!;
+            return System.Xml.Linq.XDocument.Parse(fetchXml).Descendants("condition").Single().Attribute("value")!.Value;
+        }).ToList();
+        values.Should().Equal(injected, "Acme");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ATypedParameterOfTheWrongType_FailsTheQueryNode_WithoutRunningIt()
+    {
+        var playbookId = Guid.NewGuid();
+        var (_, executor, _) = QueryDataverseNode(playbookId,
+            "{\"entityLogicalName\":\"sprk_event\",\"fetchXml\":\"<fetch><entity name='sprk_event'><filter>" +
+            "<condition attribute='modifiedon' operator='last-x-hours' value='{{timeWindowHours}}'/></filter></entity></fetch>\"}");
+        var request = CreateRequest(playbookId) with
+        {
+            Parameters = new Dictionary<string, string> { ["timeWindowHours"] = "24' secret-tail" },
+        };
+
+        var failures = new List<string?>();
+        await foreach (var evt in _service.ExecuteAsync(request, _mockHttpContext, CancellationToken.None))
+        {
+            if (evt.Type == PlaybookEventType.NodeFailed)
+            {
+                failures.Add(evt.Error);
+            }
+        }
+
+        executor.Verify(x => x.ExecuteAsync(It.IsAny<NodeExecutionContext>(), It.IsAny<CancellationToken>()), Times.Never());
+        failures.Should().ContainSingle().Which.Should().Contain("timeWindowHours").And.NotContain("secret-tail");
+    }
+
+    #endregion
+
     #region Mode Detection Tests
 
     [Fact]

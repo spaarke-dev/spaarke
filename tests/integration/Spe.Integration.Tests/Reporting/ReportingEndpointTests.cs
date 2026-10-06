@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Api.Reporting;
+using Sprk.Bff.Api.Tests;   // EndpointTable (linked from Sprk.Bff.Api.Tests/TestInfrastructure, UAC-r2 task 167 f2)
 using Xunit;
 using Xunit.Abstractions;
 
@@ -50,7 +51,6 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
     // Pre-built test GUIDs for query parameters.
     private static readonly Guid TestWorkspaceId = new("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TestReportId = new("22222222-2222-2222-2222-222222222222");
-    private static readonly Guid TestDatasetId = new("33333333-3333-3333-3333-333333333333");
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -239,7 +239,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
         // Arrange
         var client = GetUnauthenticatedClient();
-        var url = $"/api/reporting/embed-token?workspaceId={TestWorkspaceId}&reportId={TestReportId}";
+        var url = $"/api/reporting/embed-token?reportId={TestReportId}";
 
         // Act
         var response = await client.GetAsync(url);
@@ -259,7 +259,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
         // Arrange — authenticated but module is disabled (default fixture).
         var client = _fixture.CreateAuthenticatedClient();
-        var url = $"/api/reporting/embed-token?workspaceId={TestWorkspaceId}&reportId={TestReportId}";
+        var url = $"/api/reporting/embed-token?reportId={TestReportId}";
 
         // Act
         var response = await client.GetAsync(url);
@@ -279,7 +279,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
         // Arrange — module enabled, authenticated, no reporting role.
         var client = GetNoRoleClient();
-        var url = $"/api/reporting/embed-token?workspaceId={TestWorkspaceId}&reportId={TestReportId}";
+        var url = $"/api/reporting/embed-token?reportId={TestReportId}";
 
         // Act
         var response = await client.GetAsync(url);
@@ -293,34 +293,13 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
     [SkippableFact]
     [Trait("Endpoint", "GET /api/reporting/embed-token")]
-    public async Task GetEmbedToken_ReturnsBadRequest_WhenWorkspaceIdMissing()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange — Viewer user, module enabled, but missing workspaceId query param.
-        var client = GetViewerClient();
-        var url = $"/api/reporting/embed-token?reportId={TestReportId}";
-        // Note: workspaceId is intentionally omitted.
-
-        // Act
-        var response = await client.GetAsync(url);
-
-        // Assert — parameter validation returns 400 before PBI API is called.
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "Missing workspaceId must produce a 400 Bad Request with ProblemDetails");
-
-        _output.WriteLine($"GET /api/reporting/embed-token (missing workspaceId): {response.StatusCode}");
-    }
-
-    [SkippableFact]
-    [Trait("Endpoint", "GET /api/reporting/embed-token")]
     public async Task GetEmbedToken_ReturnsBadRequest_WhenReportIdMissing()
     {
         SkipIfNotConfigured();
 
         // Arrange — Viewer user, module enabled, but missing reportId.
         var client = GetViewerClient();
-        var url = $"/api/reporting/embed-token?workspaceId={TestWorkspaceId}";
+        var url = $"/api/reporting/embed-token";
         // Note: reportId is intentionally omitted.
 
         // Act
@@ -402,7 +381,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         SkipIfNotConfigured();
 
         var client = GetUnauthenticatedClient();
-        var response = await client.GetAsync($"/api/reporting/reports?workspaceId={TestWorkspaceId}");
+        var response = await client.GetAsync($"/api/reporting/reports");
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized,
             "Reports listing endpoint requires authentication");
@@ -417,32 +396,12 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         SkipIfNotConfigured();
 
         var client = _fixture.CreateAuthenticatedClient();
-        var response = await client.GetAsync($"/api/reporting/reports?workspaceId={TestWorkspaceId}");
+        var response = await client.GetAsync($"/api/reporting/reports");
 
         response.StatusCode.Should().Be(HttpStatusCode.NotFound,
             "Module gate must return 404 for /reports when module is disabled");
 
         _output.WriteLine($"GET /api/reporting/reports (module disabled): {response.StatusCode}");
-    }
-
-    [SkippableFact]
-    [Trait("Endpoint", "GET /api/reporting/reports")]
-    public async Task GetReports_ReturnsBadRequest_WhenWorkspaceIdMissing()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange — Viewer client, module enabled, but no workspaceId.
-        var client = GetViewerClient();
-
-        // Act
-        var response = await client.GetAsync("/api/reporting/reports");
-        // workspaceId not provided → should return 400.
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "GET /api/reporting/reports without workspaceId must return 400");
-
-        _output.WriteLine($"GET /api/reporting/reports (missing workspaceId): {response.StatusCode}");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -458,11 +417,8 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         // Arrange — Viewer has sprk_ReportingAccess but NOT sprk_ReportingAuthor.
         var client = GetViewerClient();
 
-        var requestBody = new CreateReportRequest(
-            WorkspaceId: TestWorkspaceId,
-            Name: "Test Report",
-            DatasetId: TestDatasetId,
-            TemplateReportId: TestReportId);
+        // uac-r2 task 166 r1: a new report is derived from a SOURCE catalog row (no workspace / dataset / template).
+        var requestBody = new CreateReportRequest(Name: "Test Report", SourceReportId: TestReportId);
 
         var content = new StringContent(
             JsonSerializer.Serialize(requestBody, JsonOptions),
@@ -488,11 +444,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         // Arrange — Admin user (has create privilege), but sends an empty report name.
         var client = GetAdminClient();
 
-        var requestBody = new CreateReportRequest(
-            WorkspaceId: TestWorkspaceId,
-            Name: "",  // Empty name — invalid.
-            DatasetId: TestDatasetId,
-            TemplateReportId: TestReportId);
+        var requestBody = new CreateReportRequest(Name: "", SourceReportId: TestReportId); // Empty name — invalid.
 
         var content = new StringContent(
             JsonSerializer.Serialize(requestBody, JsonOptions),
@@ -522,7 +474,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
         // Arrange — Viewer lacks Admin privilege for deletion.
         var client = GetViewerClient();
-        var url = $"/api/reporting/reports/{TestReportId}?workspaceId={TestWorkspaceId}";
+        var url = $"/api/reporting/reports/{TestReportId}";
 
         // Act
         var response = await client.DeleteAsync(url);
@@ -542,7 +494,7 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
         // Arrange — Author has sprk_ReportingAuthor but NOT sprk_ReportingAdmin.
         var client = _fixture.CreateReportingClient("sprk_ReportingAccess", "sprk_ReportingAuthor");
-        var url = $"/api/reporting/reports/{TestReportId}?workspaceId={TestWorkspaceId}";
+        var url = $"/api/reporting/reports/{TestReportId}";
 
         // Act
         var response = await client.DeleteAsync(url);
@@ -554,35 +506,12 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         _output.WriteLine($"DELETE /api/reporting/reports/{TestReportId} (Author): {response.StatusCode}");
     }
 
-    [SkippableFact]
-    [Trait("Endpoint", "DELETE /api/reporting/reports/{id}")]
-    public async Task DeleteReport_ReturnsBadRequest_WhenWorkspaceIdMissing()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange — Admin user but no workspaceId query param.
-        var client = GetAdminClient();
-        var url = $"/api/reporting/reports/{TestReportId}";
-        // workspaceId intentionally omitted.
-
-        // Act
-        var response = await client.DeleteAsync(url);
-
-        // Assert — Admin privilege is resolved first (no PBI call), but missing workspaceId → 400.
-        // The handler checks privilege before checking workspaceId presence, so Admin gets past the
-        // privilege check and hits the parameter validation.
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "Missing workspaceId on DELETE must return 400 even for Admin users");
-
-        _output.WriteLine($"DELETE /api/reporting/reports/{TestReportId} (Admin, missing workspaceId): {response.StatusCode}");
-    }
-
     // ─────────────────────────────────────────────────────────────────────────────
-    // PUT /api/reporting/reports/{id} — Author/Admin only
+    // PATCH /api/reporting/reports/{id} — Author/Admin only (task 166 r1: PATCH, the verb the client sends)
     // ─────────────────────────────────────────────────────────────────────────────
 
     [SkippableFact]
-    [Trait("Endpoint", "PUT /api/reporting/reports/{id}")]
+    [Trait("Endpoint", "PATCH /api/reporting/reports/{id}")]
     public async Task UpdateReport_ReturnsForbidden_WhenUserIsViewer()
     {
         SkipIfNotConfigured();
@@ -590,20 +519,21 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         // Arrange — Viewer lacks Author privilege for update operations.
         var client = GetViewerClient();
 
-        var requestBody = new UpdateReportRequest(WorkspaceId: TestWorkspaceId, Name: "Updated Name");
+        var requestBody = new UpdateReportRequest(Name: "Updated Name");
         var content = new StringContent(
             JsonSerializer.Serialize(requestBody, JsonOptions),
             Encoding.UTF8,
             "application/json");
 
         // Act
-        var response = await client.PutAsync($"/api/reporting/reports/{TestReportId}", content);
+        var response = await client.SendAsync(
+            new HttpRequestMessage(HttpMethod.Patch, $"/api/reporting/reports/{TestReportId}") { Content = content });
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
-            "PUT /api/reporting/reports/{id} requires Author or Admin privilege; Viewers get 403");
+            "PATCH /api/reporting/reports/{id} requires Author or Admin privilege; Viewers get 403");
 
-        _output.WriteLine($"PUT /api/reporting/reports/{TestReportId} (Viewer): {response.StatusCode}");
+        _output.WriteLine($"PATCH /api/reporting/reports/{TestReportId} (Viewer): {response.StatusCode}");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -612,44 +542,14 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
 
     [SkippableFact]
     [Trait("Endpoint", "POST /api/reporting/export")]
-    public async Task ExportReport_ReturnsBadRequest_WhenWorkspaceIdEmpty()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange — Viewer user, valid export request except workspaceId is Guid.Empty.
-        var client = GetViewerClient();
-
-        var requestBody = new ReportingExportRequest(
-            WorkspaceId: Guid.Empty,   // Invalid — triggers 400.
-            ReportId: TestReportId,
-            Format: ExportFormat.PDF);
-
-        var content = new StringContent(
-            JsonSerializer.Serialize(requestBody, JsonOptions),
-            Encoding.UTF8,
-            "application/json");
-
-        // Act
-        var response = await client.PostAsync("/api/reporting/export", content);
-
-        // Assert — empty workspaceId triggers parameter validation before PBI call.
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "Empty workspaceId in export request must return 400");
-
-        _output.WriteLine($"POST /api/reporting/export (empty workspaceId): {response.StatusCode}");
-    }
-
-    [SkippableFact]
-    [Trait("Endpoint", "POST /api/reporting/export")]
     public async Task ExportReport_ReturnsBadRequest_WhenReportIdEmpty()
     {
         SkipIfNotConfigured();
 
-        // Arrange — valid workspaceId but reportId is Guid.Empty.
+        // Arrange — reportId (the catalog row id) is Guid.Empty.
         var client = GetViewerClient();
 
         var requestBody = new ReportingExportRequest(
-            WorkspaceId: TestWorkspaceId,
             ReportId: Guid.Empty,      // Invalid — triggers 400.
             Format: ExportFormat.PDF);
 
@@ -674,12 +574,11 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
     {
         SkipIfNotConfigured();
 
-        // Arrange — valid workspace/report IDs but an invalid format value.
+        // Arrange — a valid catalog report id but an invalid format value.
         var client = GetViewerClient();
 
         // Serialize with a numeric value that does not correspond to a valid ExportFormat enum member.
         var rawJson = $@"{{
-            ""workspaceId"": ""{TestWorkspaceId}"",
             ""reportId"": ""{TestReportId}"",
             ""format"": 999
         }}";
@@ -705,7 +604,6 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
         var client = GetUnauthenticatedClient();
 
         var requestBody = new ReportingExportRequest(
-            WorkspaceId: TestWorkspaceId,
             ReportId: TestReportId,
             Format: ExportFormat.PDF);
 
@@ -728,65 +626,39 @@ public class ReportingEndpointTests : IClassFixture<IntegrationTestFixture>
     // GET /api/reporting/reports/{reportId} — single report fetch
     // ─────────────────────────────────────────────────────────────────────────────
 
-    [SkippableFact]
-    [Trait("Endpoint", "GET /api/reporting/reports/{id}")]
-    public async Task GetReport_ReturnsBadRequest_WhenWorkspaceIdMissing()
-    {
-        SkipIfNotConfigured();
-
-        // Arrange — Viewer client, module enabled, missing workspaceId.
-        var client = GetViewerClient();
-        var url = $"/api/reporting/reports/{TestReportId}";
-        // workspaceId query param intentionally omitted.
-
-        // Act
-        var response = await client.GetAsync(url);
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "Missing workspaceId on single report fetch must return 400");
-
-        _output.WriteLine($"GET /api/reporting/reports/{TestReportId} (missing workspaceId): {response.StatusCode}");
-    }
-
     // ─────────────────────────────────────────────────────────────────────────────
     // Endpoint registration — verify all routes are mapped
     // ─────────────────────────────────────────────────────────────────────────────
 
     [SkippableFact]
     [Trait("Endpoint", "Routing")]
-    public async Task AllReportingEndpoints_AreRegistered_NotReturning404ForRouting()
+    public void AllReportingEndpoints_AreRegistered_InTheEndpointTable()
     {
         SkipIfNotConfigured();
 
-        // Arrange — unauthenticated client. 401 proves the route is registered (not 404).
-        // If a route is not registered, ASP.NET returns 404 — so we verify 401 ≠ 404.
-        var client = GetUnauthenticatedClient();
-
+        // Registration is read from the REAL app's endpoint table. Until unified-access-control-r2 task 167 f2 this
+        // sent each request WITHOUT a bearer and asserted "not 404" — "401 proves the route is registered". Since the
+        // BFF's authorization FallbackPolicy (task 167, owner round 14 item 2) an anonymous request answers 401 whether
+        // or not a route exists, so that assertion could no longer fail (it stayed green with a route renamed). A
+        // signed-in request cannot prove it either in this fixture: with the module disabled the reporting filter
+        // answers 404 for a route that IS registered.
         var endpoints = new[]
         {
             ("GET",    $"/api/reporting/status"),
-            ("GET",    $"/api/reporting/embed-token?workspaceId={TestWorkspaceId}&reportId={TestReportId}"),
-            ("GET",    $"/api/reporting/reports?workspaceId={TestWorkspaceId}"),
-            ("GET",    $"/api/reporting/reports/{TestReportId}?workspaceId={TestWorkspaceId}"),
+            ("GET",    $"/api/reporting/embed-token?reportId={TestReportId}"),
+            ("GET",    $"/api/reporting/reports"),
+            ("GET",    $"/api/reporting/reports/{TestReportId}"),
         };
 
         foreach (var (method, url) in endpoints)
         {
-            HttpResponseMessage response;
-
-            if (method == "GET")
-                response = await client.GetAsync(url);
-            else
-                throw new InvalidOperationException($"Unexpected method: {method}");
-
-            // The module is disabled so we expect 401 (auth fails before module gate fires
-            // in ASP.NET pipeline). If we got 404, the route is not registered.
-            response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-                $"Route {method} {url} should be registered (404 means the route is missing)");
-
-            _output.WriteLine($"{method} {url}: {response.StatusCode} (route registered)");
+            EndpointTable.AssertMapped(_fixture, method, url);
+            _output.WriteLine($"{method} {url}: registered");
         }
+
+        // CONTROL: the table is not answering "yes" to everything under the module's prefix.
+        EndpointTable.Maps(_fixture, "GET", "/api/reporting/zz-not-a-route").Should().BeFalse();
+        EndpointTable.Maps(_fixture, "DELETE", "/api/reporting/status").Should().BeFalse();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────

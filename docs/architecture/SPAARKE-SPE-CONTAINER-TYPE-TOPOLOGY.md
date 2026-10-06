@@ -440,6 +440,78 @@ a container type cannot be deleted while any container of it exists anywhere.
 | Storage per container (standard) | `maxStoragePerContainerInBytes`, set **on the container type** — type-wide, not per container |
 | Containers per **standard** container type | ⚠️ **UNDOCUMENTED** — see §8 |
 
+### Every container is bound to the business unit that owns it
+
+Because one container type serves several customers (Model 1), "a container of this config's type" is **not** "this
+customer's container". Every container therefore carries its owning Dataverse business unit as a `fileStorageContainer`
+custom property, **`spaarkeBusinessUnitId`** (canonical GUID, not searchable) — unified-access-control-r2 task 165, owner
+rounds 20 and 35. The name is ONE C# constant (`src/server/shared/Contracts/SpeContainerBusinessUnitBinding.cs`,
+source-linked into the BFF and the L2 control plane) and ONE PowerShell constant (`scripts/common/SpeContainerBinding.ps1`);
+an ArchTest pins both and fails on any creation site that does not stamp.
+
+- **Stamped at creation by EVERY creation path** (round 35 item 1) — the BFF's SPE admin plane (`POST /api/spe/containers`:
+  the config's unit, or the creating admin's for a unit-less config) and secure-record provisioning (the Secure Record
+  unit); the L2 control plane's **H8** root container (the new environment's root business unit, after verification);
+  `scripts/New-BusinessUnitContainer.ps1` (the business unit it is run for), `scripts/Provision-Customer.ps1` step 10 (the
+  root business unit) and `scripts/Create-NewContainerType.ps1 -CreateTestContainer` (`-TestContainerBusinessUnitId`). A
+  stamp that does not read back removes the container again. **H8's 24h replication wait** (rounds 41 + 49): H8 binds
+  only a container it has verified addressable, so it RECORDS what it created at once, in TYPED run fields
+  (`interStepState.containerTypeId` + `speContainerCreation` — round 41's gate-evidence record was stored by the Cosmos
+  serializer as `{"valueKind":1}` and lost), and every later entry resumes with that container. A recorded root container is
+  never created again; a recorded type gets no second type — its containers are listed and one already there is adopted
+  (every further one bound to the same unit, or removed) before a root container is created; a creation that got no
+  answer is recorded as in doubt (a type in doubt is QuarantineRequired until an operator checks — app-only cannot list
+  container types; a root container in doubt is waited for through the replication window). H8 hands the container to H7
+  (`sprk_SharePointEmbeddedContainerId`) only once bound; H7 waits for H8 in the DAG. The guard follows every route to the
+  containers collection (rounds 41 + 49) — a builder held in a variable, a URI held in a variable or a constant (in any
+  file, or a dot-sourced script), an absolute URL in a C# string, a generic `PostAsJsonAsync<T>`, an abbreviated
+  `-Meth Post`, a splat, raw HTTP, the Graph PowerShell cmdlet — not one spelling. Existing containers:
+  `scripts/Backfill-SpeContainerBusinessUnitStamp.ps1` (dry run / `-Apply` / `-Verify`) derives the owner only from
+  authoritative records, takes an explicit `-Bind <containerId>=<businessUnitId>` for a container no record claims, and
+  its `-Verify` lists — and fails on — every container still unbound.
+- **Authorized per container** on every container, item, column, custom-property, permission, recycle-bin and bulk route:
+  a container bound to the admin's own unit or a descendant; an **unbound** (or malformed) container by **no** admin
+  route — root-unit admins included (round 35 item 2: under Model 1 a root admin of any environment whose config names a
+  shared type would otherwise reach another customer's unbound containers); every refusal is the same 404, logged with
+  its reason (`unbound`, `malformed`, `absent`, `other_type`, `out_of_scope`); an unreadable binding fails closed. Lists
+  and searches are trimmed the same way, and an unbound container is in **no dashboard view** either — not even the
+  platform operator's aggregate (round 41 item 2: under Model 1 the root admin of any environment is that environment's
+  platform operator, so an aggregate over a shared type's unbound containers would count other customers'); its alarm is
+  the backfill's `-Verify`. **Manual gate:** the backfill's `-Apply` + `-Verify` exit 0 in every environment before
+  task 165's BFF is deployed there, and before a further environment is onboarded onto a shared type.
+- **Server-owned**: the custom-property route refuses to set or change it.
+- **Read one container at a time**: on the containers **collection** Graph accepts `$select=customProperties`, echoes it
+  in `@odata.context`, and drops it from every row (measured 2026-10-04, beta and v1.0) — the same silent shape
+  sdap-SPE-admin-app-r2 task 028 measured for `$expand=drive`. A list read would report every container as unbound.
+
+Because sharing a type no longer exposes containers, configs of different customers may name the same container type,
+owning app and its secret; the consuming app stays per customer. The app-only container-type routes (type permissions,
+consuming-app registrations, register) refuse a read or a write of a type that a config the admin cannot reach also
+carries (round 35 item 5 — the reads list every customer's consuming app). **SPE Admin authenticates as the BFF's own
+identity** (§6B), so the BFF resolves NO Key Vault secret from a config and refuses no config for its secret name
+(round 65 item 1 removed round 35 item 3's read guard and 409 with the reads they guarded). `sprk_keyvaultsecretname` is
+retained only as data: a SUPPLIED name must start `spe-owning-app-` (400 on config POST/PUT), because one reader remains —
+`scripts/Backfill-SpeContainerBusinessUnitStamp.ps1`, which lists a config's containers as its owning app.
+
+**Tenant-wide and type-wide routes are for Spaarke's own environments only** (owner round 49 item 1). Under Model 1 every
+customer environment's root admin is a "platform operator" in their own environment, so a root-unit check cannot confine a
+route whose answer spans the whole SharePoint Embedded tenant (security alerts, secure score) or a whole container type (its
+app permissions, consuming apps, registration). Those routes serve only a root-unit admin of a deployment that carries
+the BFF setting `SpeAdmin__PlatformOperatorEnvironment=true` — a DEPLOYMENT setting (Bicep
+`speAdminPlatformOperatorEnvironment`, `config/environments.json` → `scripts/Deploy-BffApi.ps1`), never a Dataverse column
+a customer admin could clear. It is set only for Spaarke-operated environments, and **today only `dev` carries it** (owner
+round 57 item 1): Spaarke's production operator environment does not exist yet (the stopped `spaarke-bff-demo`, `demo` in
+`config/environments.json`, which declares `false`), and the change that stands it up adds the marker — its registry key,
+its name in `SpeAdminOperatorEnvironmentMarkerGuardTests`, and the App Service setting (no Bicep template names it since
+task 249 removed the Model 2 stack). Until then
+every other environment refuses those routes. The registry declaration must be a JSON boolean: `Deploy-BffApi.ps1` fails on
+any other type (PowerShell reads the string `"false"` as true — round 57 item 3). **Customer environments never carry it**
+— customer provisioning does not emit it, a missing setting is `false`, and every other caller gets the same
+`403 spe.admin.deny.platform_operator_required`. The container-type routes that act with the CALLER's own delegated token
+(list / get / create types, settings, owners) are not gated, by decision (round 57 item 2, accepting D38): Graph authorizes
+them by the caller's own SharePoint Embedded administrator role, and the BFF lends no identity, so gating them would only
+remove legitimate screens.
+
 ---
 
 ## 6A. The Dataverse config record — what is actually read
@@ -464,7 +536,7 @@ said the `OwningApp*` properties were never populated; `ResolveConfigAsync` sets
 | `sprk_containertypeid` | Which container type the config is about |
 | `sprk_owningappid` | Default `owningAppId` when **creating** a container type — nothing else |
 | `_sprk_environment_value` → `sprk_tenantid` | **Load-bearing.** The tenant guard (§6B) refuses a config whose tenant is blank or is not the BFF's |
-| `sprk_keyvaultsecretname` | **Nothing.** Optional on the form and the API; leave it blank |
+| `sprk_keyvaultsecretname` | **Nothing in the BFF** (data only). Optional; a supplied name must start `spe-owning-app-` (400). Read only by the container-binding backfill script, to list the config's containers as its owning app (a blank or non-conforming name: bind its containers with `-Bind`) |
 
 ### 🔴 Everything else on the "Edit Container Type Config" form is inert
 

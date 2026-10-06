@@ -187,11 +187,12 @@ public class SpeContainerMembershipService
             "Revoking SPE container membership: containerId={ContainerId}, email={Email}",
             containerId, contactEmail);
 
-        // Ownership outside the try: a container this stamp does not own is refused (404 spe_container_not_owned) before Graph (task 227d).
-        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
-
         try
         {
+            // Ownership INSIDE the try (task 227d): a refusal (a container this stamp does not own) or a marker read that
+            // got no answer is a failed result, like any other — never an exception. A revoke caller keeps going (its grant
+            // cache invalidation must still run) and reports the contact as not confirmed removed.
+            var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
             var read = await ReadPermissionsAsync(graphClient, containerId, ct);
 
             var targetPermission = FindPermissionByEmail(read.Permissions, contactEmail);
@@ -242,180 +243,21 @@ public class SpeContainerMembershipService
         }
     }
 
-    /// <summary>
-    /// Lists all external members of an SPE container.
-    /// Returns only external members (those with a user identity in their permission grant).
-    /// </summary>
-    /// <param name="containerId">The SPE container ID (GUID format).</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>A read-only list of external container members. Empty means the container genuinely has none.</returns>
-    /// <exception cref="ServiceException">Graph could not be reached or refused the request.</exception>
-    /// <remarks>
-    /// <para><b>Failures propagate (task 017, filed by task 016).</b> This method used to catch both
-    /// <see cref="ServiceException"/> and <see cref="Exception"/> and return <c>[]</c> in each — so an
-    /// unreachable Graph was indistinguishable from an empty container. Its only caller,
-    /// <see cref="RemoveAllExternalMembersAsync"/>, therefore answered "0 removed" either way, and
-    /// close-project reported <c>200 OK</c> while every external user might still hold file permission on
-    /// the container. That is FR-15's own acceptance ("no participant retains access post-closure")
-    /// failing silently on the SPE half.</para>
-    ///
-    /// <para>An empty list now means one thing only: the container has no external members. Callers that
-    /// need to keep going on failure should catch deliberately — and report the failure, not absorb it.</para>
-    /// </remarks>
-    public virtual async Task<IReadOnlyList<SpeContainerMember>> ListExternalMembersAsync(
-        string containerId,
-        CancellationToken ct = default)
-    {
-        var (members, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
+    // ListExternalMembersAsync, its worker ReadExternalMembersAsync, ToContainerMember and the SpeContainerMember record
+    // were DELETED 2026-10-04 by unified-access-control-r2 task 166 f1 (verifier item 14): their only caller,
+    // RemoveAllExternalMembersAsync, was deleted by task 166 (below), and no other code listed members. The honesty rules
+    // they carried live on in the one paged reader every remaining path uses (ReadPermissionsAsync — an incomplete read
+    // is never an absence), pinned by SpeContainerPagingTests through RemoveMembershipsAsync and RevokeMembershipAsync.
+    // "External" there meant "has a user identity", which on SPE includes internal users — do not rebuild a removal on
+    // such a list.
 
-        if (!enumerationComplete)
-        {
-            // This signature can return a list or throw — it has no way to say "here are SOME of them".
-            // Returning the partial list would recreate the very defect task 016 filed, one layer up:
-            // the caller would read a short list as the whole truth. Task 024 / finding M1.
-            throw new InvalidOperationException(
-                $"External members of container '{containerId}' could not be fully enumerated " +
-                $"({members.Count} read before the read gave out). A partial list must not be returned " +
-                $"here: an empty or short list is indistinguishable from the whole set to the caller.");
-        }
-
-        _logger.LogInformation(
-            "Found {Count} external members in container {ContainerId}", members.Count, containerId);
-
-        return members;
-    }
-
-    /// <summary>
-    /// The worker behind <see cref="ListExternalMembersAsync"/>: the external members that were read,
-    /// AND whether the underlying permission collection was enumerated to its end.
-    /// </summary>
-    /// <remarks>
-    /// Separate from the public method because the two callers need different things from a partial read.
-    /// <see cref="ListExternalMembersAsync"/> returns a bare list, so it cannot express partiality and
-    /// must throw. <see cref="RemoveAllExternalMembersAsync"/> SHOULD still remove everyone it managed to
-    /// see — aborting would leave strictly MORE access in place, which is the same reasoning tasks 016
-    /// and 017 used for not aborting the loop on a per-member failure — and then report the read as
-    /// incomplete so the closure guard fails.
-    /// </remarks>
-    internal async Task<(IReadOnlyList<SpeContainerMember> Members, bool EnumerationComplete)>
-        ReadExternalMembersAsync(string containerId, CancellationToken ct)
-    {
-        _logger.LogInformation("Listing external SPE members: containerId={ContainerId}", containerId);
-
-        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
-
-        var read = await ReadPermissionsAsync(graphClient, containerId, ct);
-
-        // External members are those with a GrantedToV2.User (individual user grants).
-        // System / app permissions and container-type-level grants do not have a User identity.
-        var externalMembers = read.Permissions
-            .Where(p => p.GrantedToV2?.User != null)
-            .Select(ToContainerMember)
-            .Where(m => m != null)
-            .Cast<SpeContainerMember>()
-            .ToList()
-            .AsReadOnly();
-
-        return (externalMembers, read.EnumerationComplete);
-    }
-
-    /// <summary>
-    /// Removes all external members from an SPE container.
-    /// Used when a project is closed (task 016 - Project Closure).
-    /// </summary>
-    /// <param name="containerId">The SPE container ID (GUID format).</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>How many members were removed AND how many could not be.</returns>
-    /// <exception cref="ServiceException">The member list could not be read at all — nothing was removed.</exception>
-    /// <remarks>
-    /// <para><b>Returns a count of FAILURES too (task 017, filed by task 016).</b> This used to return a
-    /// bare <c>int</c> of successes while swallowing every per-member error, so "3 of 12 removed" and
-    /// "12 of 12 removed" were both just a number the caller could not interpret — and a caller that
-    /// treats any completed call as success reports a closed project while nine people keep file access.</para>
-    ///
-    /// <para>Per-member failures still do not abort the loop: every other member should lose access, and
-    /// stopping at the first error would leave strictly more access in place. They are counted instead.
-    /// A failure to LIST propagates, because then nothing was removed and there is nothing to report.</para>
-    /// </remarks>
-    public virtual async Task<SpeBulkRemovalResult> RemoveAllExternalMembersAsync(
-        string containerId,
-        CancellationToken ct = default)
-    {
-        _logger.LogInformation("Removing all external members from container {ContainerId}", containerId);
-
-        // The worker, not ListExternalMembersAsync: a partial read must still have its members removed
-        // (aborting leaves strictly MORE access in place), with the incompleteness reported afterwards.
-        var (externalMembers, enumerationComplete) = await ReadExternalMembersAsync(containerId, ct);
-
-        if (!enumerationComplete)
-        {
-            _logger.LogError(
-                "Container {ContainerId} permissions could not be fully enumerated; removing the {Count} " +
-                "external member(s) that WERE read, but the container CANNOT be reported cleared.",
-                containerId, externalMembers.Count);
-        }
-
-        if (externalMembers.Count == 0)
-        {
-            _logger.LogInformation("No external members to remove from container {ContainerId}", containerId);
-            return new SpeBulkRemovalResult(0, 0, enumerationComplete);
-        }
-
-        _logger.LogInformation(
-            "Removing {Count} external members from container {ContainerId}",
-            externalMembers.Count, containerId);
-
-        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
-        int removedCount = 0;
-        int failedCount = 0;
-
-        foreach (var member in externalMembers)
-        {
-            try
-            {
-                await graphClient.Storage.FileStorage
-                    .Containers[containerId].Permissions[member.PermissionId]
-                    .DeleteAsync(cancellationToken: ct);
-
-                removedCount++;
-                _logger.LogDebug(
-                    "Removed external member: containerId={ContainerId}, permissionId={PermissionId}",
-                    containerId, member.PermissionId);
-            }
-            catch (ServiceException ex)
-            {
-                failedCount++;
-                _logger.LogError(ex,
-                    "Failed to remove external member: containerId={ContainerId}, permissionId={PermissionId}, " +
-                    "status={StatusCode}. They RETAIN file access. Continuing with the rest.",
-                    containerId, member.PermissionId, ex.ResponseStatusCode);
-            }
-            catch (Exception ex)
-            {
-                failedCount++;
-                _logger.LogError(ex,
-                    "Unexpected error removing external member: containerId={ContainerId}, " +
-                    "permissionId={PermissionId}. They RETAIN file access. Continuing with the rest.",
-                    containerId, member.PermissionId);
-            }
-        }
-
-        if (failedCount > 0)
-        {
-            _logger.LogError(
-                "INCOMPLETE removal of external members from container {ContainerId}: {Removed}/{Total} " +
-                "removed, {Failed} RETAIN file access.",
-                containerId, removedCount, externalMembers.Count, failedCount);
-        }
-        else
-        {
-            _logger.LogInformation(
-                "Completed removal of external members from container {ContainerId}: {Removed}/{Total} removed",
-                containerId, removedCount, externalMembers.Count);
-        }
-
-        return new SpeBulkRemovalResult(removedCount, failedCount, enumerationComplete);
-    }
+    // RemoveAllExternalMembersAsync DELETED 2026-10-03 — unified-access-control-r2 task 166 (route-authorization
+    // sweep amendment (e)). Its only caller was ProjectClosureEndpoint, and it deleted EVERY container permission
+    // carrying a user identity — which on SPE is every individual grant, INTERNAL users included (demo provisioning
+    // and the SPE admin console both add internal users). Closing a project revokes EXTERNAL access; it must not
+    // lock the project's own people out of its files. Closure now removes exactly the revoked grantees through
+    // RemoveMembershipsAsync below (the single-grant revoke's email-keyed mechanism). Its result type
+    // (SpeBulkRemovalResult) went with it. Do not re-add an "everyone with a user identity" sweep.
 
     /// <summary>
     /// Removes MANY contacts' permissions from one container using a SINGLE paged read of the
@@ -435,9 +277,10 @@ public class SpeContainerMembershipService
     /// worse — N reads became N × pages — so consolidating went from a nicety to the thing that keeps
     /// the sweep affordable at the 200-member bound.</para>
     ///
-    /// <para><b>Why not <see cref="RemoveAllExternalMembersAsync"/></b> (task 020's warning, preserved):
-    /// that removes EVERY external member of the container, not just the target organization's. An
-    /// organization revoke must not evict the other organizations' people.</para>
+    /// <para><b>Why not a whole-container sweep</b> (task 020's warning, preserved; the sweep itself,
+    /// <c>RemoveAllExternalMembersAsync</c>, was deleted by task 166): it removed EVERY permission carrying a user
+    /// identity, not just the target grantees' — other organizations' people AND internal users. A revoke or a
+    /// closure must evict exactly the people whose grants it revoked. Project closure uses this method too.</para>
     ///
     /// <para><b>Failure is per-caller-visible, not aggregated.</b> A failure to READ makes every email
     /// unanswerable, so each one gets a failed result rather than the method throwing — that preserves
@@ -467,9 +310,8 @@ public class SpeContainerMembershipService
             "Removing {Count} contact permission(s) from container {ContainerId} via one paged read",
             distinct.Count, containerId);
 
-        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, not a per-contact failure (task 227d).
-        // Acquiring the client stays inside it, as before: a client that cannot be obtained fails every contact.
-        await _ownership.EnsureOwnedAsync(containerId, ct);
+        // Ownership inside the try (task 227d): a refusal or an unanswered marker read fails every contact, like a client
+        // that cannot be obtained — every member gets an outcome (the closure / revoke callers report them and carry on).
         GraphServiceClient graphClient;
         PermissionReadResult read;
         try
@@ -746,26 +588,6 @@ public class SpeContainerMembershipService
         return null;
     }
 
-    /// <summary>
-    /// Converts a Graph Permission to a SpeContainerMember.
-    /// Uses the user's DisplayName as a fallback identifier when UPN is unavailable.
-    /// Returns null if the permission lacks a valid ID.
-    /// </summary>
-    private static SpeContainerMember? ToContainerMember(Permission permission)
-    {
-        if (string.IsNullOrEmpty(permission.Id)) return null;
-
-        var user = permission.GrantedToV2?.User;
-        if (user == null) return null;
-
-        // Prefer UPN from AdditionalData; fall back to DisplayName as identifier
-        var upn = GetUpnFromPermission(permission);
-        var identifier = upn ?? user.DisplayName ?? user.Id ?? string.Empty;
-
-        var roles = permission.Roles?.ToList() ?? [];
-
-        return new SpeContainerMember(permission.Id, identifier, roles.AsReadOnly());
-    }
 }
 
 /// <summary>
@@ -775,43 +597,3 @@ public sealed record SpeContainerMembershipResult(
     bool Success,
     string? PermissionId,
     string? Error);
-
-/// <summary>
-/// Outcome of removing every external member from a container.
-/// </summary>
-/// <param name="Removed">Members whose permission was deleted.</param>
-/// <param name="Failed">
-/// Members whose permission could NOT be deleted. Non-zero means those people still have file access,
-/// so a caller must not report the container cleared.
-/// </param>
-/// <param name="EnumerationComplete">
-/// Whether the container's permission collection was read to its END (task 024, finding M1).
-/// <para><c>false</c> means members may exist that this sweep never saw, so <c>Removed</c> and
-/// <c>Failed</c> describe only the part that was read. <b>A guard that could not finish its check must
-/// report failure, not success</b> — reporting clean on an unenumerated set is worse than having no
-/// guard, because a clean report gets acted on. Defaults to <c>true</c> so the existing two-argument
-/// construction keeps its meaning.</para>
-/// </param>
-public sealed record SpeBulkRemovalResult(int Removed, int Failed, bool EnumerationComplete = true)
-{
-    /// <summary>
-    /// True only when every external member was seen AND removed.
-    /// </summary>
-    /// <remarks>
-    /// Both conjuncts are load-bearing. <c>Failed == 0</c> alone once meant "cleared" — which was a false
-    /// clean whenever the member list itself was a partial read, since members nobody enumerated cannot
-    /// fail to be removed. <c>ProjectClosureEndpoint</c> maps this straight onto
-    /// <c>container_not_cleared</c>, so an incomplete enumeration now surfaces there with no change at
-    /// the endpoint.
-    /// </remarks>
-    public bool IsComplete => Failed == 0 && EnumerationComplete;
-}
-
-/// <summary>
-/// Represents an external member of an SPE container.
-/// Email contains the user's UPN / email when available, or their DisplayName as a fallback.
-/// </summary>
-public sealed record SpeContainerMember(
-    string PermissionId,
-    string Email,
-    IReadOnlyList<string> Roles);

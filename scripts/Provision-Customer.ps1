@@ -196,6 +196,10 @@ if (-not $env:SPAARKE_SUPPRESS_LEGACY_ORCHESTRATOR_BANNER) {
 # CONFIGURATION
 # ============================================================================
 
+# THE SPE container -> business-unit binding (unified-access-control-r2 task 165, owner round 35 item 1): step 10 stamps
+# the container it creates through Invoke-SpeContainerBindOrRemove.
+. (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
+
 $TotalSteps = 13
 $ScriptRoot = $PSScriptRoot
 $RepoRoot = (Resolve-Path "$ScriptRoot\..").Path
@@ -1186,8 +1190,78 @@ function Invoke-Step10_ProvisionSPEContainers {
     # Each business unit gets one SPE container. During provisioning, we create
     # the container for the root BU. Additional BU containers are created via
     # New-BusinessUnitContainer.ps1 when new BUs are added.
+    #
+    # BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1): the container is stamped with the
+    # root business unit it is created for, the stamp is read back, and the container is REMOVED if it did not land (the
+    # BFF's SPE admin plane reaches no unbound container). So the OWNER is resolved FIRST — no Dataverse URL, no token or
+    # no root business unit means no container is created at all (it used to create one and only then discover it could
+    # not record it, leaving an orphan) — and a root BU that already has its container is a no-op (it used to create a
+    # second, unused container first).
 
-    # 1. Get container type ID from platform Key Vault
+    # 1. Resolve the owner first: the Dataverse instance URL from prior steps, its token, the root business unit.
+    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
+        $State.StepOutputs.DataverseInstanceUrl
+    } else {
+        $DataverseEnvUrl
+    }
+
+    if ([string]::IsNullOrWhiteSpace($dataverseUrl)) {
+        Write-Log "No Dataverse instance URL available — the container's owning business unit cannot be resolved." -Level ERROR
+        throw "SPE container NOT created: no Dataverse instance URL to resolve its owning business unit."
+    }
+
+    Write-Log "Acquiring Dataverse access token for $dataverseUrl..."
+
+    $dvToken = az account get-access-token `
+        --resource $dataverseUrl `
+        --query accessToken -o tsv 2>&1
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
+        Write-Log "Failed to acquire Dataverse token: $dvToken" -Level ERROR
+        throw "SPE container NOT created: no Dataverse token to resolve its owning business unit."
+    }
+
+    $dvHeaders = @{
+        "Authorization" = "Bearer $dvToken"
+        "Content-Type"  = "application/json"
+        "OData-MaxVersion" = "4.0"
+        "OData-Version"    = "4.0"
+    }
+
+    Write-Log "Finding root business unit in Dataverse..."
+
+    try {
+        $buResponse = Invoke-RestMethod `
+            -Uri "$dataverseUrl/api/data/v9.2/businessunits?`$filter=parentbusinessunitid eq null&`$select=businessunitid,name,sprk_containerid" `
+            -Headers $dvHeaders `
+            -Method Get `
+            -ErrorAction Stop
+    }
+    catch {
+        Write-Log "Failed to query business units: $($_.Exception.Message)" -Level ERROR
+        throw "SPE container NOT created: the root business unit could not be read."
+    }
+
+    $roots = @($buResponse.value)
+    if ($roots.Count -ne 1) {
+        Write-Log "Expected exactly one root business unit, found $($roots.Count)." -Level ERROR
+        throw "SPE container NOT created: the root business unit is not unique (found $($roots.Count))."
+    }
+
+    $rootBu = $roots[0]
+    $rootBuId = $rootBu.businessunitid
+    Write-Log "Root BU: $($rootBu.name) ($rootBuId)" -Level INFO
+
+    # Idempotent: the root BU already has its container — create nothing.
+    if (-not [string]::IsNullOrWhiteSpace($rootBu.sprk_containerid)) {
+        Write-Log "Root BU already has sprk_containerid: $($rootBu.sprk_containerid) — no container created." -Level WARN
+        Write-Log "If that container predates business-unit stamping, bind it: Backfill-SpeContainerBusinessUnitStamp.ps1 (dry run, -Apply, -Verify)." -Level WARN
+        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (BU already set)" `
+            -Outputs @{ SpeContainerId = $rootBu.sprk_containerid }
+        return
+    }
+
+    # 2. Get container type ID from platform Key Vault
     # NAMING (customer-provisioning-orchestration-r1 task 019 / Phase G / spec §7.9 R2,R4):
     # The canonical secret name is `SPE-ContainerTypeId` (Seed-ProductionKeyVault.ps1 line 129 +
     # Configure-ProductionAppSettings.ps1 line 64 + config/spaarke-resources.yaml). The prior
@@ -1209,7 +1283,7 @@ function Invoke-Step10_ProvisionSPEContainers {
 
     Write-Log "Container Type ID: $containerTypeId" -Level INFO
 
-    # 2. Get Graph API token via service principal (uses az CLI logged-in identity)
+    # 3. Get Graph API token via service principal (uses az CLI logged-in identity)
     Write-Log "Acquiring Graph API access token..."
 
     $graphToken = az account get-access-token `
@@ -1223,7 +1297,7 @@ function Invoke-Step10_ProvisionSPEContainers {
 
     Write-Log "Graph API token acquired." -Level SUCCESS
 
-    # 3. Create SPE container via Graph API
+    # 4. Create SPE container via Graph API
     $containerDisplayName = "$DisplayName Documents"
     Write-Log "Creating SPE container: '$containerDisplayName'..."
 
@@ -1257,81 +1331,18 @@ function Invoke-Step10_ProvisionSPEContainers {
         throw "SPE container creation failed"
     }
 
-    # 4. Get Dataverse instance URL from prior steps
-    $dataverseUrl = if ($State.StepOutputs.DataverseInstanceUrl) {
-        $State.StepOutputs.DataverseInstanceUrl
-    } else {
-        $DataverseEnvUrl
-    }
-
-    if ([string]::IsNullOrWhiteSpace($dataverseUrl)) {
-        Write-Log "No Dataverse instance URL available. Cannot set sprk_containerid on business unit." -Level ERROR
-        Write-Log "Container was created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
-            -Outputs @{ SpeContainerId = $containerId }
-        return
-    }
-
-    # 5. Get Dataverse token
-    Write-Log "Acquiring Dataverse access token for $dataverseUrl..."
-
-    $dvToken = az account get-access-token `
-        --resource $dataverseUrl `
-        --query accessToken -o tsv 2>&1
-
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($dvToken)) {
-        Write-Log "Failed to acquire Dataverse token: $dvToken" -Level WARN
-        Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
-            -Outputs @{ SpeContainerId = $containerId }
-        return
-    }
-
-    # 6. Find the root business unit (parentbusinessunitid eq null)
-    Write-Log "Finding root business unit in Dataverse..."
-
-    $dvHeaders = @{
-        "Authorization" = "Bearer $dvToken"
-        "Content-Type"  = "application/json"
-        "OData-MaxVersion" = "4.0"
-        "OData-Version"    = "4.0"
-    }
-
+    # 5. Bind it to the root business unit (task 165, owner round 35 item 1): stamp, read back, or remove.
     try {
-        $buResponse = Invoke-RestMethod `
-            -Uri "$dataverseUrl/api/data/v9.2/businessunits?`$filter=parentbusinessunitid eq null&`$select=businessunitid,name,sprk_containerid" `
-            -Headers $dvHeaders `
-            -Method Get `
-            -ErrorAction Stop
-
-        $rootBu = $buResponse.value | Select-Object -First 1
-
-        if (-not $rootBu) {
-            Write-Log "No root business unit found in Dataverse." -Level ERROR
-            throw "Root business unit not found"
-        }
-
-        Write-Log "Root BU: $($rootBu.name) ($($rootBu.businessunitid))" -Level INFO
-
-        # Check if already has a container ID (idempotent)
-        if (-not [string]::IsNullOrWhiteSpace($rootBu.sprk_containerid)) {
-            Write-Log "Root BU already has sprk_containerid: $($rootBu.sprk_containerid)" -Level WARN
-            Write-Log "Skipping BU update. New container ID: $containerId (not applied)." -Level WARN
-            Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (BU already set)" `
-                -Outputs @{ SpeContainerId = $rootBu.sprk_containerid }
-            return
-        }
+        Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $containerId -BusinessUnitId $rootBuId `
+            -GraphBase 'https://graph.microsoft.com/v1.0'
+        Write-Log "SPE container $containerId bound to root business unit $rootBuId." -Level SUCCESS
     }
     catch {
-        Write-Log "Failed to query business units: $($_.Exception.Message)" -Level ERROR
-        Write-Log "Container created ($containerId) but BU update must be done manually." -Level WARN
-        Complete-Step -State $State -StepNumber 10 -StepName "Provision SPE containers (partial)" `
-            -Outputs @{ SpeContainerId = $containerId }
-        return
+        Write-Log "SPE container binding failed: $($_.Exception.Message)" -Level ERROR
+        throw "SPE container could not be bound to its owning business unit — see the log; sprk_containerid was not set."
     }
 
-    # 7. Set sprk_containerid on the root business unit
-    $rootBuId = $rootBu.businessunitid
+    # 6. Set sprk_containerid on the root business unit
     Write-Log "Setting sprk_containerid=$containerId on BU $rootBuId..."
 
     try {
@@ -1346,7 +1357,7 @@ function Invoke-Step10_ProvisionSPEContainers {
     }
     catch {
         Write-Log "Failed to update business unit: $($_.Exception.Message)" -Level ERROR
-        Write-Log "Container created ($containerId) — update BU manually." -Level WARN
+        Write-Log "Container created and BOUND ($containerId) — set sprk_containerid on BU $rootBuId manually." -Level WARN
     }
 
     Write-Log "SPE provisioning complete. Container ID: $containerId" -Level SUCCESS

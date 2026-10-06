@@ -5,6 +5,9 @@ import path from "path";
 import fs from "fs";
 
 const sharedLibRoot = path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src");
+// UAC-r2 task 147 r1: the memo create goes through the BFF, authenticated by @spaarke/auth (aliased to source, as the
+// SmartTodo code page does).
+const authLibRoot = path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src");
 
 /**
  * Resolve bare-module imports from shared library source files to THIS
@@ -16,7 +19,7 @@ const sharedLibRoot = path.resolve(__dirname, "../../client/shared/Spaarke.UI.Co
  * and src/solutions/CalendarSidePane/vite.config.ts.
  */
 function resolveSharedLibDeps(): import("vite").Plugin {
-  const sharedLibPaths = [sharedLibRoot].map((p) => p.replace(/\\/g, "/"));
+  const sharedLibPaths = [sharedLibRoot, authLibRoot].map((p) => p.replace(/\\/g, "/"));
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
 
   return {
@@ -60,6 +63,8 @@ export default defineConfig({
         "src/**/*.ts",
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.UI.Components/src/**/*.ts"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Auth/src/**/*.ts"),
       ],
     }),
     viteSingleFile(),
@@ -82,6 +87,7 @@ export default defineConfig({
       "@spaarke/ui-components/services": path.resolve(sharedLibRoot, "services"),
       "@spaarke/ui-components/utils": path.resolve(sharedLibRoot, "utils"),
       "@spaarke/ui-components": path.resolve(sharedLibRoot, "index.ts"),
+      "@spaarke/auth": authLibRoot,
     },
     // Ensure shared lib imports resolve from Notepad's node_modules
     dedupe: ["react", "react-dom", "@fluentui/react-components", "@fluentui/react-icons"],

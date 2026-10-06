@@ -67,6 +67,10 @@ The BROKEN script body below is preserved for audit-trail continuity only.
 # Create New Container Type for SPE Document Storage
 # Owner: BFF API app (performs all server-side Graph operations)
 # Creates container type, registers owning app, and optionally creates a test container
+#
+# BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1): a test container is a container
+# like any other — it is stamped with -TestContainerBusinessUnitId (required with -CreateTestContainer), read back, and
+# REMOVED if the stamp did not land. The BFF's SPE admin plane reaches no unbound container.
 
 param(
     [string]$OwningAppId = $env:API_APP_ID,
@@ -84,13 +88,20 @@ param(
     [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN,  # e.g., "spaarke.sharepoint.com"
     [string]$DisplayName = "Spaarke Document Storage",
     [string]$Description = "Container type for document storage - owned by BFF API app",
-    [switch]$CreateTestContainer = $false
+    [switch]$CreateTestContainer = $false,
+    # The business unit that owns the test container (task 165, round 35 item 1). Required with -CreateTestContainer.
+    [string]$TestContainerBusinessUnitId
 )
+
+. (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
 
 if (-not $OwningAppId) { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
 if (-not $OwningAppSecret) { throw "OwningAppSecret required. Pass -OwningAppSecret or set API_CLIENT_SECRET env var." }
 if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
 if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
+if ($CreateTestContainer -and -not (ConvertTo-SpeBindingGuid $TestContainerBusinessUnitId)) {
+    throw "-CreateTestContainer requires -TestContainerBusinessUnitId <business-unit GUID>: every container is stamped with its owning business unit (task 165, round 35 item 1); nothing has been created."
+}
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "CREATE NEW CONTAINER TYPE" -ForegroundColor Cyan
@@ -240,6 +251,10 @@ try {
             -Headers $headers `
             -Body $testContainerBody `
             -ErrorAction Stop
+
+        # Bind it (task 165, round 35 item 1): stamp, read back, or remove — throws (caught below) on failure.
+        Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $testContainer.id `
+            -BusinessUnitId $TestContainerBusinessUnitId -GraphBase 'https://graph.microsoft.com/beta'
 
         Write-Host "TEST CONTAINER CREATED!" -ForegroundColor Green
         Write-Host ""

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text;
@@ -21,6 +22,12 @@ namespace Sprk.Bff.Api.Api.Agent;
 /// </summary>
 public static class AgentEndpoints
 {
+    /// <summary>The run-playbook 400 text for a missing PlaybookId (one constant: handler and PlaybookAuthorizationFilter).</summary>
+    public const string PlaybookIdRequiredDetail = "PlaybookId is required";
+
+    /// <summary>The run-playbook 400 text for a missing DocumentId (one constant: handler and PlaybookAuthorizationFilter).</summary>
+    public const string DocumentIdRequiredDetail = "DocumentId is required";
+
     /// <summary>
     /// Registers all agent gateway endpoints on the provided route builder.
     /// Called from Program.cs: <c>app.MapAgentEndpoints();</c>
@@ -32,8 +39,13 @@ public static class AgentEndpoints
             .WithTags("Agent Gateway");
 
         // POST /api/agent/message — receive agent message, route to existing services
+        // unified-access-control-r2 task 164 (sweep #18): AgentAuthorizationFilter establishes the caller identity;
+        // AiAuthorizationFilter (chat-context evaluation, keyed on AgentMessageRequest) then decides on the exact records
+        // the turn uses, as the caller — the body DocumentId and, for a resumed session the caller owns, its stored
+        // host record, documents and playbook — before any session is created or resumed (one uniform 403).
         group.MapPost("/message", HandleMessageAsync)
             .AddAgentAuthorizationFilter()
+            .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("AgentMessage")
             .WithSummary("Process a message from the M365 Copilot agent")
@@ -59,8 +71,15 @@ public static class AgentEndpoints
             .ProducesProblem(500);
 
         // POST /api/agent/run-playbook — execute a playbook
+        // unified-access-control-r2 task 164 (sweep #19): AgentAuthorizationFilter establishes the caller identity;
+        // PlaybookAuthorizationFilter (run mode) then decides on the exact records the run uses, as the caller:
+        // the body PlaybookId (playbook-use decision, one uniform 404) and the body DocumentId (Read, or Write when
+        // the run can write it; one uniform 403) — before IPlaybookOrchestrationService.ExecuteAsync. Fix round 1
+        // (owner round 16 item 3): Parameters pass the shared PlaybookParameterPolicy, record parameters are authorized
+        // as the caller, and the run acts for the caller's systemuserid (PlaybookRunRequest.RunUserId).
         group.MapPost("/run-playbook", RunPlaybookAsync)
             .AddAgentAuthorizationFilter()
+            .AddPlaybookRunAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("AgentRunPlaybook")
             .WithSummary("Execute a playbook via the Copilot agent")
@@ -302,13 +321,17 @@ public static class AgentEndpoints
             var seen = new HashSet<Guid>();
             var playbooks = new List<PlaybookSummary>();
 
-            // 1. User-owned playbooks
+            // 1. User-owned playbooks. Owner round 12 item 6 (task 164): the owner filter is the caller's
+            //    Dataverse systemuserid, never the Entra oid; unresolvable → public only.
             var userGuid = ExtractUserGuid(httpContext);
-            if (userGuid.HasValue)
+            var ownerSystemUserId = userGuid.HasValue
+                ? await PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync(httpContext, cancellationToken)
+                : null;
+            if (ownerSystemUserId.HasValue)
             {
                 try
                 {
-                    var userPlaybooks = await playbookService.ListUserPlaybooksAsync(userGuid.Value, query, cancellationToken);
+                    var userPlaybooks = await playbookService.ListUserPlaybooksAsync(ownerSystemUserId.Value, query, cancellationToken);
                     foreach (var pb in userPlaybooks.Items)
                     {
                         if (seen.Add(pb.Id))
@@ -383,7 +406,7 @@ public static class AgentEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "PlaybookId is required",
+                detail: PlaybookIdRequiredDetail,
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
@@ -392,7 +415,7 @@ public static class AgentEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "DocumentId is required",
+                detail: DocumentIdRequiredDetail,
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
@@ -410,7 +433,10 @@ public static class AgentEndpoints
             {
                 PlaybookId = request.PlaybookId,
                 DocumentIds = new[] { request.DocumentId },
-                Parameters = request.Parameters
+                Parameters = request.Parameters,
+                // Owner round 16 item 3 (task 164): the run acts for the authenticated caller — the systemuserid the
+                // run-mode filter resolved (WhoAmI over OBO) — never for a caller-supplied userId.
+                RunUserId = PlaybookAuthorizationFilter.GetRunUserId(httpContext)
             };
 
             // Consume the execution stream to capture the RunId from the first event
@@ -467,13 +493,22 @@ public static class AgentEndpoints
         {
             // Delegate to existing orchestration service for run status.
             var runStatus = await orchestrationService.GetRunStatusAsync(jobId, cancellationToken);
-            if (runStatus is null)
+
+            // unified-access-control-r2 task 164 (sweep #78): the run's recorded owner (the HTTP caller's Entra oid,
+            // PlaybookRunStatus.StartedByOid, never serialized) must be THIS caller. An unknown run, an ownerless
+            // run (app-only / scheduler) and another caller's run answer ONE uniform 404 that never echoes the
+            // jobId. AgentAuthorizationFilter has already established the oid; the comparison lives here because
+            // this is where the run is loaded (filter/endpoint pair, task 164 constraint exception (d)).
+            var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+            if (runStatus is null
+                || string.IsNullOrEmpty(callerOid)
+                || string.IsNullOrEmpty(runStatus.StartedByOid)
+                || !string.Equals(runStatus.StartedByOid, callerOid, StringComparison.OrdinalIgnoreCase))
             {
-                return Results.Problem(
-                    statusCode: 404,
-                    title: "Not Found",
-                    detail: $"Playbook run {jobId} not found",
-                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
+                logger.LogWarning(
+                    "[AGENT] Playbook status for job {JobId}: unknown, ownerless or not the caller's run (found: {Found}); uniform 404",
+                    jobId, runStatus is not null);
+                return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
             }
 
             // Map the internal PlaybookRunStatus to the agent-facing PlaybookStatusResponse
@@ -509,14 +544,16 @@ public static class AgentEndpoints
 
             return Results.Ok(response);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            logger.LogError(ex, "[AGENT] Failed to get playbook status for job {JobId}", jobId);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to retrieve playbook execution status",
-                type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
+            // Task 164 r1: a fault while loading the run is the SAME uniform 404 as an unknown, ownerless or foreign run
+            // (goal (2) / ADR-003) — a distinct 500 would tell the caller that this jobId reached a real lookup.
+            logger.LogError(ex, "[AGENT] Failed to get playbook status for job {JobId}; uniform 404 (fail closed)", jobId);
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
     }
 

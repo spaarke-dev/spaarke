@@ -12,6 +12,7 @@
 using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -97,6 +98,154 @@ public class ExternalParticipationServiceInvalidationTests
         cache.Verify(c => c.RemoveAsync(
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
             It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // ── Task 137 (#1060, defect C5): the ONE invalidation routine ─────────────────────────────────────
+
+    /// <summary>
+    /// Every tenant a grant set can be cached under: the request's tid, the CIAM tenant, the app's own tenant and every
+    /// configured customer workforce tenant (Model 1: these differ). A GUID configured in upper case is ALSO removed in
+    /// the canonical lower-case "D" form the tid claim carries; duplicates collapse.
+    /// </summary>
+    [Fact]
+    public void GrantCacheTenantIds_CoversTheRequestTheCiamTenantAndEveryConfiguredWorkforceTenant()
+    {
+        var configuration = new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Ciam:TenantId"] = "C1C1C1C1-0000-0000-0000-00000000000C",
+                ["AzureAd:TenantId"] = Tenant,
+                ["WorkforceIdentity:CustomerTenantIds:0"] = "11111111-1111-1111-1111-111111111111",
+                ["WorkforceIdentity:CustomerTenantIds:1"] = Tenant,
+            })
+            .Build();
+        var sut = new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.MemberPagingParticipationService(new Mock<ITenantCache>().Object, TidContext(), configuration);
+
+        sut.GrantCacheTenantIds().Should().BeEquivalentTo(new[]
+        {
+            Tenant,
+            "C1C1C1C1-0000-0000-0000-00000000000C",
+            "c1c1c1c1-0000-0000-0000-00000000000c",
+            "11111111-1111-1111-1111-111111111111",
+        });
+    }
+
+    /// <summary>
+    /// A member page that faults mid-walk: the members already read ARE invalidated, the organization is reported as not
+    /// fully expanded, and the routine does not throw (the write it serves is unaffected; the rest expire on the TTL).
+    /// </summary>
+    [Fact]
+    public async Task InvalidateGrantSetsAsync_AMemberPageFaults_InvalidatesWhatWasRead_ReportsTheGap_NeverThrows()
+    {
+        var organizationId = Guid.Parse("0a0a0a0a-0000-0000-0000-000000000137");
+        var members = Enumerable.Range(1, 5).Select(i => Guid.Parse($"eeeeeeee-0000-0000-0000-{i:D12}")).ToArray();
+        var cache = new InMemoryTenantCache();
+        foreach (var member in members)
+        {
+            await cache.SetAsync(Tenant, ExternalAccessResource, member.ToString(), CacheVersion, new List<int> { 1 });
+        }
+
+        var sut = new Sprk.Bff.Api.Tests.AccessControl.GrantPolicyTestDoubles.MemberPagingParticipationService(cache, TidContext(), configuration: null) { PageSize = 2, FailPage = 1 };
+        sut.Members[organizationId] = members;
+
+        var outcome = await sut.InvalidateGrantSetsAsync(Array.Empty<Guid>(), new[] { organizationId });
+
+        outcome.OrganizationsNotFullyExpanded.Should().Equal(organizationId);
+        (await cache.GetAsync<List<int>>(Tenant, ExternalAccessResource, members[0].ToString(), CacheVersion))
+            .Should().BeNull("page 0 was read, so its members were invalidated");
+        (await cache.GetAsync<List<int>>(Tenant, ExternalAccessResource, members[4].ToString(), CacheVersion))
+            .Should().NotBeNull("a member past the failed page was never read; its entry expires on the TTL");
+    }
+
+    /// <summary>The live contact-state read maps only statecode 0 to Active; NULL is unreadable (fail closed).</summary>
+    [Theory]
+    [InlineData(0, "Active")]
+    [InlineData(1, "Inactive")]
+    [InlineData(2, "Inactive")]
+    [InlineData(null, "Unreadable")]
+    public void ContactStateFrom_OnlyStateCodeZeroIsActive(int? stateCode, string expected)
+        => ExternalParticipationService.ContactStateFrom(stateCode).ToString().Should().Be(expected);
+
+    /// <summary>
+    /// The contact state is read live ONCE per request (remembered in HttpContext.Items), read AGAIN by the next
+    /// request, and a fault is never remembered — so the next composition retries rather than inheriting a deny.
+    /// </summary>
+    [Fact]
+    public async Task ReadContactStateAsync_OncePerRequest_AgainNextRequest_AndAFaultIsNotRemembered()
+    {
+        var sut = new CountingState(TidContext());
+
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Active);
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Active);
+        sut.Reads.Should().Be(1, "the same request reads the row once");
+
+        sut.Context = TidContext();
+        sut.Next = ContactRecordState.Inactive;
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Inactive);
+        sut.Reads.Should().Be(2, "a new request reads live again — a deactivation is seen at once");
+
+        sut.Context = TidContext();
+        sut.Throw = true;
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Unreadable);
+        sut.Throw = false;
+        sut.Next = ContactRecordState.Active;
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Active,
+            "a fault is not remembered");
+    }
+
+    /// <summary>
+    /// A RETURNED <see cref="ContactRecordState.Unreadable"/> (a non-2xx answer other than 404, or a row with no
+    /// <c>statecode</c>) is not remembered either: within the SAME request, the next read goes back to Dataverse. The
+    /// thrown-fault case above returns from the catch before the memo is written, so only this case exercises the
+    /// memo's own <c>!= Unreadable</c> guard (task 137 r3, verifier finding 2).
+    /// </summary>
+    [Fact]
+    public async Task ReadContactStateAsync_AReturnedUnreadable_IsNotRemembered_WithinTheSameRequest()
+    {
+        var sut = new CountingState(TidContext()) { Next = ContactRecordState.Unreadable };
+
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Unreadable);
+
+        sut.Next = ContactRecordState.Active;
+        (await sut.ReadContactStateAsync(ContactId, CancellationToken.None)).Should().Be(ContactRecordState.Active,
+            "an unreadable answer is retried on the next read of the same request, never memoised");
+        sut.Reads.Should().Be(2, "both reads reached Dataverse");
+    }
+
+    private static DefaultHttpContext TidContext() => new()
+    {
+        User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("tid", Tenant) })),
+    };
+
+    private sealed class CountingState : ExternalParticipationService
+    {
+        private readonly HttpContextAccessor _accessor;
+
+        public CountingState(HttpContext context)
+            : this(new HttpContextAccessor { HttpContext = context })
+        {
+        }
+
+        private CountingState(HttpContextAccessor accessor)
+            : base(new HttpClient(), Mock.Of<ITenantCache>(), configuration: null!, credential: null!, accessor,
+                   NullLogger<ExternalParticipationService>.Instance)
+            => _accessor = accessor;
+
+        public HttpContext? Context { set => _accessor.HttpContext = value; }
+
+        public ContactRecordState Next { get; set; } = ContactRecordState.Active;
+
+        public bool Throw { get; set; }
+
+        public int Reads { get; private set; }
+
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+        {
+            Reads++;
+            return Throw
+                ? Task.FromException<ContactRecordState>(new HttpRequestException("simulated"))
+                : Task.FromResult(Next);
+        }
     }
 
     private static ExternalParticipationService CreateSut(ITenantCache cache, HttpContext? httpContext)

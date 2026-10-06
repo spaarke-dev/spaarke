@@ -20,7 +20,7 @@
 #   matching the auth posture Create-NewContainerType.ps1 /
 #   New-BusinessUnitContainer.ps1 already use (task 011 hardening).
 #
-# Usage: H8SpeContainerTypeHandler's ISpeContainerVerifier production impl
+# Usage: H8SpeContainerHandler's ISpeContainerVerifier production impl (Handlers/SpeContainer/)
 # invokes this AFTER container creation to prove the container is readable
 # via the app-only identity path (§4D I4/I5 post-condition).
 

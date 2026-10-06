@@ -2,7 +2,8 @@
  * @spaarke/ai-widgets — Canonical WorkspaceTab interface (R6 Pillar 6a)
  *
  * The contract shared by:
- *   - Pillar 6a (state model + Redis/Cosmos persistence + GET /api/workspace/state)
+ *   - Pillar 6a (state model + Redis/Cosmos persistence; the GET /api/workspace/state read route was
+ *                DELETED by unified-access-control-r2 task 166 — no client called it, owner round 10 item 1)
  *   - Pillar 6b (chat tools that mutate tabs: send_workspace_artifact,
  *                update_workspace_tab, close_workspace_tab)
  *   - Pillar 6c (workspace events, execution-trace widget, additive `workspace.*`
@@ -335,7 +336,10 @@ export interface WorkspaceTabMatterContext {
  * Persistence semantics (Pillar 6a, Q4 hybrid):
  *   - Redis hot tier (24h TTL) — every active-session tab
  *   - Cosmos durable tier     — tabs with `isPinned === true` OR matter-pinned
- *   - Restoration on mount    — via `GET /api/workspace/state`
+ *   - Restoration on mount    — none via a route: `GET /api/workspace/state` was DELETED by
+ *                               unified-access-control-r2 task 166 (no caller; owner round 10 item 1). The
+ *                               server reads workspace state only to compose the chat prompt
+ *                               (`SprkChatAgentFactory` workspace-state block).
  *
  * Discriminated union semantics:
  *   - `widgetType` (5-variant literal) is the discriminator

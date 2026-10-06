@@ -12,9 +12,10 @@
 //   4. H2a completed                 -> {H2b, H4, H5} ready (3-way fan-out post-Bicep)
 //   5. H2a + H4 completed            -> {H2b, H3, H5} ready (H3 unlocks after H4; H4b waits
 //                                      for H3 too — T245a: it reads H3's BffAppRegId)
-//   6. H2a + H4 + H3 completed       -> {H2b, H4b, H5, H8} ready (H8 fires from H3; H9
-//                                      still blocked because H4b not landed — EXEC-01 gate)
-//   7. H2a + H4 + H4b + H3           -> {H2b, H5, H8, H9} ready (H9 finally unlocks)
+//   6. H2a + H4 + H3 completed       -> {H2b, H5} ready (H4b and H8 also wait for H5 — H8 binds
+//                                      its container to the environment's root business unit,
+//                                      task 165; H9 still blocked because H4b not landed — EXEC-01)
+//   7. H2a + H4 + H4b + H3           -> {H2b, H5, H9} ready (H9 finally unlocks; H8 after H5)
 //   8. H6 needs H5 AND H3 (T245a — reads BffAppRegId); H7 needs H6 AND H8 (T245a — reads
 //      SpeContainerId)
 //   9. up through H10 completed      -> H11 ready
@@ -167,9 +168,19 @@ public sealed class DagAdvancerTests
             "EXEC-01: HandlerDependencies[H9] = { H3, H4b } — H9 must remain blocked until " +
             "H4b lands the batched app-settings; deploying BFF against an incomplete app-settings " +
             "surface is precisely the F20 IOptions fail-fast chain r1 was written to prevent.");
-        ready.Should().Contain("H8",
-            "H8 is Graph-based SPE container-type creation; it depends ONLY on H3 (Entra app-reg), " +
-            "does NOT consume shared-BFF KV values, and MUST remain in the ready-set when H3 completes.");
+        ready.Should().NotContain("H8",
+            "H8 also needs H5 (unified-access-control-r2 task 165, owner round 35 item 1): it binds the container it " +
+            "creates to the new environment's root business unit, which exists only once H5 has run.");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH3AndH5_UnlocksH8()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().Contain("H8", "H8 needs H3 (ordering) AND H5 (the environment whose root unit owns the container)");
     }
 
     [Fact]
@@ -184,21 +195,21 @@ public sealed class DagAdvancerTests
         ready.Should().Contain("H9",
             "EXEC-01 green path: with H3 + H4b both landed, H9 (BFF deploy) is finally " +
             "unblocked; BFF boots against complete KV refs + batched app-settings.");
-        ready.Should().Contain("H8",
-            "H8 is unchanged by the H4b addition — still gated on H3 only.");
+        ready.Should().NotContain("H8",
+            "H8 is unchanged by the H4b addition — it is gated on H3 and H5 (task 165), and H5 has not run here.");
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH3_H8ReadyButH9BlockedOnH4b()
+    public void ComputeReadyHandlers_AfterH3AndH5_H8ReadyButH9BlockedOnH4b()
     {
-        // The EXEC-01 discriminator: after H3, H8 is ready but H9 is NOT — H8 is Graph-only,
-        // H9 needs the batched app-settings that H4b lands. This is the whole point of the DAG
-        // change: separate SPE container-type (H8, Graph-only) from BFF deploy (H9, needs KV/app-settings).
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
+        // The EXEC-01 discriminator: after H3 (and H5 — task 165), H8 is ready but H9 is NOT — H8 is
+        // Graph-only, H9 needs the batched app-settings that H4b lands. This is the whole point of the DAG
+        // change: separate SPE container creation (H8, Graph-only) from BFF deploy (H9, needs KV/app-settings).
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
-        ready.Should().Contain("H8", "H8 depends on H3 only.");
+        ready.Should().Contain("H8", "H8 depends on H3 and H5, both complete.");
         ready.Should().NotContain("H9", "H9 also requires H4b.");
     }
 
@@ -250,6 +261,30 @@ public sealed class DagAdvancerTests
         _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running,
             "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H4b", "H6", "H8", "H9", "H7", "H10", "H11", "H12a", "H12b", "H12c"))
             .Should().Contain("H14");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6_H7WaitsForH8_WhichHandsOffOnlyABoundContainer()
+    {
+        // H8 dispatched but not complete — e.g. waiting out the 24h SPE replication window with its root container
+        // created and recorded but NOT yet bound (unified-access-control-r2 task 165, owner round 41 item 1).
+        var run = MakeRun(RunStatus.WaitingOnGate, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H9", "H6");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().NotContain("H7",
+            "H7 writes H8's root container into sprk_SharePointEmbeddedContainerId — it must wait until H8 has bound it");
+        ready.Should().Contain("H8");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6AndH8_UnlocksH7()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H9", "H6", "H8");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().BeEquivalentTo(new[] { "H7" });
     }
 
     [Fact]

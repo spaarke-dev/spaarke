@@ -783,6 +783,9 @@ builder.Services.AddSingleton<SpeConfidentialClientGraphFactory>();
 builder.Services.AddSingleton<ExchangeAdminTokenSource>();
 builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisioner>();
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
+// unified-access-control-r2 task 165, owner round 35 item 1: H8 binds the container it creates to the customer environment's
+// root business unit — read through this typed-HttpClient seam (same idiom as H10's Dataverse collaborators).
+builder.Services.AddHttpClient<IDataverseRootBusinessUnitReader, DataverseWebApiRootBusinessUnitReader>();
 builder.Services.AddScoped<H8SpeContainerHandler>();
 
 // Task 053 (Batch 3E): H10 Dataverse App User + Graph app-role parity handler

@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -26,7 +27,12 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// </summary>
 /// <remarks>
 /// ADR-001: Minimal API — MapGet/MapPost/etc. on RouteGroupBuilder, no controllers.
-/// ADR-008: Authorization inherited from the /api/spe route group (SpeAdminAuthorizationFilter).
+/// ADR-008: Authorization inherited from the /api/spe route group (SpeAdminAuthorizationFilter and
+/// <see cref="SpeAdminTenantScopeFilter"/>); each by-id read and every write is marked with
+/// <see cref="SpeAdminEnvironmentOperation"/> so that group filter applies the environment rule
+/// (unified-access-control-r2 task 165, round 16 item 4): environments are shared tenant infrastructure, so
+/// only a platform operator (an admin whose own business unit is the root) may write them, and any other admin
+/// reads only the environments linked by a config they can reach. The list trims itself the same way.
 /// ADR-019: All errors return ProblemDetails (RFC 7807).
 /// </remarks>
 public static class EnvironmentEndpoints
@@ -55,10 +61,12 @@ public static class EnvironmentEndpoints
             .Produces<IReadOnlyList<EnvironmentSummaryDto>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // GET /api/spe/environments/{id}
         group.MapGet("/environments/{id:guid}", GetEnvironmentAsync)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Read)
             .WithName("SpeGetEnvironment")
             .WithSummary("Get a single SPE environment by ID")
             .WithDescription(
@@ -67,10 +75,12 @@ public static class EnvironmentEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // POST /api/spe/environments
         group.MapPost("/environments", CreateEnvironmentAsync)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Write)
             .WithName("SpeCreateEnvironment")
             .WithSummary("Create a new SPE environment configuration")
             .WithDescription(
@@ -81,10 +91,12 @@ public static class EnvironmentEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // PUT /api/spe/environments/{id}
         group.MapPut("/environments/{id:guid}", UpdateEnvironmentAsync)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Write)
             .WithName("SpeUpdateEnvironment")
             .WithSummary("Update an existing SPE environment configuration")
             .WithDescription(
@@ -96,10 +108,12 @@ public static class EnvironmentEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         // DELETE /api/spe/environments/{id}
         group.MapDelete("/environments/{id:guid}", DeleteEnvironmentAsync)
+            .WithSpeAdminEnvironmentScope(SpeAdminEnvironmentOperation.Write)
             .WithName("SpeDeleteEnvironment")
             .WithSummary("Delete an SPE environment configuration")
             .WithDescription(
@@ -111,7 +125,8 @@ public static class EnvironmentEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+            .ProducesProblem(StatusCodes.Status500InternalServerError)
+            .ProducesProblem(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -121,14 +136,35 @@ public static class EnvironmentEndpoints
     // =========================================================================
 
     /// <summary>
-    /// GET /api/spe/environments — Returns all environment records.
+    /// GET /api/spe/environments — Returns the environment records the CALLER may read: every one for a
+    /// platform operator; otherwise only those linked by a config the caller can reach (task 165, round 16
+    /// item 4). 503 when the caller's reach cannot be read — never the untrimmed list.
     /// </summary>
     private static async Task<IResult> ListEnvironmentsAsync(
         DataverseWebApiClient dataverseClient,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
     {
+        SpeAdminEnvironmentReach reach;
+        try
+        {
+            reach = await tenantScope.GetEnvironmentReachAsync(context.User, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogError(ex,
+                "ListSpeEnvironments: the caller's environment reach could not be read — refusing. TraceId={TraceId}",
+                context.TraceIdentifier);
+            return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+        }
+
+        if (!reach.IsPlatformOperator && reach.LinkedEnvironmentIds.Count == 0)
+        {
+            return TypedResults.Ok(new List<EnvironmentSummaryDto>());
+        }
+
         try
         {
             var rows = await dataverseClient.QueryAsync<EnvironmentDataverseRow>(
@@ -136,7 +172,10 @@ public static class EnvironmentEndpoints
                 select: SelectFields,
                 cancellationToken: ct);
 
-            var items = rows.Select(r => r.ToSummary()).ToList();
+            var items = rows
+                .Where(r => reach.CanRead(r.Id))
+                .Select(r => r.ToSummary())
+                .ToList();
 
             return TypedResults.Ok(items);
         }
@@ -171,20 +210,14 @@ public static class EnvironmentEndpoints
 
             if (row is null)
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    detail: $"SPE environment '{id}' was not found.");
+                return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
             }
 
             return TypedResults.Ok(row.ToDetail());
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                detail: $"SPE environment '{id}' was not found.");
+            return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
@@ -298,10 +331,7 @@ public static class EnvironmentEndpoints
 
             if (existing is null)
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    detail: $"SPE environment '{id}' was not found.");
+                return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
             }
 
             // ── Enforce isDefault uniqueness ─────────────────────────────────
@@ -331,10 +361,7 @@ public static class EnvironmentEndpoints
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                detail: $"SPE environment '{id}' was not found.");
+            return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {
@@ -367,10 +394,7 @@ public static class EnvironmentEndpoints
 
             if (existing is null)
             {
-                return Results.Problem(
-                    statusCode: StatusCodes.Status404NotFound,
-                    title: "Not Found",
-                    detail: $"SPE environment '{id}' was not found.");
+                return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
             }
 
             // ── Check for referencing container type configs ──────────────────
@@ -413,10 +437,7 @@ public static class EnvironmentEndpoints
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return Results.Problem(
-                statusCode: StatusCodes.Status404NotFound,
-                title: "Not Found",
-                detail: $"SPE environment '{id}' was not found.");
+            return SpeAdminTenantScopeFilter.EnvironmentNotFound(id, context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not SdapProblemException)
         {

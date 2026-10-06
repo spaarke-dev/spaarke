@@ -96,6 +96,12 @@ export interface IWebApiWithCreate extends IWebApiLike {
    * @returns Promise resolving to an object with the created record's GUID
    */
   createRecord(entityType: string, data: Record<string, unknown>): Promise<{ id: string }>;
+
+  /**
+   * Deletes an entity record (optional — Xrm.WebApi offers it). Used only to remove a `sprk_document`
+   * row whose file the BFF refused to attach (unified-access-control-r2 task 166 f1).
+   */
+  deleteRecord?(entityType: string, id: string): Promise<unknown>;
 }
 
 /**

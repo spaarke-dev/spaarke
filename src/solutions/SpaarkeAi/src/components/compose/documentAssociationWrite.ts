@@ -21,13 +21,10 @@
  * columns are simple single-valued lookups, no `sprk_regarding{entity}`
  * discriminator set needed here.)
  *
- * The nav-prop discovery + `@odata.bind` write mechanics are the SAME
- * mechanism already used by matter/project/invoice/work-assignment record
- * creation (`CreateMatterWizard`/`CreateEventWizard`/etc. via
- * `discoverNavProps` + `findNavProp` from `@spaarke/ui-components`,
- * consolidated `set-regarding-and-field-mapping-resolver-r2` task 011). This
- * module does NOT fork a new association surface — it is a thin,
- * document-specific consumer of that existing mechanism, reused unmodified.
+ * UAC-r2 task 147 r1 (owner round 28 item 1): the write is the documents family's existing
+ * `PUT /api/v1/documents/{id}` (its `matterLookup` / `projectLookup` / `invoiceLookup` / `workAssignmentLookup`), not a
+ * client-side `@odata.bind` — filing a document under a record moves its owner (the Secure Record Owners team under a
+ * secure record), and the BFF owns that. A refusal carries the server's message into the warning.
  *
  * @see AssociateToStep (`@spaarke/ui-components`) — the reused UI shell
  * @see CreateOnSaveAssociationPrompt.tsx — the UI that produces the
@@ -37,8 +34,8 @@
  * @see ADR-012 — Shared Component Library (context-agnostic services)
  */
 
-import { discoverNavProps, findNavProp, cleanGuid } from '@spaarke/ui-components';
-import type { AssociationResult, EntityTypeOption, IDataService } from '@spaarke/ui-components';
+import { cleanGuid, ChildRecordWriteError } from '@spaarke/ui-components';
+import type { AssociationResult, EntityTypeOption } from '@spaarke/ui-components';
 
 // ---------------------------------------------------------------------------
 // The four selectable parent target types (+ implicit "none")
@@ -74,26 +71,53 @@ export const DOCUMENT_ASSOCIATION_TARGETS: ReadonlyArray<EntityTypeOption> = [
 ] as const;
 
 /**
- * Entity-set (collection) name per parent logical name, for the
- * `@odata.bind` URL. Mirrors the same map already duplicated across the
- * wizard services (`CreateEventWizard/eventService.ts` `_ENTITY_SET_MAP`,
- * `CreateWorkAssignmentWizard/workAssignmentService.ts`, etc.) — scoped here
- * to exactly the four types `sprk_document` supports directly.
+ * UAC-r2 task 147 r1: the `PUT /api/v1/documents/{id}` body property that files the document under each parent type
+ * (the BFF's `UpdateDocumentRequest` — `MatterLookup`, `ProjectLookup`, `InvoiceLookup`, `WorkAssignmentLookup`, serialized
+ * camelCase). The BFF writes the lookup and re-derives the owner.
  */
-const _ENTITY_SET_MAP: Record<DocumentAssociationEntityType, string> = {
-  sprk_matter: 'sprk_matters',
-  sprk_project: 'sprk_projects',
-  sprk_invoice: 'sprk_invoices',
-  sprk_workassignment: 'sprk_workassignments',
+const DOCUMENT_LOOKUP_PROPERTY: Record<DocumentAssociationEntityType, string> = {
+  sprk_matter: 'matterLookup',
+  sprk_project: 'projectLookup',
+  sprk_invoice: 'invoiceLookup',
+  sprk_workassignment: 'workAssignmentLookup',
 };
 
 function _isDocumentAssociationEntityType(value: string): value is DocumentAssociationEntityType {
   return (DOCUMENT_ASSOCIATION_ENTITY_TYPES as readonly string[]).includes(value);
 }
 
-/** Strips the `sprk_` prefix for the `findNavProp` column-hint disambiguator (e.g. `sprk_matter` -> `matter`). */
-function _resolveLookupHint(entityType: string): string {
-  return entityType.startsWith('sprk_') ? entityType.slice('sprk_'.length) : entityType;
+/**
+ * How the document is re-filed: one call to `PUT /api/v1/documents/{id}` carrying the lookup. Rejects with the server's
+ * message (a {@link ChildRecordWriteError}).
+ */
+export type DocumentRefile = (documentId: string, body: Record<string, string>) => Promise<void>;
+
+/**
+ * UAC-r2 task 147 r1 (owner round 28 item 1): the {@link DocumentRefile} over a BFF-authenticated fetch. `bffBaseUrl` may
+ * be `''` when the fetch resolves relative `/api` paths.
+ */
+export function bffDocumentRefile(
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  bffBaseUrl: string
+): DocumentRefile {
+  return async (documentId, body) => {
+    const url = `${(bffBaseUrl ?? '').replace(/\/+$/, '')}/api/v1/documents/${encodeURIComponent(documentId)}`;
+    const response = await authenticatedFetch(url, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      let detail: string | undefined;
+      try {
+        const problem = (await response.json()) as { detail?: unknown; title?: unknown };
+        detail = typeof problem.detail === 'string' ? problem.detail : typeof problem.title === 'string' ? problem.title : undefined;
+      } catch {
+        /* not ProblemDetails */
+      }
+      throw new ChildRecordWriteError(detail ?? `The document was not filed (HTTP ${response.status}).`, response.status);
+    }
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -123,16 +147,14 @@ export interface IAssociateDocumentResult {
  * function no-ops and returns success immediately (spec FR-05: a standalone
  * Document is valid; Save is never blocked on a parent).
  *
- * @param dataService   Context-agnostic Dataverse write surface (ADR-012).
- *                       Production callers supply `createXrmDataService()`
- *                       (client-side Dataverse call, per ADR-028 — this is
- *                       NOT a BFF fetch, so there is no raw-Bearer concern).
+ * @param refileDocument The document re-file through the BFF ({@link bffDocumentRefile}) — UAC-r2 task 147 r1: filing a
+ *                       document under a record changes its owner, so it is never an `Xrm.WebApi` write.
  * @param documentId     GUID of the newly created `sprk_document` record.
  * @param association    The user's selection from `CreateOnSaveAssociationPrompt`,
  *                        or `null`/`undefined` for "none".
  */
 export async function associateDocumentToParent(
-  dataService: IDataService,
+  refileDocument: DocumentRefile,
   documentId: string,
   association: AssociationResult | null | undefined
 ): Promise<IAssociateDocumentResult> {
@@ -151,28 +173,15 @@ export async function associateDocumentToParent(
   }
 
   try {
-    const navPropEntries = await discoverNavProps('sprk_document');
-    const navProp = findNavProp(navPropEntries, association.entityType, _resolveLookupHint(association.entityType));
-
-    if (!navProp) {
-      console.warn(
-        `[documentAssociationWrite] No nav-prop discovered for sprk_document -> ${association.entityType}; ` +
-          'falling back to the column logical name.'
-      );
-    }
-
-    // cleanGuid (task 100): both the parent recordId (Xrm picker source) and the server-minted
-    // sprk_document id enter OData URLs — the @odata.bind value and the `/sprk_documents(id)`
-    // path. Wrap BOTH with the canonical `cleanGuid` (no-op on bare GUIDs). NEVER hand-roll
-    // `.replace(/[{}]/g,'')` — a repo-wide bug was caused by scattered local brace-strippers.
+    // cleanGuid (task 100): NEVER hand-roll `.replace(/[{}]/g,'')`.
     const cleanRecordId = cleanGuid(association.recordId);
     const cleanDocumentId = cleanGuid(documentId);
-    const entitySet = _ENTITY_SET_MAP[association.entityType];
-    const bindProp = navProp ?? association.entityType;
 
-    await dataService.updateRecord('sprk_document', cleanDocumentId, {
-      [`${bindProp}@odata.bind`]: `/${entitySet}(${cleanRecordId})`,
-    });
+    // UAC-r2 task 147 r1 (owner round 28 item 1): filing the document under a record is a RE-FILE — it moves the
+    // document into that record, so its owner follows (the Secure Record Owners team under a secure record). It goes
+    // through the documents family's existing `PUT /api/v1/documents/{id}` (task 146: AppendTo on the target as the
+    // caller, the owner re-derived and assigned), never through Xrm.WebApi.
+    await refileDocument(cleanDocumentId, { [DOCUMENT_LOOKUP_PROPERTY[association.entityType]]: cleanRecordId });
 
     return { success: true };
   } catch (err) {

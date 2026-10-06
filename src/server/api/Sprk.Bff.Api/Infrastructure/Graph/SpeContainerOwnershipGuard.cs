@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -70,7 +71,7 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 public class SpeContainerOwnershipGuard
 {
     /// <summary>The container custom property that names the owning customer.</summary>
-    public const string MarkerPropertyName = "spaarkeCustomerId";
+    public const string MarkerPropertyName = Spaarke.Contracts.Spe.SpeContainerCustomerMarker.PropertyName;
 
     /// <summary>Stable error code for a refused container.</summary>
     public const string NotOwnedErrorCode = "spe_container_not_owned";
@@ -207,14 +208,15 @@ public class SpeContainerOwnershipGuard
             marker = await ReadMarkerAsync(id, deleted, ct).ConfigureAwait(false);
             if (_cache is not null)
             {
-                var ttl = marker is not null && !string.Equals(marker, customerId, StringComparison.Ordinal)
+                var ttl = marker is not null && !IsThisStampsMarker(marker)
                     ? OtherCustomersMarkerTtl
                     : OwnOrMissingMarkerTtl;
                 await _cache.SetContainerMarkerAsync(id, deleted, marker, ttl).ConfigureAwait(false);
             }
         }
 
-        var owned = marker is not null && string.Equals(marker, customerId, StringComparison.Ordinal);
+        // One comparison everywhere (trimmed, ordinal) — the same rule L2's H8 applies when it reads the marker (task 227e).
+        var owned = IsThisStampsMarker(marker);
         if (!owned)
         {
             _logger.LogInformation(
@@ -278,12 +280,16 @@ public class SpeContainerOwnershipGuard
         {
             await graph.RequestAdapter.SendNoContentAsync(request, ErrorMapping, ct).ConfigureAwait(false);
         }
-        catch (ODataError ex)
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
         {
+            // ANY failure (a Graph refusal, a transport fault, a timeout) leaves a container this stamp cannot reach:
+            // remove it (task 227e review). Only the caller's own cancellation propagates as is.
+            var status = ex is ODataError odata ? odata.ResponseStatusCode.ToString(CultureInfo.InvariantCulture) : ex.GetType().Name;
+            var detail = ex is ODataError odataError ? odataError.Error?.Message ?? odataError.Message : ex.Message;
             var removed = await TryDeleteUnmarkedAsync(graph, containerId).ConfigureAwait(false);
             throw new InvalidOperationException(
                 $"Created SharePoint Embedded container '{containerId}' but could not write its ownership marker " +
-                $"'{MarkerPropertyName}' (Graph {ex.ResponseStatusCode}: {ex.Error?.Message ?? ex.Message}). " +
+                $"'{MarkerPropertyName}' ({status}: {detail}). " +
                 (removed
                     ? "The new container was deleted again."
                     : "Deleting it failed too: it is unreachable from this environment until it carries the marker."),

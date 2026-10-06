@@ -401,6 +401,15 @@
     </EmbeddedResource>
   </ItemGroup>
 
+  <!-- unified-access-control-r2 task 165, owner round 35 item 1: H8 stamps the root container it creates with its
+       owning business unit under the SAME custom-property name the BFF authorizes against. The name is ONE C#
+       constant, compiled into the BFF and into this library from one source file (L2 cannot reference the BFF or
+       Spaarke.Core) — see that file's header. `internal` in each assembly. -->
+  <ItemGroup>
+    <Compile Include="..\..\shared\Contracts\SpeContainerBusinessUnitBinding.cs" Link="Shared\SpeContainerBusinessUnitBinding.cs" />
+    <Compile Include="..\..\shared\Contracts\SpeContainerCustomerMarker.cs" Link="Shared\SpeContainerCustomerMarker.cs" />
+  </ItemGroup>
+
   <!-- Expose internal seams to the L2 test project (parity with the pre-split
        csproj) and to the .Api + .Worker host projects. Post-split, the
        composition-root Program.cs files in .Api and .Worker call internal

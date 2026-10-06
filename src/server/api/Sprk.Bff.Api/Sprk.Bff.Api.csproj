@@ -49,6 +49,16 @@
          internal DataverseAuthorizationFilter / IDataversePrivilegeChecker / IFetchXmlEntityExtractor /
          EntitySource / SavedQueryService / FetchService / FetchRequestDto / SavedQueryDto types. -->
     <InternalsVisibleTo Include="Sprk.Bff.Api.IntegrationTests" />
+    <!-- CacheModule.NetworkStepsForBootedHostTests: BootedBff's Production boot (task 167 f2-v2 x master T242). -->
+    <InternalsVisibleTo Include="Spaarke.ArchTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- unified-access-control-r2 task 165, owner round 35 item 1: the SPE container → business-unit stamp's property
+         name is ONE C# constant, compiled into BOTH the BFF and the L2 control plane (which creates the H8 root
+         container) from this one source file — see its header. -->
+    <Compile Include="..\..\shared\Contracts\SpeContainerBusinessUnitBinding.cs" Link="Shared\SpeContainerBusinessUnitBinding.cs" />
+    <Compile Include="..\..\shared\Contracts\SpeContainerCustomerMarker.cs" Link="Shared\SpeContainerCustomerMarker.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -181,7 +191,6 @@
     <PackageReference Include="Polly" Version="8.7.0" />
     <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="Microsoft.Extensions.Http.Polly" Version="8.0.8" />
-    <PackageReference Include="QuestPDF" Version="2025.12.1" />
 
     <!-- net10 retarget (task 004): System.Text.RegularExpressions AND System.Security.Cryptography.Xml
          CVE-override pins REMOVED. NU1510 confirmed the net10 framework supersedes both (framework 10.0.x

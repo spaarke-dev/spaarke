@@ -1083,6 +1083,58 @@ line or `[pcf-1033]`; PASS only on `[build] Succeeded`. The same rule is used by
 
 **Safety model:** dry-run default (`-WhatIf` also forces preview even combined with `-Apply`); idempotent (compares the derived value against the row's current value, not just null-vs-populated); a disagreeing existing stamp is reported as a `Conflict` and never overwritten; an escalation gate (>50,000 total candidates, or any entity >20% unresolvable) blocks `-Apply` until `-AcknowledgeEscalation` is passed. Full detail: `Get-Help .\Backfill-CoreAncestorStamps.ps1 -Full` and [`projects/unified-access-control-r2/notes/phase3-backfill-runbook.md`](../projects/unified-access-control-r2/notes/phase3-backfill-runbook.md).
 
+### `Invoke-SecureChildBackfill.ps1`
+**Purpose:** One-time backfill of the EXISTING children of every secure project, matter and work assignment (C10 part 2): drives the BFF's `secure-child-reconciliation` job, which re-owns each child into the `Secure Record Owners` team by the ownership rule and mirrors the record's sharees. The script computes NOTHING itself — the rule is the BFF's (`SecureChildReconciler` → `IRecordOwnershipResolver` + `SecureChildShareSynchronizer`); it triggers the job through `/api/admin/jobs`, reads each run's report (`resultJson`), repeats until the pass completes, and saves the reports.
+**Usage:** 🔴 One-time (per environment) after the BFF carrying task 148 is deployed; re-runnable (idempotent).
+**Lifecycle:** ✅ Maintained (added 2026-10-04 by `unified-access-control-r2` task 148)
+**Dependencies:** Azure CLI (`az login` as a user the BFF's `SystemAdmin` policy admits; for `-Apply`, rights to change the App Service settings), PowerShell 7+
+**Owner:** UAC Team (`unified-access-control-r2`)
+**Last Used:** Author-time parse check only — **not run against a live environment** (a manual gate for the main session).
+
+**Command:**
+```powershell
+# Dry run (default, report-only): the planned changes with each row's current owner — the same plan the apply carries
+# out (grandchildren included). A report lists 200 changes per run and counts all; the script warns when it lists fewer,
+# and on NeedsF3 rows (isolated rows only Unsecure may release — the sweep never does, owner round 24).
+.\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default
+# Apply: SecureChild__Reconciliation__WritesEnabled=true for the run, removed again afterwards (restarts the app).
+.\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Apply -ResourceGroup <rg> -AppName <app>
+# Verify: exit 0 only when a full pass plans zero changes and refuses / fails nothing.
+.\Invoke-SecureChildBackfill.ps1 -BffBaseUrl https://<bff-host> -ApiScope api://<bff-app-id>/.default -Verify
+```
+
+Runbook: [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7c.1.
+### `Backfill-SpeContainerBusinessUnitStamp.ps1`
+**Purpose:** Binds EXISTING SharePoint Embedded containers to the business unit that owns them (the container custom property
+named in `common/SpeContainerBinding.ps1`). The BFF's SPE admin plane authorizes every container route per container and
+reaches **no** unbound container (unified-access-control-r2 task 165, owner rounds 20 and 35). The owner is derived only from
+authoritative records (`businessunit.sprk_containerid`, a secure root's own container, the admin-plane `CreateContainer`
+audit row); a container no record claims is bound only by an explicit `-Bind '<containerId>=<businessUnitId>'`.
+**Usage:** 🔴 Per environment — a **manual gate** before task 165's BFF is deployed there, and before a further environment
+is onboarded onto a container type another environment already uses (`-Verify` must exit 0).
+**Lifecycle:** ✅ Maintained (task 165 f1 2026-10-04; `-Bind` + unbound listing f2)
+**Dependencies:** Azure CLI (`az login`: Dataverse + the BFF Key Vault for the owning apps' secrets), PowerShell 7+
+**Safety model:** dry run by default (`-WhatIf` forces it); write-ahead reversal manifest (`-RevertManifest <csv> -Apply`
+undoes); every write read back; never overwrites a stamp (MISMATCH / FOREIGN / MALFORMED / BIND-CONFLICT are listed);
+`-MaxWritesPerRun` samples; `-Verify` lists every still-unbound container and fails on it, on a mismatch, an unreadable
+binding or a config whose containers could not be listed. A config whose Key Vault secret name is outside the
+allow-list is SKIPPED with its secret never read (round 41 item 4 — repair it with `Repair-SpeConfigSecretName.ps1`, or
+bind its containers with `-Bind`). This script is the ONE remaining reader of `sprk_keyvaultsecretname` (round 65 item 1).
+
+```powershell
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault>            # dry run
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Apply
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Bind '<containerId>=<buId>' -Apply
+.\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -KeyVaultName <vault> -Verify   # must exit 0
+```
+
+**Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
+`Invoke-SpeContainerBindOrRemove` (stamp, read back, remove the container if the stamp did not land), used by every script
+that creates a container (`New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
+`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`). `SpeAdminContainerBindingGuardTests`
+fails the build on a script that creates a container without it — including a URI held in a variable, a splat, `az rest`,
+or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 item 5).
+
 ### `Backfill-RecordOwnership.ps1`
 **Purpose:** Re-owns EXISTING **app-owned** `sprk_document` / `sprk_todo` rows to a business unit's DEFAULT OWNER TEAM, record-first — the backfill for write-path invariant **I-6**. Before task 080 every BFF-created record was owned by the BFF application user in the ROOT business unit, which no child-business-unit user can read at Deep depth. The team comes from the record the row is filed against (document: `sprk_matter` → `sprk_project` → `sprk_invoice` → `sprk_workassignment`; To Do: record regarding → document → communication), mirroring `RecordOwnershipResolver`. Rows filed against nothing are **reported, never written** — the create was app-only, so the data does not record who made it ("we can't guess").
 **Usage:** 🔴 One-time (per environment); idempotent — re-owned rows are no longer candidates.
@@ -1183,6 +1235,36 @@ Detail: [`projects/spaarkeai-word-add-in-r1/notes/082-secure-owner-role.md`](../
 
 Detail: [`projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md`](../projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md).
 
+### `Repair-SecureFlagNulls.ps1`
+**Purpose:** One-time cleanup: every NULL `sprk_issecure` on `sprk_project` / `sprk_matter` / `sprk_workassignment` becomes No, and the column default is No (owner decision Q1). Records the before/after counts and every record id in a JSON report.
+**Usage:** 🔴 One-time per environment, BEFORE deploying a BFF carrying task 150 (that BFF refuses an empty flag); idempotent. `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 150, GitHub #1067)
+**Dependencies:** Azure CLI (`az login`), PowerShell 7+
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-03, `-Apply` against `spaarkedev1` (gate G-0, owner round 11): 42 NULL rows → No (9 projects, 18 matters, 11 work assignments, 4 invoices — it discovers every entity carrying the column); `-Verify` PASS (`projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md`).
+
+```powershell
+.\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"            # dry run (ids + counts)
+.\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply     # PATCH If-Match:*, report
+.\Repair-SecureFlagNulls.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Verify    # exit 0 = no NULL, default No
+```
+
+### `Set-SecureFlagFieldSecurity.ps1`
+**Purpose:** Locks `sprk_issecure` on the three secure roots (and `sprk_invoice`, owner round 10 item 11) with field-level security — only the BFF application user(s) can write it, every business unit's default team reads it — REUSING task 133's `Spaarke BFF-Managed Field Readers/Writers` profiles (it never creates them or edits their membership). Lists every System Administrator holder (owner decision F4).
+**Usage:** 🔴 One-time per environment (task 150 step 6), AFTER the BFF and the client that stops writing the flag are deployed; `-Apply` refuses unless the profiles, every default team, the writer membership and the NULL cleanup are in place and `-ClientNoLongerWritesFlag` is passed. `-Verify` any time.
+**Lifecycle:** ✅ Maintained (added 2026-10-02 by `unified-access-control-r2` task 150, GitHub #1067)
+**Dependencies:** Azure CLI (`az login`) with System Administrator, PowerShell 7+; `Set-RecordCreatorPersonSchema.ps1 -Apply` run first
+**Owner:** `unified-access-control-r2`
+**Last Used:** 2026-10-02, **dry run only** against `spaarkedev1`: both profiles missing (task 133's schema gate not yet run), NULL rows present. **No `-Apply` has been run.**
+
+```powershell
+.\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -BffApplicationIds <ids>             # dry run
+.\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -BffApplicationIds <ids> -ClientNoLongerWritesFlag -Apply
+.\Set-SecureFlagFieldSecurity.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -BffApplicationIds <ids> -Verify
+```
+
+Detail: [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) §7d.
+
 ### `Migrate-SecureRecordsToNamedOwnerTeam.ps1`
 **Purpose:** One-time move of every secure project, matter and work assignment off the Secure Record business unit's DEFAULT owner team and onto its NAMED, non-default, memberless owner team (`Secure Record Owners`). Secure rows outside the business unit are reported as NOT ISOLATED and never touched.
 **Usage:** 🔴 One-time per environment, during the setup-guide §4.3 cutover; idempotent (a second run plans nothing). `-Verify` any time.
@@ -1242,6 +1324,48 @@ pwsh scripts/Test-SpeContainerPermissionPaging.ps1 -ContainerId 'b!...' -AccessT
 **Related**: `projects/unified-access-control-r2/notes/task-024-spe-paging-parity.md` §1 (record the verdict there); `notes/decisions/spe-paging-and-revoke-honesty-design.md` §0; GitHub #968, #969.
 
 ---
+
+### `Test-SpeConfigSecretNames.ps1`
+**Purpose:** READ-ONLY. Lists the SPE container-type configs whose `sprk_keyvaultsecretname` is outside the allow-list
+(ONE pinned prefix, `spe-owning-app-`; unified-access-control-r2 task 165, owner round 35 item 3). **Since main-session round
+65 the BFF reads no secret by this name and refuses no config for it** — SPE Admin authenticates as the BFF's own identity
+(master `bb8ba7251`), and the BFF applies the prefix only as a 400 on a SUPPLIED name. The one remaining reader is
+`Backfill-SpeContainerBusinessUnitStamp.ps1`, which lists a config's containers as its owning app and skips a config whose
+stored name does not conform (it never reads that secret). Run this check before the backfill; a listed config is repaired
+with `Repair-SpeConfigSecretName.ps1` below, or its containers are bound with the backfill's explicit `-Bind`.
+**Usage:** Per environment, before `Backfill-SpeContainerBusinessUnitStamp.ps1`. **Lifecycle:** ✅ Maintained (task 165 f2,
+2026-10-04; narrowed by round 65)
+
+```powershell
+.\Test-SpeConfigSecretNames.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -Verify   # exit 1 while any config does not conform
+```
+
+**Shared module:** `common/SpeConfigSecretNamePolicy.ps1` — THE PowerShell copy of the BFF's allow-list (`$SpeConfigSecretNamePrefix`,
+`Test-SpeConfigSecretNameAllowed`; the expression ends at `\z`, never `$`, which also matches before a trailing newline —
+round 41 item 5). Dot-sourced by this script, `Repair-SpeConfigSecretName.ps1` and the container-binding backfill;
+`SpeAdminContainerBindingGuardTests` pins it equal to the C# rule and fails on a script that reads a config's secret
+without it.
+
+### `Repair-SpeConfigSecretName.ps1`
+**Purpose:** Repairs ONE config the check above lists, so the container-binding backfill can list its containers
+(unified-access-control-r2 task 165, owner round 41 item 4; since round 65 not a BFF deploy gate — the BFF reads no such
+secret): stores
+the config's owning-app client secret under a conforming name in the BFF Key Vault(s) and PATCHes the config's
+`sprk_keyvaultsecretname` to it (If-Match on its ETag). The value comes from a vault that already holds the name (a repeat
+run mints nothing), else `-MintClientSecret` (Graph `addPassword` on the owning app — an Entra write, existing credentials
+kept; the keyId is printed, the value never) or `-SourceKeyVaultName`/`-SourceSecretName`. Never deletes the config, never
+overwrites a stored secret.
+**Usage:** Per non-conforming config the backfill must list (manual step). **Lifecycle:** ✅ Maintained (task 165 f2-v1, 2026-10-05)
+**Dependencies:** Azure CLI (`az login` with Dataverse write on the config, Key Vault secret get/set on each vault, and —
+for `-MintClientSecret` — rights to add a credential to the owning app), PowerShell 7+
+**Safety model:** dry run by default; `-Apply` writes; `-Verify` (read-only) exits 0 only when the config names the secret,
+every vault holds the same value, and that value authenticates as the owning app (a client-credentials token request).
+
+```powershell
+.\Repair-SpeConfigSecretName.ps1 -EnvironmentUrl https://spaarkedev1.crm.dynamics.com -ConfigId <config-id> -SecretName spe-owning-app-<name> -KeyVaultName <bff-kv>,<operator-kv>   # dry run
+.\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
+.\Repair-SpeConfigSecretName.ps1 ... -Verify   # must exit 0
+```
 
 ### `tests/bicep-e2e-dry-run.ps1`
 **Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 3 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep — stacks/model1-shared.bicep was retired by task 225a) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.

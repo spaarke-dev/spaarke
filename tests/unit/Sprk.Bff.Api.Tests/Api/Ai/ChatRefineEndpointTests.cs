@@ -30,9 +30,11 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebAppFactory _factory;
 
     public ChatRefineEndpointTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -52,6 +54,7 @@ public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
 
         // Assert - endpoint exists (not 404 or 405)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/ai/chat/sessions/{sessionId}/refine");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
         response.StatusCode.Should().NotBe(HttpStatusCode.MethodNotAllowed);
     }
 
@@ -61,8 +64,11 @@ public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
         // Arrange
         var sessionId = Guid.NewGuid().ToString("N");
 
-        // Act
-        var response = await _client.GetAsync($"/api/ai/chat/sessions/{sessionId}/refine");
+        // Act — WITH a bearer: the 405 is routing's answer, and since the authorization FallbackPolicy (UAC-r2 task
+        // 167 f1) an ANONYMOUS request that matches no endpoint for its method is challenged 401 before routing's 405.
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"/api/ai/chat/sessions/{sessionId}/refine");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
+        var response = await _client.SendAsync(request);
 
         // Assert - GET should not be supported on this endpoint
         response.StatusCode.Should().BeOneOf(

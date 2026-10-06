@@ -53,7 +53,8 @@ public class OfficeJobQueue
         Guid documentId,
         bool isVersionSave,
         Guid? owningTeamId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Guid? createdByPersonId = null)
     {
         _logger.LogDebug(
             "Queueing upload finalization job {JobId} for {ContentType}",
@@ -124,7 +125,8 @@ public class OfficeJobQueue
                 },
             DocumentId = documentId,
             VersionSaveJobId = isVersionSave ? jobId : null,
-            OwningTeamId = owningTeamId
+            OwningTeamId = owningTeamId,
+            CreatedByPersonId = createdByPersonId, // task 146 c1-r1 — carried with the team
         };
 
         // Create the job message

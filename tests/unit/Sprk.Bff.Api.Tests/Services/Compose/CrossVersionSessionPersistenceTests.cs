@@ -32,6 +32,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
@@ -39,7 +40,6 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Compose;
-using Spaarke.Dataverse;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Compose;
@@ -106,7 +106,7 @@ public sealed class CrossVersionSessionPersistenceTests
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     private ChatSession SeedSession(
         string sessionId,
@@ -125,7 +125,8 @@ public sealed class CrossVersionSessionPersistenceTests
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
             HostContext: hostContext)
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             AnchoredAnnotations = annotations,
             Outputs = outputs,
         };
@@ -397,7 +398,8 @@ public sealed class CrossVersionSessionPersistenceTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>())
-        { OwnerOid = TestSessionOwner.Oid,
+        {
+            OwnerOid = TestSessionOwner.Oid,
             Outputs = new[]
             {
                 new SessionOutput

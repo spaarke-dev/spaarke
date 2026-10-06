@@ -55,7 +55,6 @@ public class AnalysisOrchestrationServiceTests
         var tenantCacheMock = new Mock<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
         var ragServiceMock = new Mock<IRagService>();
         var storageRetryPolicyMock = new Mock<IStorageRetryPolicy>();
-        var exportRegistry = new ExportServiceRegistry(Array.Empty<IExportService>());
         var options = Options.Create(new AnalysisOptions
         {
             Enabled = true,
@@ -85,7 +84,7 @@ public class AnalysisOrchestrationServiceTests
             _dataverseServiceMock.Object,
             _workingDocumentServiceMock.Object,
             storageRetryPolicyMock.Object,
-            exportRegistry,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             new Mock<ILogger<AnalysisResultPersistence>>().Object);
 
         // Post DI-cycle-break (2026-06-08): AnalysisOrchestrationService takes
@@ -146,124 +145,9 @@ public class AnalysisOrchestrationServiceTests
     // build-vs-maintain criteria — this test lived outside the 7 KEEP paths (build-class), so no
     // same-PR replacement is required.
 
-    #region SaveWorkingDocumentAsync Tests
-
-    [Fact]
-    public async Task SaveWorkingDocumentAsync_AnalysisNotFound_ThrowsKeyNotFoundException()
-    {
-        // Arrange
-        var analysisId = Guid.NewGuid();
-        var request = new AnalysisSaveRequest
-        {
-            FileName = "output.md",
-            Format = SaveDocumentFormat.Md
-        };
-
-        // Act & Assert
-        var act = async () => await _service.SaveWorkingDocumentAsync(analysisId, request, CancellationToken.None);
-
-        await act.Should().ThrowAsync<KeyNotFoundException>()
-            .WithMessage($"*{analysisId}*not found*");
-    }
-
-    // task 064 (ADR-040 Path A, spec §13.5 / FR-22): regression test for the sprk_chathistory
-    // read drop. AnalysisEntity no longer carries a ChatHistory property at all — this test
-    // pins the behavior that SaveWorkingDocumentAsync succeeds purely off WorkingDocument, with
-    // no chat-history column required on the Dataverse record.
-    [Fact]
-    public async Task SaveWorkingDocumentAsync_AnalysisFoundWithNoChatHistoryColumn_SavesSuccessfully()
-    {
-        // Arrange
-        var analysisId = Guid.NewGuid();
-        var documentId = Guid.NewGuid();
-        _dataverseServiceMock
-            .Setup(x => x.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AnalysisEntity
-            {
-                Id = analysisId,
-                DocumentId = documentId,
-                Name = "Test Analysis",
-                WorkingDocument = "# Working draft",
-                StatusCode = 0,
-                CreatedOn = DateTime.UtcNow.AddMinutes(-10),
-                ModifiedOn = DateTime.UtcNow
-            });
-        _workingDocumentServiceMock
-            .Setup(x => x.SaveToSpeAsync(analysisId, "output.md", It.IsAny<byte[]>(), "text/markdown", It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SavedDocumentResult
-            {
-                DocumentId = documentId,
-                DriveId = "drive-1",
-                ItemId = "item-1",
-                WebUrl = "https://example.com/output.md"
-            });
-        var request = new AnalysisSaveRequest { FileName = "output.md", Format = SaveDocumentFormat.Md };
-
-        // Act
-        var result = await _service.SaveWorkingDocumentAsync(analysisId, request, CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNull();
-        result.DocumentId.Should().Be(documentId);
-    }
-
-    #endregion
-
-    #region ExportAnalysisAsync Tests
-
-    [Fact]
-    public async Task ExportAnalysisAsync_AnalysisNotFound_ThrowsKeyNotFoundException()
-    {
-        // Arrange
-        var analysisId = Guid.NewGuid();
-        var request = new AnalysisExportRequest
-        {
-            Format = ExportFormat.Email
-        };
-
-        // Act & Assert
-        var act = async () => await _service.ExportAnalysisAsync(analysisId, request, CancellationToken.None);
-
-        await act.Should().ThrowAsync<KeyNotFoundException>()
-            .WithMessage($"*{analysisId}*not found*");
-    }
-
-    // task 064: ExportAnalysisAsync's ExportContext never read ChatHistory even before the
-    // read-drop (it only uses WorkingDocument/FinalOutput/DocumentName) — this pins that the
-    // shared loader change does not regress export: the analysis loads and export proceeds
-    // (format-not-supported here only because the test registry has no export services wired,
-    // per the constructor's `ExportServiceRegistry(Array.Empty<IExportService>())` setup — the
-    // KeyNotFoundException path is what would fire if the loader still required chat history).
-    [Fact]
-    public async Task ExportAnalysisAsync_AnalysisFoundWithNoChatHistoryColumn_LoadsWithoutThrowing()
-    {
-        // Arrange
-        var analysisId = Guid.NewGuid();
-        _dataverseServiceMock
-            .Setup(x => x.GetAnalysisAsync(analysisId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AnalysisEntity
-            {
-                Id = analysisId,
-                DocumentId = Guid.NewGuid(),
-                Name = "Test Analysis",
-                WorkingDocument = "# Working draft",
-                StatusCode = 0,
-                CreatedOn = DateTime.UtcNow.AddMinutes(-10),
-                ModifiedOn = DateTime.UtcNow
-            });
-        var request = new AnalysisExportRequest { Format = ExportFormat.Email };
-
-        // Act
-        var result = await _service.ExportAnalysisAsync(analysisId, request, CancellationToken.None);
-
-        // Assert — the analysis loaded (no KeyNotFoundException); the registry has no export
-        // services wired in this test fixture, so the format-not-supported result is expected.
-        result.Should().NotBeNull();
-        result.Success.Should().BeFalse();
-        result.Error.Should().Contain("not supported");
-    }
-
-    #endregion
+    // unified-access-control-r2 task 162 (owner round 10 item 1): the SaveWorkingDocumentAsync and
+    // ExportAnalysisAsync test regions (4 tests) were DELETED with the production methods, whose only callers
+    // were POST /api/ai/analysis/{analysisId}/save and /export (no caller in the repo, not published).
 
     #region GetAnalysisAsync Tests
 

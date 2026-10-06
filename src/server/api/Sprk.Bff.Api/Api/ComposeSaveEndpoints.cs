@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Telemetry;
@@ -38,7 +40,9 @@ internal static class ComposeSaveEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status500InternalServerError);
+            .Produces(StatusCodes.Status500InternalServerError)
+            // Task 166 r1: a session-store fault during the body-session ownership check refuses the save.
+            .Produces(StatusCodes.Status503ServiceUnavailable);
 
         // (3b) POST /api/compose/documents/create-on-save — FR-05 create-on-save (task 100).
         // A TRANSIENT Browse/Upload draft has NO SPE drive-item, so the `{documentSpeId}` path
@@ -60,7 +64,9 @@ internal static class ComposeSaveEndpoints
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
             .Produces(StatusCodes.Status404NotFound)
-            .Produces(StatusCodes.Status500InternalServerError);
+            .Produces(StatusCodes.Status500InternalServerError)
+            // Task 166 r1: a session-store fault during the body-session ownership check refuses the save.
+            .Produces(StatusCodes.Status503ServiceUnavailable);
 
         return group;
     }
@@ -69,6 +75,8 @@ internal static class ComposeSaveEndpoints
         string documentSpeId,
         [FromBody] SaveComposeDocumentBody body,
         IComposeService composeService,
+        // Task 166 (amendment d): the session named in the body is bound only if the CALLER owns it.
+        ChatSessionManager sessionManager,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -78,8 +86,11 @@ internal static class ComposeSaveEndpoints
         if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
         if (body is null) return BadRequest("Request body is required.");
         if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
         if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required in the request body for first-Save promotion rebind.");
+
+        // Task 166 (amendment d): the tenant is the CALLER's claim, never the body (see ResolveBindableSessionIdAsync).
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId)) return MissingTenantClaim();
 
         // R4 FR-06 (task 032): a save carrying the retired paragraph-diff delta comes from a client build
         // predating the operation-log cutover. Reject it with a ProblemDetails so a stale payload is a clean 400
@@ -108,7 +119,14 @@ internal static class ComposeSaveEndpoints
 
         logger.LogInformation(
             "Compose save: tenant={TenantId} drive={DriveId} item={DocumentSpeId} session={SessionId} record={DocumentRecordId} contentBytes={SizeBytes} ops={OpCount} comments={CommentCount} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content?.Length ?? 0, body.OperationLog?.Operations.Count ?? 0, body.Comments?.Count ?? 0, httpContext.TraceIdentifier);
+            tenantId, body.DriveId, documentSpeId, body.SessionId, body.DocumentRecordId, body.Content?.Length ?? 0, body.OperationLog?.Operations.Count ?? 0, body.Comments?.Count ?? 0, httpContext.TraceIdentifier);
+
+        var (sessionLookupFaulted, boundSessionId) = await ResolveBindableSessionIdAsync(
+            sessionManager, tenantId, body.SessionId, httpContext, logger, ct).ConfigureAwait(false);
+        if (sessionLookupFaulted)
+        {
+            return SessionUnavailable(httpContext);
+        }
 
         var request = new SaveComposeDocumentRequest
         {
@@ -117,9 +135,10 @@ internal static class ComposeSaveEndpoints
             // ContainerId forwarding REMOVED — issue #858. It was already ignored on this (replace)
             // path, and the field no longer exists on SaveComposeDocumentRequest.
             Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
-            // Replace path still requires a session (guarded above at the endpoint); non-null here.
-            SessionId = body.SessionId!,
-            TenantId = body.TenantId,
+            // Task 166: the session is forwarded ONLY when the caller owns it; otherwise the save runs UNBOUND
+            // (empty — the service's "no session" form) and nothing session-keyed is read or rebound.
+            SessionId = boundSessionId,
+            TenantId = tenantId,
             DocumentRecordId = body.DocumentRecordId,
             DisplayName = body.DisplayName,
             // R4 FR-06 (task 032): the op-log's base version + the ordered op-log the engine applies onto it.
@@ -144,7 +163,8 @@ internal static class ComposeSaveEndpoints
             SummaryPage = body.SummaryPage,
         };
 
-        return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
+        return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct, echoSessionId: body.SessionId)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -159,6 +179,8 @@ internal static class ComposeSaveEndpoints
     private static async Task<IResult> CreateOnSave(
         [FromBody] SaveComposeDocumentBody body,
         IComposeService composeService,
+        // Task 166 (amendment d): the session named in the body is bound only if the CALLER owns it.
+        ChatSessionManager sessionManager,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
@@ -171,7 +193,10 @@ internal static class ComposeSaveEndpoints
         // there. The container is now chosen by ComposeService.ResolveCreateOnSaveContainerAsync from
         // the matter bound to the session (after authorizing the caller against it), or from the acting
         // user's business unit when there is no matter.
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        // Task 166 (amendment d): the tenant is the CALLER's claim, never the body.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId)) return MissingTenantClaim();
 
         // R4 FR-06 (task 032): reject the retired paragraph-diff delta shape (stale client) with a clean 400.
         if (body.EditedParagraphs is { Count: > 0 })
@@ -189,7 +214,14 @@ internal static class ComposeSaveEndpoints
 
         logger.LogInformation(
             "Compose create-on-save: tenant={TenantId} session={SessionId} contentBytes={SizeBytes} modelBlocks={BlockCount} TraceId={TraceId}",
-            body.TenantId, body.SessionId, body.Content?.Length ?? 0, body.ContentModel?.Blocks.Count ?? 0, httpContext.TraceIdentifier);
+            tenantId, body.SessionId, body.Content?.Length ?? 0, body.ContentModel?.Blocks.Count ?? 0, httpContext.TraceIdentifier);
+
+        var (sessionLookupFaulted, boundSessionId) = await ResolveBindableSessionIdAsync(
+            sessionManager, tenantId, body.SessionId, httpContext, logger, ct).ConfigureAwait(false);
+        if (sessionLookupFaulted)
+        {
+            return SessionUnavailable(httpContext);
+        }
 
         var request = new SaveComposeDocumentRequest
         {
@@ -198,10 +230,12 @@ internal static class ComposeSaveEndpoints
             DocumentSpeId = null,
             DriveId = null,
             Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
-            // Empty when no session is bound (Browse/local-file first Save). The service treats an
-            // empty/whitespace SessionId as "no session" and skips the FR-07 rebind (task 110).
-            SessionId = body.SessionId ?? string.Empty,
-            TenantId = body.TenantId,
+            // Empty when no session is bound (Browse/local-file first Save) — AND, since task 166, when the
+            // body names a session the caller does not own. The service treats an empty SessionId as "no
+            // session": it skips the FR-07 rebind, picks the container from the acting user's business unit
+            // instead of the session's bound matter, and reads no session-keyed PDF marker or memory.
+            SessionId = boundSessionId,
+            TenantId = tenantId,
             DocumentRecordId = null,
             DisplayName = body.DisplayName,
             // R3 FR-01a (task 027): the born-in-editor content model the server RENDERS into high-fidelity bytes.
@@ -237,8 +271,112 @@ internal static class ComposeSaveEndpoints
             SourceDocumentRecordId = body.SourceDocumentRecordId,
         };
 
-        return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct).ConfigureAwait(false);
+        return await ExecuteSaveAsync(request, documentSpeId: null, composeService, logger, httpContext, ct, echoSessionId: body.SessionId)
+            .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Task 166 (route-authorization sweep, amendment d): the session id a save may BIND — the body's, when and
+    /// only when the CALLER owns that session; otherwise <see cref="string.Empty"/>, the service's "no session".
+    /// A session-store FAULT is a third answer, <c>Faulted = true</c>, and the caller REFUSES the save (503).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The defect.</b> Both save routes passed the body's tenant AND session straight into
+    /// <c>IComposeService.SaveAsync</c>, whose first-save promotion rebinds that session's document id
+    /// (<c>ComposeRecordResolution.RebindSessionDocumentIdAsync</c> — <c>GetSessionAsync</c> has no owner
+    /// predicate), whose create-on-save path picks the container from the session's bound matter, and whose
+    /// memory capture distils that session's defined terms into the new document's record memory. Naming another
+    /// user's session therefore rewrote their session and read their session state into the caller's document.</para>
+    ///
+    /// <para><b>Why "unbound" rather than a refusal — for an ANSWERED lookup.</b> Compose LoadAsync's own #863 rule
+    /// is the precedent: a session that is not the caller's is treated exactly as one that does not exist, and the
+    /// user gets a working document rather than an error. For a save, "does not exist" already means "nothing to
+    /// rebind" — the service skips every session-keyed step on an empty id — so not-yours, not-found and unowned
+    /// become the SAME unbound save. One answer, no session-existence oracle, and no saved work is ever refused
+    /// because a session aged out of the store.</para>
+    ///
+    /// <para><b>Why a FAULT refuses instead (task 166 r1, ADR-003).</b> "The store did not answer" is not "the
+    /// session is not yours". Degrading it to an unbound save changes WHERE a create-on-save writes: an unbound
+    /// create-on-save takes the acting user's business-unit container, while the caller's own session — bound to
+    /// their SECURE matter — would have chosen that matter's own container. A transient Redis fault would then put
+    /// secure-matter draft content into the shared business-unit container, and SharePoint Embedded permissions are
+    /// additive-only, so that placement cannot be retracted. Before task 166 the service's own
+    /// <c>GetSessionAsync</c> faulted and the save failed; the fault now fails the save explicitly, before any
+    /// write, with a retryable 503.</para>
+    /// </remarks>
+    private static async Task<(bool Faulted, string BoundSessionId)> ResolveBindableSessionIdAsync(
+        ChatSessionManager sessionManager,
+        string tenantId,
+        string? sessionId,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(sessionId))
+        {
+            return (false, string.Empty);
+        }
+
+        try
+        {
+            var (owned, _) = await ComposeActiveDocumentEndpoints.ResolveOwnedSessionAsync(
+                    sessionManager, tenantId, sessionId, CallerResolution.ResolveObjectId(httpContext.User), ct)
+                .ConfigureAwait(false);
+
+            if (owned is not null)
+            {
+                return (false, sessionId);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The DECISION only. Fail closed: the save is refused before any write (see remarks).
+            logger.LogWarning(ex,
+                "Compose save: session-ownership lookup FAULTED for session={SessionId} tenant={TenantId}; REFUSING the "
+                + "save (503) — nothing written. TraceId={TraceId}",
+                sessionId, tenantId, httpContext.TraceIdentifier);
+            return (true, string.Empty);
+        }
+
+        logger.LogWarning(
+            "Compose save: session={SessionId} tenant={TenantId} is not the caller's (or does not exist) — saving UNBOUND: "
+            + "no rebind, no session-derived container, no session state read. TraceId={TraceId}",
+            sessionId, tenantId, httpContext.TraceIdentifier);
+        return (false, string.Empty);
+    }
+
+    /// <summary>
+    /// Task 166 r1: the save refusal for a session-store FAULT during the ownership lookup — 503, nothing written,
+    /// retryable. The same answer on both save routes; carries a machine-readable <c>code</c> (ADR-019).
+    /// </summary>
+    internal const string SessionUnavailableCode = "compose_session_unavailable";
+
+    private static IResult SessionUnavailable(HttpContext httpContext)
+    {
+        ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseSessionUnavailable);
+        return Results.Problem(
+            statusCode: StatusCodes.Status503ServiceUnavailable,
+            title: "Session Temporarily Unavailable",
+            detail: "Compose could not confirm this editing session belongs to you, so nothing was saved and nothing "
+                    + "was overwritten. Your changes are still here — try saving again in a moment.",
+            type: "https://tools.ietf.org/html/rfc7231#section-6.6.4",
+            extensions: new Dictionary<string, object?>
+            {
+                ["code"] = SessionUnavailableCode,
+                ["correlationId"] = httpContext.TraceIdentifier,
+            });
+    }
+
+    /// <summary>401 for a caller whose token carries no tenant (<c>tid</c>) claim — task 166.</summary>
+    private static IResult MissingTenantClaim() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status401Unauthorized,
+            title: "Unauthorized",
+            detail: "Tenant identity ('tid' claim) not found in authentication token.");
 
     /// <summary>
     /// Shared save execution used by both the replace route (<see cref="Save"/>) and the
@@ -251,7 +389,10 @@ internal static class ComposeSaveEndpoints
         IComposeService composeService,
         ILogger logger,
         HttpContext httpContext,
-        CancellationToken ct)
+        CancellationToken ct,
+        // Task 166: the session id the CLIENT sent, echoed on the response when the save ran unbound so the
+        // wire contract is unchanged (the client keeps its own session id; nothing session-keyed was touched).
+        string? echoSessionId = null)
     {
         // FR-S08 (r8 task 015): the document-size gate, on the ONE path both save routes share so the
         // replace and create-on-save routes can never diverge on it. Checked BEFORE SaveAsync, so an
@@ -311,7 +452,11 @@ internal static class ComposeSaveEndpoints
             return Results.Ok(new SaveComposeDocumentResponse(
                 DocumentSpeId: result.DocumentSpeId,
                 DriveId: result.DriveId,
-                SessionId: result.SessionId,
+                // Task 166: an UNBOUND save (session not the caller's) ran with an empty session; echo the id the
+                // client sent so the response shape is identical whether or not the session was bound.
+                SessionId: string.IsNullOrEmpty(result.SessionId) && !string.IsNullOrEmpty(echoSessionId)
+                    ? echoSessionId
+                    : result.SessionId,
                 DocumentRecordId: result.DocumentRecordId,
                 VersionId: result.VersionId,
                 ETag: result.ETag,
@@ -625,6 +770,8 @@ public sealed record SaveComposeDocumentBody(
     /// path (task 110) — absent when the draft has no chat session; the server skips the FR-07
     /// rebind. Still REQUIRED on the replace path (guarded at that endpoint).</summary>
     [property: JsonPropertyName("sessionId")] string? SessionId,
+    /// <summary>OBSOLETE — never read (unified-access-control-r2 task 166). Both save routes take the tenant
+    /// from the caller's <c>tid</c> claim; this property stays only so the shipped client's payload binds.</summary>
     [property: JsonPropertyName("tenantId")] string TenantId,
     /// <summary>The retained-original bytes (same-session fast-path baseline / clean-save passthrough).
     /// OPTIONAL as of R3 task 027: a dirty-loaded save may instead send <see cref="BaselineVersionId"/> +

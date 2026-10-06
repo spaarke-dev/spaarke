@@ -198,6 +198,12 @@ only the org-grant term was lost. Fixed: the query reports cancellation as `Fail
 `ReadOrganizationMembershipsAsync` rethrows. Pinned by
 `GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants` (perturbation P9).
 
+> **Superseded by task 132 r1 (2026-10-03).** Task 132 made `QueryGrantSetAsync` rethrow the caller's cancellation
+> and stopped any faulted grant set from being cached, which removed W3's premise. The junction query now rethrows the
+> caller's cancellation too (task 132 criterion 3), and this test was rewritten as
+> `GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_PropagatesTheCancellation_AndCachesNothing` — W3's real concern,
+> never caching "no access at all" on a client abort, is kept. See `notes/task-132-access-cache-faults-and-staleness.md` §2 / §15.
+
 ### §A.6 No `CacheVersion` bump
 
 The cached grant-set shape is unchanged (filtering happens before caching). An entry written under the old
@@ -273,7 +279,7 @@ at first commit; **23** after verifier round 1 (§I).
 | `ComposeAsync_OrgKeyedDenyRow_StillMatchesAMemberWhoseMembershipNoLongerConfers` ×3 | **real transport**: veto over-match — ended / not-yet-started / inactive-organization |
 | `ComposeAsync_JunctionQueryFaults_DeniesEveryCandidateAndTheAdditiveTermsContributeNothing` ×3 | **real transport**: ISS-019 — 500 / 403 / timeout, both directions from one fault, with a healthy control |
 | `ComposeAsync_JunctionEntryCannotAcquireItsTokenOrApiUrl_DeniesEveryCandidate` ×2 | **real entry** (added §I.2): the pre-existing token / API-url acquisition fault still denies every candidate |
-| `GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants` | review fix W3 |
+| `GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants` | review fix W3 — **superseded by task 132 r1**: now `…_PropagatesTheCancellation_AndCachesNothing` (§A.5 note) |
 | `ComposeAsync_OneJunctionReadPerResolution_ServesTheConferringAndTheWallSets` | one read on the wire serves both sets; its `$filter` is exactly the wall's (§I.1) |
 
 **Instrument.** The fault and over-match claims run the REAL `ExternalParticipationService` and

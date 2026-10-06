@@ -523,6 +523,10 @@ internal sealed class Def14FakeAuthHandler : AuthenticationHandler<Authenticatio
             new("oid", oid),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"DEF14 Test User {oid}"),
+            // uac-r2 task 166 (amendment d): the save routes scope by the CALLER's tid claim, never the body's
+            // tenantId (which they now ignore). Every real Entra token carries one; a principal without it is the
+            // 401 the handlers answer before any SPE call.
+            new("tid", "tenant-aad-def14"),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

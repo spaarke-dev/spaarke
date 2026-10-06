@@ -345,3 +345,8 @@ shared/taskpane/services/__tests__/taskPaneWidthService.test.ts
 # TaskPaneNavigation (tab order + capability gate, live toolbar).
 shared/taskpane/components/views/__tests__/EmailView.test.tsx
 shared/taskpane/services/__tests__/paneEmailService.test.ts
+# UAT round 6 (2026-10-06): task 102 - Find's two independently scrolling sections and the keyboard-operable divider;
+# task 103 - expand/collapse width stepping (3x, then screen fractions, then the web cap) and the toolbar button's gating.
+shared/taskpane/components/__tests__/FindSplitPane.test.tsx
+shared/taskpane/services/__tests__/taskPaneExpand.test.ts
+shared/taskpane/components/__tests__/TaskPaneExpand.test.tsx

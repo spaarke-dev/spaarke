@@ -19,9 +19,20 @@
 //     - Production: GraphContainerProvisioner — Microsoft.Graph 6.5.0 as the
 //       container type's owning app, app-only, via the Worker UAMI's federated
 //       identity credential (task 248). Calls Storage.FileStorage.Containers.PostAsync +
-//       Containers[id].Activate.PostAsync per topology doc §6; task 227e adds the
-//       find (listing + marker read) and the marker write H8 needs to reuse a container.
+//       Containers[id].Activate.PostAsync per topology doc §6.
 //     - Test: fake ISpeContainerProvisioner returning canned outcomes.
+//
+// BUSINESS-UNIT STAMP + RESUME (unified-access-control-r2 task 165, owner rounds
+// 35 / 41 / 49 — re-applied to H8-B at the batch-4 integration):
+//   - BindRootContainerAsync stamps the container with its owning business unit
+//     (custom property Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName
+//     — the one C# constant the BFF authorizes against), reads it back, and
+//     DELETES the container when the stamp did not land. H8 calls it once the
+//     container is verified addressable.
+//   - ActivateAsync re-activates a container H8 created and RECORDED whose
+//     /activate failed, so a resume never creates a second container.
+//   - Every fault after the container POST was sent is a CreateFailure saying
+//     whether a container may exist (ContainerInDoubt) — never an exception.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
@@ -37,11 +48,36 @@ public interface ISpeContainerProvisioner
 {
     /// <summary>
     /// Creates and activates a container of the specified container-type.
-    /// Domain failures do NOT throw; infra faults (transport, timeout) MAY
-    /// throw. Successful outcome carries the new container's GUID.
+    /// Domain failures do NOT throw. A fault before any Graph request is sent
+    /// (the owning-app token exchange) MAY throw; every fault after the container
+    /// POST was sent is returned (<see cref="SpeContainerProvisionOutcome.CreateFailure.ContainerInDoubt"/> /
+    /// <see cref="SpeContainerProvisionOutcome.ActivateFailure"/>), so the handler can record what may exist.
+    /// Successful outcome carries the new container's GUID.
     /// </summary>
     Task<SpeContainerProvisionOutcome> ProvisionAsync(
         SpeContainerProvisionRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Activates a container H8 already created and recorded whose <c>/activate</c> failed (unified-access-control-r2
+    /// task 165: a resume continues with the container it made — it never creates another). Returns
+    /// <see cref="SpeContainerProvisionOutcome.Success"/> or <see cref="SpeContainerProvisionOutcome.ActivateFailure"/>
+    /// only; a fault before any Graph request MAY throw.
+    /// </summary>
+    Task<SpeContainerProvisionOutcome> ActivateAsync(
+        SpeContainerActivationRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stamps a container H8 created with its owning business unit (unified-access-control-r2 task 165, owner round 35
+    /// item 1 — every container-creation path stamps), reads the stamp back, and REMOVES the container when the stamp
+    /// does not read back, so no unbound container is left behind. Called by the handler once the container is verified
+    /// readable (an SPE container may be unaddressable for up to 24h after creation — stamping it earlier would remove
+    /// healthy containers during that documented window). Domain failures do NOT throw; a fault before any Graph call
+    /// MAY throw.
+    /// </summary>
+    Task<SpeContainerBindOutcome> BindRootContainerAsync(
+        SpeContainerBindRequest request,
         CancellationToken cancellationToken);
 
     /// <summary>
@@ -55,95 +91,51 @@ public interface ISpeContainerProvisioner
         CancellationToken cancellationToken);
 
     /// <summary>
-    /// Task 227e: the containers of the request's container type that are already this customer's. Candidates are those
-    /// with the request's display name or (when the listing carries descriptions) the request's description; a candidate
-    /// is this customer's when its <see cref="SpeContainerMarker.PropertyName"/> custom property is this customer's id,
-    /// or — unmarked (a container from before the marker) — when its description is H8's description for this customer.
-    /// A container marked for another customer, or unmarked with another description, is never returned. A listing that cannot be read to the end is a Failure (no verdict), never "none found" —
-    /// "none" makes H8 create a container. Domain failures do NOT throw; infra faults MAY throw.
-    /// </summary>
-    Task<SpeContainerLookupOutcome> FindCustomerContainersAsync(
-        SpeContainerLookupRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Task 227e: activates an existing container (<c>POST /containers/{id}/activate</c>) — for a reused container
-    /// still inactive because an earlier activation failed. Returns Success or ActivateFailure (never CreateFailure).
-    /// </summary>
-    Task<SpeContainerProvisionOutcome> ActivateAsync(
-        SpeContainerActivationRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Task 227e: ensures the container carries <see cref="SpeContainerMarker.PropertyName"/> = the customer id — the
-    /// marker the customer's BFF recognises its containers by (T227d). GET first; written only when absent, so a
-    /// re-run writes nothing. A container marked for another customer is a Failure and is left untouched.
+    /// Task 227e: ensures the container carries the <c>spaarkeCustomerId</c> custom property
+    /// (<see cref="Spaarke.Contracts.Spe.SpeContainerCustomerMarker"/>) = the customer id — the marker the customer's BFF
+    /// recognises its containers by (T227d). GET first; written only when absent, so a re-run writes nothing. A container
+    /// marked for another customer, or whose marker is not a readable string, is a Failure and is left untouched.
     /// </summary>
     Task<SpeContainerMarkerOutcome> EnsureCustomerMarkerAsync(
         SpeContainerMarkerRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 227e: READS (never writes) what an existing container says about its owner — its container type, its
+    /// <c>spaarkeCustomerId</c> marker and its business-unit stamp — so H8 can refuse a reused container that is not the
+    /// customer's BEFORE it binds or marks anything. A 404 is <see cref="SpeContainerInspection.NotFound"/>; any other
+    /// Graph refusal is a Failure. Infra faults MAY throw.
+    /// </summary>
+    Task<SpeContainerInspection> InspectContainerAsync(
+        SpeContainerInspectionRequest request,
+        CancellationToken cancellationToken);
 }
 
-/// <summary>
-/// The container custom property that names the owning customer. MUST equal the BFF's
-/// <c>SpeContainerOwnershipGuard.MarkerPropertyName</c> (pinned by <c>tests/Spaarke.ArchTests/TenantIsolation/SpeContainerMarkerParityTests.cs</c>).
-/// </summary>
-public static class SpeContainerMarker
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.InspectContainerAsync"/>.</summary>
+public sealed record SpeContainerInspectionRequest(string TenantId, string OwningAppId, string ContainerId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.InspectContainerAsync"/>.</summary>
+public abstract record SpeContainerInspection
 {
-    /// <summary>Custom property name; its value is the customer id (<c>Customer__Id</c> on the customer's BFF).</summary>
-    public const string PropertyName = "spaarkeCustomerId";
-}
+    private SpeContainerInspection() { }
 
-/// <summary>Inputs to <see cref="ISpeContainerProvisioner.FindCustomerContainersAsync"/>.</summary>
-/// <param name="TenantId">Customer Entra tenant id (§4D I5).</param>
-/// <param name="ContainerTypeId">The container type to list.</param>
-/// <param name="OwningAppId">The container type's owning app — the listing runs as it.</param>
-/// <param name="CustomerId">The customer whose marker a match may carry.</param>
-/// <param name="DisplayName">The display name H8 gives the customer's container.</param>
-/// <param name="Description">The description H8 gives the customer's container — customer-specific, so it proves an
-/// unmarked container is this customer's (a display name is operator intake and does not).</param>
-public sealed record SpeContainerLookupRequest(
-    string TenantId,
-    string ContainerTypeId,
-    string OwningAppId,
-    string CustomerId,
-    string DisplayName,
-    string Description);
+    /// <summary>
+    /// The container exists. <paramref name="Marker"/> is its <c>spaarkeCustomerId</c> (null when absent;
+    /// <paramref name="MarkerUnreadable"/> when present but not a string); <paramref name="BusinessUnitId"/> its business-unit
+    /// stamp (null when absent; <paramref name="StampUnreadable"/> when present but not one GUID).
+    /// </summary>
+    public sealed record Found(
+        string? ContainerTypeId,
+        string? Marker,
+        bool MarkerUnreadable,
+        Guid? BusinessUnitId,
+        bool StampUnreadable) : SpeContainerInspection;
 
-/// <summary>A container <see cref="ISpeContainerProvisioner.FindCustomerContainersAsync"/> found.</summary>
-/// <param name="Id">Container id.</param>
-/// <param name="DisplayName">Its display name.</param>
-/// <param name="Marker">Its <see cref="SpeContainerMarker.PropertyName"/> value; null when it has none.</param>
-public sealed record SpeContainerMatch(string Id, string DisplayName, string? Marker);
+    /// <summary>Graph answered 404 for the owning app: no such container (or not one of the owning app's type).</summary>
+    public sealed record NotFound : SpeContainerInspection;
 
-/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.FindCustomerContainersAsync"/>.</summary>
-public abstract record SpeContainerLookupOutcome
-{
-    private SpeContainerLookupOutcome() { }
-
-    /// <summary>The listing was read to the end; <paramref name="Matches"/> may be empty.</summary>
-    public sealed record Found(IReadOnlyList<SpeContainerMatch> Matches) : SpeContainerLookupOutcome;
-
-    /// <summary>No verdict — Graph refused or the listing did not finish.</summary>
-    public sealed record Failure(string Diagnostic) : SpeContainerLookupOutcome;
-}
-
-/// <summary>Inputs to <see cref="ISpeContainerProvisioner.ActivateAsync"/>.</summary>
-public sealed record SpeContainerActivationRequest(string TenantId, string OwningAppId, string ContainerId);
-
-/// <summary>Inputs to <see cref="ISpeContainerProvisioner.EnsureCustomerMarkerAsync"/>.</summary>
-public sealed record SpeContainerMarkerRequest(string TenantId, string OwningAppId, string ContainerId, string CustomerId);
-
-/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.EnsureCustomerMarkerAsync"/>.</summary>
-public abstract record SpeContainerMarkerOutcome
-{
-    private SpeContainerMarkerOutcome() { }
-
-    /// <summary>The container carries this customer's marker; <paramref name="Written"/> is true when this call wrote it.</summary>
-    public sealed record Success(bool Written) : SpeContainerMarkerOutcome;
-
-    /// <summary>Graph refused, or the container is marked for another customer (left untouched).</summary>
-    public sealed record Failure(string Diagnostic) : SpeContainerMarkerOutcome;
+    /// <summary>Graph refused the read — no verdict.</summary>
+    public sealed record Failure(string Diagnostic) : SpeContainerInspection;
 }
 
 /// <summary>
@@ -179,6 +171,66 @@ public abstract record SpeContainerTypeGrantOutcome
 
     /// <summary>Graph refused to read or write the grant for <paramref name="AppId"/>; later grants were not attempted.</summary>
     public sealed record Failure(string AppId, string Diagnostic) : SpeContainerTypeGrantOutcome;
+}
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.EnsureCustomerMarkerAsync"/>.</summary>
+public sealed record SpeContainerMarkerRequest(string TenantId, string OwningAppId, string ContainerId, string CustomerId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.EnsureCustomerMarkerAsync"/>.</summary>
+public abstract record SpeContainerMarkerOutcome
+{
+    private SpeContainerMarkerOutcome() { }
+
+    /// <summary>The container carries this customer's marker; <paramref name="Written"/> is true when this call wrote it.</summary>
+    public sealed record Success(bool Written) : SpeContainerMarkerOutcome;
+
+    /// <summary>Graph refused, or the container is marked for another customer / unreadably (left untouched).</summary>
+    public sealed record Failure(string Diagnostic) : SpeContainerMarkerOutcome;
+}
+
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.ActivateAsync"/>.</summary>
+/// <param name="CustomerId">Customer partition key — audit logs only.</param>
+/// <param name="TenantId">Customer Entra tenant id (§4D I1/I5).</param>
+/// <param name="OwningAppId">The container type's owning app — the identity that created the container.</param>
+/// <param name="ContainerId">The recorded container to activate.</param>
+public sealed record SpeContainerActivationRequest(
+    string CustomerId,
+    string TenantId,
+    string OwningAppId,
+    string ContainerId);
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.BindRootContainerAsync"/>.</summary>
+/// <param name="CustomerId">Customer partition key — audit logs only.</param>
+/// <param name="TenantId">Customer Entra tenant id (§4D I1/I5).</param>
+/// <param name="OwningAppId">The container type's owning app — the identity that created the container.</param>
+/// <param name="ContainerId">The container to bind.</param>
+/// <param name="BusinessUnitId">The owning business unit: the ROOT business unit of the customer's Dataverse environment.</param>
+/// <param name="RemoveIfNotBound">True for a container H8 just created (a failed bind removes it — nothing unbound is
+/// left). False for the customer's EXISTING container a later run reuses (task 227e): its files are the customer's data,
+/// so a failed bind leaves it in place and the run stops for an operator.</param>
+public sealed record SpeContainerBindRequest(
+    string CustomerId,
+    string TenantId,
+    string OwningAppId,
+    string ContainerId,
+    Guid BusinessUnitId,
+    bool RemoveIfNotBound = true);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.BindRootContainerAsync"/>.</summary>
+public abstract record SpeContainerBindOutcome
+{
+    private SpeContainerBindOutcome() { }
+
+    /// <summary>The stamp was written and read back.</summary>
+    public sealed record Bound : SpeContainerBindOutcome;
+
+    /// <summary>
+    /// The stamp did not land. <paramref name="Removed"/> is true when the container was then deleted (nothing unbound
+    /// is left); false when that also failed and an UNBOUND container remains (no admin route reaches it until the
+    /// backfill binds it with <c>-Bind</c>, an operator removes it, or a resume of H8 binds it).
+    /// </summary>
+    public sealed record NotBound(string Diagnostic, bool Removed) : SpeContainerBindOutcome;
 }
 
 /// <summary>
@@ -231,10 +283,13 @@ public abstract record SpeContainerProvisionOutcome
     public sealed record Success(SpeContainerProvisionOutputs Outputs) : SpeContainerProvisionOutcome;
 
     /// <summary>
-    /// The container CREATE call failed (Graph API error). No confirmed
-    /// external side effect — Resumable at the handler level.
+    /// The container CREATE call failed. With <paramref name="ContainerInDoubt"/> false it is Graph's own answer (an
+    /// <c>ODataError</c>) — nothing was created, Resumable at the handler level. With it true the POST got NO
+    /// authoritative answer (a client timeout, a dropped connection, a 2xx without an id): a container may exist,
+    /// unbound, that no one names — the handler records that and creates no container until an operator has checked
+    /// (unified-access-control-r2 task 165, owner round 49 item 2).
     /// </summary>
-    public sealed record CreateFailure(string Diagnostic) : SpeContainerProvisionOutcome;
+    public sealed record CreateFailure(string Diagnostic, bool ContainerInDoubt = false) : SpeContainerProvisionOutcome;
 
     /// <summary>
     /// The container was created but the follow-up /activate call failed.
@@ -242,5 +297,6 @@ public abstract record SpeContainerProvisionOutcome
     /// GUID (for audit / cleanup). Handler classifies as QuarantineRequired —
     /// a created-but-not-activated container is unusable per topology doc §6.
     /// </summary>
-    public sealed record ActivateFailure(string ContainerId, string Diagnostic) : SpeContainerProvisionOutcome;
+    /// <remarks><paramref name="NoAnswer"/>: the /activate call got no authoritative answer (transport fault, timeout).</remarks>
+    public sealed record ActivateFailure(string ContainerId, string Diagnostic, bool NoAnswer = false) : SpeContainerProvisionOutcome;
 }

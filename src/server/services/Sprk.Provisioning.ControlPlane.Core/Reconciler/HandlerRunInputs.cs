@@ -190,8 +190,10 @@ public static class HandlerRunInputs
                 // T227b: H8 grants these two on the container-type registration before creating the container.
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
-                // T227e: H8's own earlier write — a WaitingOnGate re-run or a resume reuses that container, never re-creates.
-                RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
+                // unified-access-control-r2 task 165, owner round 35 item 1: the container is bound to this environment's
+                // ROOT business unit (read before anything is created) — H5 output; H8 depends on H5. T227e: H8 also reads
+                // that environment's recorded container (sprk_SharePointEmbeddedContainerId) to reuse it on a later run.
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H9] =
             [

@@ -217,8 +217,9 @@ $RowFiles = @{
     "RECALL-SESSION-FILE"              = "$RepoRoot/infra/dataverse/sprk_analysistool-recall-session-file-row.json"
     # AIR2-075 RETIREMENT (2026-07-10): GET-WORKSPACE-TAB-CONTENT (GetWorkspaceTabContentHandler)
     # was retired with the orphaned workspace-tab tool cluster — do not re-seed. The KEPT read
-    # path is IWorkspaceStateService.GetTabsAsync via GET /api/workspace/state + the
-    # SprkChatAgentFactory workspace-state prompt block (no seed row of its own).
+    # path is IWorkspaceStateService.GetTabsAsync via the SprkChatAgentFactory workspace-state
+    # prompt block (no seed row of its own); GET /api/workspace/state was DELETED by
+    # unified-access-control-r2 task 166 (owner round 10 item 1: no caller, not published).
     # spaarke-ai-architecture-redesign-r1 / task 008 / FR-P0-07 (read half) — the three
     # dataverse.* READ tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
     #   dataverse.describe    → DataverseDescribeHandler    (describe(path, scope?))

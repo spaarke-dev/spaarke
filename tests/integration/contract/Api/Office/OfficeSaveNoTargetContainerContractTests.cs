@@ -355,16 +355,28 @@ public class OfficeSaveNoTargetContainerContractTests
     }
 
     /// <summary>
-    /// A to-do filed under a report card (which belongs to a matter, but leaves no root stamp on the to-do) is
-    /// refused, and nothing is uploaded anywhere.
+    /// A to-do filed under a report card that belongs to a SECURE matter, carrying NO copy of that matter (the live
+    /// a01477e8 shape: report cards were not derived before task 156): its copy is stale, so the save is refused, nothing
+    /// is uploaded anywhere, and the to-do is enqueued for re-stamping. (Task 155 refused it as unverifiable; task 156
+    /// reads the report card live and compares.)
     /// </summary>
     [Fact]
-    public async Task PostOfficeSave_TargetingATodoFiledUnderAReportCard_IsRefused_AndUploadsNothing()
+    public async Task PostOfficeSave_TargetingATodoFiledUnderAReportCard_WithNoCopyOfItsMatter_IsRefusedAsStale_AndUploadsNothing()
     {
+        var reportCard = Guid.NewGuid();
         using var factory = new NoTargetSaveFactory(
             NoTargetSaveFactory.CallerOid.Resolvable,
-            dataverse => ArrangeTodo(dataverse, row =>
-                row["sprk_regardingreportcard"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_reportcard", Guid.NewGuid())));
+            dataverse =>
+            {
+                ArrangeTodo(dataverse, row =>
+                    row["sprk_regardingreportcard"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_reportcard", reportCard));
+                ArrangeRow(dataverse, new Microsoft.Xrm.Sdk.Entity("sprk_reportcard", reportCard)
+                {
+                    ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", SecureMatterId),
+                });
+                ArrangeMatters(dataverse);
+            },
+            securableRoots: true);
         using var client = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
@@ -372,10 +384,172 @@ public class OfficeSaveNoTargetContainerContractTests
         // The Office save renders every resolver refusal as its pre-existing 400 "Save failed: {code}: …" shape
         // (OfficeService.SaveAsync's catch); the CODE is what identifies the refusal.
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_unverifiable");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_stale");
+        (await RetryableAsync(response)).Should().BeTrue(
+            "verifier round 3 item 7: the refusal enqueued the re-stamp that makes this save succeed, and its text says "
+            + "'try again in a minute' — the pane must be allowed to offer the retry");
         factory.UploadedToContainers.Should().BeEmpty(
-            "the report card's matter may be SECURE; neither the to-do's business unit nor the tenant default may "
-            + "stand in for it");
+            "the report card's matter is SECURE; neither the to-do's business unit nor the tenant default may stand in "
+            + "for it");
+        factory.RestampQueue.Children.Should().ContainSingle().Which.Should().Be(("sprk_todo", TodoId));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // §5 unified-access-control-r2 task 156 — a child filed under another record: its copy is compared with that
+    //    record's LIVE root, through the real Office save (owner round 4 item 5, option b).
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private static readonly Guid SecureMatterId = Guid.Parse("15600000-0000-0000-0000-0000000005e1");
+    private static readonly Guid PlainMatterId = Guid.Parse("15600000-0000-0000-0000-0000000005e2");
+    private static readonly Guid OtherPlainMatterId = Guid.Parse("15600000-0000-0000-0000-0000000005e3");
+    private static readonly Guid CommunicationId = Guid.Parse("15600000-0000-0000-0000-0000000005c1");
+    private static readonly Guid CarrierDocumentId = Guid.Parse("15600000-0000-0000-0000-0000000005d1");
+    private const string SecureMatterContainer = "b!secure-matter-own-container-156";
+
+    /// <summary>A to-do under a communication whose copy of the communication's matter is <paramref name="copy"/>.</summary>
+    private static Action<Mock<IDataverseService>> TodoUnderCommunication(Guid copy, Guid communicationRoot) => dataverse =>
+    {
+        ArrangeTodo(dataverse, row =>
+        {
+            row["sprk_regardingcommunication"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_communication", CommunicationId);
+            row["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", copy);
+            row["sprk_regardingrecordid"] = CommunicationId.ToString();
+        });
+        ArrangeRow(dataverse, new Microsoft.Xrm.Sdk.Entity("sprk_communication", CommunicationId)
+        {
+            ["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", communicationRoot),
+        });
+        ArrangeMatters(dataverse);
+    };
+
+    /// <summary>
+    /// The Office add-in's own to-do shape (<c>OfficeService.CreateTodoAsync</c>): the matter the user picked (the pair
+    /// names it) plus the Word document it was created from, whose own matter is <paramref name="documentMatter"/>.
+    /// </summary>
+    private static Action<Mock<IDataverseService>> CarrierTodo(Guid directMatter, Guid documentMatter) => dataverse =>
+    {
+        ArrangeTodo(dataverse, row =>
+        {
+            row["sprk_regardingmatter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", directMatter);
+            row["sprk_regardingrecordid"] = directMatter.ToString();
+            row["sprk_regardingdocument"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_document", CarrierDocumentId);
+        });
+        ArrangeRow(dataverse, new Microsoft.Xrm.Sdk.Entity("sprk_document", CarrierDocumentId)
+        {
+            ["sprk_matter"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_matter", documentMatter),
+        });
+        ArrangeMatters(dataverse);
+    };
+
+    [Fact]
+    public async Task PostOfficeSave_TodoUnderACommunication_WithAFreshCopyOfASecureMatter_LandsInTheMattersOwnContainer()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable, TodoUnderCommunication(SecureMatterId, SecureMatterId), securableRoots: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.IsSuccessStatusCode.Should().BeTrue(await response.Content.ReadAsStringAsync());
+        factory.UploadedToContainers.Should().Equal([SecureMatterContainer],
+            "the copy equals the communication's live root, so it resolves exactly as a direct link to the secure matter");
+        factory.RestampQueue.Children.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostOfficeSave_TodoUnderACommunication_WhoseCopyIsStale_IsRefused_UploadsNothing_AndIsEnqueued()
+    {
+        // The communication was re-filed to the SECURE matter; the to-do still carries the plain one. Trusting the copy
+        // was the #1038 leak — the bytes would have gone to the to-do's shared business-unit container.
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable, TodoUnderCommunication(PlainMatterId, SecureMatterId), securableRoots: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_stale");
+        (await RetryableAsync(response)).Should().BeTrue("a stale copy is transient: the re-stamp it enqueued lands in seconds");
+        factory.UploadedToContainers.Should().BeEmpty();
+        factory.RestampQueue.Children.Should().ContainSingle().Which.Should().Be(("sprk_todo", TodoId));
+    }
+
+    [Fact]
+    public async Task PostOfficeSave_CarrierTodo_WhoseDocumentAgreesWithItsSecureMatter_LandsInTheMattersOwnContainer()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable, CarrierTodo(SecureMatterId, SecureMatterId), securableRoots: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.IsSuccessStatusCode.Should().BeTrue(await response.Content.ReadAsStringAsync());
+        factory.UploadedToContainers.Should().Equal([SecureMatterContainer]);
+    }
+
+    [Fact]
+    public async Task PostOfficeSave_CarrierTodo_WhoseDocumentNamesADifferentMatter_WithASecureOne_IsRefusedAsAmbiguous()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable, CarrierTodo(SecureMatterId, PlainMatterId), securableRoots: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("container_ancestor_ambiguous");
+        (await RetryableAsync(response)).Should().BeFalse(
+            "an ambiguous filing is permanent until a person re-files it — only the STALE 409 is retryable");
+        factory.UploadedToContainers.Should().BeEmpty();
+        factory.RestampQueue.Children.Should().BeEmpty("the user chose the matter — nothing is a stale copy");
+    }
+
+    /// <summary>The refusal body's <c>retryable</c> extension (the save's ProblemDetails shape).</summary>
+    private static async Task<bool> RetryableAsync(HttpResponseMessage response)
+    {
+        using var document = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        return document.RootElement.GetProperty("retryable").GetBoolean();
+    }
+
+    [Fact]
+    public async Task PostOfficeSave_CarrierTodo_WhoseDocumentNamesADifferentMatter_NeitherSecure_UsesTheDirectLink()
+    {
+        using var factory = new NoTargetSaveFactory(
+            NoTargetSaveFactory.CallerOid.Resolvable, CarrierTodo(PlainMatterId, OtherPlainMatterId), securableRoots: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/save", DocumentSaveTargeting("todo", TodoId));
+
+        response.IsSuccessStatusCode.Should().BeTrue(await response.Content.ReadAsStringAsync());
+        factory.UploadedToContainers.Should().Equal([TodoBusinessUnitContainer],
+            "the user chose the plain matter, so the to-do keeps its own non-secure default");
+    }
+
+    /// <summary>Any row, answering only the requested columns (as Dataverse does).</summary>
+    private static void ArrangeRow(Mock<IDataverseService> dataverse, Microsoft.Xrm.Sdk.Entity row)
+        => dataverse
+            .Setup(d => d.RetrieveAsync(row.LogicalName, row.Id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid _, string[] columns, CancellationToken _) =>
+            {
+                var projected = new Microsoft.Xrm.Sdk.Entity(row.LogicalName, row.Id);
+                foreach (var column in columns.Where(row.Contains))
+                {
+                    projected[column] = row[column];
+                }
+
+                return projected;
+            });
+
+    /// <summary>The secure matter (with its own container) and the two plain ones.</summary>
+    private static void ArrangeMatters(Mock<IDataverseService> dataverse)
+    {
+        ArrangeRow(dataverse, new Microsoft.Xrm.Sdk.Entity("sprk_matter", SecureMatterId)
+        {
+            ["sprk_issecure"] = true,
+            ["sprk_containerid"] = SecureMatterContainer,
+        });
+        ArrangeRow(dataverse, new Microsoft.Xrm.Sdk.Entity("sprk_matter", PlainMatterId) { ["sprk_issecure"] = false });
+        ArrangeRow(dataverse, new Microsoft.Xrm.Sdk.Entity("sprk_matter", OtherPlainMatterId) { ["sprk_issecure"] = false });
     }
 
     /// <summary>
@@ -511,17 +685,29 @@ public class OfficeSaveNoTargetContainerContractTests
 
         private readonly CallerOid _caller;
         private readonly Action<Mock<IDataverseService>>? _arrangeTarget;
+        private readonly bool _securableRoots;
 
         /// <param name="caller">The caller identity.</param>
         /// <param name="arrangeTarget">
         /// Rows for the TARGET record (task 155 f2), layered after the caller arrangement so a target's own
         /// business-unit read is distinguishable from the acting user's.
         /// </param>
-        public NoTargetSaveFactory(CallerOid caller, Action<Mock<IDataverseService>>? arrangeTarget = null)
+        /// <param name="securableRoots">
+        /// Task 156: answer the securable-entity registry as live dev does — project / matter / work assignment carry
+        /// <c>sprk_issecure</c>, and every record a to-do can be filed under is a known entity — instead of the base
+        /// factory's "nothing is securable, only association types exist". A secure root and a carrier document can only
+        /// be exercised through the real save with it.
+        /// </param>
+        public NoTargetSaveFactory(
+            CallerOid caller, Action<Mock<IDataverseService>>? arrangeTarget = null, bool securableRoots = false)
         {
             _caller = caller;
             _arrangeTarget = arrangeTarget;
+            _securableRoots = securableRoots;
         }
+
+        /// <summary>Task 156: every stale row the resolver enqueued for re-stamping (no Service Bus is reached).</summary>
+        public Sprk.Bff.Api.Tests.TestInfrastructure.RecordingRestampQueue RestampQueue { get; } = new();
 
         /// <summary>The SPE container id of every upload the save path performed.</summary>
         public ConcurrentBag<string> UploadedToContainers { get; } = new();
@@ -638,6 +824,34 @@ public class OfficeSaveNoTargetContainerContractTests
                 // an inference from a status code.
                 services.RemoveAll<CallerRecordAccessProbe>();
                 services.AddScoped<CallerRecordAccessProbe>(_ => new RecordingProbe(ProbedRecords));
+
+                // ── task 156: the re-stamp queue a stale refusal enqueues on, and (opt-in) a live-shaped registry ──
+                services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue>();
+                services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestampQueue>(RestampQueue);
+
+                if (_securableRoots)
+                {
+                    var securable = new HashSet<string>(StringComparer.Ordinal)
+                    {
+                        "sprk_project", "sprk_matter", "sprk_workassignment",
+                    };
+                    var known = new HashSet<string>(StringComparer.Ordinal)
+                    {
+                        "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_todo",
+                        "sprk_event", "sprk_invoice", "sprk_communication", "sprk_document", "sprk_analysis",
+                        "sprk_agreement", "sprk_budget", "sprk_reportcard", "contact", "account", "sprk_organization",
+                        "businessunit", "systemuser", "sprk_recordtype_ref",
+                    };
+                    var registry = new Mock<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry>();
+                    registry
+                        .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+                        .ReturnsAsync(securable);
+                    registry
+                        .Setup(r => r.ClassifyEntityAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                        .ReturnsAsync((string name, CancellationToken _) => TestEntityCatalog.Classify(name, securable, known));
+                    services.RemoveAll<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry>();
+                    services.AddSingleton(registry.Object);
+                }
             });
         }
 

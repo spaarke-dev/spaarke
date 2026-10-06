@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -49,6 +50,9 @@ public static class ConsumingTenantEndpoints
     {
         // GET /api/spe/containertypes/{typeId}/consumers?configId={id}
         group.MapGet("/containertypes/{typeId}/consumers", ListConsumersAsync)
+            // App-only as the config's owning app: the type must be the config's own, and the list names every customer's
+            // consuming app, so the caller must reach every config of the type (task 165, round 20 item 3; round 35 item 5).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeListConsumingTenants")
             .WithSummary("List consuming application registrations for an SPE container type")
             .WithDescription(
@@ -65,6 +69,8 @@ public static class ConsumingTenantEndpoints
 
         // POST /api/spe/containertypes/{typeId}/consumers?configId={id}
         group.MapPost("/containertypes/{typeId}/consumers", RegisterConsumerAsync)
+            // A consuming-app registration grants an app EVERY container of the type: a type shared with an unreachable config is not changed (task 165).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeRegisterConsumingTenant")
             .WithSummary("Register a new consuming application for an SPE container type")
             .WithDescription(
@@ -81,6 +87,8 @@ public static class ConsumingTenantEndpoints
 
         // PUT /api/spe/containertypes/{typeId}/consumers/{appId}?configId={id}
         group.MapPut("/containertypes/{typeId}/consumers/{appId}", UpdateConsumerAsync)
+            // Shared-type write rule (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeUpdateConsumingTenant")
             .WithSummary("Update permissions for an existing consuming application registration")
             .WithDescription(
@@ -96,6 +104,8 @@ public static class ConsumingTenantEndpoints
 
         // DELETE /api/spe/containertypes/{typeId}/consumers/{appId}?configId={id}
         group.MapDelete("/containertypes/{typeId}/consumers/{appId}", RemoveConsumerAsync)
+            // Shared-type write rule (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeRemoveConsumingTenant")
             .WithSummary("Remove a consuming application registration from an SPE container type")
             .WithDescription(

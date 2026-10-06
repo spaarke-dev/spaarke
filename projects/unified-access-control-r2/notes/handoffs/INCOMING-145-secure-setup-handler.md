@@ -116,8 +116,27 @@ narrowing roles is an owner decision.
    strip is unconditional in an environment with SharePoint integration, run the negative probe (assign a probe
    project with one location row to the team, with and without `prvReadSharePointData`). If it is refused, the
    SharePoint Reads join the codified set with that refusal as evidence — they do NOT get kept by a literal exception.
-2. Task 150 (lock `sprk_issecure` with field-level security) adds a field security profile in the same step
-   (whichever of 150 or this handler lands first creates the step; the other extends it).
+2. **Task 150 extends this step (2026-10-02)** — the field-level security of the columns only the BFF writes
+   (`sprk_issecure`, and task 133's `sprk_createdbyperson`), on `sprk_project`, `sprk_matter`, `sprk_workassignment`.
+   ONE mechanism, the profiles task 133 created; never a second set:
+
+   | Step | Read | Write only when needed | Refuse (Failure) when |
+   |---|---|---|---|
+   | S10 profiles | `fieldsecurityprofiles?$filter=name eq 'Spaarke BFF-Managed Field Readers'` / `… Writers'` | 0 → create (in SpaarkeCore) | >1 of either |
+   | S11 reader members | every `teams?$filter=isdefault eq true` vs the reader profile's `teamprofiles_association` | each missing default team → associate. **A business unit created later is a re-run of this step** (the new-BU step) | — |
+   | S12 writer members | `systemusers?$filter=applicationid eq <bff app id>` (the BFF identity H-step that creates the application user — D-13: per-customer registration, never hard-coded) vs `systemuserprofiles_association` | missing BFF app user → associate | any OTHER member (human, other application user, any team) — **QuarantineRequired**: the membership is the lock |
+   | S13 NULL flags | `<set>?$filter=sprk_issecure eq null&$top=1` per table | each NULL → `false` (a new environment has none; an upgraded one has the pre-column rows — `scripts/Repair-SecureFlagNulls.ps1`) | — |
+   | S14 lock | `EntityDefinitions(…)/Attributes(LogicalName='sprk_issecure')?$select=IsSecured` per table | not secured → `IsSecured = true`, then AT ONCE the reader (read=4) and writer (read/create/update=4) `fieldpermissions` (retry 0x8004f508 — securing propagates asynchronously) | any other profile with create/update=4 on the column (besides System Administrator — owner decision F4) |
+   | S15 verify | the standing assertion's census (`SecureFlagFieldSecurityAssertion`) | — | any finding |
+
+   **Order constraint, binding**: S14 runs only after the BFF and the client that no longer write `sprk_issecure` are
+   deployed to the environment (in a NEW environment there is no older client, so this is automatic; on an upgrade it
+   is task 150 step 6). S11/S12 before S14, always: securing first masks the column for every reader. S13 runs
+   BEFORE the environment receives any BFF build containing task 150 (that BFF refuses an EMPTY flag), so on an upgrade
+   the handler — or the operator, until it exists — runs S13 ahead of the BFF deploy, not with the lock; no deploy
+   script checks it (task 150 r1, verifier item 11).
+   Reference implementation: `scripts/Set-RecordCreatorPersonSchema.ps1` (S10–S12) + `scripts/Set-SecureFlagFieldSecurity.ps1`
+   (S14, preconditions = S10–S13) + `scripts/Repair-SecureFlagNulls.ps1` (S13).
 3. The dev environment itself is not yet in the target shape (see `../task-145-secure-owner-role-privileges.md` §2):
    the named team does not exist and the role is on the default team (task 144's §4.3 cutover is pending), so the
    handler's S8 would be the cutover's step 4 there. Run the cutover by hand in dev first; the handler is for new
@@ -127,7 +146,9 @@ narrowing roles is an owner decision.
 
 `docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md` §3 (BU) → §4.2 (named team) → §5.2 (role) → §5.3
 (`scripts/Set-SecureRecordOwnerRolePrivileges.ps1 -EnvironmentUrl <url>` dry run, then `-Apply`) → **§5.4 strip** →
-§5.3 `-Verify` (exit 0) → §5.5 (assign to the named team; remove System Administrator) → §7 checks 1–11. The live
+§5.3 `-Verify` (exit 0) → §5.5 (assign to the named team; remove System Administrator) → §7 checks 1–11 → **§7b**
+(`Set-RecordCreatorPersonSchema.ps1`: the column plus both BFF-managed field profiles and their members) → **§7c**
+(task 150: `Repair-SecureFlagNulls.ps1`, then `Set-SecureFlagFieldSecurity.ps1`, then the field-security assertion). The live
 NFR-05 run needs `AZURE_TOKEN_CREDENTIALS=AzureCliCredential` on a workstation where only `az login` is available
 (plain `DefaultAzureCredential` resolved only `EnvironmentCredential` there).
 

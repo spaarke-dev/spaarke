@@ -13,6 +13,7 @@
  *   - searchContactsAsLookup, searchOrganizationsAsLookup, searchUsersAsLookup
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type {
   ICreateWorkAssignmentFormState,
   IAssignWorkState,
@@ -32,6 +33,7 @@ import {
 } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // Re-export shared search helpers for use by step components
 export {
@@ -135,7 +137,9 @@ export class WorkAssignmentService {
     tenantId?: string
   ) {
     this._tenantId = tenantId ?? '';
-    this._dataService = dataService;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): every CHILD create / re-file this service makes (and the file step's
+    // documents) goes through the BFF (G5) — the server decides the owner; nothing is created as the user.
+    this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
     // Stored (not just forwarded to EntityCreationService) so createWorkAssignment
     // can call the Field Mapping Framework engine (task 021 / FR-12) directly.
     this._authenticatedFetch = authenticatedFetch;
@@ -144,7 +148,7 @@ export class WorkAssignmentService {
     // Wrap IDataService to adapt createRecord return type.
     const webApiAdapter = {
       createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
+        const id = await this._dataService.createRecord(entityName, data);
         return { id };
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
@@ -152,7 +156,7 @@ export class WorkAssignmentService {
       retrieveMultipleRecords: (entityName: string, options?: string) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
+        await this._dataService.updateRecord(entityName, id, data);
         return { id };
       },
       deleteRecord: async (entityName: string, id: string) => {
@@ -537,6 +541,10 @@ export class WorkAssignmentService {
         warnings: [],
       };
     }
+
+    // -- Step 1b (task 142, owner Q5 + R3): the work assignment's "Assigned *" people get their access NOW --
+    // The client create's L1 trigger (see syncAssignedAccess). Never throws, never fails the wizard.
+    await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'workassignment', workAssignmentId);
 
     // -- Step 2: Upload files to SPE -----------------------------------------
     //

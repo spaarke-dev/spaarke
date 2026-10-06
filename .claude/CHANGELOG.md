@@ -11,9 +11,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 `customer-provisioning-orchestration-r1` T227e.
 
-- **`.claude/constraints/provisioning.md`** (SPE section): H8 finds before it creates (run state, then the type's
-  containers by H8's name/description + `spaarkeCustomerId` marker); two candidates stop the run; never rename the
-  customer's container.
+- **`.claude/constraints/provisioning.md`** (SPE section): one container per customer, ever — on top of
+  unified-access-control-r2 task 165's per-run creation record, a LATER run reuses the container the environment records
+  (`sprk_SharePointEmbeddedContainerId`, written by H7); the record and the environment disagreeing stops the run naming
+  both; a reused container is never removed by a failed bind; H8 writes the `spaarkeCustomerId` marker after the bind.
+  The marker name is one source-linked constant (`src/server/shared/Contracts/SpeContainerCustomerMarker.cs`).
 - **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `from-topology-constants` retired with its only
   entry (`SPE-ContainerTypeId`, unread); the reader now refuses it.
 - **`.claude/skills/provision-environment/SKILL.md`**: the `containerTypeId` comment names its real readers (H4b setting, H8).
@@ -86,6 +88,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
   (`ServiceBusClientFactory`), and the startup-failure line now says so.
 
 ---
+###### 2026-10-05 — bff-deploy route verification and smoke check; FAILURE-MODES AP-15 (unified-access-control-r2 tasks 140, 166, 167)
+
+`.claude/skills/bff-deploy/SKILL.md`: §9c's smoke check moves from the retired anonymous `/healthz/dataverse/doc/{id}` to
+`/healthz/dataverse` (task 166). Route registration is now proved with a SIGNED-IN request — since task 167's authorization
+FallbackPolicy an anonymous request answers 401 whether or not the route exists — in Step 3, Manual Quick Deploy step 3 and the
+troubleshooting table, which also gains a row for 429 from `/healthz` / `/ping` (the "health-probe" rate limit).
+`.claude/FAILURE-MODES.md` gains AP-15: TimeZoneIndependent DateOnly columns arrive from the Web API as timestamps (task 140).
+
+###### 2026-10-04 — Route-sweep integration: knowledge indexing pointer removed; communications filter pointer (unified-access-control-r2 tasks 161, 163)
+
+`.claude/skills/add-reference-to-index/SKILL.md` "Related" no longer points at `ReferenceIndexingService.cs`: task 163
+deleted it together with `/api/admin/knowledge/*`, so the scripts the skill lists are the only indexing path.
+`.claude/patterns/api/endpoint-filters.md` lists `CommunicationRecordAuthorizationFilter` (task 161) as a second
+per-record filter to read: one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny
+answer.
+
+###### 2026-10-04 — ADR-034 Amendment A4: Assigned-To access is materialized as removable grants (unified-access-control-r2 task 142)
+
+`.claude/adr/ADR-034-user-record-membership.md` gains the A4 call-out, four MUST bullets and two MUST NOT bullets.
+The access-conferring registry gets a second, **write-time** consumer. Every registry-listed Contact- or
+Organization-typed "Assigned *" column on a project, matter or work assignment gives the named subject
+**Collaborate** as an explicit, removable grant, or a POA share for a linked internal user. ONE invariant owner
+does this, `AssignedAccessMaterializer`, with three triggers: L1 inline, the sync route and an L4 job. Provenance
+lives in the `sprk_assignedaccess` ledger. It never lowers existing access, and an operator's removal sticks
+(`Declined`). The record's Restricted / Secure / Limited policy and the No Access list apply before any write, and
+nothing is written when an input cannot be read (ADR-003). The read-time standing-grant and organization-expansion
+terms are kept (owner A2 reversed).
+
+Line 41's claim that the Q4 `sprk_assigned*` fields have no BFF writers is corrected (142's writer census). The
+owner accepted the amendment under §6.5 path B in round 11, 2026-10-03. The spec's FR-32 and MUST NOT list and
+design §7 now name the one exception. Full rules: `docs/adr/ADR-034-user-record-membership.md` § "Amendment A4".
+
+
 ###### 2026-10-05 — Redis key-rotation tooling removed (T242b, owner)
 
 `customer-provisioning-orchestration-r1` T242b.

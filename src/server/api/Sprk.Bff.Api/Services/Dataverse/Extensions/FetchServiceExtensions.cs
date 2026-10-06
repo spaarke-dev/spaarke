@@ -13,7 +13,8 @@ namespace Sprk.Bff.Api.Services.Dataverse.Extensions;
 ///   <item><see cref="IFetchXmlEntityExtractor"/> → <see cref="FetchXmlEntityExtractor"/> as
 ///         <b>singleton</b> — the extractor is stateless (pure parser) and the same instance
 ///         can safely serve every request. Singleton avoids per-request allocation for what is
-///         a security-critical path called on every <c>/api/dataverse/fetch</c> request.</item>
+///         a security-critical path called on every external-seam fetch
+///         (<c>/api/v1/external/api/dataverse/fetch</c>).</item>
 ///   <item><see cref="FetchService"/> as <b>scoped</b> — depends on <c>IDataverseService</c>
 ///         which is registered scoped per the Spaarke.Dataverse module's lifetime contract.
 ///         <see cref="FetchService"/> itself holds no per-request mutable state beyond the
@@ -27,8 +28,9 @@ namespace Sprk.Bff.Api.Services.Dataverse.Extensions;
 public static class FetchServiceExtensions
 {
     /// <summary>
-    /// Registers the services required by the Spaarke DataGrid Framework R1 fetch endpoint
-    /// (FR-BFF-04 — <c>POST /api/dataverse/fetch</c>).
+    /// Registers the FetchXML services (FR-BFF-04). Their only consumer is the external module seam
+    /// (<c>ExternalModuleDataEndpoints</c>); the internal <c>POST /api/dataverse/fetch</c> was deleted by
+    /// unified-access-control-r2 task 160.
     /// </summary>
     public static IServiceCollection AddDataverseFetchServices(this IServiceCollection services)
     {

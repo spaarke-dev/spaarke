@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
@@ -57,6 +58,8 @@ public static class RecycleBinEndpoints
 
         // POST /api/spe/recyclebin/{id}/restore?configId={id}
         group.MapPost("/recyclebin/{containerId}/restore", RestoreContainerAsync)
+            // The container is in the recycle bin: the per-container rule reads its binding there (task 165).
+            .WithSpeAdminContainerLocation(SpeAdminContainerLocation.RecycleBin)
             .WithName("SpeRestoreContainer")
             .WithSummary("Restore a soft-deleted SPE container from the recycle bin")
             .WithDescription(
@@ -71,6 +74,7 @@ public static class RecycleBinEndpoints
 
         // DELETE /api/spe/recyclebin/{id}?configId={id}
         group.MapDelete("/recyclebin/{containerId}", PermanentDeleteContainerAsync)
+            .WithSpeAdminContainerLocation(SpeAdminContainerLocation.RecycleBin)
             .WithName("SpePermanentDeleteContainer")
             .WithSummary("Permanently delete a soft-deleted SPE container (irreversible)")
             .WithDescription(
@@ -152,6 +156,7 @@ public static class RecycleBinEndpoints
     private static async Task<IResult> ListDeletedContainersAsync(
         [FromQuery] string? configId,
         SpeAdminGraphService graphService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -180,7 +185,17 @@ public static class RecycleBinEndpoints
             var deleted = await graphService.ListDeletedContainersForConfigAsync(
                 config, config.ContainerTypeId, ct);
 
+            // Task 165, owner round 20 item 2: one container type can serve several customers (Model 1), so the
+            // recycle bin of a type holds other customers' containers too. Only the ones the caller reaches are listed.
+            var trim = await tenantScope.TrimToReachableContainersAsync(
+                context.User, config, deleted.Select(c => c.Id), deleted: true, ct);
+            if (trim is null)
+            {
+                return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+            }
+
             var items = deleted
+                .Where(c => trim.Reachable.Contains(c.Id))
                 .Select(c => new DeletedContainerDto
                 {
                     Id = c.Id,
@@ -294,11 +309,7 @@ public static class RecycleBinEndpoints
                     "RestoreContainer: container '{ContainerId}' not found in recycle bin, configId {ConfigId}, TraceId={TraceId}",
                     containerId, configGuid, context.TraceIdentifier);
 
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found in the recycle bin.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.RecycleBinContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -334,11 +345,7 @@ public static class RecycleBinEndpoints
                 "RestoreContainer: Graph returned 404 for container '{ContainerId}' in recycle bin, configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Not Found",
-                detail: $"Container '{containerId}' was not found in the recycle bin.",
-                statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.RecycleBinContainerNotFound(containerId, context.TraceIdentifier);
         }
         catch (SpaarkeStorageException ex)
         {
@@ -425,11 +432,7 @@ public static class RecycleBinEndpoints
                     "PermanentDeleteContainer: container '{ContainerId}' not found in recycle bin, configId {ConfigId}, TraceId={TraceId}",
                     containerId, configGuid, context.TraceIdentifier);
 
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found in the recycle bin.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.RecycleBinContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -466,11 +469,7 @@ public static class RecycleBinEndpoints
                 "PermanentDeleteContainer: Graph returned 404 for container '{ContainerId}' in recycle bin, configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Not Found",
-                detail: $"Container '{containerId}' was not found in the recycle bin.",
-                statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.RecycleBinContainerNotFound(containerId, context.TraceIdentifier);
         }
         catch (SpaarkeStorageException ex)
         {

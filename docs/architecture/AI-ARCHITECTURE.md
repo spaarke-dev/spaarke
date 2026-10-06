@@ -350,7 +350,7 @@ The seven active Spaarke AI Search indexes and their primary BFF consumers (serv
 |---|---|---|
 | `spaarke-files-index` | `RagService`, `RagIndexingPipeline`, `FileIndexingService`, `IndexRetrieveNode`, `KnowledgeBaseEndpoints`, `BulkRagIndexingJobHandler`, `RagIndexingJobHandler` · endpoints `POST /api/ai/rag/query`, `POST /api/ai/rag/index-file`, semantic search endpoints | bidirectional |
 | `spaarke-records-index` | `DataverseIndexSyncService`, `RecordSyncJob`, `RecordSearchAuthorizationFilter` · endpoint `POST /api/ai/search` (scope=entity) | bidirectional |
-| `spaarke-rag-references` | `ReferenceIndexingService`, `ReferenceRetrievalService` · ingestion via PowerShell `scripts/ai-search/Add-ReferenceToIndex.ps1` + `Index-AllReferences.ps1` (KNW-*.md golden references); read path via L1 knowledge retrieval | bidirectional |
+| `spaarke-rag-references` | `ReferenceRetrievalService` (reads; the BFF writer `ReferenceIndexingService` was removed by unified-access-control-r2 task 163) · ingestion ONLY via PowerShell `scripts/ai-search/Add-ReferenceToIndex.ps1` + `Index-AllReferences.ps1` (KNW-*.md golden references); read path via L1 knowledge retrieval | bidirectional |
 | `spaarke-insights-index` | `PrecedentProjectionSync` + insights projection pipeline · endpoint `POST /api/ai/insights/search` | bidirectional |
 | `spaarke-session-files` | `SessionFilesCleanupJob` (cleanup only) · schema-only in this project per FR-18 (no ingestion path) | outbound (cleanup reads only) |
 | `spaarke-invoices-index` | `InvoiceIndexingJobHandler`, `InvoiceSearchService` · schema-only in this project per FR-18 (no ingestion) | outbound (search reads only) |
@@ -484,7 +484,7 @@ Session state, audit logs, feedback, memory, and prompt history are persisted to
 | Container | Partition Key | TTL | Purpose | Service |
 |-----------|--------------|-----|---------|---------|
 | `sessions` | `/userId` | 90 days | AI conversation sessions | SessionPersistenceService |
-| `prompts` | `/sessionId` | 90 days | Individual prompt/completion pairs | PromptLibraryService |
+| `prompts` | `/sessionId` | 90 days | Still provisioned; no BFF service reads or writes it since the prompt library (`/api/ai/prompts`) was retired by unified-access-control-r2 task 164 | — (was PromptLibraryService) |
 | `audit` | `/tenantId` | None (permanent) | Immutable compliance audit trail (ADR-015 Tier 2) | AuditLogService |
 | `memory` | `/userId` | 90 days | Per-matter structured AI memory snapshots | MatterMemoryService |
 | `feedback` | `/tenantId` | 90 days | User feedback (thumbs up/down) on AI responses | FeedbackService |

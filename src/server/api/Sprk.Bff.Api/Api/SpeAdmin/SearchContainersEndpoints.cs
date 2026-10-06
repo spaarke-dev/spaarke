@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -22,6 +24,26 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 /// </remarks>
 public static class SearchContainersEndpoints
 {
+    /// <summary>
+    /// One page of the response (task 165, owner rounds 20, 35 and 41): only the containers the caller reaches, and
+    /// Graph's total only through the ONE shared rule, <see cref="SpeAdminContainerTrim.ReportableGraphTotal"/> (a
+    /// platform operator, a page nothing was removed from, no further page). Internal so the rule's use HERE is proven
+    /// directly: the containers collection reports no total today (<c>SearchContainersAsync</c> returns null), so no
+    /// request through the host could observe it — the f2 verifier's seed V14 stayed green for exactly that reason.
+    /// </summary>
+    internal static SearchContainersResponse BuildResponse(
+        SpeAdminGraphService.ContainerSearchPage page, SpeAdminContainerTrim trim)
+    {
+        var visible = page.Items.Where(r => trim.Reachable.Contains(r.Id)).ToList();
+
+        return new SearchContainersResponse(
+            Items: visible
+                .Select(r => new SearchContainerDto(r.Id, r.DisplayName, r.Description, r.ContainerTypeId))
+                .ToList(),
+            TotalCount: trim.ReportableGraphTotal(page.TotalCount, page.Items.Count, visible.Count, page.NextSkipToken),
+            NextSkipToken: page.NextSkipToken);
+    }
+
     /// <summary>
     /// Registers the search containers endpoint on the provided /api/spe route group.
     /// Called from <see cref="SpeAdminEndpoints.MapSpeAdminEndpoints"/> with the /api/spe group.
@@ -62,6 +84,7 @@ public static class SearchContainersEndpoints
         [FromQuery] string? configId,
         [FromBody] SearchContainersRequest request,
         SpeAdminGraphService graphService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -110,12 +133,18 @@ public static class SearchContainersEndpoints
                 request.SkipToken,
                 ct);
 
-            var response = new SearchContainersResponse(
-                Items: searchPage.Items
-                    .Select(r => new SearchContainerDto(r.Id, r.DisplayName, r.Description, r.ContainerTypeId))
-                    .ToList(),
-                TotalCount: searchPage.TotalCount,
-                NextSkipToken: searchPage.NextSkipToken);
+            // Task 165, owner round 20 item 2: the search spans every container the owning app can see — in Model 1
+            // other customers' too. Only containers the caller reaches are returned, and Graph's total goes through
+            // the ONE shared rule (SpeAdminContainerTrim.ReportableGraphTotal, rounds 35/41): a platform operator, a
+            // page nothing was removed from, no further page (BuildResponse).
+            var trim = await tenantScope.TrimToReachableContainersAsync(
+                context.User, config, searchPage.Items.Select(r => r.Id), deleted: false, ct);
+            if (trim is null)
+            {
+                return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+            }
+
+            var response = BuildResponse(searchPage, trim);
 
             logger.LogInformation(
                 "SearchContainers: returned {Count} results for query '{Query}', configId {ConfigId}, TraceId={TraceId}",

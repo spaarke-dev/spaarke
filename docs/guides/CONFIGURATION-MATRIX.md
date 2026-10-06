@@ -211,10 +211,6 @@ Options class: `AnalysisOptions` (`Configuration/AnalysisOptions.cs`)
 | `Analysis:MaxChatHistoryMessages` | `20` | 1-50 | appsettings | Chat history depth |
 | `Analysis:MaxChatInputTokens` | `50000` | int | appsettings | Max input tokens for chat |
 | `Analysis:MaxDocumentContextLength` | `100000` | 1000-200000 | appsettings | Max doc text in prompt |
-| `Analysis:EnableDocxExport` | `true` | bool | appsettings | DOCX export enabled |
-| `Analysis:EnablePdfExport` | `true` | bool | appsettings | PDF export enabled |
-| `Analysis:EnableEmailExport` | `true` | bool | appsettings | Email export enabled |
-| `Analysis:EnableTeamsExport` | `false` | bool | appsettings | Teams export enabled |
 | `Analysis:MaxConcurrentStreams` | `3` | 1-10 | appsettings | Max concurrent streams |
 | `Analysis:StreamChunkDelayMs` | `10` | 0-100 | appsettings | SSE chunk delay |
 | `Analysis:DeploymentEnvironment` | `Development` | string | Env Var / Dataverse | Environment name |

@@ -21,6 +21,7 @@
  * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateTodoFormState, AssociationResult } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import {
@@ -278,7 +279,12 @@ export class TodoService {
     // 4. Create the record — strictly `sprk_todo` (NEVER `sprk_event`)
     let todoId: string;
     try {
-      todoId = await this._dataService.createRecord('sprk_todo', entity);
+      // UAC-r2 task 147 r1 (owner round 28 item 1): the child create goes through the BFF (G5) — the server decides the
+      // owner (the Secure Record Owners team under a secure record); a refusal surfaces the server's message.
+      todoId = await withBffChildWrites(this._dataService, this._authenticatedFetch, this._bffBaseUrl).createRecord(
+        'sprk_todo',
+        entity
+      );
     } catch (err) {
       console.error('[TodoService] createRecord error:', err);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

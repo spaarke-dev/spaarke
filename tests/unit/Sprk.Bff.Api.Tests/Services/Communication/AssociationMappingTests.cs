@@ -104,6 +104,7 @@ public class AssociationMappingTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object,
             scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }

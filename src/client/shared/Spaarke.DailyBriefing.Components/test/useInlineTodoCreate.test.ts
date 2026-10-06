@@ -32,6 +32,15 @@ import { renderHook, act } from '@testing-library/react';
 import { useInlineTodoCreate } from '../src/hooks/useInlineTodoCreate';
 import type { IWebApi, NotificationItem } from '../src/types/notifications';
 
+/**
+ * UAC-r2 task 147 r1: the hook now creates the To Do through the BFF (its default). These tests inject a creator that
+ * delegates to the webApi stub, so the payload assertions below still read what the hook built.
+ */
+function viaWebApi(webApi: IWebApi) {
+  return async (table: string, payload: Record<string, unknown>): Promise<string> =>
+    ((await webApi.createRecord(table, payload)) as { id: string }).id;
+}
+
 function makeItem(overrides: Partial<NotificationItem> = {}): NotificationItem {
   return {
     id: 'n-1',
@@ -79,7 +88,7 @@ describe('useInlineTodoCreate', () => {
     const webApi = makeWebApi({
       retrieveRecord: jest.fn().mockResolvedValue({ _sprk_primarycontact_value: 'contact-123' }),
     });
-    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1'));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1', viaWebApi(webApi)));
     const item = makeItem();
 
     await act(async () => {
@@ -99,7 +108,7 @@ describe('useInlineTodoCreate', () => {
     const webApi = makeWebApi({
       retrieveRecord: jest.fn().mockResolvedValue({}), // no _sprk_primarycontact_value field
     });
-    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1'));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1', viaWebApi(webApi)));
     const item = makeItem({ id: 'n-2' });
 
     await act(async () => {
@@ -113,7 +122,7 @@ describe('useInlineTodoCreate', () => {
 
   it('no userId supplied: skips the primary-contact lookup entirely and creates without assignment', async () => {
     const webApi = makeWebApi();
-    const { result } = renderHook(() => useInlineTodoCreate(webApi));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, undefined, viaWebApi(webApi)));
     const item = makeItem({ id: 'n-3' });
 
     await act(async () => {
@@ -129,7 +138,7 @@ describe('useInlineTodoCreate', () => {
     const webApi = makeWebApi({
       retrieveRecord: jest.fn().mockRejectedValue(new Error('lookup failed')),
     });
-    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1'));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, 'user-1', viaWebApi(webApi)));
     const item = makeItem({ id: 'n-4' });
 
     await act(async () => {
@@ -145,7 +154,7 @@ describe('useInlineTodoCreate', () => {
     const webApi = makeWebApi({
       createRecord: jest.fn().mockRejectedValue(new Error('Dataverse rejected create')),
     });
-    const { result } = renderHook(() => useInlineTodoCreate(webApi));
+    const { result } = renderHook(() => useInlineTodoCreate(webApi, undefined, viaWebApi(webApi)));
     const item = makeItem({ id: 'n-5' });
 
     await act(async () => {
@@ -156,6 +165,49 @@ describe('useInlineTodoCreate', () => {
     expect(result.current.isPending(item.id)).toBe(false);
     expect(result.current.getError(item.id)).toBe('Dataverse rejected create');
     expect(result.current.getCreatedId(item.id)).toBeUndefined();
+  });
+
+  it('UAC-r2 task 147 r1: by default the To Do is created through the BFF (G5), never through webApi.createRecord', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const services = require('@spaarke/ui-components/services') as { createChildRecordViaBff: jest.Mock };
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const auth = require('@spaarke/auth') as { authenticatedFetch: jest.Mock };
+    services.createChildRecordViaBff.mockClear();
+    const webApi = makeWebApi();
+    const { result } = renderHook(() => useInlineTodoCreate(webApi));
+    const item = makeItem({ id: 'n-7' });
+
+    await act(async () => {
+      await result.current.createTodo(item);
+    });
+
+    expect(webApi.createRecord).not.toHaveBeenCalled();
+    expect(services.createChildRecordViaBff).toHaveBeenCalledTimes(1);
+    const [fetchFn, base, table, record] = services.createChildRecordViaBff.mock.calls[0];
+    expect(fetchFn).toBe(auth.authenticatedFetch);
+    expect(base).toBe('');
+    expect(table).toBe('sprk_todo');
+    expect(record).not.toHaveProperty('ownerid@odata.bind');
+    expect(result.current.getCreatedId(item.id)).toBe('bff-todo-1');
+  });
+
+  it('UAC-r2 task 147 r1: a BFF refusal surfaces the server message on the item', async () => {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const services = require('@spaarke/ui-components/services') as { createChildRecordViaBff: jest.Mock };
+    services.createChildRecordViaBff.mockRejectedValueOnce(
+      new Error('A record this to-do is filed under was not found. The to-do was not saved.')
+    );
+    const { result } = renderHook(() => useInlineTodoCreate(makeWebApi()));
+    const item = makeItem({ id: 'n-8' });
+
+    await act(async () => {
+      await result.current.createTodo(item);
+    });
+
+    expect(result.current.isCreated(item.id)).toBe(false);
+    expect(result.current.getError(item.id)).toBe(
+      'A record this to-do is filed under was not found. The to-do was not saved.'
+    );
   });
 
   it('webApi is null: createTodo is a no-op and no state is mutated', async () => {

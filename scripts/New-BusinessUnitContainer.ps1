@@ -5,8 +5,14 @@
 # credential (H8 creates customer containers). This script works only with a LEGACY owning app that still
 # has a certificate in Key Vault; it cannot act as an MI-FIC owning app from a workstation.
 #
-# Purpose: Creates a new SharePoint Embedded container and sets sprk_containerid on a Dataverse business unit
+# Purpose: Creates a new SharePoint Embedded container, BINDS it to the business unit, and sets sprk_containerid on it
 # Usage: Run when a new business unit is created and needs document storage
+#
+# BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1): the container is stamped with
+# -BusinessUnitId (custom property $SpeContainerStampProperty, scripts/common/SpeContainerBinding.ps1), the stamp is
+# read back, and the container is REMOVED if it did not land — sprk_containerid is written only for a bound container.
+# The BFF's SPE admin plane reaches no unbound container, so an unstamped container would be invisible to the very
+# business unit's administrators it was made for.
 #
 # T6 FIX (spec.md FR-11 + § MUST rules): SPE container creation now uses
 # confidential-client CERT-BASED auth. The prior `az account get-access-token`
@@ -50,6 +56,11 @@ param(
 $ErrorActionPreference = 'Stop'
 
 if (-not $ContainerTypeId) { throw "ContainerTypeId required. Pass -ContainerTypeId or set SPE_CONTAINER_TYPE_ID env var." }
+$parsedBusinessUnitId = [guid]::Empty
+if (-not [guid]::TryParse($BusinessUnitId, [ref]$parsedBusinessUnitId) -or $parsedBusinessUnitId -eq [guid]::Empty) {
+    throw "BusinessUnitId '$BusinessUnitId' is not a business-unit GUID — the container would have no owner, so none is created."
+}
+$BusinessUnitId = $parsedBusinessUnitId.ToString('D')
 if (-not $DataverseUrl)    { throw "DataverseUrl required. Pass -DataverseUrl or set DATAVERSE_URL env var." }
 if (-not $OwningAppId)     { throw "OwningAppId required for SPE cert-based auth. Pass -OwningAppId or set API_APP_ID env var." }
 if (-not $TenantId)        { throw "TenantId required for SPE cert-based auth. Pass -TenantId or set TENANT_ID env var." }
@@ -59,8 +70,9 @@ if (-not $useKeyVault -and -not $CertThumbprint) {
     throw "Cert bootstrap required. Pass -KeyVaultName + -CertSecretName (production) or -CertThumbprint (dev). Env vars: SPE_KV_NAME + SPE_CERT_SECRET_NAME, or SPE_CERT_THUMBPRINT."
 }
 
-# --- Dot-source the SPE cert-based token helper (T6 fix) ---
+# --- Dot-source the SPE cert-based token helper (T6 fix) and THE container binding (task 165, round 35 item 1) ---
 . (Join-Path $PSScriptRoot 'common/Get-SpeConfidentialClientToken.ps1')
+. (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
 
 Write-Host "===============================================" -ForegroundColor Cyan
 Write-Host "CREATE SPE CONTAINER FOR BUSINESS UNIT" -ForegroundColor Cyan
@@ -201,6 +213,20 @@ catch {
     Write-Host "  - Verify owning app has FileStorageContainer.Selected permission (app-only)" -ForegroundColor Gray
     Write-Host "  - Verify container type is registered: Check-ContainerType-Registration.ps1" -ForegroundColor Gray
     Write-Host "  - If 403 'Public client not allowed' — this should NOT occur under cert-based flow (T6 fix)" -ForegroundColor Gray
+    exit 1
+}
+
+# Step 3b: Bind the container to its business unit (task 165, owner round 35 item 1) — stamp, read back, or remove.
+Write-Host "Step 3b: Binding the container to business unit $BusinessUnitId..." -ForegroundColor Yellow
+
+try {
+    Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $containerId -BusinessUnitId $BusinessUnitId `
+        -GraphBase 'https://graph.microsoft.com/v1.0'
+    Write-Host ""
+}
+catch {
+    Write-Host "Container binding FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "sprk_containerid was NOT set on the business unit." -ForegroundColor Yellow
     exit 1
 }
 

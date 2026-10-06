@@ -99,6 +99,23 @@ public class AccessSnapshot
     public IEnumerable<string> TeamMemberships { get; init; } = Array.Empty<string>();
     public IEnumerable<string> Roles { get; init; } = Array.Empty<string>();
     public DateTimeOffset CachedAt { get; init; } = DateTimeOffset.UtcNow;
+
+    /// <summary>
+    /// <c>true</c> when this snapshot is NOT a complete Dataverse answer, so it MUST NOT be cached: a read
+    /// faulted, or the rights came from the degraded read-probe fallback because <c>RetrievePrincipalAccess</c>
+    /// gave no answer (unified-access-control-r2 task 132 · defect C12).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What is a fault, and what is an answer.</b> A successful read that returns nothing is an ANSWER:
+    /// <c>RetrievePrincipalAccess</c> answering with no rights, a probe refused with 403/404, a user lookup that
+    /// succeeds and finds no systemuser. A non-2xx other than those, a throttle (429), a 5xx, a timeout, a parse
+    /// failure or any exception is a FAULT, and so is a failed team or role sub-read. A probe-derived Read is
+    /// DEGRADED: it is correct for the request, but caching it would pin a Write holder at Read for the TTL.</para>
+    /// <para><b>The current request is unaffected.</b> A faulted snapshot carries exactly the rights it always
+    /// did (fail closed, ADR-003). Only whether it may be STORED changes. Additive with a default of
+    /// <c>false</c>, so every existing construction site keeps compiling and behaving the same.</para>
+    /// </remarks>
+    public bool Faulted { get; init; }
 }
 
 /// <summary>

@@ -26,6 +26,14 @@
 //            detection — H13's T6SpeConfidentialClientTrapProbe still owns T6
 //            acceptance gate per topology doc §R5 + task 214.4 Option A)
 //
+//   ADDED (unified-access-control-r2 task 165, batch-4 integration — owner rounds
+//            35 / 41 / 49 re-applied to H8-B): MissingDataverseEnvUrl,
+//            RootBusinessUnitUnresolved, ContainerBindingFailed /
+//            ...NotRemoved / ContainerBindingInfraFault (every container is stamped
+//            with its owning business unit, read back, or removed),
+//            CreationRecordNotPersisted and ContainerCreationInDoubt (H8 records
+//            what it created and resumes with it — never a second container).
+//
 // PATTERN PARITY: mirrors Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs —
 // one const per failure branch + lowercase kebab-case for greppability.
 // -----------------------------------------------------------------------------
@@ -85,29 +93,41 @@ public static class SpeContainerRejectionCodes
     public const string ContainerTypeGrantInfraFault = "spe-container-type-grant-infra-fault";
 
     /// <summary>
-    /// Task 227e: the lookup for the customer's existing container got no verdict (Graph refused the listing or a
-    /// candidate's custom properties, or the listing did not finish). Nothing was created — Resumable.
+    /// Task 227e: the customer's recorded container (environment variable <c>sprk_SharePointEmbeddedContainerId</c>, which
+    /// H7 writes on the first run) could not be read, or carries more than one value. H8 creates a container only when it
+    /// can tell the customer has none — nothing was created. Resumable.
     /// </summary>
-    public const string ContainerLookupFailed = "spe-container-lookup-failed";
-
-    /// <summary>Task 227e: infrastructure fault (token exchange, transport, timeout) during the lookup — Resumable, nothing created.</summary>
-    public const string ContainerLookupInfraFault = "spe-container-lookup-infra-fault";
+    public const string RecordedContainerUnreadable = "spe-recorded-container-unreadable";
 
     /// <summary>
-    /// Task 227e: more than one container of the type is this customer's (same display name, this customer's marker
-    /// or none). H8 never picks one: the diagnostic names them all and the operator decides (delete or rename the
-    /// extra one, or set its marker) before resuming. Nothing was created — Resumable.
+    /// Task 227e: the container the environment records (or this run adopted) does not exist for the container type's
+    /// owning app — deleted, or of another type or tenant. Not the replication wait: it is not a new container. Nothing
+    /// was created or written — Resumable once the record names the customer's container.
+    /// </summary>
+    public const string RecordedContainerNotFound = "spe-recorded-container-not-found";
+
+    /// <summary>
+    /// Task 227e: the container H8 would reuse is not the customer's — another container type, another customer's
+    /// <c>spaarkeCustomerId</c>, or another business unit's stamp. H8 wrote nothing to it (no stamp, no marker) and created
+    /// nothing — Resumable once the record names the customer's container.
+    /// </summary>
+    public const string RecordedContainerNotTheCustomers = "spe-recorded-container-not-the-customers";
+
+    /// <summary>
+    /// Task 227e: two containers are the customer's — the environment's recorded one and this run's own record name
+    /// different containers. H8 never picks one: the diagnostic names both and the operator decides which holds the
+    /// customer's data before resuming. Nothing more was created — Resumable.
     /// </summary>
     public const string DuplicateCustomerContainers = "spe-duplicate-customer-containers";
 
     /// <summary>
-    /// Task 227e: the customer's container exists and is verified, but its <c>spaarkeCustomerId</c> marker could not
-    /// be confirmed or written (Graph refused, or the container is marked for another customer — then it is left
-    /// untouched). The container id is kept on the run, so a resume reuses it — Resumable.
+    /// Task 227e: the customer's container is bound, but its <c>spaarkeCustomerId</c> marker could not be confirmed or
+    /// written (Graph refused, or the container is marked for another customer / unreadably — then it is left untouched).
+    /// The container stays on the run's record, so a resume marks it — Resumable.
     /// </summary>
     public const string ContainerMarkerFailed = "spe-container-marker-failed";
 
-    /// <summary>Task 227e: infrastructure fault while confirming / writing the marker — Resumable (the container id is kept).</summary>
+    /// <summary>Task 227e: infrastructure fault while confirming / writing the marker — Resumable (the container stays on record).</summary>
     public const string ContainerMarkerInfraFault = "spe-container-marker-infra-fault";
 
     /// <summary>Provisioner infrastructure fault (transport, timeout, unexpected exception) — Resumable, no external side effect confirmed.</summary>
@@ -141,6 +161,55 @@ public static class SpeContainerRejectionCodes
 
     /// <summary>Verifier infrastructure fault after successful creation + activation — QuarantineRequired (created resource, unverified post-condition).</summary>
     public const string VerificationInfraFault = "spe-verification-infra-fault";
+
+    /// <summary>
+    /// <c>InterStepState.DataverseEnvUrl</c> (H5 output) is missing — H8 binds the container to the environment's root
+    /// business unit (unified-access-control-r2 task 165, owner round 35 item 1), so H5 MUST complete first. Resumable;
+    /// checked before any external side effect.
+    /// </summary>
+    public const string MissingDataverseEnvUrl = "spe-missing-dataverse-env-url";
+
+    /// <summary>
+    /// The customer environment's root business unit could not be read, or it reports none (or more than one).
+    /// Resumable; checked before any external side effect — H8 never creates a container it could not bind.
+    /// </summary>
+    public const string RootBusinessUnitUnresolved = "spe-root-business-unit-unresolved";
+
+    /// <summary>
+    /// The container was created and verified, but its business-unit stamp did not read back, so it was REMOVED (owner
+    /// round 35 item 1: no unbound container is left behind). QuarantineRequired; a resume after the cause is fixed
+    /// creates a new container (the removed one is dropped from the run's record).
+    /// </summary>
+    public const string ContainerBindingFailed = "spe-container-binding-failed";
+
+    /// <summary>
+    /// As <see cref="ContainerBindingFailed"/>, but removing the unbound container ALSO failed: an unbound container
+    /// remains, which no SPE admin route reaches. QuarantineRequired — the container stays on the run's record (a resume
+    /// re-verifies and re-binds it); or bind it with
+    /// <c>scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind &lt;containerId&gt;=&lt;rootBusinessUnitId&gt;</c>, or remove it.
+    /// </summary>
+    public const string ContainerBindingFailedNotRemoved = "spe-container-binding-failed-not-removed";
+
+    /// <summary>The bind step threw before any Graph call — QuarantineRequired: the container exists, unbound, on record.</summary>
+    public const string ContainerBindingInfraFault = "spe-container-binding-infra-fault";
+
+    /// <summary>
+    /// H8 created a container but could not record it in the run (the run was deleted, or every merge retry lost a
+    /// concurrent write). QuarantineRequired: the diagnostic names the container — it is UNBOUND (no SPE admin route
+    /// reaches it); bind it with <c>scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind
+    /// &lt;containerId&gt;=&lt;rootBusinessUnitId&gt;</c> or remove it before the run is resumed (a resume of a run with no
+    /// record creates afresh).
+    /// </summary>
+    public const string CreationRecordNotPersisted = "spe-creation-record-not-persisted";
+
+    /// <summary>
+    /// The container POST got no authoritative answer (a client timeout, a dropped connection, a 2xx without an id): a
+    /// container may exist, UNBOUND, that the run does not name. QuarantineRequired; H8 creates NO container until an
+    /// operator has looked (the diagnostic is the procedure), recorded a container found, and cleared the quarantine
+    /// (unified-access-control-r2 task 165, owner round 49 item 2, on H8-B). The container type is shared, so H8 does not
+    /// guess by listing it.
+    /// </summary>
+    public const string ContainerCreationInDoubt = "spe-container-creation-in-doubt";
 
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "spe-concurrent-write-conflict";

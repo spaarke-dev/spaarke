@@ -52,6 +52,7 @@ const useStyles = makeStyles({
   },
   // Pills left, "+ New" pushed to the right end of the same row; wraps (never clips) at narrow widths.
   header: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },
+  createTitle: { margin: 0 },
   newBtn: { marginLeft: 'auto', flexShrink: 0 },
   chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS },
   chip: {
@@ -214,6 +215,8 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const inputRef = useRef<HTMLInputElement | null>(null);
   const selectedBtnRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterRef = useRef<'input' | 'selected' | null>(null);
+  // Task 101: the pill that was selected when "+ New" opened — Cancel returns to it.
+  const typeBeforeCreateRef = useRef<EntityType>(initialType);
   useEffect(() => {
     const target = focusAfterRef.current;
     if (!target) return;
@@ -254,11 +257,16 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   }, [selectedNotFileable, onChange]);
 
   const handleTypeChange = (type: EntityType) => {
+    if (showCreate) {
+      // Task 101 (owner UAT round 6 item 1): while the create form is open a pill switches the FORM's type; the form
+      // stays open (Cancel is the way out). The search state belongs to the view before "+ New" — left untouched.
+      setSelectedType(type);
+      return;
+    }
     setSelectedType(type);
     setQuery('');
     setSearchResults([]);
     setSearchError(null);
-    setShowCreate(false);
     setCreateWarning(null);
   };
 
@@ -285,6 +293,8 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
   const cancelCreate = () => {
     focusAfterRef.current = 'input';
+    // Restore the view the user had before "+ New": the type pill they started from (the query + results are for it).
+    setSelectedType(typeBeforeCreateRef.current);
     setShowCreate(false);
     setCreateWarning(null);
   };
@@ -408,6 +418,12 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
   return (
     <div className={styles.root}>
+      {/* Task 101 (owner item 2): the create form's title, above the type pills, only while the form is open. */}
+      {showCreate && (
+        <Text as="h2" size={400} weight="semibold" className={styles.createTitle}>
+          Create New Record
+        </Text>
+      )}
       {/* Pill row (task 095, owner 2026-10-04): no "Related to" label — the type pills are left-aligned and
           "+ New" sits at the right end of the same row. */}
       <div className={styles.header}>
@@ -439,6 +455,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             icon={<AddRegular />}
             onClick={() => {
               focusAfterRef.current = 'input';
+              typeBeforeCreateRef.current = selectedType;
               setShowCreate(true);
               setCreateWarning(null);
             }}
@@ -450,10 +467,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
       </div>
 
       {showCreate ? (
-        // Task 100: the "+ New" form — the fields the owner listed for this type (CreateRecordForm). Keyed by type so
-        // a type switch never carries one type's values into another's form.
+        // Task 100: the "+ New" form — the fields the owner listed for this type (CreateRecordForm). Task 101: NOT
+        // keyed by type — a pill switch keeps the form mounted; it carries Name/Description/Assigned To over and
+        // drops the type-only values itself.
         <CreateRecordForm
-          key={selectedType}
           type={selectedType}
           matterTypes={createForm?.matterTypes ?? EMPTY_LIST}
           practiceAreas={createForm?.practiceAreas ?? EMPTY_LIST}

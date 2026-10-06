@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
@@ -107,6 +108,8 @@ public static class ContainerTypeEndpoints
 
         // POST /api/spe/containertypes/{typeId}/register?configId={id}
         group.MapPost("/containertypes/{typeId}/register", RegisterContainerTypeAsync)
+            // App-only as the config's owning app: the type must be the config's own, and a type shared with an unreachable config is not changed (task 165, owner round 20 item 3).
+            .WithSpeAdminContainerTypeScope()
             .WithName("SpeRegisterContainerType")
             .WithSummary("Register an SPE container type (grant app permissions)")
             .WithDescription(

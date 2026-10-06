@@ -26,6 +26,7 @@ import {
 } from '../../services/EntityCreationService';
 import { discoverNavProps, cleanGuid } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // ---------------------------------------------------------------------------
 // Result types
@@ -233,11 +234,11 @@ export class ProjectService {
    * @odata.bind syntax for each lookup field.
    *
    * BU cascade (FR-WIZ-02, fixes latent gap G2): when `cascadeDefaults` is provided,
-   * applies `sprk_containerid` AND `sprk_searchindexname` from the user's owning
-   * Business Unit to the create payload via
-   * {@link EntityCreationService.applyUserBuDefaults}. Both fields are guarded by
-   * INV-5 — explicit values pre-existing on the payload are preserved (never
-   * overwritten). Callers (typically `CreateProjectWizard.tsx`) resolve the
+   * applies `sprk_searchindexname` from the user's owning Business Unit to the create
+   * payload via {@link EntityCreationService.applyUserBuDefaults}, guarded by INV-5 —
+   * an explicit value pre-existing on the payload is preserved. `sprk_containerid` is
+   * NOT written here (task 076): provisioning's Step 7 is its only writer, which is what
+   * lets the server read "owned by the secure team, no container" as resumable (task 133). Callers (typically `CreateProjectWizard.tsx`) resolve the
    * defaults via {@link EntityCreationService.resolveUserBuDefaults}.
    *
    * Returns ICreateProjectResult — never throws.
@@ -277,17 +278,14 @@ export class ProjectService {
       entity['sprk_projectdescription'] = formValues.description.trim();
     }
 
-    // Set sprk_issecure when the user has designated this as a Secure Project.
-    // This flag is intentionally only set to true — once a project is secure,
-    // the designation is irreversible (enforced by domain logic in the BFF).
-    if (formValues.isSecure === true) {
-      entity['sprk_issecure'] = true;
-    }
+    // `sprk_issecure` is NEVER written here (unified-access-control-r2 task 150). The column is field-secured: only the
+    // BFF application user may create or update it, so a create payload naming it is REFUSED for every user. A secure
+    // project is asked for by calling provisioning (`provisionSecureProject`), which marks it secure as its first
+    // write. `formValues.isSecure` therefore drives the CALLER's provisioning call, not this payload.
 
-    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_containerid` AND
-    // `sprk_searchindexname` from the current user's owning Business Unit.
-    // INV-5 is enforced per-field by applyUserBuDefaults — explicit override
-    // values already on the payload are preserved.
+    // FR-WIZ-02 / G2 latent-gap fix: cascade `sprk_searchindexname` from the current
+    // user's owning Business Unit (INV-5: an explicit value is preserved). Not
+    // `sprk_containerid` — task 076 removed that write; the server owns it.
     if (cascadeDefaults) {
       const applied = EntityCreationService.applyUserBuDefaults(entity, cascadeDefaults);
       console.info('[ProjectService] BU cascade applied:', applied);
@@ -394,6 +392,14 @@ export class ProjectService {
       // IDataService.createRecord returns Promise<string> (just the id)
       const projectId = await this._dataService.createRecord('sprk_project', entity);
       console.info('[ProjectService] createRecord success, projectId:', projectId);
+
+      // Task 142 (owner Q5 + R3): the project's "Assigned *" people get their access now — unless it is about to be
+      // SECURED, in which case the wizard syncs AFTER provisioning so the rule sees a secure record and SUGGESTS
+      // (owner A3 = prompt) instead of granting first. Never throws, never fails the create.
+      if (!formValues.isSecure) {
+        await syncAssignedAccess(this._authenticatedFetch, this._bffBaseUrl, 'project', projectId);
+      }
+
       return {
         projectId,
         projectName: formValues.projectName.trim(),

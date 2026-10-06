@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 6 (4) — Find shows "Similar Documents" and "Matching records" as two sections, each its own scrollable list, with a draggable divider between them; check the "Matter: Matter" / "Unknown" row labels</title>
+    <phase>6 UAT round 6 (2026-10-06)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`FindView.tsx`, `FindResultsList.tsx`) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only layout change with a small new interaction (resizable split), decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT6-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 101 and 103. Disjoint: 102 owns `FindView.tsx`, `FindResultsList.tsx`, the Find hooks and their tests; it MUST NOT edit `CreateRecordForm.tsx`, `RelatedToPicker.tsx`, `TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `taskPaneWidthService.ts`, `App.tsx`, `webpack.config.js` or `ci-gated-suites.txt` (report new suites to the main session). Client-only; if the label defect is server-side, REPORT it, do not edit the BFF.</parallel-reason>
+    <deps>092</deps>
+    <tags>frontend, office-addins, typescript, find, unit-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 6 (2026-10-06), item 4, plus the label observation in note §3. Record: `notes/042-uat-round6-2026-10-06.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>Find shows two independent lists — Similar Documents and Matching records — that each scroll on their own and share the pane through a divider the user can drag, so neither list pushes the other out of view.</goal>
+
+  <context>
+    <background>
+      - **Owner (round 6, item 4)**: separate sections for "Most similar documents" (rename **"Similar Documents"**)
+        and "Matching records", each its own scrollable list; "each section dragable to …" (cut off). Main-session
+        reading, stated to the owner: a **draggable divider** between the two sections that resizes their heights.
+      - **Today** (tasks 092/077/034): one scroll for both lists; documents render progressively as the user scrolls
+        (ADR-051 exception, spec row) and records page on "non-empty ⇒ more" (spec ADR-051 records row). Both
+        progressive-scroll mechanisms must keep working inside their own scroll container.
+      - **Item 5 (task 103)** hides the pane's main scroll bar, so each Find list's own scroll is what the user uses.
+      - **Label observation (note §3)**: the pinned row reads "Matter: **Matter**" (record name shown as the type) and
+        every similar document shows "**Unknown** · …" for its type. Find where each label comes from (client mapping
+        vs. BFF response) and fix it if it is client-side; if the BFF sends no type/name, REPORT it.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 4">Two sections with headers "Similar Documents" and "Matching records"; each list scrolls independently; the pinned "this document's record" row stays with Similar Documents.</constraint>
+    <constraint source="owner item 4 (as interpreted)">A divider between the sections can be dragged (pointer) and moved with the keyboard (arrow keys; `role="separator"`, `aria-orientation="horizontal"`, `aria-valuenow`); each section keeps a minimum height so neither disappears; the split starts at an even share of the available height. The chosen split may be remembered per viewer (localStorage, wrapped in try/catch).</constraint>
+    <constraint source="ADR-051 exceptions">Progressive reveal (documents) and page-on-non-empty (records) keep working, each triggered by its own list's scroll; their existing tests stay green.</constraint>
+    <constraint source="NFR-10 / ADR-021">Same in both hosts; Fluent v9 tokens; dark mode; works at 320 px and when the pane is wide (task 103).</constraint>
+    <constraint source="ADR-038">Update the Find tests; add tests for the split and the divider; report new suites to the main session for `ci-gated-suites.txt`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Find shows "Similar Documents" and "Matching records" as two sections, each with its own scroll container.</criterion>
+    <criterion testable="true">Dragging the divider (pointer) and pressing Up/Down on it (keyboard) changes the two heights; neither goes below its minimum.</criterion>
+    <criterion testable="true">Scrolling the documents list reveals more documents; scrolling the records list loads the next page — independently.</criterion>
+    <criterion testable="true">The label observation is resolved: the pinned row shows the record's name and type correctly, and documents show a real type where one exists; or the note records why not (server data) with evidence.</criterion>
+    <criterion testable="true">Gates: jest (all suites) green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy): as above. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-6 note, the 092/077 notes, `FindView.tsx`, `FindResultsList.tsx`, the Find hooks.</step>
+    <step>Two sections + independent scroll; tests.</step>
+    <step>Divider (pointer + keyboard); tests.</step>
+    <step>Label check; gates; `notes/102-find-split-sections.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The Find view, both lists and their progressive loading exist (tasks 034/077/092).</existing>
+    <extension>Yes — re-arranges the existing lists into two scroll regions with a divider. Check `@spaarke/ui-components` for an existing splitter/resizable-panel component first (ADR-012 amended: reuse by default) and use it by exact-path alias if one fits.</extension>
+    <cost-of-doing-nothing>Owner UAT round 6 item 4: one long scroll hides Matching records below every similar document.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Find split">
+      <steps>
+        <step>Find: two sections; scroll each independently; drag the divider; Tab to it and use the arrow keys.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/102-find-split-sections.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round6-2026-10-06.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/077-find-gaps.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/102-find-split-sections.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>

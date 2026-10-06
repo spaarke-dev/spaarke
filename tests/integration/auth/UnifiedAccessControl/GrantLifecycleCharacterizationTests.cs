@@ -246,8 +246,8 @@ public class GrantLifecycleCharacterizationTests
         Mock<DataverseWebApiClient> client, GrantAccessRequest request) =>
         GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
-            callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear, Mock.Of<ITenantCache>(),
-            new DefaultHttpContext(), NullLogger.Instance, CancellationToken.None);
+            callerOid: null, client.Object, OpenRecordPolicy, NoAccessListClear,
+            NullLogger.Instance, CancellationToken.None);
 
     /// <summary>
     /// Task 139: the grant core takes the grantor's ceiling as a REQUIRED input. The upsert behaviour this class pins
@@ -276,18 +276,22 @@ public class GrantLifecycleCharacterizationTests
         (await Grant(client, request)).AccessRecordId;
 
     /// <summary>
-    /// ContainerId is null throughout this class, so the SPE step is never attempted and the membership
-    /// service is only a constructor argument. Task 017 swapped the handler's <c>IGraphClientFactory</c>
-    /// for <see cref="SpeContainerMembershipService"/> when the endpoint's forked (and broken) SPE matcher
-    /// was deleted in favour of the service's own — see <c>SpeRevokeMatcherTests</c>.
+    /// The project root is NON-secure throughout this class, so its derived container is the shared business-unit
+    /// container, the SPE step is never attempted, and the membership service is only a constructor argument.
+    /// (Until uac-r2 task 166 the same effect came from a null <c>ContainerId</c> on the request; the request no
+    /// longer carries one — the container is derived from the grant root.) Task 017 swapped the handler's
+    /// <c>IGraphClientFactory</c> for <see cref="SpeContainerMembershipService"/> when the endpoint's forked (and
+    /// broken) SPE matcher was deleted in favour of the service's own — see <c>SpeRevokeMatcherTests</c>.
     /// </summary>
     private static Task<IResult> Revoke(Mock<DataverseWebApiClient> client, Guid accessRecordId, Guid contactId) =>
         RevokeExternalAccessEndpoint.RevokeAccessAsync(
-            new RevokeAccessRequest(accessRecordId, contactId, ProjectId, ContainerId: null),
+            new RevokeAccessRequest(accessRecordId, contactId, ProjectId),
             client.Object,
             new SpeContainerMembershipService(
                 TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
-            Mock.Of<ITenantCache>(),
+            OpenRecordPolicy,
+            AssignedAccessTestDoubles.InertMaterializer(),
+            TestRecordContainerResolver.ForNonSecureRecord("sprk_project", ProjectId),
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
 
     private static RevokeAccessResponse RevokeBody(IResult result) =>
@@ -1215,7 +1219,7 @@ public class GrantLifecycleCharacterizationTests
         => GrantExternalAccessEndpoint.CreateGrantAsync(
             request, ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor,
             callerOid: null, client.Object, new GrantPolicyTestDoubles.FlagStubParticipationService(flags),
-            NoAccessListClear, Mock.Of<ITenantCache>(), new DefaultHttpContext(), NullLogger.Instance,
+            NoAccessListClear, NullLogger.Instance,
             CancellationToken.None);
 
     /// <summary>
@@ -1300,7 +1304,7 @@ public class GrantLifecycleCharacterizationTests
 
         var faulted = await GrantExternalAccessEndpoint.CreateGrantAsync(
             Request(), ExternalGrantRootType.Project, ProjectId, Today, FullAccessGrantor, callerOid: null,
-            client.Object, throwing, NoAccessListClear, Mock.Of<ITenantCache>(), new DefaultHttpContext(),
+            client.Object, throwing, NoAccessListClear,
             NullLogger.Instance, CancellationToken.None);
         var realRestricted = await GrantUnder(
             client, Request(), new RootRecordFlags(IsSecure: true, IsRestricted: true));
@@ -1309,5 +1313,213 @@ public class GrantLifecycleCharacterizationTests
         faulted.Refusal.StatusCode.Should().Be(503);
         realRestricted.Refusal!.ReasonCode.Should().Be(ExternalGrantLifecycle.RecordRestrictedReasonCode);
         table.CreateCount.Should().Be(0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Task 137 (#1060, defect C5) — every grant-write path invalidates EVERY entry that can hold the grant:
+    // under every tenant a grant set is cached under, and for every active member of an organization grant.
+    // The cache is the PRODUCTION TenantCache over MemoryDistributedCache; only the organization-member page
+    // read is substituted (GrantPolicyTestDoubles.MemberPagingParticipationService).
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private const string WorkforceTenant = "a0a0a0a0-0000-0000-0000-00000000000a";
+    private const string CiamTenant = "c1c1c1c1-0000-0000-0000-00000000000c";
+
+    private static readonly IConfiguration TenantConfig = new ConfigurationBuilder()
+        .AddInMemoryCollection(new Dictionary<string, string?> { ["Ciam:TenantId"] = CiamTenant })
+        .Build();
+
+    private static TenantCache RealCache() => new(
+        new Microsoft.Extensions.Caching.Distributed.MemoryDistributedCache(
+            Microsoft.Extensions.Options.Options.Create(new Microsoft.Extensions.Caching.Memory.MemoryDistributedCacheOptions())),
+        NullLogger<TenantCache>.Instance);
+
+    /// <summary>A workforce ADMIN's request: its tid is the workforce tenant, never the CIAM one.</summary>
+    private static DefaultHttpContext AdminRequest() => new()
+    {
+        User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+            new[] { new System.Security.Claims.Claim("tid", WorkforceTenant) }, "test")),
+    };
+
+    private static Task SeedEntryAsync(ITenantCache cache, string tenant, Guid contactId)
+        => cache.SetAsync(tenant, ExternalParticipationService.ExternalAccessResource, contactId.ToString(),
+            ExternalParticipationService.CacheVersion, new { Projects = new[] { ProjectId } }, TimeSpan.FromSeconds(60));
+
+    private static async Task<bool> CachedAsync(ITenantCache cache, string tenant, Guid contactId)
+        => await cache.GetAsync<object>(tenant, ExternalParticipationService.ExternalAccessResource, contactId.ToString(),
+            ExternalParticipationService.CacheVersion) is not null;
+
+    private static Task<IResult> RevokeAs(
+        Mock<DataverseWebApiClient> client, Guid accessRecordId, Guid contactId, ExternalParticipationService participations)
+        => RevokeExternalAccessEndpoint.RevokeAccessAsync(
+            new RevokeAccessRequest(accessRecordId, contactId, ProjectId),
+            client.Object,
+            new SpeContainerMembershipService(TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
+            participations,
+            AssignedAccessTestDoubles.InertMaterializer(),
+            TestRecordContainerResolver.ForNonSecureRecord("sprk_project", ProjectId),
+            AdminRequest(), NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>
+    /// C5 — the CIAM miss: a workforce admin revokes; the grantee's CIAM-tenant entry (written by their ciamlogin.com
+    /// requests) is cleared as well as the admin's own tenant's, so the next CIAM request reads fresh grants instead of
+    /// a 60-second stale hit. A contact the revoke does not name keeps its entry.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_ByAWorkforceAdmin_ClearsTheGranteesCiamTenantEntry_NotJustTheAdminsTenant()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var row = table.Seed(ContactId, null, ProjectId, level: 1);
+        var cache = RealCache();
+        await SeedEntryAsync(cache, CiamTenant, ContactId);
+        await SeedEntryAsync(cache, WorkforceTenant, ContactId);
+        await SeedEntryAsync(cache, CiamTenant, OtherContactId);
+
+        var result = await RevokeAs(client, row.Id, ContactId,
+            GrantPolicyTestDoubles.RealInvalidationOver(cache, AdminRequest(), TenantConfig));
+
+        RevokeBody(result).DeactivatedCount.Should().Be(1);
+        (await CachedAsync(cache, CiamTenant, ContactId)).Should().BeFalse(
+            "the grantee's CIAM-tenant entry is gone — the next ciamlogin.com request is a cache MISS (fresh grants)");
+        (await CachedAsync(cache, WorkforceTenant, ContactId)).Should().BeFalse("the admin tenant's entry too");
+        (await CachedAsync(cache, CiamTenant, OtherContactId)).Should().BeTrue("a contact the revoke does not name is untouched");
+    }
+
+    /// <summary>
+    /// C5 — organization grants: revoking one clears every ACTIVE member's entry under every tenant — including an
+    /// organization LARGER than the revoke path's 200-member SPE bound, paged to completion (no silent cap).
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_ClearsEveryMember_EvenPastTheTwoHundredMemberBound()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var row = table.Seed(null, OrganizationId, ProjectId, level: 1);
+        var members = Enumerable.Range(1, ExternalOrganizationMembership.MaxMembersPerSweep + 51)
+            .Select(i => Guid.Parse($"bbbbbbbb-0000-0000-0000-{i:D12}"))
+            .ToArray();
+        var cache = RealCache();
+        foreach (var member in members)
+        {
+            await SeedEntryAsync(cache, CiamTenant, member);
+        }
+
+        var participations = GrantPolicyTestDoubles.RealInvalidationOver(cache, AdminRequest(), TenantConfig);
+        participations.PageSize = 100;
+        participations.Members[OrganizationId] = members;
+
+        var result = await RevokeAs(client, row.Id, Guid.Empty, participations);
+
+        RevokeBody(result).DeactivatedCount.Should().Be(1);
+        foreach (var member in members)
+        {
+            (await CachedAsync(cache, CiamTenant, member)).Should().BeFalse($"member {member} is invalidated");
+        }
+
+        participations.PageReads.Select(p => p.Page).Should().Equal(new[] { 0, 1, 2 },
+            "251 members at 100 per page are read in three pages, to the end");
+    }
+
+    /// <summary>
+    /// C5 — an invalidation failure never changes the write's answer: the same revoke over a cache whose removals
+    /// THROW returns exactly the response a healthy cache gets (the routine logs and leaves the TTL to expire it).
+    /// </summary>
+    [Fact]
+    public async Task Revoke_WhenEveryCacheRemovalThrows_ReturnsTheSameResponse()
+    {
+        var healthyTable = new FakeGrantTable();
+        var healthyRow = healthyTable.Seed(ContactId, null, ProjectId, level: 1);
+        var healthy = await RevokeAs(healthyTable.BuildMock(), healthyRow.Id, ContactId,
+            GrantPolicyTestDoubles.RealInvalidationOver(RealCache(), AdminRequest(), TenantConfig));
+
+        var throwingCache = new Mock<ITenantCache>();
+        throwingCache
+            .Setup(c => c.RemoveAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("simulated Redis timeout"));
+        var table = new FakeGrantTable();
+        var row = table.Seed(ContactId, null, ProjectId, level: 1);
+
+        var faulted = await RevokeAs(table.BuildMock(), row.Id, ContactId,
+            GrantPolicyTestDoubles.RealInvalidationOver(throwingCache.Object, AdminRequest(), TenantConfig));
+
+        throwingCache.Invocations.Should().NotBeEmpty("precondition: the removals were attempted, and threw");
+        faulted.Should().BeOfType<Ok<RevokeAccessResponse>>();
+        RevokeBody(faulted).Should().BeEquivalentTo(RevokeBody(healthy),
+            "an invalidation failure is non-fatal: status and body are unchanged");
+    }
+
+    /// <summary>
+    /// C5 — /grant asks the ONE routine for exactly the grantees the written key reaches: the ORGANIZATION on an
+    /// organization grant (whose members it expands), and only the CONTACT on a person grant that also records the
+    /// person's firm (the firm is metadata, not a grantee).
+    /// </summary>
+    [Fact]
+    public async Task Grant_InvalidatesTheOrganizationOnAnOrgGrant_AndOnlyTheContactOnAPersonGrantWithAFirm()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var participations = new GrantPolicyTestDoubles.FlagStubParticipationService(RootRecordFlags.None);
+
+        await GrantExternalAccessEndpoint.CreateGrantAsync(
+            Request(contactId: Guid.Empty, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId, Today,
+            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, NullLogger.Instance,
+            CancellationToken.None);
+        await GrantExternalAccessEndpoint.CreateGrantAsync(
+            Request(contactId: OtherContactId, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId,
+            Today, FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, NullLogger.Instance,
+            CancellationToken.None);
+
+        participations.Invalidations.Select(i => (Contacts: i.Contacts.ToList(), Organizations: i.Organizations.ToList()))
+            .Should().BeEquivalentTo(new[]
+            {
+                (Contacts: new List<Guid>(), Organizations: new List<Guid> { OrganizationId }),
+                (Contacts: new List<Guid> { OtherContactId }, Organizations: new List<Guid>()),
+            }, o => o.WithStrictOrdering());
+    }
+
+    /// <summary>
+    /// C5 end to end on /grant (verifier r1 finding 8): an ORGANIZATION grant written through the real core, over the
+    /// REAL invalidation routine and the production cache, clears every ACTIVE member's CIAM-tenant entry — an
+    /// organization LARGER than the revoke path's 200-member SPE bound, paged to completion — and leaves a contact
+    /// outside the organization cached.
+    /// </summary>
+    [Fact]
+    public async Task Grant_OfAnOrganizationGrant_ClearsEveryMember_EvenPastTheTwoHundredMemberBound()
+    {
+        var table = new FakeGrantTable();
+        var client = table.BuildMock();
+        var members = Enumerable.Range(1, ExternalOrganizationMembership.MaxMembersPerSweep + 51)
+            .Select(i => Guid.Parse($"bbbbbbbb-0000-0000-0000-{i:D12}"))
+            .ToArray();
+        var cache = RealCache();
+        foreach (var member in members)
+        {
+            await SeedEntryAsync(cache, CiamTenant, member);
+        }
+
+        await SeedEntryAsync(cache, CiamTenant, OtherContactId);
+
+        var participations = GrantPolicyTestDoubles.RealInvalidationOver(cache, AdminRequest(), TenantConfig);
+        participations.RootFlags = RootRecordFlags.None;
+        participations.PageSize = 100;
+        participations.Members[OrganizationId] = members;
+
+        var outcome = await GrantExternalAccessEndpoint.CreateGrantAsync(
+            Request(contactId: Guid.Empty, organizationId: OrganizationId), ExternalGrantRootType.Project, ProjectId, Today,
+            FullAccessGrantor, callerOid: null, client.Object, participations, NoAccessListClear, NullLogger.Instance,
+            CancellationToken.None);
+
+        outcome.Refusal.Should().BeNull("precondition: the organization grant is written");
+        table.ActiveRows.Should().ContainSingle().Which.OrganizationId.Should().Be(OrganizationId);
+        foreach (var member in members)
+        {
+            (await CachedAsync(cache, CiamTenant, member)).Should().BeFalse($"member {member} is invalidated");
+        }
+
+        (await CachedAsync(cache, CiamTenant, OtherContactId)).Should().BeTrue("a contact outside the organization is untouched");
+        participations.PageReads.Select(p => p.Page).Should().Equal(new[] { 0, 1, 2 },
+            "251 members at 100 per page are read in three pages, to the end");
     }
 }

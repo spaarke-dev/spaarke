@@ -441,9 +441,10 @@ public class OfficeService : IOfficeService
             // refusal writes nothing at all. A version save is skipped: it creates no document, and its row keeps
             // the owner it already has. `IsVersionSave` is the cheap intent predicate; the target is read below.
             Guid? owningTeamId = null;
+            Guid? createdByPersonId = null;
             if (!IsVersionSave(request))
             {
-                owningTeamId = await _ownershipResolver.ResolveOwningTeamAsync(
+                var documentOwner = await _ownershipResolver.ResolveOwnerAsync(
                     new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
                     {
                         TargetEntityLogicalName = request.TargetEntity?.EntityType,
@@ -451,8 +452,13 @@ public class OfficeService : IOfficeService
                         // The oid is enough: the resolver keys systemuser on azureactivedirectoryobjectid, the same
                         // key OfficeAuthFilter resolved and RecordContainerResolver uses for this save's container.
                         CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                        // Task 146 c1-r1 (owner round 13 item 9): the saving user asked for every document this save
+                        // creates app-only — recorded as their creator person (carried to the worker with the team).
+                        RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId),
                     },
                     cancellationToken);
+                owningTeamId = documentOwner.IsOwned ? documentOwner.OwningTeamId : null;
+                createdByPersonId = documentOwner.CreatedByPerson;
 
                 if (owningTeamId is null)
                 {
@@ -948,7 +954,8 @@ public class OfficeService : IOfficeService
                     // primary key, so the stored file self-identifies as the record that owns it.
                     preAssignedDocumentId,
                     // Task 080: resolved (or refused) before anything was written — see RECORD OWNERSHIP above.
-                    owningTeamId);
+                    owningTeamId,
+                    createdByPersonId);
 
                 // FR-C3 (email-communication-intelligence-r2, R-3): the content is byte-identical to an existing
                 // canonical document (returned as `documentId`). No second document was created — and there is
@@ -1039,7 +1046,8 @@ public class OfficeService : IOfficeService
                     documentId,
                     isVersionSave: false,
                     owningTeamId,
-                    cancellationToken);
+                    cancellationToken,
+                    createdByPersonId);
 
                 // Mark job as complete - background workers will process asynchronously
                 // User sees immediate success while AI processing continues in background. The save's view (task 060)
@@ -1106,7 +1114,11 @@ public class OfficeService : IOfficeService
                 {
                     Code = refusal.Code,
                     Message = refusal.Detail ?? refusal.Title,
+                    // A 5xx refusal is transient. So is container_ancestor_stale (task 156), although it is a 409: the
+                    // refusal itself enqueued the re-stamp that makes the same save succeed, and its text tells the user
+                    // to try again in a minute. Every other 4xx refusal is permanent until the data changes.
                     Retryable = refusal.StatusCode >= 500
+                        || string.Equals(refusal.Code, RecordContainerResolver.AncestorStaleCode, StringComparison.Ordinal)
                 }
             };
         }
@@ -1877,15 +1889,20 @@ public class OfficeService : IOfficeService
         // caller's business-unit DEFAULT OWNER TEAM. A new invoice is filed against nothing here, so the acting user's
         // business unit decides. This used to be best-effort — an unresolved caller left the invoice app-owned in the
         // ROOT business unit, invisible to its own creator — and is now a refusal, like Matter and Project.
-        var invoiceOwnerTeamId = await _ownershipResolver.ResolveOwningTeamAsync(
+        var invoiceOwner = await _ownershipResolver.ResolveOwnerAsync(
             new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
             {
                 CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
                     ? callerSystemUserId
                     : null,
                 CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the invoice the app creates.
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
+                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
+                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
             },
             cancellationToken).ConfigureAwait(false);
+        var invoiceOwnerTeamId = invoiceOwner.IsOwned ? invoiceOwner.OwningTeamId : null;
 
         if (invoiceOwnerTeamId is null)
         {
@@ -1899,6 +1916,7 @@ public class OfficeService : IOfficeService
         }
 
         entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", invoiceOwnerTeamId.Value);
+        invoiceOwner.StampCreatorOn(entity); // task 146 c1-r1 — the Office user, on the app-created invoice
 
         var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
@@ -1994,6 +2012,10 @@ public class OfficeService : IOfficeService
         RecordCreationFailureKind.OwnerUnresolved => StatusCodes.Status403Forbidden,
         // Task 076: the platform's next numbers were all held by rows; a retry later (or a re-seed) succeeds.
         RecordCreationFailureKind.NumberUnavailable => StatusCodes.Status409Conflict,
+        // Task 158 r1: a caller walled off (or without the rights to create under) a secure record — 403; a secure create that
+        // could not be checked or completed (and was removed again) — 500.
+        RecordCreationFailureKind.SecureFilingRefused => StatusCodes.Status403Forbidden,
+        RecordCreationFailureKind.SecureFilingFailed => StatusCodes.Status500InternalServerError,
         _ => StatusCodes.Status500InternalServerError
     };
 
@@ -2155,9 +2177,11 @@ public class OfficeService : IOfficeService
         // Carrying regarding (FR-14, task 035) — the open Word document or the Outlook email being filed.
         // Independent of the record regarding above: both may be written to the same sprk_todo (constraint:
         // "Setting only one when both are available is a defect, not a graceful degradation"). Does NOT touch
-        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md)
-        // and does NOT run the core-ancestor stamp (the stamp is a property of the record regarding above,
-        // unchanged by this task — a document/communication carrier alone needs no stamp of its own).
+        // sprk_regardingrecordid/-name/-type (those describe the RECORD, per notes/035-todo-regarding-decision.md).
+        // When a record regarding was chosen above, the stamp is that record's and a carrier adds none (the pair names
+        // the record: CoreAncestorResolver.ClassifyStampSource reads every carrier as a carrier). When NO record was
+        // chosen, a single carrier IS what the To Do is filed under (ClassifyStampSource rule 5) — so it is stamped
+        // from that carrier below (unified-access-control-r2 task 156, verifier round 1 item 8).
         if (request.DocumentId is { } documentId
             && documentId != Guid.Empty
             && TodoRegardingMap.TryGetValue("Document", out var docCarrier))
@@ -2172,14 +2196,41 @@ public class OfficeService : IOfficeService
             entity[commCarrier.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(commCarrier.LogicalName, communicationId);
         }
 
+        // Carrier-only To Do (no record regarding): stamp it from what it is filed under, so it is BORN with the copy the
+        // storage resolver compares and the reconciliation job keeps fresh. Before this, the carrier-only To Do was
+        // created with no copy, so its first upload answered 409 container_ancestor_stale until the re-stamp landed, and
+        // until then it inherited none of the carrier's project / matter / work assignment (C10 part 2: a child of a
+        // secure record is secure). The ONE classification rule decides: exactly one carrier → that record; a document
+        // AND an email with no record → AmbiguousSource → nothing is stamped (the storage resolver refuses it as
+        // ambiguous, and it inherits nothing — fail closed). Same fail-closed contract as the record regarding above.
+        if (!entity.Contains("sprk_regardingrecordid")
+            && Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.ClassifyStampSource(
+                    "sprk_todo", entity,
+                    Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver.PartyRegardingColumnNames("sprk_todo"))
+                is { Kind: Sprk.Bff.Api.Services.Dataverse.StampSourceKind.Source, Source: { } carrierSource })
+        {
+            var carrierStamp = await _coreAncestors
+                .StampAsync(entity, carrierSource.Intermediate, carrierSource.Id, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!carrierStamp.Succeeded)
+            {
+                _logger.LogError(
+                    "Create To Do aborted: core-ancestor derivation failed for its {CarrierType} {CarrierId}. {Error}",
+                    carrierSource.Intermediate, carrierSource.Id, carrierStamp.Error);
+                return null;
+            }
+        }
+
         // Owner (task 080, write-path invariant I-6): a business unit's DEFAULT OWNER TEAM, never the app user and
         // never an individual. RECORD-FIRST — the To Do belongs with what it is filed against: the record regarding
         // first, then the document or email it was created from, and only when there is neither, the acting user.
         // Before this, a resolved caller owned the To Do and an unresolved one silently left it app-owned in ROOT.
-        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference(
-            "team",
-            await ResolveTodoOwnerTeamAsync(request, userId, ownerSystemUserId, cancellationToken)
-                .ConfigureAwait(false));
+        var (todoTeamId, todoCreatorPerson) = await ResolveTodoOwnerTeamAsync(
+            entity, request, userId, ownerSystemUserId, cancellationToken).ConfigureAwait(false);
+        entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("team", todoTeamId);
+        // Task 146 c1-r1 (owner round 13 item 9): the Office user asked for the To Do the app creates.
+        Spaarke.Dataverse.RecordCreatorPersonColumn.StampIfKnown(entity, todoCreatorPerson);
 
         var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
@@ -2196,14 +2247,16 @@ public class OfficeService : IOfficeService
     /// acting user's when it is filed against nothing.
     /// </summary>
     /// <remarks>
-    /// The target is the FIRST that was named, and it is passed alone:
-    /// <see cref="Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver"/> refuses a
-    /// named-but-unreadable target rather than trying the next one, and that is right here too — dropping past a
-    /// secure regarding record to its document would own the To Do outside the secure business unit.
+    /// Task 146 (secure-if-any): EVERY parent the To Do carries is passed — the record regarding, its core-ancestor
+    /// stamps, and the document / email carriers — with the first named as the primary (its business unit decides an
+    /// ordinary To Do). Any secure parent makes the To Do the named Secure team's; any named-but-unreadable parent
+    /// refuses rather than being skipped (a carrier could be the secure one). Before 146 only the first target was
+    /// passed, so a To Do on an ordinary matter carrying a SECURE document was owned in the ordinary unit.
     /// </remarks>
     /// <exception cref="SdapProblemException"><see cref="OfficeErrorCodes.RecordOwnerUnresolved"/> (403) when no team
     /// resolves. Thrown rather than returned as null so the endpoint can tell this refusal from its generic one.</exception>
-    private async Task<Guid> ResolveTodoOwnerTeamAsync(
+    private async Task<(Guid Team, Guid? CreatorPerson)> ResolveTodoOwnerTeamAsync(
+        Microsoft.Xrm.Sdk.Entity todo,
         CreateTodoRequest request,
         string userId,
         string? ownerSystemUserId,
@@ -2220,19 +2273,25 @@ public class OfficeService : IOfficeService
                         ? (TodoRegardingMap["Communication"].LogicalName, communicationId)
                         : (null, null);
 
-        var teamId = await _ownershipResolver.ResolveOwningTeamAsync(
-            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+        var primary = target.LogicalName is not null && target.Id is { } targetId
+            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(target.LogicalName, targetId)
+            : null;
+        var todoOwner = await _ownershipResolver.ResolveOwnerAsync(
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(todo, primary) with
             {
-                TargetEntityLogicalName = target.LogicalName,
-                TargetRecordId = target.Id,
                 CallerSystemUserId = Guid.TryParse(ownerSystemUserId, out var callerSystemUserId)
                     ? callerSystemUserId
                     : null,
                 CallerObjectId = Guid.TryParse(userId, out var callerObjectId) ? callerObjectId : null,
+                // Task 146 c1-r1 (owner round 13 item 9): the Office user is the person who asked.
+                RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(
+                    Guid.TryParse(ownerSystemUserId, out var requesterId) ? requesterId : null,
+                    Guid.TryParse(userId, out var requesterOid) ? requesterOid : null),
             },
             cancellationToken).ConfigureAwait(false);
+        var teamId = todoOwner.IsOwned ? todoOwner.OwningTeamId : null;
 
-        return teamId ?? throw new SdapProblemException(
+        return teamId is { } resolvedTeam ? (resolvedTeam, todoOwner.CreatedByPerson) : throw new SdapProblemException(
             OfficeErrorCodes.RecordOwnerUnresolved,
             OfficeErrorCodes.GetTitle(OfficeErrorCodes.RecordOwnerUnresolved),
             target.LogicalName is not null

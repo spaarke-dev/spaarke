@@ -115,7 +115,6 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     [InlineData("POST", "/api/compose/upload")]
     [InlineData("GET", "/api/compose/documents/spe-item-abc")]
     [InlineData("POST", "/api/compose/documents/spe-item-abc/save")]
-    [InlineData("POST", "/api/compose/documents/spe-item-abc/promote")]
     [InlineData("POST", "/api/compose/documents/00000000-0000-0000-0000-000000000001/checkout")]
     [InlineData("POST", "/api/compose/documents/00000000-0000-0000-0000-000000000001/checkin")]
     public async Task ComposeEndpoint_WhenUnauthenticated_Returns401(string verb, string path)
@@ -261,38 +260,9 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
         result.DocumentRecordId.Should().Be(documentRecordId);
     }
 
-    [Fact]
-    public async Task PostPromoteDocument_Authenticated_WithValidBody_Returns200_AndReportsWasCreated()
-    {
-        const string speId = "spe-item-promote-pqr";
-        const string tenantId = "tenant-aad-003";
-        var sessionId = Guid.NewGuid().ToString();
-        var documentRecordId = Guid.NewGuid();
-
-        _fixture.ComposeServiceMock
-            .Setup(s => s.PromoteIfEphemeralAsync(It.IsAny<PromoteComposeDocumentRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PromoteComposeDocumentResult
-            {
-                DocumentSpeId = speId,
-                SessionId = sessionId,
-                DocumentRecordId = documentRecordId,
-                WasCreated = true,
-            });
-
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new { sessionId, tenantId, displayName = "Draft.docx" };
-
-        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/promote", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<PromoteComposeDocumentResponse>();
-        result.Should().NotBeNull();
-        result!.DocumentRecordId.Should().Be(documentRecordId);
-        result.WasCreated.Should().BeTrue("first promotion creates the sprk_document row");
-    }
+    // PostPromoteDocument_* (happy path + missing-session 400) DELETED 2026-10-03 with the route — unified-access-control-r2
+    // task 166 retired POST /api/compose/documents/{documentSpeId}/promote (no client; body tenant + session, no owner
+    // check). Its absence is asserted by tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs.
 
     [Fact]
     public async Task PostCheckoutDocument_Authenticated_Returns501_PerR1StubContract()
@@ -358,20 +328,6 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
 
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
             "Save handler validates non-empty content and returns 400 ProblemDetails when empty");
-    }
-
-    [Fact]
-    public async Task PostPromoteDocument_WhenMissingSessionId_Returns400()
-    {
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new { tenantId = "tenant-aad-009" };  // no sessionId
-
-        var response = await client.PostAsJsonAsync(
-            "/api/compose/documents/spe-item-nosession/promote", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "Promote handler requires sessionId for the ephemeral->promoted rebind (FR-07)");
     }
 
 }
