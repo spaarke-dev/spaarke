@@ -446,7 +446,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             {
                 Conditions =
                 {
-                    new ConditionExpression("sprk_communication", ConditionOperator.Equal, communicationId),
+                    // The archive document links back through sprk_relatedcommunication (the column the create below writes).
+                    // sprk_document has no sprk_communication column; filtering on it made every archive answer 500.
+                    new ConditionExpression("sprk_relatedcommunication", ConditionOperator.Equal, communicationId),
                     new ConditionExpression("sprk_isemailarchive", ConditionOperator.Equal, true),
                 },
             },
