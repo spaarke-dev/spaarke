@@ -1,7 +1,7 @@
 /**
  * DueDateCardList container (PCF-side)
  * Fetches a Dataverse view of events, maps to EventDueDateCard props, owns
- * record navigation (window.Xrm), and renders the pure @spaarke/visuals
+ * record navigation (shared getXrm), and renders the pure @spaarke/visuals
  * `DueDateCardList`.
  *
  * VHVU-050 — data flow inverted: the presentational component (in
@@ -19,6 +19,7 @@ import type { IConfigWebApi } from '../services/ConfigurationLoader';
 import { resolveQuery, injectContextFilter, type ISubstitutionParams } from '../services/ViewDataService';
 import { logger } from '../utils/logger';
 import { mapEventToCardProps } from '../utils/eventDueDate';
+import { getXrm } from '../../../../shared/Spaarke.UI.Components/src/utils/xrmContext';
 
 export interface IDueDateCardListVisualProps {
   chartDefinition: IChartDefinition;
@@ -133,8 +134,9 @@ export const DueDateCardListVisual: React.FC<IDueDateCardListVisualProps> = ({
       setNavigatingId(eventId);
       try {
         const entityName = chartDefinition.sprk_entitylogicalname || 'sprk_event';
+        // Shared walker (task 081 round 4, review F2) — this read window.Xrm only.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm = (window as any).Xrm;
+        const xrm: any = getXrm('navigation');
 
         if (xrm?.Navigation?.navigateTo) {
           // Open event record form as a modal dialog at the `record` OOB size

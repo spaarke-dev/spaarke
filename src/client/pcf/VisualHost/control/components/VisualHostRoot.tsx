@@ -778,8 +778,10 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
   const handleViewListClick = useCallback(() => {
     if (!chartDefinition?.sprk_viewlisttabname) return;
 
+    // Nearest frame with Xrm.Page (shared walker, task 081 round 4) — this read
+    // window.Xrm only.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
+    const xrm: any = getXrm('page');
     const tabName = chartDefinition.sprk_viewlisttabname;
 
     logger.info('VisualHostRoot', 'View List click - navigating to tab', {
