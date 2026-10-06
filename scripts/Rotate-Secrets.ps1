@@ -7,10 +7,12 @@
     service restart for both platform-level and customer-level secrets.
 
     Supported secret types:
-      - StorageKey      : Regenerates storage account keys
-      - ServiceBus      : Regenerates Service Bus access keys
-      - EntraId         : Rotates Entra ID app registration client secrets
-      - All             : Rotates all supported secret types
+      - StorageKey      : Retired (no-op). Customer stamps disable shared-key access (task 244); there is no
+                          platform storage key in Key Vault.
+      - ServiceBus      : Regenerates the PLATFORM Service Bus access key (gated by the secret-free marker).
+                          Customer scope is a retired no-op: stamp Service Bus has SAS disabled (task 244).
+      - EntraId         : Retired (no-op). The BFF identity is secret-free (ADR-028 A4).
+      - All             : Runs every type above
 
     Redis is not rotated here (task 242, owner D12/D13): every Spaarke Redis is Azure Managed Redis with
     access keys disabled, reached with a managed identity — there is no key or connection string to rotate.
@@ -52,7 +54,7 @@
 
 .EXAMPLE
     # Rotate demo customer storage keys
-    .\Rotate-Secrets.ps1 -Scope Customer -CustomerId demo -SecretType StorageKey
+    .\Rotate-Secrets.ps1 -Scope Customer -CustomerId demo -SecretType All -DryRun
 
 .EXAMPLE
     # Rotate all secrets for all vaults (platform + all customers)
@@ -115,8 +117,6 @@ $script:AuditEntries = @()
 
 function Get-PlatformVaultName { "sprk-platform-$Environment-kv" }
 function Get-CustomerVaultName([string]$cid) { "sprk-$cid-$Environment-kv" }
-function Get-StorageAccountName([string]$cid) { "sprk$($cid)$($Environment)sa" }
-function Get-ServiceBusName([string]$cid) { "sprk-$cid-$Environment-sb" }
 
 # ─────────────────────────────────────────────
 # Logging & Audit
@@ -238,86 +238,6 @@ function Assert-VaultAccess([string]$vaultName) {
     $result = az keyvault secret list --vault-name $vaultName --query "[0].id" -o tsv 2>$null
     if ($LASTEXITCODE -ne 0) {
         throw "Cannot access Key Vault '$vaultName'. Verify permissions (Key Vault Secrets Officer role required)."
-    }
-}
-
-# ─────────────────────────────────────────────
-# Secret Rotation: Storage Account Keys
-# ─────────────────────────────────────────────
-
-function Rotate-StorageKey {
-    param(
-        [string]$StorageAccountName,
-        [string]$VaultName,
-        [string]$SecretName,
-        [string]$ResourceGroup
-    )
-
-    if ($DryRun) {
-        Write-AuditLog -Level "INFO" -SecretName $SecretName -VaultName $VaultName `
-            -Action "Rotate-StorageKey" -Result "DryRun" `
-            -Detail "Would regenerate key2 for storage '$StorageAccountName', update vault, then regenerate key1"
-        return
-    }
-
-    try {
-        # Step 1: Regenerate secondary key (key2) — services still using key1
-        Write-AuditLog -Level "INFO" -SecretName $SecretName -VaultName $VaultName `
-            -Action "RegenerateKey2" -Result "InProgress" -Detail "Storage: $StorageAccountName"
-
-        az storage account keys renew `
-            --account-name $StorageAccountName `
-            --resource-group $ResourceGroup `
-            --key key2 `
-            -o none
-
-        if ($LASTEXITCODE -ne 0) { throw "Failed to regenerate key2 for '$StorageAccountName'" }
-
-        # Step 2: Get the new key2 value
-        $newKey = az storage account keys list `
-            --account-name $StorageAccountName `
-            --resource-group $ResourceGroup `
-            --query "[1].value" -o tsv
-
-        if (-not $newKey) { throw "Failed to retrieve new key2 for '$StorageAccountName'" }
-
-        # Step 3: Build connection string and update Key Vault
-        $connString = "DefaultEndpointsProtocol=https;AccountName=$StorageAccountName;AccountKey=$newKey;EndpointSuffix=core.windows.net"
-
-        az keyvault secret set `
-            --vault-name $VaultName `
-            --name $SecretName `
-            --value $connString `
-            -o none
-
-        if ($LASTEXITCODE -ne 0) { throw "Failed to update Key Vault secret '$SecretName'" }
-
-        # Step 4: Verify connectivity with new key
-        $testResult = az storage container list `
-            --account-name $StorageAccountName `
-            --account-key $newKey `
-            --query "[0].name" -o tsv 2>$null
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-AuditLog -Level "WARN" -SecretName $SecretName -VaultName $VaultName `
-                -Action "VerifyConnectivity" -Result "Warning" `
-                -Detail "Connectivity check returned non-zero but key may still be valid (empty account?)"
-        }
-
-        # Step 5: Now regenerate key1 (old key) to invalidate it
-        az storage account keys renew `
-            --account-name $StorageAccountName `
-            --resource-group $ResourceGroup `
-            --key key1 `
-            -o none
-
-        Write-AuditLog -Level "SUCCESS" -SecretName $SecretName -VaultName $VaultName `
-            -Action "Rotate-StorageKey" -Result "Success" `
-            -Detail "Rotated to key2, invalidated key1"
-    }
-    catch {
-        Write-AuditLog -Level "ERROR" -SecretName $SecretName -VaultName $VaultName `
-            -Action "Rotate-StorageKey" -Result "Failed" -Detail $_.Exception.Message
     }
 }
 
@@ -507,9 +427,9 @@ function Rotate-PlatformSecrets {
         # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
         # 2026-08-24). On a secret-free platform vault, rotating it here would resurrect it and
         # silently reverse the migration while this run reports Success (§10.5 trap class). Refuse
-        # loudly instead — mirrors the A43 Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape. Model 2
-        # per-customer vaults are gated separately below in Rotate-CustomerSecrets (§10.3 fleet
-        # consistency — this check is per-vault, not per-fleet, so it works identically for both).
+        # loudly instead — mirrors the A43 Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape. Per-customer
+        # vaults (Model 1 and Model 2 stamps) need no gate: since task 244 Rotate-CustomerSecrets does not
+        # rotate Service Bus at all — the stamp namespace has SAS disabled.
         Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $vaultName
 
         $sbName = "sprk-platform-$Environment-sb"
@@ -537,11 +457,11 @@ function Rotate-PlatformSecrets {
         Write-Host "  [EntraId] BFF API client secret: retired — the BFF identity is secret-free (ADR-028 A4). Nothing to rotate." -ForegroundColor DarkGray
     }
 
-    # Storage keys are customer-level, not platform-level
+    # Storage keys: there is no platform storage key in Key Vault, and customer stamps are keyless (task 244).
     if ($SecretType -eq "StorageKey") {
         Write-AuditLog -Level "INFO" -SecretName "N/A" -VaultName $vaultName `
             -Action "Rotate-StorageKey" -Result "Skipped" `
-            -Detail "Storage accounts are per-customer. Use -Scope Customer -CustomerId <id>"
+            -Detail "No storage key is held in Key Vault: customer stamps disable shared-key access (task 244). Nothing to rotate."
     }
 }
 
@@ -563,31 +483,27 @@ function Rotate-CustomerSecrets([string]$cid) {
         Assert-VaultAccess $vaultName
     }
 
-    # Storage Account
+    # Storage + Service Bus — RETIRED for customer stamps (task 244, owner D13, 2026-10-06).
+    #
+    # A customer stamp (Model 1 and Model 2 alike — one per-customer template) has shared-key access
+    # disabled on its Storage account and local (SAS) auth disabled on its Service Bus namespace; the BFF
+    # reaches both with the stamp's managed identity. Renewing a storage key or the namespace's
+    # RootManageSharedAccessKey would only write useless key material (Storage-ConnectionString /
+    # ServiceBus-ConnectionString) into the per-customer vault — the secrets T226 removed — and the
+    # follow-up connectivity check would fail. Kept as explicit no-ops (not deleted) so `-SecretType All`
+    # still reports what it did instead of silently narrowing.
     if ($SecretType -eq "StorageKey" -or $SecretType -eq "All") {
-        $saName = Get-StorageAccountName $cid
-        Rotate-StorageKey `
-            -StorageAccountName $saName `
-            -VaultName $vaultName `
-            -SecretName "Storage-ConnectionString" `
-            -ResourceGroup $resourceGroup
+        Write-AuditLog -Level "INFO" -SecretName "Storage-ConnectionString" -VaultName $vaultName `
+            -Action "Rotate-StorageKey" -Result "Skipped" `
+            -Detail "Retired by task 244: the stamp Storage account has shared-key access disabled (managed identity only). Nothing to rotate."
+        Write-Host "  [StorageKey] retired — the stamp Storage account accepts no shared key (task 244). Nothing to rotate." -ForegroundColor DarkGray
     }
 
-    # Service Bus
     if ($SecretType -eq "ServiceBus" -or $SecretType -eq "All") {
-        # ── A38c secret-free marker gate (Model 2 — per-customer vault) ────────────────────────
-        # Same rationale as the platform-vault gate above (Rotate-PlatformSecrets). Under Model 2,
-        # N per-customer vaults each carry their own tag (§10.3 fleet consistency) — this call
-        # checks exactly THIS customer's vault ($vaultName is `Get-CustomerVaultName $cid`), so the
-        # gate is evaluated independently per customer as this function is invoked per customer.
-        Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $vaultName -CustomerId $cid
-
-        $sbName = Get-ServiceBusName $cid
-        Rotate-ServiceBusKey `
-            -NamespaceName $sbName `
-            -VaultName $vaultName `
-            -SecretName "ServiceBus-ConnectionString" `
-            -ResourceGroup $resourceGroup
+        Write-AuditLog -Level "INFO" -SecretName "ServiceBus-ConnectionString" -VaultName $vaultName `
+            -Action "Rotate-ServiceBusKey" -Result "Skipped" `
+            -Detail "Retired by task 244: the stamp Service Bus namespace has local (SAS) auth disabled (managed identity only). Nothing to rotate."
+        Write-Host "  [ServiceBus] retired — the stamp namespace accepts no SAS (task 244). Nothing to rotate." -ForegroundColor DarkGray
     }
 
     # Entra ID is platform-level, not per-customer

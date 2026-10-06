@@ -4,7 +4,7 @@
     <title>Keyless customer-stamp resources in Bicep (owner D13, plan G16) — disable local/key auth on AI Search, OpenAI, Document Intelligence, Service Bus and Storage; grant the L2 identity its Search roles; drop the secret-bearing outputs</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T244 (owner decision D13 keyless stamps, gap G16; hard prerequisite of T186 per D22)</phase>
     <gate>startable after PR #1311 merges (T243 ✅, T242 ✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Auth change on every customer-stamp resource (tag auth) deployed by H2a, plus L2 RBAC, a legacy script and tests; failure mode is every stamp service call returning 401/403.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -149,5 +149,54 @@
 
   <notes>
     Filed 2026-10-06 (SESSION 37) from plan §7 T244 after T242b closed; facts in the background read the same day.
+  
+
+    COMPLETED 2026-10-06 (session 37). Template only — no live Azure change (T186 deploys it; T230 makes the runtime MI calls).
+
+    STEP 1 CONSUMER INVENTORY (escalation triggers):
+    - AI Search: BFF via MI (AiSearch__ManagedIdentity__Enabled, SearchClientFactory key-if-configured); L2 H2b
+      (DefaultAzureCredential) + H13 tenant-filter probe (live /docs/search as L2) — L2 had NO Search role (G16).
+    - OpenAI: stamp catalog carries only AzureOpenAI-Endpoint; OpenAiClient/AiModule use a key only if set. Stamp
+      kind is OpenAI (E-2 was observed on dev's AIServices kind) — T230 measures it.
+    - Document Intelligence: MI since T243; no stamp has a DocIntelKey setting.
+    - Service Bus: BFF + membership publisher by namespace (ServiceBus__FullyQualifiedNamespace) + MI; the SAS rule
+      fed only the template output.
+    - Storage: BFF session blobs use endpoint + credential (stamp sets no SessionFileStore:BlobEndpoint today).
+      Event Grid dead-letter (deployAcsMessaging) had no identity -> trigger 1 FIRED -> owner chose system-topic MI.
+    - Cosmos: BFF CosmosClientBuilder(endpoint, credential) + UAMI sqlRoleAssignment -> owner added it to T244.
+    - Template outputs: only legacy Provision-Customer.ps1 read storageConnectionString/serviceBusConnectionString
+      (L2 no longer shells out to it). Rotate-Secrets.ps1 -Scope Customer minted Storage/SB keys into the customer
+      vault (found by both reviews) -> retired as explicit no-ops. Dev-only scripts Add-ReferenceToIndex.ps1 /
+      Sync-RecordsToIndex.ps1 list dev's OpenAI key (shared dev, not stamps — AC2 grep hit, accepted).
+    - L2 handlers, sidecar: no key/SAS use. Trigger 2 did not fire; trigger 3 did not fire.
+
+    DONE: disableLocalAuth true on AI Search (no authOptions), OpenAI, Document Intelligence, Service Bus, Cosmos
+    (owner 2026-10-06); Storage shared key off (customer.bicep passes true; module default now true). Removed outputs
+    searchServiceAdminKey/QueryKey, openAiKey, serviceBusConnectionString (+ SAS rule SpaarkeAppAccess), storage
+    connectionString, customer storageConnectionString/serviceBusConnectionString. L2 UAMI: Search Service Contributor
+    (H2b) + Search Index Data READER (H13 probe; L2 writes no documents — least privilege, deviation from the AC's
+    "Index Data Contributor", reason recorded) on the stamp search service, conditional on the principal (Model 1).
+    ACS Event Grid dead-letter: deadLetterWithResourceIdentity + system-topic SystemAssigned identity + Storage Blob
+    Data Contributor on the dead-letter container. H2b: a provisioner 401/403 -> Resumable `search-access-denied`
+    (role propagation after H2a; was Quarantine) + tests. Provision-Customer.ps1 no longer reads/writes the two
+    connection strings. Rotate-Secrets.ps1 customer Storage/SB rotation retired (Rotate-StorageKey removed; Pester
+    updated). Forcing function tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs (11 facts: 5 real-template
+    rules + controls; the 5 rules fail on the pre-T244 customer.json). Docs: inventory (incl. drift fix: stamp OpenAI is
+    kind=OpenAI, not AIServices), deployment guide, provisioning.md keyless rule, azure-deployment.md Service Bus row,
+    ADR-028 E-2 informational note, CHANGELOG.
+
+    VERIFIED: ControlPlane.Tests 2118 pass / 0 fail / 1 skip; ArchTests 360/360 (11 new); Pester gates 27/27; bicep lint = master (only pre-existing
+    warnings); customer.json = fresh compile; bicep-e2e-dry-run Build PASS (notes/bicep-e2e-dry-run-20261005.md).
+
+    STEP 9.5: code-review (0 Critical; W1 H2b race FIXED; W2 Rotate-Secrets FIXED; W3 over-claim FIXED by adding Cosmos;
+    S1-S9, S11 FIXED; S10 accepted above; S12 Model 2 Lighthouse would need both Search roles — Model 2 out of scope;
+    S13 ACS local auth — documented exclusion; S14 dates are UTC). adr-check (0 hard violations; B-1 resolved by the
+    owner's Cosmos decision (path C); W-1 E-2 note added; W-2/W-3 FIXED; W-4 FIXED; W-5 claim corrected; W-6 FIXED
+    (Reader); W-7 comment; W-8 ADR-028 cited; W-9 accepted — single same-RG caller).
+
+    FOLLOW-UPS: (1) CI check that the checked-in customer.json equals a fresh compile (the ArchTests read the
+    checked-in JSON; CI publishes its own compile) — needs a pinned Bicep version to avoid templateHash noise;
+    (2) T230 runtime MI call per service incl. E-2 measurement on kind=OpenAI; (3) ACS disableLocalAuth once its
+    module API is raised.
   </notes>
 </task>

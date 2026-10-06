@@ -91,6 +91,10 @@ public abstract record AiSearchIndexProvisionOutcome
     /// 400: unknown field 'foo'"). Handler wraps this in a
     /// <see cref="FailureClass.QuarantineRequired"/> §4C classification —
     /// partial deploys can leave a subset of indexes created.
+    /// <para><paramref name="AccessDenied"/> is true when the service refused the L2 identity (HTTP 401/403). On a new
+    /// stamp that is the Search role assignments H2a just created not having taken effect yet (task 244: the service
+    /// is Entra-only, so the roles are the only way in). The handler classifies it Resumable, not Quarantine — every
+    /// index PUT is create-or-replace, so resuming re-applies the same schemas.</para>
     /// </summary>
-    public sealed record Failure(string Diagnostic) : AiSearchIndexProvisionOutcome;
+    public sealed record Failure(string Diagnostic, bool AccessDenied = false) : AiSearchIndexProvisionOutcome;
 }

@@ -1,6 +1,6 @@
 # Provisioning Constraints
 
-> **Last Reviewed**: 2026-08-25
+> **Last Reviewed**: 2026-10-06 (T244 — keyless stamp resources rule added)
 > **Reviewed By**: customer-provisioning-orchestration-r1 task 203a per punch list row A08
 > **Load when**: task tags include `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler`, `customer-provisioning`
 > **Wired into**: `.claude/skills/task-execute/SKILL.md` Step 4a tag map
@@ -155,6 +155,13 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - **MUST NOT** add `listKeys()`, a Redis key/connection-string output, a `Redis-ConnectionString` catalog secret, or a `Redis__ConnectionString` / `ConnectionStrings__Redis` setting for a stamp. The endpoint is the plain setting `Redis__Endpoint` (`host:10000`) — set by `customer.bicep` and by H4b (`from-h2a-output:redis_endpoint`).
 - The BFF (`CacheModule`) and the L2 Worker (`DispatchModule`) authenticate with their user-assigned identity (`ManagedIdentity__ClientId`) over RESP3 whenever `Redis__Endpoint` is set, and **refuse to start** on a connection string without it outside Development/Testing — so a deployed BFF/Worker MUST carry `Redis__Endpoint` before it runs a T242+ build (per-env cut-over: task 242b, endpoint added first, connection string removed only after master carries T242).
 - H1 registers `Microsoft.Cache` by default. Managed Redis has no scale-down and HA is fixed at create — size up only on a measured memory metric.
+
+## Stamp resources are keyless (BINDING, task 244 / owner D13)
+
+- **MUST** keep local/key auth disabled on the stamp's AI Search, Azure OpenAI, Document Intelligence, Service Bus, Cosmos DB and SignalR (`disableLocalAuth: true`; AI Search with no `authOptions`), Storage (`allowSharedKeyAccess: false` — the module default since T244) and Redis (rule above). A new keyed resource (e.g. Content Safety, T246) ships the same way. Documented exclusions (in the test file): App Insights ingestion, and ACS (setting unverified on its pinned API).
+- **MUST NOT** add `listKeys()` / `listAdminKeys()` / `listQueryKeys()`, a SAS authorization rule, an `AccountKey=` connection string, or a key / connection-string output to any stamp module or to `customer.bicep`. A caller that needs data-plane access gets a **role** (BFF UAMI: `bff-runtime-rbac.bicep` + module grants; L2 UAMI: `customer-l2-bff-rbac.bicep` — Website Contributor, Search Service Contributor, Search Index Data Reader — L2 writes no documents).
+- Event Grid dead-letters to stamp Storage with `deadLetterWithResourceIdentity` (system-topic identity, Storage Blob Data Contributor on the container) — plain `deadLetterDestination` has no identity.
+- Forcing function: `tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs` reads the compiled `customer.json` — recompile it (`az bicep build --file customer.bicep --outfile customer.json`) after any module change. T230 makes one real managed-identity call per service at runtime (and measures ADR-028 E-2 on the stamp's `kind: OpenAI` account).
 
 ## Handler idempotency + drift-detection
 

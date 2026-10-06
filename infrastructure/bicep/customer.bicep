@@ -307,6 +307,10 @@ module storage 'modules/storage-account.bicep' = {
     // account-key fallback. Same T5-stable UAMI pattern as openAi/aiSearch/
     // docIntelligence below.
     userAssignedIdentityPrincipalId: uami.outputs.principalId
+    // Keyless (owner D13, task 244): no shared-key access. Any caller uses the blob endpoint with an
+    // identity — the stamp UAMI holds Storage Blob Data Contributor (above); Event Grid dead-letters
+    // with its system topic's identity (acs-communication.bicep).
+    disableSharedKeyAccess: true
     tags: tags
   }
 }
@@ -583,9 +587,9 @@ module bffApi 'modules/app-service.bicep' = {
     //     Data/Service Contributor on Service Bus + AI Search (bffRuntimeRbac below).
     //     H4b adds the MI selectors (ServiceBus__FullyQualifiedNamespace,
     //     AiSearch__ManagedIdentity__Enabled). Storage's connection string was unused
-    //     by any BFF code and is not emitted. KNOWN GAP (plan G16): modules/ai-search.bicep
-    //     still creates the service keys-only, so its MI calls 403 until T244 enables
-    //     Entra auth on it.
+    //     by any BFF code and is not emitted. Since T244 (G16 closed) every one of these
+    //     services has local/key auth DISABLED (Storage: shared key off), so the UAMI is
+    //     the only way in — a key setting could not work even if one were emitted.
     //   - Document Intelligence is reached with the stamp UAMI too (T243, owner D13): the
     //     BFF uses managed identity when no DocumentIntelligence__DocIntelKey is set, and no
     //     stamp is given one. The module sets a custom subdomain (Entra needs it) and grants
@@ -654,7 +658,9 @@ module bffApiSlot 'modules/app-service-slot.bicep' = {
 // L2 CONTROL-PLANE UAMI -- Website Contributor on the per-customer BFF App
 // Service (customer-provisioning-orchestration-r1 task 203b, punch list row A21
 // / task 201 "Deferred #1"). Enables H4b Kudu docker-log fetch + H9 zip-deploy
-// from the L2 Worker. Split into modules/customer-l2-bff-rbac.bicep because
+// from the L2 Worker. Plus Search Service Contributor + Search Index Data
+// Contributor on the stamp AI Search service for H2b (task 244, G16 -- the
+// service has local auth disabled). Split into modules/customer-l2-bff-rbac.bicep because
 // this stack (targetScope='subscription') cannot inline RG-scoped role
 // assignments (BCP139) -- same pattern as modules/bff-runtime-rbac.bicep.
 // ============================================================================
@@ -667,6 +673,7 @@ module customerL2BffRbac 'modules/customer-l2-bff-rbac.bicep' = {
     // Implicit dependency on bffApi via bffApi.outputs.appServiceName -- no
     // explicit dependsOn needed (BCP linter rule no-unnecessary-dependson).
     bffAppServiceName: bffApi.outputs.appServiceName
+    searchServiceName: aiSearch.outputs.searchServiceName
   }
 }
 
@@ -789,14 +796,12 @@ output keyVaultId string = keyVault.outputs.keyVaultId
 // --- Storage Account ---
 output storageAccountName string = storage.outputs.storageAccountName
 output storagePrimaryEndpoint string = storage.outputs.primaryEndpoint
-#disable-next-line outputs-should-not-contain-secrets
-output storageConnectionString string = storage.outputs.connectionString
+// No storage connection-string output (task 244): shared-key access is disabled.
 
 // --- Service Bus ---
 output serviceBusName string = serviceBus.outputs.serviceBusName
 output serviceBusEndpoint string = serviceBus.outputs.serviceBusEndpoint
-#disable-next-line outputs-should-not-contain-secrets
-output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnectionString
+// No Service Bus connection-string output (task 244): local (SAS) auth is disabled.
 
 // --- Cosmos DB (task 014 Wave C2 prep — per-customer AI platform state) ---
 output cosmosAccountName string = cosmosDb.outputs.accountName
@@ -806,15 +811,14 @@ output cosmosDatabaseName string = cosmosDb.outputs.databaseName
 
 // --- Azure OpenAI (task 128 / Phase C). Output name is LOAD-BEARING:
 // ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
-// BicepDeployOutputs.OpenAiEndpoint. Raw `openAiKey` is intentionally NOT
-// echoed here — flows through task 129's kv-secrets wiring instead. ---
+// BicepDeployOutputs.OpenAiEndpoint. There is no key: local auth is disabled
+// (task 244) and the stamp BFF uses its UAMI. ---
 output openAiEndpoint string = openAi.outputs.openAiEndpoint
 
 // --- AI Search (task 128 / Phase C). Output name is LOAD-BEARING:
 // ArmDeploymentRunner.MapOutputs (task 123) reads this exact name to populate
-// BicepDeployOutputs.AiSearchEndpoint. Raw `searchServiceAdminKey` is
-// intentionally NOT echoed here — flows through task 129's kv-secrets wiring
-// instead. ---
+// BicepDeployOutputs.AiSearchEndpoint. There is no key: local auth is disabled
+// (task 244); the BFF UAMI and the L2 UAMI hold Search roles. ---
 output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 
 // --- Document Intelligence (task 128b / Phase C). Output name is LOAD-BEARING:

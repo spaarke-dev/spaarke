@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-06 ~00:30 UTC SESSION 36 END (context-handoff) — **T242b ✅ COMPLETE**; **PR #1311** open (T242b close-out: rotation tooling removed, BFF redis health-check leak fixed, review fixes, demo config, D27) — CI running; **MUST merge before 2026-10-08 06:00 UTC**. Next task: **T244**. Older header text below is history.
+> **Last Updated**: 2026-10-06 ~03:15 UTC SESSION 37 — PR #1311 MERGED (`c8b93b294`); **T244 ✅ COMPLETE** (keyless customer stamps: local auth off on Search/OpenAI/DocIntel/ServiceBus/Cosmos, Storage shared key off, no key outputs, L2 Search roles, Event Grid dead-letter via topic MI, H2b 401/403 Resumable, Rotate-Secrets customer Storage/SB retired). Next: **T246**. Older header text below is history.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -36,15 +36,15 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 36, 2026-10-06)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 37, 2026-10-06)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T242b ✅ COMPLETED 2026-10-06.** Next: **T244** — keyless resources in Bicep (D13, G16) — POML to be authored/located (plan row T244). T242c is pending an owner re-scope (D27: demo becomes the provisioning test environment). |
-| **Step** | Between tasks. **PR #1311** (https://github.com/spaarke-dev/spaarke/pull/1311) opened 2026-10-06 ~00:20 UTC from `work/customer-provisioning-orchestration-r1`; CI was 28 pass / 5 pending at handoff. It MUST merge before 2026-10-08 06:00 UTC (master still has the staging Redis-rotation cron; scheduled workflows run from master). |
-| **Status** | between tasks. Open owner items: SPE Model 1 grant for mi-bff-api-dev (SPE Admin UI; explained); config 68f9a952 `sprk_keyvaultsecretname="null"` (harmless, offered to clear); redeploy dev alerts with the fixed latency alert (not yet approved); W7 — deploy the L2 Api template before its next code deploy. |
-| **Next Action** | 1) `gh pr checks 1311` until 0 pending; if Router + all checks pass and state CLEAN → ask owner to OK the merge (merge commit, `gh pr merge 1311 --merge`, no `--delete-branch`), then sync `C:/code_files/spaarke` (fetch + pull master). If master moved/conflicts → merge master into the branch, resolve, push, re-wait (/merge-to-master Step 2.5). 2) Recheck dev redis health-check latency over a longer window (KQL in the S36 log; fix = `0911515d7` deployed 00:06 UTC). 3) Then `task-execute` T244 (no POML yet — author it from plan row T244 via task-create conventions). |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+| **Task** | **T246** — Per-customer Azure AI Content Safety, keyless (G26) — POML NOT YET AUTHORED (author from plan §7 row T246 the same way T244 was: facts first, closed AC). T244 ✅ 2026-10-06. |
+| **Step** | Between tasks — T244 committed + pushed on the branch (no PR yet; batch with T246 or open when the owner wants). |
+| **Status** | not-started (T246). Open owner items: W7 — deploy the L2 Api template before its next L2 Api code deploy. S36 owner items closed in S37: dev alerts redeployed; SPE config 68f9a952 cleared; SPE grant for mi-bff-api-dev done (Graph API; 01:38 UTC sync 'All 3 concern(s) synced successfully'). |
+| **Next Action** | Author `tasks/246-*.poml` from plan row T246 (modules/content-safety.bicep: kind ContentSafety, disableLocalAuth true, custom subdomain; wire into customer.bicep; Cognitive Services User for the stamp UAMI; per_env_settings AiSafety__ContentSafety__Endpoint from an H2a output; drop ContentSafety-ApiKey + its PinnedManifestGaps pin; BFF: remove the hard-coded dev-endpoint fallback -> fail at boot when unset, BFF §10 publish-size + CVE). CustomerStampKeylessTemplateTests will require disableLocalAuth on the new account (raise the CognitiveServices minimum to 3). Then task-execute T246. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 
 ### Critical context for the next session (SESSION 36 handoff)

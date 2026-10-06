@@ -170,6 +170,26 @@ public sealed class SearchIndexClientProvisionerTests
         var failure = outcome.Should().BeOfType<AiSearchIndexProvisionOutcome.Failure>().Subject;
         failure.Diagnostic.Should().Contain("400");
         failure.Diagnostic.Should().Contain("unknown field");
+        failure.AccessDenied.Should().BeFalse("a 400 is a schema problem, not an authorization one");
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task ProvisionAsync_ServiceRefusesIdentity_ReturnsAccessDeniedFailure(HttpStatusCode status)
+    {
+        var handler = new FakeArmHttpMessageHandler(_ => new HttpResponseMessage(status)
+        {
+            Content = new StringContent("""{ "error": { "code": "Forbidden", "message": "Authorization failed." } }"""),
+        });
+        var provisioner = BuildProvisioner(handler);
+        var request = BuildRequest(System.Collections.Immutable.ImmutableArray.Create("spaarke-files-index"));
+
+        var outcome = await provisioner.ProvisionAsync(request, CancellationToken.None);
+
+        var failure = outcome.Should().BeOfType<AiSearchIndexProvisionOutcome.Failure>().Subject;
+        failure.AccessDenied.Should().BeTrue();
+        failure.Diagnostic.Should().Contain(((int)status).ToString(System.Globalization.CultureInfo.InvariantCulture));
     }
 
     [Fact]

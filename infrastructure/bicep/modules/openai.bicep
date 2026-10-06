@@ -85,7 +85,7 @@ param deployments array = [
   // See docs/guides/AI-EMBEDDING-STRATEGY.md for rationale.
 ]
 
-@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this OpenAI account. Task 030 canonical target per ADR-028: the BFF acquires Azure OpenAI tokens via `DefaultAzureCredential` pinned to the UAMI (`AZURE_CLIENT_ID` app-setting). Note the ADR-028 E-2 documented MI exception for OpenAI data plane — when API-key auth is active this grant is dormant but MUST still be provisioned so the MI code path can be restored via config change alone. Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal.')
+@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this OpenAI account. Task 030 canonical target per ADR-028: the BFF acquires Azure OpenAI tokens via `DefaultAzureCredential` pinned to the UAMI (`AZURE_CLIENT_ID` app-setting). Local auth is disabled on this account (task 244), so this grant is the only route the stamp BFF has into it; the ADR-028 E-2 API-key fallback applies to the shared dev account, not to stamps. Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal.')
 param userAssignedIdentityPrincipalId string = ''
 
 @description('Tags for the resource')
@@ -112,9 +112,11 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
         value: ip
       }]
     }
-    // Disable local API key auth when using managed identity + private endpoint
-    // Uncomment after validating managed identity auth end-to-end:
-    // disableLocalAuth: true
+    // Keyless (owner D13, task 244): Microsoft Entra only. The stamp BFF calls this account with its
+    // UAMI (Cognitive Services User below); no customer vault holds an OpenAI key, and the BFF uses a
+    // key only when one is configured. ADR-028 E-2 (MI 401 on the shared dev `AIServices`-kind account)
+    // is measured for this `OpenAI`-kind account by H13 (task 230).
+    disableLocalAuth: true
   }
 }
 
@@ -153,8 +155,8 @@ resource modelDeployments 'Microsoft.CognitiveServices/accounts/deployments@2024
 // Built-in role ID: a97b65f3-24c7-4388-baec-2e87135dc908
 // Grants the per-customer UAMI the right to call OpenAI data-plane actions
 // (chat completions, embeddings) via `DefaultAzureCredential` — the canonical
-// ADR-028 outbound-auth path. See E-2 exception note on the param description
-// for the API-key fallback currently in force on `spaarke-openai-dev`.
+// ADR-028 outbound-auth path and, with local auth disabled (task 244), the only one.
+// The API-key fallback of ADR-028 E-2 applies to the shared dev account only.
 // No prior RBAC on this module — no interim SA-MI grant to preserve.
 // ============================================================================
 
@@ -179,5 +181,4 @@ output openAiId string = openAi.id
 output openAiName string = openAi.name
 output openAiEndpoint string = openAi.properties.endpoint
 output publicNetworkAccess string = openAi.properties.publicNetworkAccess
-#disable-next-line outputs-should-not-contain-secrets
-output openAiKey string = openAi.listKeys().key1
+// No key output (task 244): local auth is disabled.

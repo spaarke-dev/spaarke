@@ -505,13 +505,14 @@ function Invoke-Step3_DeployBicep {
     # Note: redis* outputs from customer.bicep are intentionally NOT consumed
     # per Q-E Architecture 1 (per-customer Redis deprecated). See deprecation
     # header above and scripts/Deploy-RedisCache.ps1 for the canonical path.
+    # customer.bicep has no storage / Service Bus connection-string outputs (task 244): the stamp's
+    # Storage has shared-key access disabled and its Service Bus has local (SAS) auth disabled, so
+    # there is no key to carry. The stamp reaches both with its managed identity.
     $stepOutputs = @{
         StorageAccountName      = $outputs.storageAccountName.value
-        StorageConnectionString = $outputs.storageConnectionString.value
         KeyVaultName            = $outputs.keyVaultName.value
         KeyVaultUri             = $outputs.keyVaultUri.value
         ServiceBusName          = $outputs.serviceBusName.value
-        ServiceBusConnString    = $outputs.serviceBusConnectionString.value
     }
 
     Write-Log "Storage Account: $($stepOutputs.StorageAccountName)" -Level SUCCESS
@@ -553,6 +554,10 @@ function Invoke-Step4_PopulateKeyVault {
     # `Dataverse-ClientSecret` or `BFF-API-ClientSecret`. Neither is written here; the BFF
     # client secret is owned by Register-EntraAppRegistrations.ps1 (platform KV).
     # ── A38c secret-free marker gate ────────────────────────────────────────────────────────
+    # NOTE (task 244): this batch no longer writes ServiceBus-ConnectionString — customer.bicep has no
+    # connection-string outputs. The gate is kept only as the whole-script refusal for an environment
+    # that has migrated (pinned by tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1); the
+    # rationale below describes why it was added.
     # ServiceBus-ConnectionString is an auth-v4-retired credential (ADR-028 A4 / E-3 closed
     # 2026-08-24). This legacy orchestrator is superseded by the L2 control-plane (§5.2 — see
     # the deprecation banner at script entry) and predates the secret-free credential-selection
@@ -563,9 +568,9 @@ function Invoke-Step4_PopulateKeyVault {
     # Deploy-AllIndexes.ps1:610-670 FAIL-LOUD shape.
     Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $kvName -CustomerId $CustomerId
 
+    # Storage-ConnectionString / ServiceBus-ConnectionString are no longer written (task 244):
+    # the stamp resources reject keys, and customer.bicep emits no connection string.
     $secrets = [ordered]@{
-        "Storage-ConnectionString"    = $State.StepOutputs.StorageConnectionString
-        "ServiceBus-ConnectionString" = $State.StepOutputs.ServiceBusConnString
         "Customer-Id"                 = $CustomerId
         "Customer-DisplayName"        = $DisplayName
         "Dataverse-ServiceUrl"        = $DataverseEnvUrl

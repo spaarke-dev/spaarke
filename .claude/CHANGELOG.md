@@ -7,6 +7,24 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Customer stamps are keyless (T244, owner D13)
+
+`customer-provisioning-orchestration-r1` T244 (plan G16).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp resources are keyless" — local auth disabled on
+  AI Search (no `authOptions`), OpenAI, Document Intelligence and Service Bus; Storage shared key off; no key-listing
+  call, SAS rule or key/connection-string output in any stamp module; callers get roles (L2 now holds Search Service
+  Contributor for H2b + Search Index Data Reader for the H13 probe); Event Grid dead-letters with the system topic's identity.
+  Forcing function: `tests/Spaarke.ArchTests/CustomerStampKeylessTemplateTests.cs` over the compiled `customer.json`.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`**: informational note under E-2 (no rule change) — E-2 covers the
+  shared dev `AIServices` account only; stamps are `kind: OpenAI` with local auth disabled, so the key fallback cannot
+  apply there; a 401 at T230 would be an E-2 scope extension needing an owner decision. Cosmos DB and SignalR are in
+  the keyless rule too (owner added Cosmos 2026-10-06).
+- **`.claude/constraints/azure-deployment.md`**: the Service Bus row listed a Key Vault-referenced
+  `ConnectionStrings__ServiceBus`; the supported path is `ServiceBus__FullyQualifiedNamespace` + managed identity
+  (`ServiceBusClientFactory`), and the startup-failure line now says so.
+
+---
 ###### 2026-10-05 — Redis key-rotation tooling removed (T242b, owner)
 
 `customer-provisioning-orchestration-r1` T242b.

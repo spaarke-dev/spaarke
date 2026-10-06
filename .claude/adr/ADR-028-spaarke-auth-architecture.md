@@ -418,6 +418,8 @@ E-2 is **re-affirmed, not resolved.** It was re-tested rather than inherited, an
 
 **Do not remove E-2 without that measurement.** Re-testing only the half that was already known to pass would reproduce the prior result and mistake it for a refutation — the failure mode this project exists to eliminate.
 
+- **Note (2026-10-06, customer-provisioning-orchestration-r1 T244 — informational, no rule change)**: E-2's scope is the shared dev account (`kind=AIServices`) only. Customer stamps deploy `kind: OpenAI` with a custom subdomain and **local auth disabled** (owner D13, T244), so a stamp has no API key to fall back to — the managed identity is its only path, and E-2's key escape hatch does not apply. Task T230 makes the first real managed-identity call against a stamp account: if it also returns 401, that is a stamp-scope extension of E-2 and needs an owner decision (path B) — it cannot be fixed by setting a key without re-enabling local auth in Bicep. The ADR-028 amendment recording D13 is task T235.
+
 ### E-3: OBO / BFF-identity confidential clients — transitional retained secret (2026-08-17, per A4) — ✅ **CLOSED 2026-08-24**
 
 > ## ✅ E-3 IS CLOSED. THE SECRET IS GONE. DO NOT CITE THIS EXCEPTION FOR NEW CODE.

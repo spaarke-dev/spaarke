@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "17705922489390793174"
+      "templateHash": "2355619395462746037"
     }
   },
   "parameters": {
@@ -821,6 +821,9 @@
           "userAssignedIdentityPrincipalId": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
           },
+          "disableSharedKeyAccess": {
+            "value": true
+          },
           "tags": {
             "value": "[parameters('tags')]"
           }
@@ -832,7 +835,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "7677835116867748803"
+              "templateHash": "7454944092691742298"
             }
           },
           "parameters": {
@@ -882,9 +885,9 @@
             },
             "disableSharedKeyAccess": {
               "type": "bool",
-              "defaultValue": false,
+              "defaultValue": true,
               "metadata": {
-                "description": "Disable shared key access (requires RBAC for all access)"
+                "description": "Disable shared key access (requires RBAC for all access). Default true (task 244, owner D13): the only caller, customer.bicep, is keyless."
               }
             },
             "allowedSubnetId": {
@@ -1070,10 +1073,6 @@
             "primaryEndpoint": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').primaryEndpoints.blob]"
-            },
-            "connectionString": {
-              "type": "string",
-              "value": "[if(parameters('disableSharedKeyAccess'), format('BlobEndpoint={0}', reference(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').primaryEndpoints.blob), format('DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1};EndpointSuffix=core.windows.net', parameters('storageAccountName'), listKeys(resourceId('Microsoft.Storage/storageAccounts', parameters('storageAccountName')), '2023-01-01').keys[0].value))]"
             }
           }
         }
@@ -1117,7 +1116,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10595085439683821615"
+              "templateHash": "1288551145610522466"
             }
           },
           "parameters": {
@@ -1176,7 +1175,8 @@
                 "tier": "[parameters('sku')]"
               },
               "properties": {
-                "minimumTlsVersion": "1.2"
+                "minimumTlsVersion": "1.2",
+                "disableLocalAuth": true
               }
             },
             {
@@ -1200,20 +1200,6 @@
               "dependsOn": [
                 "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusName'))]"
               ]
-            },
-            {
-              "type": "Microsoft.ServiceBus/namespaces/AuthorizationRules",
-              "apiVersion": "2022-10-01-preview",
-              "name": "[format('{0}/{1}', parameters('serviceBusName'), 'SpaarkeAppAccess')]",
-              "properties": {
-                "rights": [
-                  "Send",
-                  "Listen"
-                ]
-              },
-              "dependsOn": [
-                "[resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusName'))]"
-              ]
             }
           ],
           "outputs": {
@@ -1228,10 +1214,6 @@
             "serviceBusEndpoint": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.ServiceBus/namespaces', parameters('serviceBusName')), '2022-10-01-preview').serviceBusEndpoint]"
-            },
-            "serviceBusConnectionString": {
-              "type": "string",
-              "value": "[listKeys(resourceId('Microsoft.ServiceBus/namespaces/AuthorizationRules', parameters('serviceBusName'), 'SpaarkeAppAccess'), '2022-10-01-preview').primaryConnectionString]"
             }
           }
         }
@@ -1277,7 +1259,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "1164447964505157143"
+              "templateHash": "12849270921423368096"
             }
           },
           "parameters": {
@@ -1352,7 +1334,7 @@
                   }
                 ],
                 "publicNetworkAccess": "Enabled",
-                "disableLocalAuth": false,
+                "disableLocalAuth": true,
                 "minimalTlsVersion": "Tls12",
                 "backupPolicy": {
                   "type": "Continuous",
@@ -1701,7 +1683,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "14901195768447614326"
+              "templateHash": "12146549191795670766"
             }
           },
           "parameters": {
@@ -1775,7 +1757,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this OpenAI account. Task 030 canonical target per ADR-028: the BFF acquires Azure OpenAI tokens via `DefaultAzureCredential` pinned to the UAMI (`AZURE_CLIENT_ID` app-setting). Note the ADR-028 E-2 documented MI exception for OpenAI data plane — when API-key auth is active this grant is dormant but MUST still be provisioned so the MI code path can be restored via config change alone. Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal."
+                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this OpenAI account. Task 030 canonical target per ADR-028: the BFF acquires Azure OpenAI tokens via `DefaultAzureCredential` pinned to the UAMI (`AZURE_CLIENT_ID` app-setting). Local auth is disabled on this account (task 244), so this grant is the only route the stamp BFF has into it; the ADR-028 E-2 API-key fallback applies to the shared dev account, not to stamps. Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal."
               }
             },
             "tags": {
@@ -1814,7 +1796,8 @@
                     }
                   ],
                   "defaultAction": "[if(parameters('disablePublicNetworkAccess'), 'Deny', if(empty(parameters('allowedIpRanges')), 'Allow', 'Deny'))]"
-                }
+                },
+                "disableLocalAuth": true
               }
             },
             {
@@ -1876,10 +1859,6 @@
             "publicNetworkAccess": {
               "type": "string",
               "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2024-10-01').publicNetworkAccess]"
-            },
-            "openAiKey": {
-              "type": "string",
-              "value": "[listKeys(resourceId('Microsoft.CognitiveServices/accounts', parameters('openAiName')), '2024-10-01').key1]"
             }
           }
         }
@@ -1920,7 +1899,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "1785798622156330437"
+              "templateHash": "5837679080203439705"
             }
           },
           "parameters": {
@@ -1987,7 +1966,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this AI Search service per task 030 constraint (c). Empty default skips the assignment. Emitted assignment sets principalType=ServicePrincipal. See notes/task-030-deviations.md N1: `Cognitive Services User` is scoped to Microsoft.CognitiveServices resource provider and is functionally dormant on this Microsoft.Search resource; the AI Search data-plane MI grant that IS actionable (`Search Index Data Contributor` / `Search Service Contributor`) is deferred to a follow-on task. The literal POML constraint is honored here so the audit trail matches spec FR-37; runtime effectiveness will be validated at Phase F acceptance and the follow-on filed if the gap is observed."
+                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this AI Search service per task 030 constraint (c). Empty default skips the assignment. Emitted assignment sets principalType=ServicePrincipal. See notes/task-030-deviations.md N1: `Cognitive Services User` is scoped to Microsoft.CognitiveServices resource provider and is functionally dormant on this Microsoft.Search resource; the AI Search grants that ARE effective are made elsewhere: Search Index Data Contributor + Search Service Contributor for the BFF UAMI (modules/bff-runtime-rbac.bicep) and Search Service Contributor + Search Index Data Reader for the L2 UAMI (modules/customer-l2-bff-rbac.bicep, task 244). The literal POML constraint is honored here so the audit trail matches spec FR-37."
               }
             },
             "tags": {
@@ -2019,7 +1998,8 @@
                 "publicNetworkAccess": "enabled",
                 "encryptionWithCmk": {
                   "enforcement": "Unspecified"
-                }
+                },
+                "disableLocalAuth": true
               }
             },
             {
@@ -2051,14 +2031,6 @@
             "searchServiceEndpoint": {
               "type": "string",
               "value": "[format('https://{0}.search.windows.net', parameters('searchServiceName'))]"
-            },
-            "searchServiceAdminKey": {
-              "type": "string",
-              "value": "[listAdminKeys(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), '2023-11-01').primaryKey]"
-            },
-            "searchServiceQueryKey": {
-              "type": "string",
-              "value": "[listQueryKeys(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), '2023-11-01').value[0].key]"
             }
           }
         }
@@ -2102,7 +2074,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "11530843244190946280"
+              "templateHash": "18259377592470348640"
             }
           },
           "parameters": {
@@ -2164,7 +2136,8 @@
                 "publicNetworkAccess": "Enabled",
                 "networkAcls": {
                   "defaultAction": "Allow"
-                }
+                },
+                "disableLocalAuth": true
               }
             },
             {
@@ -2593,7 +2566,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "10352649800283505020"
+              "templateHash": "8577218084247725591"
             }
           },
           "parameters": {
@@ -2671,6 +2644,9 @@
               }
             }
           },
+          "variables": {
+            "storageBlobDataContributorRoleId": "ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+          },
           "resources": [
             {
               "type": "Microsoft.Communication/communicationServices",
@@ -2688,12 +2664,30 @@
               "name": "[parameters('systemTopicName')]",
               "location": "[parameters('resourceLocation')]",
               "tags": "[parameters('tags')]",
+              "identity": {
+                "type": "SystemAssigned"
+              },
               "properties": {
                 "source": "[resourceId('Microsoft.Communication/communicationServices', parameters('acsResourceName'))]",
                 "topicType": "Microsoft.Communication.CommunicationServices"
               },
               "dependsOn": [
                 "[resourceId('Microsoft.Communication/communicationServices', parameters('acsResourceName'))]"
+              ]
+            },
+            {
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', last(split(parameters('deadLetterStorageAccountResourceId'), '/')), 'default', parameters('deadLetterContainerName'))]",
+              "name": "[guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', last(split(parameters('deadLetterStorageAccountResourceId'), '/')), 'default', parameters('deadLetterContainerName')), resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName')), variables('storageBlobDataContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('storageBlobDataContributorRoleId'))]",
+                "principalId": "[reference(resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName')), '2023-12-15-preview', 'full').identity.principalId]",
+                "principalType": "ServicePrincipal",
+                "description": "Event Grid system topic writes dead-lettered ACS chat events (keyless, task 244)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName'))]"
               ]
             },
             {
@@ -2712,11 +2706,16 @@
                 "filter": {
                   "includedEventTypes": "[parameters('includedEventTypes')]"
                 },
-                "deadLetterDestination": {
-                  "endpointType": "StorageBlob",
-                  "properties": {
-                    "resourceId": "[parameters('deadLetterStorageAccountResourceId')]",
-                    "blobContainerName": "[parameters('deadLetterContainerName')]"
+                "deadLetterWithResourceIdentity": {
+                  "identity": {
+                    "type": "SystemAssigned"
+                  },
+                  "deadLetterDestination": {
+                    "endpointType": "StorageBlob",
+                    "properties": {
+                      "resourceId": "[parameters('deadLetterStorageAccountResourceId')]",
+                      "blobContainerName": "[parameters('deadLetterContainerName')]"
+                    }
                   }
                 },
                 "retryPolicy": {
@@ -2726,7 +2725,8 @@
                 "eventDeliverySchema": "EventGridSchema"
               },
               "dependsOn": [
-                "[resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName'))]"
+                "[resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName'))]",
+                "[extensionResourceId(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', last(split(parameters('deadLetterStorageAccountResourceId'), '/')), 'default', parameters('deadLetterContainerName')), 'Microsoft.Authorization/roleAssignments', guid(resourceId('Microsoft.Storage/storageAccounts/blobServices/containers', last(split(parameters('deadLetterStorageAccountResourceId'), '/')), 'default', parameters('deadLetterContainerName')), resourceId('Microsoft.EventGrid/systemTopics', parameters('systemTopicName')), variables('storageBlobDataContributorRoleId')))]"
               ]
             }
           ],
@@ -3412,6 +3412,9 @@
           },
           "bffAppServiceName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName'))), '2025-04-01').outputs.appServiceName.value]"
+          },
+          "searchServiceName": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceName.value]"
           }
         },
         "template": {
@@ -3421,7 +3424,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9333419783799827268"
+              "templateHash": "9872580262698008396"
             }
           },
           "parameters": {
@@ -3437,10 +3440,18 @@
               "metadata": {
                 "description": "Name of the per-customer BFF App Service (Microsoft.Web/sites) provisioned by the parent customer.bicep."
               }
+            },
+            "searchServiceName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the per-customer AI Search service (Microsoft.Search/searchServices) provisioned by the parent customer.bicep. The L2 UAMI gets Search Service Contributor (H2b) + Search Index Data Reader (H13 probe) on it (task 244)."
+              }
             }
           },
           "variables": {
-            "websiteContributorRoleId": "de139f84-1756-47ae-9be6-808fbbe84772"
+            "websiteContributorRoleId": "de139f84-1756-47ae-9be6-808fbbe84772",
+            "searchServiceContributorRoleId": "7ca78c08-252a-4471-8644-bb5ff32d4ba0",
+            "searchIndexDataReaderRoleId": "1407120a-92aa-4202-b7e9-c0e197c71c8f"
           },
           "resources": [
             {
@@ -3455,17 +3466,52 @@
                 "principalType": "ServicePrincipal",
                 "description": "L2 UAMI -- H4b Kudu docker-log fetch + H9 BFF zip-deploy on per-customer BFF App Service (task 203b, punch list A21 / task 201 Deferred #1)"
               }
+            },
+            {
+              "condition": "[not(empty(parameters('controlPlaneUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('searchServiceContributorRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchServiceContributorRoleId'))]",
+                "principalId": "[parameters('controlPlaneUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 UAMI -- H2b creates the stamp search indexes over Entra (local auth disabled; task 244, G16)"
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('controlPlaneUamiPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.Search/searchServices', parameters('searchServiceName'))]",
+              "name": "[guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('searchIndexDataReaderRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('searchIndexDataReaderRoleId'))]",
+                "principalId": "[parameters('controlPlaneUamiPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "L2 UAMI -- H13 queries the stamp search indexes (tenant-filter probe) over Entra (local auth disabled; task 244, G16)"
+              }
             }
           ],
           "outputs": {
             "websiteContributorRoleAssignmentName": {
               "type": "string",
               "value": "[if(not(empty(parameters('controlPlaneUamiPrincipalId'))), guid(resourceId('Microsoft.Web/sites', parameters('bffAppServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('websiteContributorRoleId')), '')]"
+            },
+            "searchServiceContributorRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('controlPlaneUamiPrincipalId'))), guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('searchServiceContributorRoleId')), '')]"
+            },
+            "searchIndexDataReaderRoleAssignmentName": {
+              "type": "string",
+              "value": "[if(not(empty(parameters('controlPlaneUamiPrincipalId'))), guid(resourceId('Microsoft.Search/searchServices', parameters('searchServiceName')), parameters('controlPlaneUamiPrincipalId'), variables('searchIndexDataReaderRoleId')), '')]"
             }
           }
         }
       },
       "dependsOn": [
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('bffApi-{0}', variables('baseName')))]",
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]"
       ]
@@ -4114,10 +4160,6 @@
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.primaryEndpoint.value]"
     },
-    "storageConnectionString": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('storage-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]"
-    },
     "serviceBusName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusName.value]"
@@ -4125,10 +4167,6 @@
     "serviceBusEndpoint": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusEndpoint.value]"
-    },
-    "serviceBusConnectionString": {
-      "type": "string",
-      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('serviceBus-{0}', variables('baseName'))), '2025-04-01').outputs.serviceBusConnectionString.value]"
     },
     "cosmosAccountName": {
       "type": "string",
