@@ -262,7 +262,7 @@ public sealed class SpeAdminContainerItemRouteGateTests
             // Compare by shape: the group prefix, plus the template with its {placeholders} replaced
             // by the concrete values this class uses.
             var concrete = (SpeAdminGroupPrefix + route)
-                .Replace("{id}", ContainerId)
+                .Replace("{containerId}", ContainerId)
                 .Replace("{itemId}", ItemId);
 
             covered.Should().Contain(

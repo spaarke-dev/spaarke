@@ -51,12 +51,21 @@ public class SpeFileStore : ISpeFileOperations
     /// the only available assertion was that provisioning reached business-unit creation and then
     /// failed on the unavailable test-host Graph services — and business-unit creation no longer exists.
     /// </remarks>
+    /// <param name="containerTypeId">The container type.</param>
+    /// <param name="displayName">The container's display name.</param>
+    /// <param name="owningBusinessUnitId">
+    /// Stamped on the container before this returns (unified-access-control-r2 task 165, owner round 20 item 1) —
+    /// every container this BFF creates carries the business unit that owns it.
+    /// </param>
+    /// <param name="description">Optional description.</param>
+    /// <param name="ct">Cancellation token.</param>
     public virtual Task<ContainerDto?> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
+        Guid owningBusinessUnitId,
         string? description = null,
         CancellationToken ct = default)
-        => _containerOps.CreateContainerAsync(containerTypeId, displayName, description, ct);
+        => _containerOps.CreateContainerAsync(containerTypeId, displayName, owningBusinessUnitId, description, ct);
 
     public Task<ContainerDto?> GetContainerDriveAsync(string containerId, CancellationToken ct = default)
         => _containerOps.GetContainerDriveAsync(containerId, ct);

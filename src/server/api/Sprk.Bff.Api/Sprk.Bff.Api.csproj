@@ -52,6 +52,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- unified-access-control-r2 task 165, owner round 35 item 1: the SPE container → business-unit stamp's property
+         name is ONE C# constant, compiled into BOTH the BFF and the L2 control plane (which creates the H8 root
+         container) from this one source file — see its header. -->
+    <Compile Include="..\..\shared\Contracts\SpeContainerBusinessUnitBinding.cs" Link="Shared\SpeContainerBusinessUnitBinding.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- 🔴 THREE DIFFERENT "AGENT" STACKS ARE EASY TO CONFLATE HERE. Verified 2026-09-29 (task 125):
            * Azure.AI.Projects          = Azure AI Foundry AGENT SERVICE. USED — Services/Ai/Foundry/.
            * Microsoft.Agents.Hosting.* = M365 AGENTS SDK (Copilot/Teams channel). USED — brings

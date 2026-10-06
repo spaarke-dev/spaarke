@@ -868,9 +868,12 @@ public partial class RouteAuthorizationGuardTests
             + "operator surface (sweep S-70, S-71, S-81).",
             "decides from role claims (IsInRole) and references no decision service"),
         new NonDecidingAttachment("AddSpeAdminTenantScopeFilter", "Api/Filters/SpeAdminTenantScopeFilter.cs", "165",
-            "Scopes a configId to the caller's business units, but passes through when no configId is in the query or route, "
-            + "and CanAccessConfigAsync fails OPEN on a lookup error and for a BU-less config.",
-            "if (!TryReadConfigId(...)) return await next(context) (SpeAdminTenantScopeFilter.cs:76-78)"),
+            "Since task 165 it decides per config (uniform 404; 503 when unverifiable — fail CLOSED), per container (its "
+            + "business-unit binding; an unbound container reaches nobody) and per container type, and confines the "
+            + "tenant-/type-wide routes to a root admin of a Spaarke-operated environment. It still passes through a request "
+            + "that names NO configId, which the handler then refuses with its own 400; so it is not a per-resource credit "
+            + "on its own, and the /api/spe routes are credited as an operator surface (AdminOnlyRoutes).",
+            "if (present.Count == 0) { return await next(context); } (SpeAdminTenantScopeFilter.cs, InvokeAsync)"),
     };
 
     // =============================================================================================
@@ -899,6 +902,11 @@ public partial class RouteAuthorizationGuardTests
         new NotAuthorizationForm("AddEndpointFilter(ValidateCreateEventRequestAsync)",
             "Task 159: POST /api/v1/events request SHAPE only (EventEndpoints.cs:201-214, no I/O), run BEFORE the route's "
             + "RecordRouteAccessAuthorizationFilter so a 400 never becomes a 403; it decides nothing about any record."),
+        new NotAuthorizationForm("RequireSpeAdminPlatformOperator",
+            "Task 165 (owner round 49 item 1): endpoint METADATA, not a filter. It marks the tenant-wide and type-wide SPE "
+            + "admin routes so that SpeAdminTenantScopeFilter, which decides, confines them to a root admin of a Spaarke-"
+            + "operated environment (the platform-operator check that runs first in its InvokeAsync). It narrows an "
+            + "AdminOnlyRoutes surface further and decides nothing itself."),
         new NotAuthorizationForm("AddEndpointFilter(ValidateFilingRequestAsync)",
             "Task 147 r1c: PATCH /api/v1/events/{id}/filing request SHAPE only (EventEndpoints.cs:172-177, "
             + "ChildRecordEndpoints.FilingShapeProblem, no I/O), before the route's RecordRouteAccessAuthorizationFilter(\"write\")."),
@@ -1093,6 +1101,16 @@ public partial class RouteAuthorizationGuardTests
                 "POST /api/ai/rag/index",
                 "DELETE /api/ai/rag/{documentId}",
             }),
+        new AdminOnlyGroup("Api/Admin/RecordMatchingAdminEndpoints.cs", SystemAdminPolicy,
+            "Record-matching index maintenance is an OPERATOR surface: a full or incremental app-only re-read of every "
+            + "matter, project and invoice into the shared records index, and that index's counts. Task 165 (sweep S-47, "
+            + "S-48, S-77) put the group behind the SystemAdmin policy, whose scope-substring branch it also removed.",
+            new[]
+            {
+                "POST /api/admin/record-matching/sync",
+                "POST /api/admin/record-matching/sync-incremental",
+                "GET /api/admin/record-matching/status",
+            }),
         new AdminOnlyGroup("Api/Insights/PrecedentAdminEndpoints.cs", SpeAdminPolicy,
             "SME authoring and confirmation of Insights precedents (D-P3 phase 1): curation of tenant-wide "
             + "reference content behind the Admin/SystemAdmin app role.",
@@ -1139,15 +1157,15 @@ public partial class RouteAuthorizationGuardTests
         new AdminOnlyGroup("Api/SpeAdmin/ConfigEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
             + "containers and container types are platform resources with no Dataverse row, administered by tenant "
-            + "SPE administrators. The route param is 'id', so the tenant scope never fires on /{id} (S-45, "
-            + "S-73..S-75, task 165).",
+            + "SPE administrators. Task 165 renamed the route parameter to 'configId', so the tenant scope reads it and "
+            + "answers the uniform 404 for a config outside the caller's units (S-45, S-73..S-75).",
             new[]
             {
                 "GET /api/spe/configs",
-                "GET /api/spe/configs/{id:guid}",
+                "GET /api/spe/configs/{configId:guid}",
                 "POST /api/spe/configs",
-                "PUT /api/spe/configs/{id:guid}",
-                "DELETE /api/spe/configs/{id:guid}",
+                "PUT /api/spe/configs/{configId:guid}",
+                "DELETE /api/spe/configs/{configId:guid}",
             }),
         new AdminOnlyGroup("Api/SpeAdmin/ConsumingTenantEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
@@ -1202,15 +1220,15 @@ public partial class RouteAuthorizationGuardTests
             + "SPE administrators.",
             new[]
             {
-                "GET /api/spe/containers/{id}/items",
-                "GET /api/spe/containers/{id}/items/{itemId}/versions",
-                "GET /api/spe/containers/{id}/items/{itemId}/thumbnails",
-                "POST /api/spe/containers/{id}/items/{itemId}/share",
-                "GET /api/spe/containers/{id}/items/{itemId}/content",
-                "GET /api/spe/containers/{id}/items/{itemId}/preview",
-                "DELETE /api/spe/containers/{id}/items/{itemId}",
-                "POST /api/spe/containers/{id}/folders",
-                "POST /api/spe/containers/{id}/items/upload",
+                "GET /api/spe/containers/{containerId}/items",
+                "GET /api/spe/containers/{containerId}/items/{itemId}/versions",
+                "GET /api/spe/containers/{containerId}/items/{itemId}/thumbnails",
+                "POST /api/spe/containers/{containerId}/items/{itemId}/share",
+                "GET /api/spe/containers/{containerId}/items/{itemId}/content",
+                "GET /api/spe/containers/{containerId}/items/{itemId}/preview",
+                "DELETE /api/spe/containers/{containerId}/items/{itemId}",
+                "POST /api/spe/containers/{containerId}/folders",
+                "POST /api/spe/containers/{containerId}/items/upload",
             }),
         new AdminOnlyGroup("Api/SpeAdmin/ContainerPermissionEndpoints.cs", SpeAdminPolicy,
             "SPE administration via the /api/spe aggregator (Admin/SystemAdmin app role + tenant scope): "
@@ -2090,49 +2108,12 @@ public partial class RouteAuthorizationGuardTests
             + "task 164: the handler compares PlaybookRunStatus.StartedByOid with the caller (AgentEndpoints.cs:498-506) "
             + "and answers one uniform 404 — an owner comparison, which resolves no sweep entry in this guard."),
 
-        // ---------- sweep fix task 165 ----------
-        Pending("POST /api/spe/bulk/delete", "165", Gap.InsufficientDecision,
-            "S-44 (high), Api/SpeAdmin/BulkOperationEndpoints.cs:50: An SPE admin in BU A can bulk-delete "
-            + "containers of any customer's config. This is a cross-tenant app-only destructive write, "
-            + "admin-plane variant. Confidence is medium (see the sweep note)",
-            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter"),
-        Pending("POST /api/spe/bulk/permissions", "165", Gap.InsufficientDecision,
-            "S-72 (medium), Api/SpeAdmin/BulkOperationEndpoints.cs:65: An SPE admin in BU A can grant "
-            + "themselves, or any principal, roles such as owner on any customer's containers via the app "
-            + "identity, which then gives direct access to the (see the sweep note)",
-            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter"),
-        Pending("PUT /api/spe/configs/{id:guid}", "165", Gap.InsufficientDecision,
-            "S-45 (high), Api/SpeAdmin/ConfigEndpoints.cs:83: An SPE admin in BU A can modify or hijack "
-            + "customer B's config. Re-pointing sprk_BusinessUnit to their own BU makes every later "
-            + "configId-scoped container route pass the (see the sweep note)",
-            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter"),
-        Pending("GET /api/spe/configs/{id:guid}", "165", Gap.InsufficientDecision,
-            "S-73 (medium), Api/SpeAdmin/ConfigEndpoints.cs:69: An SPE admin scoped to customer A's business "
-            + "unit can read customer B's container-type config: owning app id, container type id, Key Vault "
-            + "secret names, BU and (see the sweep note)",
-            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter"),
-        Pending("POST /api/spe/configs", "165", Gap.InsufficientDecision,
-            "S-74 (medium), Api/SpeAdmin/ConfigEndpoints.cs:76: An SPE admin in BU A can mint a config, in "
-            + "their own BU or unscoped, that names customer B's containerTypeId, or any owningAppId plus any "
-            + "secret name in the BFF Key (see the sweep note)",
-            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter"),
-        Pending("DELETE /api/spe/configs/{id:guid}", "165", Gap.InsufficientDecision,
-            "S-75 (medium), Api/SpeAdmin/ConfigEndpoints.cs:91: An SPE admin in any BU can delete another "
-            + "customer's container-type config. This is an app-only cross-BU delete on the admin plane, reported "
-            + "as low confidence.",
-            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter"),
-        Pending("POST /api/admin/record-matching/sync", "165", Gap.NoDecision,
-            "S-47 (medium), Api/Admin/RecordMatchingAdminEndpoints.cs:18: Any signed-in user can start a full "
-            + "app-only re-read of every matter, project and invoice and a MergeOrUpload into the shared records "
-            + "search index. The cost is resource (see the sweep note)"),
-        Pending("POST /api/admin/record-matching/sync-incremental", "165", Gap.NoDecision,
-            "S-48 (medium), Api/Admin/RecordMatchingAdminEndpoints.cs:27: Same as /sync. Any authenticated user "
-            + "can drive app-only reads of all matters, projects and invoices modified since a time they choose, "
-            + "and app-only writes into the (see the sweep note)"),
-        Pending("GET /api/admin/record-matching/status", "165", Gap.NoDecision,
-            "S-77 (low), Api/Admin/RecordMatchingAdminEndpoints.cs:37: Any signed-in user learns the index "
-            + "name, its total document count and per-record-type counts. This is low-severity information "
-            + "disclosure on an operator surface. It is (see the sweep note)"),
+        // ---------- sweep fix task 165: all nine waivers DELETED at its integration (batch-4, 2026-10-05) ----------
+        // S-44, S-72 (bulk), S-45, S-73..S-75 (configs) and S-47, S-48, S-77 (record matching) are resolved by credit:
+        // the /api/spe routes are an operator surface (AdminOnlyRoutes, the SPE admin mechanism) on which task 165's
+        // SpeAdminTenantScopeFilter now confines every configId to the caller's units (uniform 404; 503 fail-closed), and the
+        // record-matching group requires the SystemAdmin policy. Task 165 also re-keyed the config routes {id:guid} ->
+        // {configId:guid} (its note section 1), so those three waivers' keys no longer exist. ResolvedBy + ProofTest below.
 
         // ---------- sweep fix task 166 ----------
         Pending("POST /api/compose/upload", "166", Gap.NoDecision,
@@ -2736,15 +2717,27 @@ public partial class RouteAuthorizationGuardTests
             { ResolvedBy = "164", ProofTest = "tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs::RetiredRoutes_AreAbsentFromTheEndpointTable" },
         new SweepFinding("S-32", Severity.High, "POST /api/ai/document-intelligence/associate-record", "164", Gap.NoDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs::RetiredRoutes_AreAbsentFromTheEndpointTable" },
-        new SweepFinding("S-44", Severity.High, "POST /api/spe/bulk/delete", "165", Gap.InsufficientDecision),
-        new SweepFinding("S-72", Severity.Medium, "POST /api/spe/bulk/permissions", "165", Gap.InsufficientDecision),
-        new SweepFinding("S-45", Severity.High, "PUT /api/spe/configs/{id:guid}", "165", Gap.InsufficientDecision),
-        new SweepFinding("S-73", Severity.Medium, "GET /api/spe/configs/{id:guid}", "165", Gap.InsufficientDecision),
-        new SweepFinding("S-74", Severity.Medium, "POST /api/spe/configs", "165", Gap.InsufficientDecision),
-        new SweepFinding("S-75", Severity.Medium, "DELETE /api/spe/configs/{id:guid}", "165", Gap.InsufficientDecision),
-        new SweepFinding("S-47", Severity.Medium, "POST /api/admin/record-matching/sync", "165", Gap.NoDecision),
-        new SweepFinding("S-48", Severity.Medium, "POST /api/admin/record-matching/sync-incremental", "165", Gap.NoDecision),
-        new SweepFinding("S-77", Severity.Low, "GET /api/admin/record-matching/status", "165", Gap.NoDecision),
+        new SweepFinding("S-44", Severity.High, "POST /api/spe/bulk/delete", "165", Gap.InsufficientDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/SpeAdmin/SpeAdminConfigAndBulkTenantScopeTests.cs::Bulk_WithAnOutOfScopeOrUnknownBodyConfigId_IsTheUniform404_AndNothingIsEnqueued" },
+        new SweepFinding("S-72", Severity.Medium, "POST /api/spe/bulk/permissions", "165", Gap.InsufficientDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/SpeAdmin/SpeAdminConfigAndBulkTenantScopeTests.cs::Bulk_WithAnOutOfScopeOrUnknownBodyConfigId_IsTheUniform404_AndNothingIsEnqueued" },
+        // S-45, S-73, S-75: the sweep keyed these {id:guid}; task 165 renamed the parameter to {configId:guid} (the
+        // tenant scope never read "id"). Reconciled at the 165 integration under main-session round 65: the same verb
+        // and path, re-keyed to the live route (the task 167 trigger 4 escalation, answered).
+        new SweepFinding("S-45", Severity.High, "PUT /api/spe/configs/{configId:guid}", "165", Gap.InsufficientDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/SpeAdmin/SpeAdminConfigAndBulkTenantScopeTests.cs::Put_OutOfScopeConfig_IsTheUniform404_AndNothingIsWritten" },
+        new SweepFinding("S-73", Severity.Medium, "GET /api/spe/configs/{configId:guid}", "165", Gap.InsufficientDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/SpeAdmin/SpeAdminConfigAndBulkTenantScopeTests.cs::Get_OutOfScopeConfig_AnswersTheSame404AsAnUnknownConfig_AndReadsNothing" },
+        new SweepFinding("S-74", Severity.Medium, "POST /api/spe/configs", "165", Gap.InsufficientDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/SpeAdmin/SpeAdminConfigAndBulkTenantScopeTests.cs::Post_IntoAnUnreachableBusinessUnit_Is403_AndNothingIsCreated" },
+        new SweepFinding("S-75", Severity.Medium, "DELETE /api/spe/configs/{configId:guid}", "165", Gap.InsufficientDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/SpeAdmin/SpeAdminConfigAndBulkTenantScopeTests.cs::Delete_OutOfScopeAndUnknownConfigs_AreTheUniform404_AndNothingIsDeleted" },
+        new SweepFinding("S-47", Severity.Medium, "POST /api/admin/record-matching/sync", "165", Gap.NoDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/Admin/RecordMatchingAdminPolicyTests.cs::ACallerWithAUserRoleOnly_IsForbidden_AndTheSyncServiceIsNeverCalled" },
+        new SweepFinding("S-48", Severity.Medium, "POST /api/admin/record-matching/sync-incremental", "165", Gap.NoDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/Admin/RecordMatchingAdminPolicyTests.cs::ACallerWithAUserRoleOnly_IsForbidden_AndTheSyncServiceIsNeverCalled" },
+        new SweepFinding("S-77", Severity.Low, "GET /api/admin/record-matching/status", "165", Gap.NoDecision)
+            { ResolvedBy = "165", ProofTest = "tests/integration/auth/Admin/RecordMatchingAdminPolicyTests.cs::ACallerWithAUserRoleOnly_IsForbidden_AndTheSyncServiceIsNeverCalled" },
         new SweepFinding("S-36", Severity.High, "PUT /api/v1/documents/{id}", "166", Gap.InsufficientDecision)
             { ResolvedBy = "166", ProofTest = "tests/integration/data-mutation/CoreAncestorStamping/DocumentRefileRestampRouteTests.cs::Put_NamingAStoragePointerField_IsRefusedAndWritesNothing" },
         new SweepFinding("S-66", Severity.Medium, "GET /api/v1/documents", "166", Gap.NoDecision)

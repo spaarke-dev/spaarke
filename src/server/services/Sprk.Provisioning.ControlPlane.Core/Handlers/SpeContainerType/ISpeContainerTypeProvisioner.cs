@@ -9,6 +9,22 @@
 // are created in a single invocation. Unit tests inject stubs to avoid pwsh +
 // Graph round-trips.
 //
+// BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1):
+//   Every SPE container carries its owning business unit as the custom property
+//   Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName — the
+//   BFF's admin plane reaches NO unbound container. H8's root container is
+//   bound to the ROOT business unit of the customer's Dataverse environment
+//   (H8 therefore runs after H5 — DagAdvancer.HandlerDependencies) through
+//   BindRootContainerAsync, once the container is verified readable.
+//   RESUME (owner rounds 41 + 49): H8 records what it created in the run's TYPED
+//   creation record (InterStepState.ContainerTypeId + SpeContainerCreation)
+//   immediately; a re-entry never calls ProvisionAsync for a recorded root
+//   container, and when only the type is recorded it passes
+//   ExistingContainerTypeId so no second (undeletable) container type is made —
+//   the type's containers are listed and an existing one ADOPTED before any new
+//   root container is created. Every fault after a Graph write was sent is a
+//   Failure that says what may exist (ContainerTypeInDoubt / RootContainerInDoubt).
+//
 // WHY -CreateTestContainer FOR THE "ROOT CONTAINER" (deviation from the POML's
 // literal "invoke New-BusinessUnitContainer.ps1" wording — Path C pivot):
 //   New-BusinessUnitContainer.ps1 requires an EXISTING Dataverse business-unit
@@ -59,6 +75,51 @@ public interface ISpeContainerTypeProvisioner
     Task<SpeContainerTypeProvisionOutcome> ProvisionAsync(
         SpeContainerTypeProvisionRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stamps the root container H8 created with its owning business unit (unified-access-control-r2 task 165, owner
+    /// round 35 item 1 — every container-creation path stamps), reads the stamp back, and REMOVES the container when the
+    /// stamp does not read back, so no unbound container is left behind. Called by the handler once the container is
+    /// verified readable (an SPE container may be unaddressable for up to 24h after creation — stamping it earlier would
+    /// remove healthy containers during that documented window). Domain failures do NOT throw; infra faults before any
+    /// Graph call (cert load) MAY throw.
+    /// </summary>
+    Task<SpeContainerBindOutcome> BindRootContainerAsync(
+        SpeContainerBindRequest request,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Inputs to <see cref="ISpeContainerTypeProvisioner.BindRootContainerAsync"/>.</summary>
+/// <param name="CustomerId">Customer partition key — audit logs only.</param>
+/// <param name="TenantId">Customer Entra tenant id (§4D I1/I5).</param>
+/// <param name="OwningAppId">The owning app (H3 output) — the confidential-client identity that created the container.</param>
+/// <param name="VaultName">Customer Key Vault holding the SPE owner cert (T6).</param>
+/// <param name="CertSecretName">KV secret holding the base64 PFX SPE owner cert (T6).</param>
+/// <param name="ContainerId">The root container to bind.</param>
+/// <param name="BusinessUnitId">The owning business unit: the ROOT business unit of the customer's Dataverse environment.</param>
+public sealed record SpeContainerBindRequest(
+    string CustomerId,
+    string TenantId,
+    string OwningAppId,
+    string VaultName,
+    string CertSecretName,
+    string ContainerId,
+    Guid BusinessUnitId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerTypeProvisioner.BindRootContainerAsync"/>.</summary>
+public abstract record SpeContainerBindOutcome
+{
+    private SpeContainerBindOutcome() { }
+
+    /// <summary>The stamp was written and read back.</summary>
+    public sealed record Bound : SpeContainerBindOutcome;
+
+    /// <summary>
+    /// The stamp did not land. <paramref name="Removed"/> is true when the container was then deleted (nothing unbound
+    /// is left); false when that also failed and an UNBOUND container remains (no admin route reaches it until the
+    /// backfill binds it with <c>-Bind</c> or an operator removes it).
+    /// </summary>
+    public sealed record NotBound(string Diagnostic, bool Removed) : SpeContainerBindOutcome;
 }
 
 /// <summary>
@@ -74,6 +135,18 @@ public interface ISpeContainerTypeProvisioner
 /// <param name="VaultName">Customer Key Vault name holding the SPE owner cert (§4D I4 tenant-scoped vault) — passed as the script's <c>-KeyVaultName</c>.</param>
 /// <param name="CertSecretName">KV secret name holding the base64 PFX SPE owner cert (T6 cert bootstrap) — passed as the script's <c>-CertSecretName</c>.</param>
 /// <param name="DisplayName">Container-type display name.</param>
+/// <param name="ExistingContainerTypeId">
+/// The container type THIS run's H8 already created (recorded in the run — unified-access-control-r2 task 165, owner
+/// rounds 41 + 49), or null. When set, NO container type is created. The type's containers are LISTED first: a
+/// container already in it (one an earlier creation made — e.g. a POST whose answer was lost) is ADOPTED as the root
+/// container instead of creating another; only when the type holds none is a new root container created in it. A
+/// container type is durable customer data that cannot be deleted, so a resume never creates a second one.
+/// </param>
+/// <param name="RootContainerCreationInDoubt">
+/// True when an earlier root-container POST into <paramref name="ExistingContainerTypeId"/> got no authoritative answer
+/// and the replication window has not passed: the container may exist but not be listed yet. If the type then lists no
+/// container, nothing is created — the outcome is <see cref="SpeContainerTypeProvisionOutcome.RootContainerNotYetVisible"/>.
+/// </param>
 public sealed record SpeContainerTypeProvisionRequest(
     string CustomerId,
     string TenantId,
@@ -81,7 +154,9 @@ public sealed record SpeContainerTypeProvisionRequest(
     string SharePointDomain,
     string VaultName,
     string CertSecretName,
-    string DisplayName);
+    string DisplayName,
+    string? ExistingContainerTypeId = null,
+    bool RootContainerCreationInDoubt = false);
 
 /// <summary>
 /// Outputs H8 needs to (a) populate <see cref="Sprk.Provisioning.ControlPlane.Models.InterStepState.ContainerTypeId"/>,
@@ -90,9 +165,16 @@ public sealed record SpeContainerTypeProvisionRequest(
 /// </summary>
 /// <param name="ContainerTypeId">SPE container-type id (GUID) created + registered to the owning app.</param>
 /// <param name="RootContainerId">SPE container id (GUID) of the root container created within the container type.</param>
+/// <param name="AdditionalContainerIds">
+/// When a root container was ADOPTED from the run's own type and the type held more than one container: the others
+/// (the oldest is the root). H8 binds each to the root business unit (or removes it) before completing.
+/// </param>
+/// <param name="Adopted">True when the root container already existed in the type (listed), false when created now.</param>
 public sealed record SpeContainerTypeProvisionOutputs(
     string ContainerTypeId,
-    string RootContainerId);
+    string RootContainerId,
+    IReadOnlyList<string>? AdditionalContainerIds = null,
+    bool Adopted = false);
 
 /// <summary>
 /// Discriminated result of <see cref="ISpeContainerTypeProvisioner.ProvisionAsync"/>.
@@ -111,7 +193,29 @@ public abstract record SpeContainerTypeProvisionOutcome
     /// markers are absent despite a claimed success) — the handler maps this to
     /// <see cref="Handlers.FailureClass.QuarantineRequired"/> + a distinct
     /// rejection code so operators never mistake a T6 regression for a routine
-    /// Resumable failure.
+    /// Resumable failure. <paramref name="CreatedContainerTypeId"/> names the container type this call DID create (or
+    /// reused) before it failed, so the handler records it and a resume creates only the root container in it
+    /// (task 165, owner round 41 item 1) — null when no container type exists yet.
     /// </summary>
-    public sealed record Failure(string Diagnostic, bool IsDelegatedTokenTrap) : SpeContainerTypeProvisionOutcome;
+    /// <remarks>
+    /// Owner round 49 item 2: EVERY fault after a Graph write was sent becomes a Failure — never an exception — so the
+    /// handler records what may exist. <paramref name="ContainerTypeInDoubt"/>: the container-type POST got no
+    /// authoritative answer (a client timeout, a dropped connection, a 2xx without an id), so a type may exist that no
+    /// one names. <paramref name="RootContainerInDoubt"/>: the same for the root-container POST into
+    /// <paramref name="CreatedContainerTypeId"/>. An <c>ODataError</c> is Graph's own answer — nothing in doubt.
+    /// </remarks>
+    public sealed record Failure(
+        string Diagnostic,
+        bool IsDelegatedTokenTrap,
+        string? CreatedContainerTypeId = null,
+        bool ContainerTypeInDoubt = false,
+        bool RootContainerInDoubt = false)
+        : SpeContainerTypeProvisionOutcome;
+
+    /// <summary>
+    /// The request said a root container may exist unseen (<see cref="SpeContainerTypeProvisionRequest.RootContainerCreationInDoubt"/>)
+    /// and the type lists none yet — nothing was created; the handler waits (owner round 49 item 2: no second root
+    /// container while the first may exist).
+    /// </summary>
+    public sealed record RootContainerNotYetVisible(string ContainerTypeId, string Diagnostic) : SpeContainerTypeProvisionOutcome;
 }

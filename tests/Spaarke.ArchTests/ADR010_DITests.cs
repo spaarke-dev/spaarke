@@ -277,7 +277,16 @@ public class ADR010_DITests
         // such an interface, never IRagService / IPostUploadIndexingEnqueuer. It is also a real test
         // seam: DocumentContainerRelocatorTests.RecordingIndexing is its double (index-pending and
         // retry are proven through it). Same category as IFileSummarizeAi / IPreferenceMemoryCapture.
-        const int knownOneToOneCeiling = 158;
+        //
+        // ───────── Ceiling raised 158 → 159, 2026-10-05 (batch-4 integration of unified-access-control-r2 task 165) ─────────
+        // ISpeAdminContainerScopedRequest -> SearchItemsRequest. Surfaced by the merge, not a new commit: on task 165's own
+        // branch the count stayed within 158. SEAM JUSTIFICATION: it is how SpeAdminTenantScopeFilter — an endpoint filter,
+        // which sees route arguments only as object — finds a container id in a BOUND BODY (owner round 20 item 2, the
+        // per-container rule; SpeAdminTenantScopeFilter.cs, the bound-body read). Its sibling ISpeAdminConfigScopedRequest has
+        // two implementations and is not counted; this one has one today because only the item search names a container in
+        // its body. Registering a concrete would mean the filter naming each request type, so a new container-scoped body
+        // would silently skip the rule. It is a request contract, not a service, and never registered in DI.
+        const int knownOneToOneCeiling = 159;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

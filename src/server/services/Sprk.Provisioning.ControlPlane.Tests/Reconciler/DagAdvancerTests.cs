@@ -131,15 +131,26 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH3_UnlocksH8H9_FanOut()
+    public void ComputeReadyHandlers_AfterH3_UnlocksH9_ButH8WaitsForH5()
     {
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3");
 
         var ready = _sut.ComputeReadyHandlers(run);
 
         // Note: H2b + H5 still ready (they were ready after H2a; still not dispatched).
-        ready.Should().BeEquivalentTo(new[] { "H2b", "H5", "H8", "H9" },
-            "design.md §4.1 DAG: H3 → {H8, H9} parallel fan-out.");
+        ready.Should().BeEquivalentTo(new[] { "H2b", "H5", "H9" },
+            "design.md §4.1 DAG: H3 → H9; H8 also needs H5 (unified-access-control-r2 task 165, owner round 35 " +
+            "item 1: H8 stamps the root container with the new environment's root business unit).");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH3AndH5_UnlocksH8()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().Contain("H8", "H8 needs H3 (owning app) AND H5 (the environment whose root unit owns the container)");
     }
 
     [Fact]
@@ -151,6 +162,30 @@ public sealed class DagAdvancerTests
 
         ready.Should().BeEquivalentTo(new[] { "H2b", "H4", "H6" },
             "design.md §4.1 DAG: H5 → H6 (solution import).");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6_H7WaitsForH8_WhichHandsOffOnlyABoundContainer()
+    {
+        // H8 dispatched but not complete — e.g. waiting out the 24h SPE replication window with its root container
+        // created and recorded but NOT yet bound (unified-access-control-r2 task 165, owner round 41 item 1).
+        var run = MakeRun(RunStatus.WaitingOnGate, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H9", "H6");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().NotContain("H7",
+            "H7 writes H8's root container into sprk_SharePointEmbeddedContainerId — it must wait until H8 has bound it");
+        ready.Should().Contain("H8");
+    }
+
+    [Fact]
+    public void ComputeReadyHandlers_AfterH6AndH8_UnlocksH7()
+    {
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H3", "H5", "H9", "H6", "H8");
+
+        var ready = _sut.ComputeReadyHandlers(run);
+
+        ready.Should().BeEquivalentTo(new[] { "H7" });
     }
 
     [Fact]

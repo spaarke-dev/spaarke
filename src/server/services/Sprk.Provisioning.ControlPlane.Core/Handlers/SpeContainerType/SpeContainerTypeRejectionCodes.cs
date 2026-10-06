@@ -41,6 +41,52 @@ public static class SpeContainerTypeRejectionCodes
     public const string RunNotFound = "spe-run-not-found";
 
     /// <summary>
+    /// <c>InterStepState.DataverseEnvUrl</c> (H5 output) is missing — H8 binds the root container to the environment's
+    /// root business unit (unified-access-control-r2 task 165, owner round 35 item 1), so H5 MUST complete first.
+    /// Resumable; checked before any external side effect.
+    /// </summary>
+    public const string MissingDataverseEnvUrl = "spe-missing-dataverse-env-url";
+
+    /// <summary>
+    /// The customer environment's root business unit could not be read, or it reports none (or more than one).
+    /// Resumable; checked before any external side effect — H8 never creates a container it could not bind.
+    /// </summary>
+    public const string RootBusinessUnitUnresolved = "spe-root-business-unit-unresolved";
+
+    /// <summary>
+    /// The root container was created and verified, but its business-unit stamp did not read back, so it was REMOVED
+    /// (round 35 item 1: no unbound container is left behind). QuarantineRequired — the container type exists without
+    /// a root container; an operator re-runs H8 after the cause is fixed.
+    /// </summary>
+    public const string ContainerBindingFailed = "spe-container-binding-failed";
+
+    /// <summary>
+    /// As <see cref="ContainerBindingFailed"/>, but removing the unbound container ALSO failed: an unbound container
+    /// remains, which no SPE admin route reaches. QuarantineRequired — bind it with
+    /// <c>scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind &lt;containerId&gt;=&lt;rootBusinessUnitId&gt;</c> or remove it.
+    /// </summary>
+    public const string ContainerBindingFailedNotRemoved = "spe-container-binding-failed-not-removed";
+
+    /// <summary>The bind step threw (cert load before any Graph call) — QuarantineRequired: the container exists, unbound.</summary>
+    public const string ContainerBindingInfraFault = "spe-container-binding-infra-fault";
+
+    /// <summary>
+    /// The run records a root container this H8 created but no container type for it — a state H8 never writes
+    /// (unified-access-control-r2 task 165, owner round 41 item 1). QuarantineRequired, and NOTHING is created: H8 never
+    /// guesses which type it made, and never makes a second container while one it created is unaccounted for.
+    /// </summary>
+    public const string CreationRecordInconsistent = "spe-creation-record-inconsistent";
+
+    /// <summary>
+    /// H8 created a container type and root container but could not record them in the run (the run was deleted, or
+    /// every merge retry lost a concurrent write). QuarantineRequired: the diagnostic names both ids — the root container
+    /// is UNBOUND (no SPE admin route reaches it); bind it with
+    /// <c>scripts/Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind &lt;containerId&gt;=&lt;rootBusinessUnitId&gt;</c> or remove it
+    /// before the run is resumed (a resume of a run with no record creates afresh).
+    /// </summary>
+    public const string CreationRecordNotPersisted = "spe-creation-record-not-persisted";
+
+    /// <summary>
     /// The provisioner reported a hard failure (PS script non-zero exit /
     /// Graph error) that is NOT a T6 delegated-token trap. Resumable — operator
     /// resolves the precondition (connectivity, permissions, SPE cert-replication
@@ -86,6 +132,15 @@ public static class SpeContainerTypeRejectionCodes
 
     /// <summary>ProvisioningRun row was deleted while H8 was in flight.</summary>
     public const string RunDeletedDuringProvisioning = "spe-run-deleted-during-provisioning";
+
+    /// <summary>
+    /// The container-type POST got no authoritative answer (a client timeout, a dropped connection, a 2xx without an
+    /// id): a container type may exist that the run does not name — and a container type cannot be deleted and is
+    /// capped per tenant. QuarantineRequired; H8 creates NO type until an operator has checked with a delegated
+    /// SharePoint Embedded admin token, recorded the type in the run if one exists, and cleared the quarantine
+    /// (unified-access-control-r2 task 165, owner round 49 item 2).
+    /// </summary>
+    public const string ContainerTypeCreationInDoubt = "spe-container-type-creation-in-doubt";
 }
 
 /// <summary>

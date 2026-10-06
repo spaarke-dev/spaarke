@@ -1,6 +1,41 @@
 namespace Sprk.Bff.Api.Models.SpeAdmin;
 
 /// <summary>
+/// Implemented by every SPE admin request BODY that names a container type config. The tenant-scope
+/// filter (<c>SpeAdminTenantScopeFilter</c>) reads <see cref="ConfigId"/> from any bound argument that
+/// implements this, so the business-unit boundary runs on body-carried configIds by contract.
+/// </summary>
+/// <remarks>
+/// unified-access-control-r2 task 165 (sweep findings #44, #72). The two bulk request records carried
+/// <c>ConfigId</c> in the body, where the filter never looked, so any SPE admin could bulk-delete or
+/// grant owner on another business unit's containers. <c>SpeAdminConfigScopedBodyGuardTests</c> fails
+/// the build when a request record under <c>Models/SpeAdmin</c> carries a <c>ConfigId</c> without
+/// implementing this — the next such record must not bypass the boundary the way these two did.
+/// </remarks>
+public interface ISpeAdminConfigScopedRequest
+{
+    /// <summary>The config the request acts on, as the client sent it (validated by the endpoint).</summary>
+    string? ConfigId { get; }
+}
+
+/// <summary>
+/// Implemented by every SPE admin request BODY that names ONE container the request acts on. The tenant-scope
+/// filter reads <see cref="ContainerId"/> from any bound argument that implements this and applies the
+/// per-container business-unit rule to it (unified-access-control-r2 task 165, owner round 20 item 2), exactly as
+/// it does for a <c>{containerId}</c> route value.
+/// </summary>
+/// <remarks>
+/// <c>SpeAdminConfigScopedBodyGuardTests</c> fails the build when a body bound by any <c>/api/spe</c> handler carries
+/// a <c>ContainerId</c> without implementing this. A body that names MANY containers (the bulk requests) does not:
+/// those are authorized per item in the job.
+/// </remarks>
+public interface ISpeAdminContainerScopedRequest
+{
+    /// <summary>The container the request acts on, or null/empty when it names none.</summary>
+    string? ContainerId { get; }
+}
+
+/// <summary>
 /// Specifies the type of bulk operation to perform on a set of SPE containers.
 /// </summary>
 public enum BulkOperationType
@@ -20,7 +55,8 @@ public enum BulkOperationType
 /// </summary>
 /// <param name="ContainerIds">
 /// Non-empty list of SPE container IDs to delete.
-/// All containers must belong to the container type identified by the <c>configId</c> query parameter.
+/// All containers must belong to the container type of the config named by <c>ConfigId</c>; the
+/// background job refuses, per item, any container of another type (task 165).
 /// </param>
 /// <param name="ConfigId">
 /// Dataverse ID of the SPE container type config that authenticates Graph API calls.
@@ -31,7 +67,7 @@ public enum BulkOperationType
 /// </remarks>
 public sealed record BulkDeleteRequest(
     IReadOnlyList<string> ContainerIds,
-    string ConfigId);
+    string ConfigId) : ISpeAdminConfigScopedRequest;
 
 /// <summary>
 /// Request body for initiating a bulk permission assignment operation.
@@ -63,7 +99,7 @@ public sealed record BulkPermissionsRequest(
     string ConfigId,
     string? UserId,
     string? GroupId,
-    string Role);
+    string Role) : ISpeAdminConfigScopedRequest;
 
 /// <summary>
 /// Tracks the live progress of a bulk operation.

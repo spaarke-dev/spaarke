@@ -383,7 +383,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **8 authoritative solutions** (§11.1a): SpaarkeCore, webresources, then 6 tier-3 parallel | All 8 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
-| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s) | Container GET succeeds; container ID persisted to Dataverse + KV | `spe-{customerId}` |
+| **H8** | SPE container-type + root container | Uses **confidential-client (app-only) token** with cert bootstrapped from KV (**T6** trap — delegated 403s). **Binds the root container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1); runs after **H3 and H5**; **records what it created at once, in typed run fields, and RESUMES with it** (rounds 41 + 49: a recorded root container is never created again; a recorded type gets no second type, and its containers are listed and an existing one ADOPTED before a root container is created; a creation with no answer is recorded as in doubt — a type in doubt is QuarantineRequired until an operator checks, a root container in doubt is waited for) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound; persisted to Dataverse + KV | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
@@ -400,8 +400,12 @@ H0 --> H1 --> H2a --> { H2b (indexes), H4 (KV), H5 (dv-env) }   # 3-way parallel
                             |
                             v
                        H4 --> H3 (needs KV for secrets) --> { H8 (SPE), H9 (BFF deploy) }
+                                                                 ^
+                                                    H5 (dv-env) -+   # H8 also needs H5: it binds the root container
+                                                                     # to the environment's root business unit (task 165)
 
-H5 --> H6 (solutions) --> H7 --> H10 (needs H6) --> H11
+# H7 also needs H8 (task 165, round 41): H7 writes H8's root container, which H8 hands off only once BOUND.
+H5 --> H6 (solutions) --> H7 (+ H8) --> H10 (needs H6) --> H11
                                     |
                                     v
                               { H12a (AI seed), H12b (config seed) }   # parallel
@@ -719,6 +723,43 @@ A repeated collision by the same identity does not write again; a different iden
    one whose `sprk_identitycollisionparties` no longer reads as the BFF wrote it (someone edited it). The job never
    clears either, so that an unrecorded collision cannot vanish.
 
+#### 6.5.4 SPE admin operator-environment marker (`SpeAdmin__PlatformOperatorEnvironment`) — NEVER on a customer stamp
+
+> Added 2026-10-05 by `unified-access-control-r2` task 165, owner round 49 item 1.
+
+The BFF's SPE admin routes whose answer spans the **whole SharePoint Embedded tenant** (security alerts, secure score) or a
+**whole container type** (its app permissions, consuming apps, registration) serve only a root-unit administrator of a
+**Spaarke-operated** environment. Under Model 1 every customer environment has its own root-unit administrator, so the
+root check alone cannot confine them; the deployment setting `SpeAdmin__PlatformOperatorEnvironment=true` marks Spaarke's
+own environments — **today only `dev`** (round 57 item 1; Spaarke's production operator environment adds it in the change
+that stands it up). It is a deployment setting, not a Dataverse column, because a customer administrator can edit a column.
+
+- **Customer environments never carry it** — Model 1 shared stamp, Model 2 stamp, every per-customer setting set. Customer
+  provisioning (the L2 control plane, the canonical app-settings catalog, `customer.bicep`, the Model 1 stack) does not emit
+  it; `model2-full.bicep`'s `speAdminPlatformOperatorEnvironment` parameter defaults to `false`, and a `false` stamp does not
+  carry the setting at all. `SpeAdminOperatorEnvironmentMarkerGuardTests` fails the build if any of them names it.
+- **Missing = false = refused** (fail closed); a value that is not a boolean stops the BFF at startup.
+- **Spaarke-operated environments** declare `"speAdminPlatformOperatorEnvironment": true` in `config/environments.json`
+  (today only `dev`); `scripts/Deploy-BffApi.ps1` then sets the App Service setting on the slot(s) it deploys to, and FAILS a
+  deploy to an environment that carries the setting without declaring it. The declaration must be a JSON boolean (`true` /
+  `false`, unquoted): the deploy FAILS on any other type, because PowerShell reads the string `"false"` as true (round 57
+  item 3; the parse is `scripts/common/SpeAdminOperatorMarker.ps1`, which `SpeAdminOperatorEnvironmentMarkerGuardTests` runs).
+- **Standing up Spaarke's production operator environment** (the stopped `spaarke-bff-prod` / `demo`, which declares `false`
+  today) is the change that adds the marker: its registry key set to `true`, `param speAdminPlatformOperatorEnvironment =
+  true` in its `.bicepparam`, its name in `SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments`, and the
+  App Service setting (the next `Deploy-BffApi.ps1` run sets it). Until then it refuses those routes (fail closed).
+  **The same change must make the entry reachable through `-Environment`** (main-session round 62 item 2): `demo` is not in
+  `Deploy-BffApi.ps1`'s `-Environment` `ValidateSet` (`dev`, `staging`, `production`), so today no deploy reads the
+  `demo` entry — neither this declaration nor its `requiredCorsOrigins` gate. Add `demo` to the `ValidateSet` and deploy
+  with `-Environment demo`.
+- **A declared marker is bound to its App Service** (round 62 item 1): when the entry declares `true`, the deploy FAILS
+  unless `-AppServiceName` and `-ResourceGroupName` equal that entry's `appServiceName` / `resourceGroup`
+  (`Assert-SpeAdminOperatorMarkerTarget`, `scripts/common/SpeAdminOperatorMarker.ps1`). The declaration is read by the
+  `-Environment` label, which defaults to `dev`, so without this a deploy naming another App Service would inherit dev's
+  marker.
+- A customer root-unit admin calling those routes gets `403 spe.admin.deny.platform_operator_required` — the same answer as
+  a leaf admin anywhere.
+
 ---
 
 ## 7. Pipeline Execution Phases (walkthrough)
@@ -814,6 +855,40 @@ import — the script never customises a managed component (ADR-027); it then on
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
 **H8** provisions container-type + root container. **T6 fix**: uses confidential-client (app-only) token with cert bootstrapped from KV — delegated tokens produce `public client not allowed` 403s.
+
+**Business-unit binding (unified-access-control-r2 task 165, owner round 35 items 1-2).** Every SPE container carries the
+business unit that owns it as the custom property `spaarkeBusinessUnitId`, and the BFF's SPE admin plane reaches **no**
+unbound container — not even for a root-unit administrator. H8 therefore runs after H5, reads the new environment's
+**root** business unit before creating anything (no environment URL or no root unit → Resumable, nothing created), and
+once the root container is verified readable stamps it, reads the stamp back, and **removes** the container if the stamp
+did not land (QuarantineRequired: `spe-container-binding-failed` / `…-not-removed` / `…-infra-fault`). Every other creation
+path follows the same rule: the BFF, `New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
+`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`.
+
+**The replication wait and every other resume (owner rounds 41 + 49).** An SPE container may be unaddressable for up to
+24h after creation, so H8 binds only after the app-only GET verifies it. To make that safe, H8 **records what it created in
+the run immediately, in TYPED fields** — `interStepState.containerTypeId` plus `interStepState.speContainerCreation`
+(the root container, any further containers to bind, and whether a creation got no answer) — before it verifies, binds or
+writes anything else. (Round 41 kept the root container in the `h8-t6-verified` gate's evidence; the Cosmos SDK's
+Newtonsoft serializer stored that as `{"valueKind":1}`, so in production every resume found only the type and created a
+SECOND root container, leaving the first UNBOUND. Gate evidence now persists too, but H8 never resumes from it.) Every
+later entry (the re-dispatch after the 24h wait, a resume after a quarantine, a crash) reads that record and **resumes at
+verification with the same container** — a recorded root container is never created again. When only the container type is
+recorded (a failed bind removed the root container, or creation stopped after the type), H8 creates no second type
+(container types cannot be deleted and are capped per tenant): it **lists the type's containers and adopts one already
+there** (a creation whose answer was lost) before it creates a root container, and binds every further container it finds
+to the same root unit (or removes it). Every fault after a Graph write was sent is recorded rather than thrown: a
+**container-type POST with no answer** (a client timeout, a dropped connection) is QuarantineRequired
+`spe-container-type-creation-in-doubt` — H8 creates no type until an operator has checked with a delegated SharePoint
+Embedded admin token (`GET /storage/fileStorage/containerTypes`; app-only answers 403), recorded a type it finds in
+`interStepState.containerTypeId`, and cleared the quarantine; a **root-container POST with no answer** is recorded, and
+within the replication window H8 waits (WaitingOnGate) rather than create a second root container while the first may
+still appear. The container is **handed to H7**
+(`interStepState.speContainerId` → `sprk_SharePointEmbeddedContainerId`) **only once it is bound** — H8 writes that
+field only on completion, after the bind and the KV write; H7 depends on H8 in the DAG and refuses a container id from a
+run where H8 has not completed. While the run waits, H9 and the other branches still advance; H7, H10 and what follows
+wait for the bound container. A creation H8 could not record (the run deleted, or every merge lost a concurrent write)
+is QuarantineRequired `spe-creation-record-not-persisted`, naming both ids for an operator to bind (`-Bind`) or remove.
 
 Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId`) AND KV secret (`customer-{customerId}-spe-container-id`) — enables I4 invariant enforcement.
 
@@ -1033,7 +1108,40 @@ pac admin create-environment `
 # Phase 5 — SPE (confidential-client — T6 fix)
 .\scripts\Create-NewContainerType.ps1 -CustomerId "acme"
 .\scripts\Register-*.ps1                 # per SPE registration ceremony
-.\scripts\New-BusinessUnitContainer.ps1 -CustomerId "acme"
+# Creates the business unit's container AND binds it to that unit (stamp, read back, or the container is removed —
+# task 165, owner round 35 item 1); sprk_containerid is written only for a bound container.
+.\scripts\New-BusinessUnitContainer.ps1 `
+    -BusinessUnitId "<bu-guid>" -BusinessUnitName "<bu name>" `
+    -ContainerTypeId "<container-type-id>" -DataverseUrl "<dv-org-url>" `
+    -OwningAppId "<owning-app-id>" -TenantId "<tenant-guid>" `
+    -KeyVaultName "<customer-kv>" -CertSecretName "<spe-cert-secret>"
+
+# Phase 5b — SPE container BINDING GATE (task 165, owner round 35 item 2 — MANUAL GATE, BLOCKING).
+# No SPE admin route reaches an unbound container. Before task 165's BFF is deployed to an environment, and before a
+# further environment is onboarded onto a container type another environment already uses, EVERY container of every
+# config must be bound. Dry run first (read-only), then -Apply, then -Verify — which must exit 0:
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>"
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>" -Apply
+#   containers no record claims are listed UNDERIVABLE: bind each to its owner explicitly (or remove it) —
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>" `
+    -Bind '<containerId>=<businessUnitId>' -Apply
+.\scripts\Backfill-SpeContainerBusinessUnitStamp.ps1 -EnvironmentUrl "<dv-org-url>" -KeyVaultName "<bff-kv>" -Verify   # MUST exit 0
+# When onboarding onto a SHARED container type, run the -Verify above in EVERY environment that already uses the type —
+# a container of the type left unbound in one environment is otherwise nobody's to administer.
+
+# Phase 5c — SPE config Key Vault secret names (task 165, round 35 item 3; round 41 item 4; narrowed by round 65 item 1).
+# The BFF reads NO secret by this name (SPE Admin runs as the BFF's own identity) and refuses no config for it; it only
+# answers 400 when a config is SAVED naming a secret outside 'spe-owning-app-'. The one reader left is the Phase 5b
+# backfill, which lists a config's containers as its owning app and SKIPS a config whose stored name does not conform.
+# Run this before Phase 5b; for each config it lists, repair it below or bind its containers with -Bind:
+.\scripts\Test-SpeConfigSecretNames.ps1 -EnvironmentUrl "<dv-org-url>" -Verify
+#   for each config it lists (MANUAL GATE; never delete the config): store the owning app's client secret under a
+#   conforming name in the BFF Key Vault(s) and point the config at it — dry run, then -Apply (mint a new client secret
+#   with -MintClientSecret, or copy one with -SourceKeyVaultName/-SourceSecretName), then -Verify (exit 0):
+.\scripts\Repair-SpeConfigSecretName.ps1 -EnvironmentUrl "<dv-org-url>" -ConfigId "<config-id>" `
+    -SecretName "spe-owning-app-<name>" -KeyVaultName "<bff-kv>","<operator-kv>"
+.\scripts\Repair-SpeConfigSecretName.ps1 ... -MintClientSecret -Apply
+.\scripts\Repair-SpeConfigSecretName.ps1 ... -Verify
 
 # Phase 6 — BFF deploy
 .\scripts\Deploy-BffApi.ps1 -CustomerId "acme" -Slot production
@@ -1250,6 +1358,9 @@ These are **module-scoped** deployment / build workflows — NOT customer-provis
 | 2026-10-02 | §6.5.2: the schema prerequisite is UNBLOCKED — owner decision B2: uniqueness on the unsecured mirror `contact.sprk_externalobjectidkey` (key `sprk_ExternalObjectIdUniqueKey`), field-level security stays on the binding; what a mirror squat can and cannot do. The job now reconciles every provisioning target (`DATAVERSE_URL` + active `sprk_dataverseenvironment` rows), so a registration link that does not land IS retried, and each target needs the schema. §6.5.3: clear all three binding columns; the "Key mirror held by another contact" procedure | `unified-access-control-r2` task 141 third fix round (`task/uac-r2-141-f3`; owner round 4 item 4) |
 | 2026-10-02 | §6.5.2: second Dataverse prerequisite — `scripts/Set-RecordCreatorPersonSchema.ps1` (`sprk_createdbyperson`, BFF-only, field-secured) must run BEFORE a BFF carrying task 133 is deployed, or Office quick-create and work-assignment creates fail | `unified-access-control-r2` task 133 round b2 (owner round 7 item 2) |
 | 2026-10-02 | §7.4: record numbering after H6 — `scripts/Set-RecordNumberingSchema.ps1` in every environment (the autonumber seed is not carried by a solution import; first run numbers blank rows) | `spaarkeai-word-add-in-r1` task 076 (owner decisions 2026-10-02: platform autonumber, interim until the numbering function) |
+| 2026-10-05 | §5 H8 row + §7.5: H8's creation record is TYPED (`interStepState.speContainerCreation`) — round 41's gate-evidence record did not survive the Cosmos serializer, so production resumes created a second root container; a recorded type's containers are listed and adopted before a root container is created; container-type / root-container creations with no answer are recorded (type: QuarantineRequired `spe-container-type-creation-in-doubt` until an operator checks; root: waited for). §6.5.4: the SPE admin operator-environment marker — never on a customer stamp | `unified-access-control-r2` task 165, owner round 49 (`task/uac-r2-165-f2-v2`) |
+| 2026-10-05 | §6.5.4: a declared marker is bound to its registry entry's App Service / resource group (the deploy fails otherwise); the `demo` stand-up also adds `demo` to `Deploy-BffApi.ps1`'s `-Environment` `ValidateSet` | `unified-access-control-r2` task 165, round 62 (batch-4 integration) |
+| 2026-10-05 | §6.5.4: only `dev` carries the marker today — Spaarke's production operator environment (`demo`, declared `false`) adds it in the change that stands it up; the registry declaration must be a JSON boolean and the deploy fails on any other type (`[bool]"false"` is true in PowerShell) | `unified-access-control-r2` task 165, round 57 (`task/uac-r2-165-h`) |
 
 ---
 

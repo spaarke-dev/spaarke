@@ -59,7 +59,7 @@ public class WorkloadPlacementGuardTests
     //   shared library the BFF registers, is not inventoried — none exists today (task-102 code review). Review
     //   catches those; widen the scan if one appears.
     // =============================================================================================
-    private const int TimerServiceBaseline = 13; // 14 → 13: TodoGenerationService migrated to IScheduledJob (UAC-r2 task 152)
+    private const int TimerServiceBaseline = 12; // 14 → 13: TodoGenerationService (UAC-r2 task 152); 13 → 12: SpeDashboardSyncService (UAC-r2 task 165) — both migrated to IScheduledJob
 
     private const int OtherServiceBaseline = 9;
 
@@ -67,7 +67,6 @@ public class WorkloadPlacementGuardTests
     {
         ["ScheduledRagIndexingService"] = "PeriodicTimer RAG re-index loop. Migrates to IScheduledJob when next touched (ADR-052 §1, ADR-036).",
         ["RecordSyncJob"] = "PeriodicTimer record-sync loop. Migrates to IScheduledJob when next touched (ADR-052 §1, ADR-036).",
-        ["SpeDashboardSyncService"] = "PeriodicTimer SPE dashboard sync loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["DemoExpirationService"] = "Wait-until-midnight Task.Delay loop expiring demo tenants. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["SessionFileRetentionJob"] = "PeriodicTimer (TimeProvider) session-file retention loop. Migrates when next touched (ADR-052 §1, ADR-036).",
         ["SessionFilesCleanupJob"] = "PeriodicTimer session-files cleanup loop. Migrates when next touched (ADR-052 §1, ADR-036).",

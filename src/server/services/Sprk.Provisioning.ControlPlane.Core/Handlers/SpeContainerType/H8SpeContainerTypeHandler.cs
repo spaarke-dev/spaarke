@@ -45,6 +45,42 @@
 //     follows GUID canonicalization (script already emits canonical-form
 //     GUIDs from Graph responses).
 //
+// BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1,
+// 2026-10-04 — supersedes the "H8 runs before H5/H6" premise of deviation (1)
+// below for the DAG): every SPE container is stamped with its owning business
+// unit at creation, and the BFF's admin plane reaches NO unbound container. H8
+// now depends on H3 AND H5 (DagAdvancer.HandlerDependencies), reads the new
+// environment's ROOT business unit before creating anything
+// (IDataverseRootBusinessUnitReader; missing/unreadable -> Resumable, no side
+// effect), and after verification binds the root container to it
+// (ISpeContainerTypeProvisioner.BindRootContainerAsync: stamp, read back,
+// DELETE on failure). A bind failure is QuarantineRequired
+// (ContainerBindingFailed / ...NotRemoved / ContainerBindingInfraFault) and the
+// container id is never handed to H7. Recorded for this project in
+// projects/customer-provisioning-orchestration-r1/notes/uac-r2-165-h8-container-stamp.md.
+//
+// RESUME (task 165, owner rounds 41 + 49 — every creation path stamps or
+// removes, the replication-pending path included): H8 RECORDS what it created
+// immediately (6b) in TYPED fields of the run — InterStepState.ContainerTypeId
+// + InterStepState.SpeContainerCreation (the root container, further containers
+// to bind, creations in doubt). Round 41 kept the root container in the T6
+// gate's JsonElement evidence, which the Cosmos SDK's Newtonsoft serializer
+// wrote as {"valueKind":1}: every re-entry then created a second root container
+// (owner round 49 item 2). A re-entry that finds the record (5c,
+// ReadRecordedCreation) RESUMES at verification with that container: it never
+// calls ProvisionAsync for a recorded root container. When only the type is
+// recorded, the provisioner lists it and ADOPTS a container already in it (a
+// creation whose answer was lost) before creating one, and creates none while
+// an unanswered root-container POST may still appear (WaitingOnGate). A
+// container-type POST with no answer is QuarantineRequired — a type may exist
+// unnamed and cannot be found app-only or deleted. The H7 hand-off
+// (InterStepState.SpeContainerId) is written ONLY by MarkCompleteAsync, after
+// the bind (of the root and every adopted container) and the KV write, and H7
+// depends on H8 in the DAG — so H7 never consumes an unbound container. The L2
+// tests persist runs through the production serializer
+// (CosmosModule.BuildCosmosClient), so a record that does not survive Cosmos
+// fails them.
+//
 // DEVIATION FROM POML LITERAL WORDING (documented per CLAUDE.md §6.5 — Path C
 // pivot-to-comply, discovered during implementation; see
 // projects/customer-provisioning-orchestration-r1/notes/task-051-h8-deviations.md
@@ -102,6 +138,17 @@
 //   │ KV writer infra fault                      │ QuarantineRequired       │
 //   │ Concurrent Cosmos writer conflict          │ Resumable                │
 //   │ Run row deleted mid-flight                 │ Resumable                │
+//   │ Recorded root container without a type     │ QuarantineRequired       │
+//   │ (task 165 round 41; nothing created)       │                          │
+//   │ Creation not recordable (run deleted /     │ QuarantineRequired       │
+//   │ merges lost; ids in the diagnostic)        │                          │
+//   │ Container-type POST with no answer (the    │ QuarantineRequired       │
+//   │ type may exist unnamed; round 49)          │ (until an operator clears│
+//   │                                            │ after checking)          │
+//   │ Root-container POST with no answer         │ Resumable (recorded; the │
+//   │                                            │ resume lists + adopts)   │
+//   │ Root creation in doubt, type lists none,   │ NOT a §4C failure class  │
+//   │ within the replication window              │ — RunStatus.WaitingOnGate│
 //   └───────────────────────────────────────────┴──────────────────────────┘
 //
 // IDEMPOTENCY (3-level per ADR-004 / design.md §4.1):
@@ -170,6 +217,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
     private readonly ISpeContainerTypeProvisioner _provisioner;
     private readonly ISpeContainerVerifier _verifier;
     private readonly ISpeContainerIdKvWriter _kvWriter;
+    private readonly IDataverseRootBusinessUnitReader _rootBusinessUnitReader;
     private readonly SpeContainerTypeOptions _options;
     private readonly ILogger<H8SpeContainerTypeHandler> _logger;
 
@@ -185,6 +233,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         ISpeContainerTypeProvisioner provisioner,
         ISpeContainerVerifier verifier,
         ISpeContainerIdKvWriter kvWriter,
+        IDataverseRootBusinessUnitReader rootBusinessUnitReader,
         IOptions<SpeContainerTypeOptions> options,
         ILogger<H8SpeContainerTypeHandler> logger)
     {
@@ -192,6 +241,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(provisioner);
         ArgumentNullException.ThrowIfNull(verifier);
         ArgumentNullException.ThrowIfNull(kvWriter);
+        ArgumentNullException.ThrowIfNull(rootBusinessUnitReader);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -199,6 +249,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         _provisioner = provisioner;
         _verifier = verifier;
         _kvWriter = kvWriter;
+        _rootBusinessUnitReader = rootBusinessUnitReader;
         _options = options.Value;
         _logger = logger;
     }
@@ -318,57 +369,252 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (6) Invoke the provisioner (container-type + root container, T6
-        //     confidential-client cert-based). Infra faults are Resumable (no
-        //     confirmed external side effect); domain Failure with
-        //     IsDelegatedTokenTrap=true is the T6 trap itself.
-        SpeContainerTypeProvisionOutcome provisionOutcome;
+        // (5a) InterStepState.SpeContainerId is H7's hand-off and is written ONLY by MarkCompleteAsync, after the bind (owner
+        //      round 41 item 1). H8 is not complete (5), so a value here predates the bind: the pre-round-41
+        //      replication-pending path wrote the UNBOUND root container's id there. That path ALSO named it in the T6 gate's
+        //      evidence, but evidence never survived Cosmos' Newtonsoft serializer ({"valueKind":1} — owner round 49 item
+        //      2), so this field is the only place such a run records its root container. It is MOVED into H8's typed
+        //      creation record (InterStepState.SpeContainerCreation) and withdrawn before ANY write this entry makes — so no
+        //      persisted state of an incomplete H8 hands a container to H7, and the container is resumed, not orphaned.
+        AdoptPreRound41HandOff(run);
+
+        // (5b) The root container's owner (unified-access-control-r2 task 165, owner round 35 item 1): every SPE
+        //      container is stamped with its owning business unit at creation — here the ROOT business unit of the
+        //      customer's Dataverse environment (H5 output; under D-12 the environment is the customer's own). Resolved
+        //      BEFORE any external side effect: H8 never creates a container it could not bind. H8 runs after H5
+        //      (DagAdvancer.HandlerDependencies), so a missing URL is an upstream defect — Resumable.
+        var dataverseEnvUrl = run.InterStepState.DataverseEnvUrl;
+        if (string.IsNullOrWhiteSpace(dataverseEnvUrl))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerTypeRejectionCodes.MissingDataverseEnvUrl,
+                "InterStepState.DataverseEnvUrl is empty — H5 (Dataverse environment) MUST complete before H8: the root " +
+                "container is bound to the environment's root business unit (task 165, owner round 35 item 1).",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        Guid rootBusinessUnitId;
         try
         {
-            var provisionRequest = new SpeContainerTypeProvisionRequest(
-                CustomerId: envelope.CustomerId,
-                TenantId: tenantId,
-                OwningAppId: owningAppId,
-                SharePointDomain: sharePointDomain,
-                VaultName: keyVaultName,
-                CertSecretName: certSecretName,
-                DisplayName: displayName);
-            provisionOutcome = await _provisioner.ProvisionAsync(provisionRequest, cancellationToken)
+            var root = await _rootBusinessUnitReader
+                .ReadRootBusinessUnitIdAsync(dataverseEnvUrl, tenantId, cancellationToken)
                 .ConfigureAwait(false);
+            if (root is not { } resolved || resolved == Guid.Empty)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved,
+                    $"Dataverse environment '{dataverseEnvUrl}' reports no root business unit — the root container " +
+                    "would have no owner, so none is created.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            rootBusinessUnitId = resolved;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "H8 provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
+                "H8 could not read the root business unit: runId={RunId} customerId={CustomerId}",
                 envelope.RunId, envelope.CustomerId);
             return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerTypeRejectionCodes.ProvisioningInfraFault,
-                $"SPE container-type provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "No confirmed external side effect — Resumable.",
+                SpeContainerTypeRejectionCodes.RootBusinessUnitUnresolved,
+                $"Reading the root business unit of '{dataverseEnvUrl}' failed: {ex.GetType().Name}: {ex.Message}. " +
+                "No container was created — Resumable.",
                 cancellationToken).ConfigureAwait(false);
         }
 
-        if (provisionOutcome is SpeContainerTypeProvisionOutcome.Failure provisionFailure)
+        // (5c) What THIS run's H8 already created (unified-access-control-r2 task 165, owner rounds 41 + 49) — read from the
+        //      run's TYPED creation record, never from gate evidence. H8 is not complete (5), so a recorded container type /
+        //      root container is one H8 made on an earlier entry that stopped before completing: the 24h replication wait
+        //      (7b), a quarantined verification, bind or KV step, a fault with no answer, or a crash. A re-entry RESUMES
+        //      with it — it never calls ProvisionAsync for a recorded root container (that created a second container type
+        //      and root container on every resume and orphaned the first one UNBOUND).
+        var recorded = ReadRecordedCreation(run);
+        if (recorded.Inconsistent)
         {
-            if (provisionFailure.IsDelegatedTokenTrap)
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                SpeContainerTypeRejectionCodes.CreationRecordInconsistent,
+                "The run's H8 creation record (interStepState.speContainerCreation) names root container(s) " +
+                $"'{string.Join("', '", recorded.AllContainerIds)}' or an unanswered root-container creation, but no container " +
+                "type (interStepState.containerTypeId) — H8 never writes that state. Nothing was created: an operator must " +
+                "establish which container type they belong to (or remove them) and correct the run before H8 resumes.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // A container type that is now known withdraws an earlier "type in doubt" (an operator recorded it).
+        if (recorded.ContainerTypeId is not null && run.InterStepState.SpeContainerCreation is { ContainerTypeInDoubtSince: not null } known)
+        {
+            known.ContainerTypeInDoubtSince = null;
+        }
+
+        // (5d) A container-type POST of this run got no authoritative answer (owner round 49 item 2): a type may exist that
+        //      no one names, and a container type can neither be deleted nor be found app-only. H8 creates NO type until an
+        //      operator has checked with a delegated SharePoint Embedded admin token and cleared the quarantine below.
+        if (recorded.ContainerTypeId is null && recorded.ContainerTypeInDoubtSince is { } typeInDoubtSince)
+        {
+            if (!QuarantineClearedSince(run, typeInDoubtSince))
             {
                 return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                    SpeContainerTypeRejectionCodes.TrapT6DelegatedTokenDetected, provisionFailure.Diagnostic,
+                    SpeContainerTypeRejectionCodes.ContainerTypeCreationInDoubt,
+                    ContainerTypeInDoubtDiagnostic(envelope, owningAppId, typeInDoubtSince),
                     cancellationToken).ConfigureAwait(false);
             }
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerTypeRejectionCodes.ProvisioningFailed, provisionFailure.Diagnostic, cancellationToken)
-                .ConfigureAwait(false);
+
+            // The operator cleared H8's in-doubt quarantine after checking (a type they found would now be recorded in
+            // interStepState.containerTypeId). The marker is withdrawn and a type is created below.
+            _logger.LogWarning(
+                "H8 container-type creation in doubt since {Since} was cleared by an operator — creating the type: runId={RunId}",
+                typeInDoubtSince, envelope.RunId);
+            run.InterStepState.SpeContainerCreation!.ContainerTypeInDoubtSince = null;
         }
 
-        var outputs = ((SpeContainerTypeProvisionOutcome.Success)provisionOutcome).Outputs;
-        if (string.IsNullOrWhiteSpace(outputs.ContainerTypeId) || string.IsNullOrWhiteSpace(outputs.RootContainerId))
+        SpeContainerTypeProvisionOutputs outputs;
+        if (recorded.RootContainerId is { } recordedRoot)
         {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerTypeRejectionCodes.ProvisioningOutputsIncomplete,
-                "SPE container-type provisioner returned incomplete outputs — one of ContainerTypeId / " +
-                "RootContainerId is blank.",
-                cancellationToken).ConfigureAwait(false);
+            outputs = new SpeContainerTypeProvisionOutputs(recorded.ContainerTypeId!, recordedRoot, recorded.AdditionalContainerIds);
+            _logger.LogInformation(
+                "H8 resumes with the container type {ContainerTypeId} and root container {RootContainerId} it already " +
+                "created — nothing is created: runId={RunId} customerId={CustomerId}",
+                outputs.ContainerTypeId, outputs.RootContainerId, envelope.RunId, envelope.CustomerId);
+        }
+        else
+        {
+            // (6) Invoke the provisioner (container-type + root container, T6
+            //     confidential-client cert-based) — or, when this run already
+            //     created the container type, ONLY a root container in it: one
+            //     the type already holds is ADOPTED (owner round 49 item 2), and
+            //     none is created while an unanswered root-container POST may
+            //     still appear (the replication window). The provisioner returns
+            //     every fault after a Graph write as a Failure saying what may
+            //     exist; it throws only before any Graph call (cert load).
+            var rootContainerInDoubt = recorded.RootContainerInDoubtSince is { } rootInDoubtSince
+                                       && DateTimeOffset.UtcNow - rootInDoubtSince < RootContainerInDoubtWindow;
+            SpeContainerTypeProvisionOutcome provisionOutcome;
+            try
+            {
+                var provisionRequest = new SpeContainerTypeProvisionRequest(
+                    CustomerId: envelope.CustomerId,
+                    TenantId: tenantId,
+                    OwningAppId: owningAppId,
+                    SharePointDomain: sharePointDomain,
+                    VaultName: keyVaultName,
+                    CertSecretName: certSecretName,
+                    DisplayName: displayName,
+                    ExistingContainerTypeId: recorded.ContainerTypeId,
+                    RootContainerCreationInDoubt: rootContainerInDoubt);
+                provisionOutcome = await _provisioner.ProvisionAsync(provisionRequest, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H8 provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerTypeRejectionCodes.ProvisioningInfraFault,
+                    $"SPE container-type provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                    "Raised before any Graph write (the provisioner returns every later fault as a Failure) — Resumable.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (provisionOutcome is SpeContainerTypeProvisionOutcome.Failure provisionFailure)
+            {
+                // Record what may exist BEFORE anything else (owner round 49 item 2): the type it created (a resume creates
+                // only a root container in it), a type that may exist unnamed, a root container that may exist unseen.
+                var createdType = string.IsNullOrWhiteSpace(provisionFailure.CreatedContainerTypeId)
+                    ? recorded.ContainerTypeId
+                    : provisionFailure.CreatedContainerTypeId.Trim();
+                if (createdType is not null || provisionFailure.ContainerTypeInDoubt || provisionFailure.RootContainerInDoubt)
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    var failureRecord = await RecordCreationAsync(run, etag, new CreationUpdate(
+                            ContainerTypeId: createdType,
+                            RootContainerId: null,
+                            AdditionalContainerIds: null,
+                            ContainerTypeInDoubtSince: provisionFailure.ContainerTypeInDoubt ? now : null,
+                            RootContainerInDoubtSince: provisionFailure.RootContainerInDoubt ? now : recorded.RootContainerInDoubtSince,
+                            Status: provisionFailure.ContainerTypeInDoubt
+                                ? SpeContainerCreationRecord.StatusContainerTypeInDoubt
+                                : provisionFailure.RootContainerInDoubt
+                                    ? SpeContainerCreationRecord.StatusRootContainerInDoubt
+                                    : SpeContainerCreationRecord.StatusTypeOnly),
+                        expectedRootContainerId: null, envelope)
+                        .ConfigureAwait(false);
+                    if (failureRecord.Refusal is { } failureRefusal)
+                    {
+                        return failureRefusal;
+                    }
+
+                    (run, etag) = (failureRecord.Run!, failureRecord.ETag!);
+                }
+
+                if (provisionFailure.ContainerTypeInDoubt)
+                {
+                    return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                        SpeContainerTypeRejectionCodes.ContainerTypeCreationInDoubt,
+                        provisionFailure.Diagnostic + " " +
+                        ContainerTypeInDoubtDiagnostic(envelope, owningAppId, run.InterStepState.SpeContainerCreation?.ContainerTypeInDoubtSince),
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                if (provisionFailure.IsDelegatedTokenTrap)
+                {
+                    return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                        SpeContainerTypeRejectionCodes.TrapT6DelegatedTokenDetected, provisionFailure.Diagnostic,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerTypeRejectionCodes.ProvisioningFailed,
+                    provisionFailure.Diagnostic + (provisionFailure.RootContainerInDoubt
+                        ? " Recorded: the resume lists the container type and adopts the container if it was created."
+                        : string.Empty),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (provisionOutcome is SpeContainerTypeProvisionOutcome.RootContainerNotYetVisible notYetVisible)
+            {
+                // An earlier root-container POST got no answer and its type lists no container yet: creating another now
+                // could leave the first one unbound when it appears. Wait (a run-level pause, like the replication wait);
+                // the next entry lists again, and creates only once the window has passed.
+                return await MarkWaitingOnGateAsync(run, etag, new CreationUpdate(
+                        ContainerTypeId: notYetVisible.ContainerTypeId,
+                        RootContainerId: null,
+                        AdditionalContainerIds: null,
+                        ContainerTypeInDoubtSince: null,
+                        RootContainerInDoubtSince: recorded.RootContainerInDoubtSince,
+                        Status: SpeContainerCreationRecord.StatusRootContainerInDoubt),
+                    notYetVisible.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+
+            outputs = ((SpeContainerTypeProvisionOutcome.Success)provisionOutcome).Outputs;
+            if (string.IsNullOrWhiteSpace(outputs.ContainerTypeId) || string.IsNullOrWhiteSpace(outputs.RootContainerId))
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerTypeRejectionCodes.ProvisioningOutputsIncomplete,
+                    "SPE container-type provisioner returned incomplete outputs — one of ContainerTypeId / " +
+                    "RootContainerId is blank.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // (6b) RECORD the creation in the run NOW — before verification, the bind or anything else — so no later
+            //      failure, wait, crash or lost write can make a re-entry create a second one (owner rounds 41 + 49). The
+            //      record is H8's own and TYPED: InterStepState.ContainerTypeId + InterStepState.SpeContainerCreation
+            //      (the root container, and any further containers adopted with it). It is NOT the H7 hand-off
+            //      (SpeContainerId), which only a bound container ever reaches.
+            var record = await RecordCreationAsync(run, etag, new CreationUpdate(
+                    ContainerTypeId: outputs.ContainerTypeId,
+                    RootContainerId: outputs.RootContainerId,
+                    AdditionalContainerIds: outputs.AdditionalContainerIds,
+                    ContainerTypeInDoubtSince: null,
+                    RootContainerInDoubtSince: null,
+                    Status: SpeContainerCreationRecord.StatusCreated),
+                expectedRootContainerId: null, envelope)
+                .ConfigureAwait(false);
+            if (record.Refusal is { } refusal)
+            {
+                return refusal;
+            }
+
+            (run, etag) = (record.Run!, record.ETag!);
         }
 
         // (7) T6 post-condition: verify the root container is readable via a
@@ -411,21 +657,103 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         // (7b) DS-4 §2 / this project's CLAUDE.md MUST rules: the up-to-24h
         // SPE container-type replication window is a RUN-LEVEL external
         // blocker, not a handler defect. The container-type + root container
-        // DO exist (real, durable side effects) — persist those IDs so a
-        // later resume does not need to re-derive them — but do NOT write the
-        // KV secret yet (that still waits on Verified, unchanged ordering)
-        // and do NOT record a CompletedPhase (H8 has not finished; a later
-        // resume re-runs HandleAsync in full). RunStatus.WaitingOnGate is a
-        // session-free pause — no other handler in the DAG depends on H8
-        // (DagAdvancer.HandlerDependencies has no entry keyed on H8), so this
-        // does not block unrelated branches.
+        // DO exist (real, durable side effects) and are already RECORDED (6b),
+        // so the later re-entry RESUMES with them at (7) — it creates nothing
+        // (owner round 41 item 1). Do NOT write the KV secret yet (that still
+        // waits on Verified, unchanged ordering), do NOT bind (the container
+        // may be unaddressable), do NOT hand the container to H7, and do NOT
+        // record a CompletedPhase. RunStatus.WaitingOnGate is a session-free
+        // pause; H7 depends on H8 (DagAdvancer.HandlerDependencies), so it waits
+        // for the bound container — H9 and the other branches still advance.
         if (verifyResult is SpeContainerVerificationResult.ReplicationPending pending)
         {
-            return await MarkWaitingOnGateAsync(run, etag, outputs, pending.Diagnostic, cancellationToken)
-                .ConfigureAwait(false);
+            return await MarkWaitingOnGateAsync(run, etag, new CreationUpdate(
+                    ContainerTypeId: outputs.ContainerTypeId,
+                    RootContainerId: outputs.RootContainerId,
+                    AdditionalContainerIds: outputs.AdditionalContainerIds,
+                    ContainerTypeInDoubtSince: null,
+                    RootContainerInDoubtSince: null,
+                    Status: SpeContainerCreationRecord.StatusReplicationPending),
+                pending.Diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
         var verified = (SpeContainerVerificationResult.Verified)verifyResult;
+
+        // (7c) Bind the verified root container to its owning business unit (task 165, owner round 35 item 1): stamp,
+        //      read back, and REMOVE the container when the stamp did not land — no unbound container is handed to H7
+        //      or left behind. Done after verification because an SPE container may be unaddressable for up to 24h
+        //      after creation (7b): binding earlier would remove healthy containers during that documented window.
+        SpeContainerBindOutcome bindOutcome;
+        try
+        {
+            bindOutcome = await _provisioner.BindRootContainerAsync(
+                new SpeContainerBindRequest(
+                    CustomerId: envelope.CustomerId,
+                    TenantId: tenantId,
+                    OwningAppId: owningAppId,
+                    VaultName: keyVaultName,
+                    CertSecretName: certSecretName,
+                    ContainerId: outputs.RootContainerId,
+                    BusinessUnitId: rootBusinessUnitId),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 bind infrastructure fault: runId={RunId} customerId={CustomerId} rootContainerId={RootContainerId}",
+                envelope.RunId, envelope.CustomerId, outputs.RootContainerId);
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                SpeContainerTypeRejectionCodes.ContainerBindingInfraFault,
+                $"Binding root container '{outputs.RootContainerId}' to business unit '{rootBusinessUnitId}' failed before " +
+                $"any Graph call: {ex.GetType().Name}: {ex.Message}. The container exists UNBOUND (no SPE admin route reaches " +
+                "it) — bind it with Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind, or remove it — QuarantineRequired.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        if (bindOutcome is SpeContainerBindOutcome.NotBound notBound)
+        {
+            if (notBound.Removed)
+            {
+                // The recorded root container no longer exists. Keep the (undeletable) container type on record and
+                // drop the container, so a resume never verifies a deleted container (a 404 reads as the replication wait)
+                // and never makes a second type: it lists the type and adopts a container still in it (an additional one),
+                // or creates ONLY a new root container. Persisted with the merge-safe record write — a lost write here would
+                // leave the deleted container on record.
+                var removal = await RecordCreationAsync(run, etag, new CreationUpdate(
+                        ContainerTypeId: outputs.ContainerTypeId,
+                        RootContainerId: null,
+                        AdditionalContainerIds: outputs.AdditionalContainerIds,
+                        ContainerTypeInDoubtSince: null,
+                        RootContainerInDoubtSince: null,
+                        Status: SpeContainerCreationRecord.StatusRootContainerRemoved),
+                    expectedRootContainerId: outputs.RootContainerId, envelope)
+                    .ConfigureAwait(false);
+                if (removal.Refusal is { } removalRefusal)
+                {
+                    return removalRefusal;
+                }
+
+                (run, etag) = (removal.Run!, removal.ETag!);
+            }
+
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                notBound.Removed
+                    ? SpeContainerTypeRejectionCodes.ContainerBindingFailed
+                    : SpeContainerTypeRejectionCodes.ContainerBindingFailedNotRemoved,
+                notBound.Diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        // (7d) Further containers adopted with the root (a repeated creation in the run's own type — owner round 49 item 2):
+        //      each is bound to the same business unit, or removed, before anything durable consumes the root — none is
+        //      left unbound. One that is neither bound nor removed stays on record and the run is quarantined naming it.
+        var additionalRefusal = await BindAdditionalContainersAsync(
+                run, etag, outputs, envelope, tenantId, owningAppId, keyVaultName, certSecretName, rootBusinessUnitId,
+                cancellationToken)
+            .ConfigureAwait(false);
+        if (additionalRefusal is not null)
+        {
+            return additionalRefusal;
+        }
 
         // (8) Persist the real container-type id to the customer KV (the slot
         //     H4 pre-created with a placeholder — StaticKvSecretManifest.cs).
@@ -472,7 +800,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
             envelope.RunId, envelope.CustomerId, outputs.ContainerTypeId, outputs.RootContainerId,
             verified.Status, kvResult.GetType().Name, stopwatch.ElapsedMilliseconds);
 
-        return await MarkCompleteAsync(run, etag, idempotencyKey, outputs, verified, envelope, cancellationToken)
+        return await MarkCompleteAsync(run, etag, idempotencyKey, outputs, verified, rootBusinessUnitId, envelope, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -550,41 +878,33 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
     }
 
     /// <summary>
-    /// Records the 24h SPE replication-lag pause. Sets
-    /// <see cref="RunStatus.WaitingOnGate"/> (never Resumable/QuarantineRequired
-    /// per this project's CLAUDE.md MUST rules), persists the already-created
-    /// container-type/root-container IDs, and marks the T6Verified gate
-    /// Pending (with evidence) rather than Verified. Does NOT append a
-    /// CompletedPhase — H8 has not finished; a subsequent resume re-executes
-    /// HandleAsync from the top, re-attempting verification (the container-
-    /// type + container already exist on the SPE side; only the app-only GET
-    /// is retried).
+    /// Records a run-level external wait: the 24h SPE replication lag (verification answered 404), or a root-container
+    /// creation in doubt whose container is not listed yet. Sets <see cref="RunStatus.WaitingOnGate"/> (never
+    /// Resumable/QuarantineRequired per this project's CLAUDE.md MUST rules), keeps everything H8 created ON RECORD in the
+    /// typed creation record (<paramref name="update"/> — InterStepState.ContainerTypeId + SpeContainerCreation), and
+    /// marks the T6 gate Pending rather than Verified. Does NOT append a CompletedPhase and does NOT hand the container to
+    /// H7 (InterStepState.SpeContainerId stays empty — an unbound container is never handed off; owner round 41 item 1).
+    /// A subsequent re-entry finds the record (ReadRecordedCreation) and RESUMES with it: a recorded root container is
+    /// verified again (then bound, the KV write, completion); a type with a creation in doubt is listed again.
     /// </summary>
     private async Task<HandlerResult> MarkWaitingOnGateAsync(
         ProvisioningRun run,
         string etag,
-        SpeContainerTypeProvisionOutputs outputs,
+        CreationUpdate update,
         string diagnostic,
         CancellationToken cancellationToken)
     {
-        run.InterStepState.ContainerTypeId = outputs.ContainerTypeId;
-        run.InterStepState.SpeContainerId = outputs.RootContainerId;
-        run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
-        {
-            Status = GateState.Pending,
-            VerifierHandler = HandlerIdentifier,
-            Evidence = BuildEvidence(outputs.RootContainerId, "replication-pending", verifiedViaAppOnlyToken: false),
-        };
+        ApplyCreationRecord(run, update);
 
         run.Status = RunStatus.WaitingOnGate;
         run.CurrentPhase = HandlerIdentifier;
         run.ErrorDetail = null; // Not an error — an expected external wait.
 
         _logger.LogInformation(
-            "H8 SPE container-type provisioning WaitingOnGate (24h replication lag): runId={RunId} " +
+            "H8 SPE container-type provisioning WaitingOnGate ({Status}): runId={RunId} " +
             "customerId={CustomerId} containerTypeId={ContainerTypeId} rootContainerId={RootContainerId} " +
             "diagnostic={Diagnostic}",
-            run.RunId, run.CustomerId, outputs.ContainerTypeId, outputs.RootContainerId, diagnostic);
+            update.Status, run.RunId, run.CustomerId, update.ContainerTypeId, update.RootContainerId ?? "(none)", diagnostic);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
@@ -615,6 +935,7 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         string idempotencyKey,
         SpeContainerTypeProvisionOutputs outputs,
         SpeContainerVerificationResult.Verified verified,
+        Guid owningBusinessUnitId,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -628,12 +949,20 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
         // present") — this is the deviation-(2) handoff mechanism documented
         // in this file's header.
         run.InterStepState.SpeContainerId = outputs.RootContainerId;
+        // The typed record says what H8 finished with (live gate (d) reads it): the root container, bound to this unit.
+        run.InterStepState.SpeContainerCreation = new SpeContainerCreationRecord
+        {
+            RootContainerId = outputs.RootContainerId,
+            OwningBusinessUnitId = owningBusinessUnitId.ToString("D"),
+            Status = SpeContainerCreationRecord.StatusBound,
+            UpdatedAt = completedAt,
+        };
         run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
         {
             Status = GateState.Verified,
             VerifiedAt = completedAt,
             VerifierHandler = HandlerIdentifier,
-            Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true),
+            Evidence = BuildEvidence(outputs.RootContainerId, verified.Status, verifiedViaAppOnlyToken: true, owningBusinessUnitId),
         };
 
         run.Status = RunStatus.Running;
@@ -676,6 +1005,328 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
     }
 
     /// <summary>
+    /// How long an unanswered root-container POST may still produce a container its type does not list yet — the SPE
+    /// replication window (design.md §4.1 H8 row: up to 24h). Within it H8 creates no further root container while its
+    /// type lists none (owner round 49 item 2).
+    /// </summary>
+    internal static readonly TimeSpan RootContainerInDoubtWindow = TimeSpan.FromHours(24);
+
+    /// <summary>Conflicting writes a creation record is merged over before H8 gives up (operator writes only — dispatch is session-serialized per customer).</summary>
+    private const int RecordMergeAttempts = 5;
+
+    /// <summary>
+    /// What this run's H8 already created and has not completed (unified-access-control-r2 task 165, owner rounds 41 +
+    /// 49), read ONLY from typed fields — never from gate evidence: <see cref="InterStepState.ContainerTypeId"/> (H8 is its
+    /// only writer) and <see cref="InterStepState.SpeContainerCreation"/>. A pre-round-41 run's root container is moved
+    /// into the record by <see cref="AdoptPreRound41HandOff"/> first.
+    /// </summary>
+    internal static RecordedCreation ReadRecordedCreation(ProvisioningRun run)
+    {
+        var creation = run.InterStepState.SpeContainerCreation;
+        var additional = (creation?.AdditionalContainerIds ?? Array.Empty<string>())
+            .Select(Trimmed)
+            .Where(id => id is not null)
+            .Select(id => id!)
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        var root = Trimmed(creation?.RootContainerId);
+        return new RecordedCreation(
+            ContainerTypeId: Trimmed(run.InterStepState.ContainerTypeId),
+            RootContainerId: root,
+            AdditionalContainerIds: additional.Where(id => !string.Equals(id, root, StringComparison.Ordinal)).ToList(),
+            ContainerTypeInDoubtSince: creation?.ContainerTypeInDoubtSince,
+            RootContainerInDoubtSince: creation?.RootContainerInDoubtSince);
+    }
+
+    /// <summary>
+    /// The pre-round-41 replication-pending path wrote the UNBOUND root container into
+    /// <see cref="InterStepState.SpeContainerId"/> (H7's hand-off). It is moved into the typed creation record — as the
+    /// root container, or as a further container to bind when the record already names a different root — and the
+    /// hand-off is withdrawn. Called before any write of an entry of an incomplete H8.
+    /// </summary>
+    internal static void AdoptPreRound41HandOff(ProvisioningRun run)
+    {
+        var handOff = Trimmed(run.InterStepState.SpeContainerId);
+        run.InterStepState.SpeContainerId = null;
+        if (handOff is null)
+        {
+            return;
+        }
+
+        var creation = run.InterStepState.SpeContainerCreation ??= new SpeContainerCreationRecord
+        {
+            Status = SpeContainerCreationRecord.StatusCreated,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        if (Trimmed(creation.RootContainerId) is null)
+        {
+            creation.RootContainerId = handOff;
+        }
+        else if (!string.Equals(Trimmed(creation.RootContainerId), handOff, StringComparison.Ordinal))
+        {
+            creation.AdditionalContainerIds ??= new List<string>();
+            if (!creation.AdditionalContainerIds.Contains(handOff, StringComparer.Ordinal))
+            {
+                creation.AdditionalContainerIds.Add(handOff);
+            }
+        }
+    }
+
+    /// <summary>
+    /// True when an operator cleared a quarantine H8 raised, at or after <paramref name="since"/> — the acknowledgement the
+    /// "container type in doubt" quarantine asks for (its diagnostic is the procedure).
+    /// </summary>
+    private static bool QuarantineClearedSince(ProvisioningRun run, DateTimeOffset since) =>
+        run.Quarantine is { State: QuarantineState.Cleared, ClearedAt: { } clearedAt } quarantine
+        && string.Equals(quarantine.QuarantinedByHandler, HandlerIdentifier, StringComparison.Ordinal)
+        && clearedAt >= since;
+
+    /// <summary>THE operator procedure for a container type in doubt (owner round 49 item 2).</summary>
+    private static string ContainerTypeInDoubtDiagnostic(HandlerEnvelope envelope, string owningAppId, DateTimeOffset? since) =>
+        $"A container-type creation for run '{envelope.RunId}' got no authoritative answer" +
+        (since is { } s ? $" (at {s:O})" : string.Empty) +
+        ": a container type owned by app '" + owningAppId + "' may exist that the run does not name. A container type " +
+        "cannot be deleted and is capped per tenant, so H8 creates NO type until an operator checks. With a DELEGATED " +
+        "SharePoint Embedded admin token (app-only answers 403): GET https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes " +
+        $"and look for owningAppId '{owningAppId}'. If one exists, set the run document's interStepState.containerTypeId to " +
+        "its id (H8 then creates only a root container in it). Then clear this quarantine (POST /api/runs/{id}/clear-quarantine) " +
+        "and resume: clearing it is the confirmation — without a recorded type H8 then creates one.";
+
+    /// <summary>
+    /// Binds every further container adopted with the root (<see cref="SpeContainerTypeProvisionOutputs.AdditionalContainerIds"/>)
+    /// to the root's business unit, or removes it (the provisioner's bind-or-remove). A bound or removed one leaves the
+    /// record; one that is neither stays on it and the run is quarantined naming it. Null to continue.
+    /// </summary>
+    private async Task<HandlerResult?> BindAdditionalContainersAsync(
+        ProvisioningRun run,
+        string etag,
+        SpeContainerTypeProvisionOutputs outputs,
+        HandlerEnvelope envelope,
+        string tenantId,
+        string owningAppId,
+        string keyVaultName,
+        string certSecretName,
+        Guid rootBusinessUnitId,
+        CancellationToken cancellationToken)
+    {
+        var pending = (outputs.AdditionalContainerIds ?? Array.Empty<string>())
+            .Where(id => !string.IsNullOrWhiteSpace(id) && !string.Equals(id, outputs.RootContainerId, StringComparison.Ordinal))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+        foreach (var containerId in pending.ToList())
+        {
+            SpeContainerBindOutcome outcome;
+            try
+            {
+                outcome = await _provisioner.BindRootContainerAsync(
+                    new SpeContainerBindRequest(
+                        CustomerId: envelope.CustomerId,
+                        TenantId: tenantId,
+                        OwningAppId: owningAppId,
+                        VaultName: keyVaultName,
+                        CertSecretName: certSecretName,
+                        ContainerId: containerId,
+                        BusinessUnitId: rootBusinessUnitId),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                KeepOnRecord(pending);
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    SpeContainerTypeRejectionCodes.ContainerBindingInfraFault,
+                    $"Binding further container '{containerId}' (found in the run's own container type with root container " +
+                    $"'{outputs.RootContainerId}') to business unit '{rootBusinessUnitId}' failed before any Graph call: " +
+                    $"{ex.GetType().Name}: {ex.Message}. It exists UNBOUND — bind it with Backfill-SpeContainerBusinessUnitStamp.ps1 " +
+                    "-Bind, or remove it — QuarantineRequired.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (outcome is SpeContainerBindOutcome.NotBound { Removed: false } notBound)
+            {
+                KeepOnRecord(pending);
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    SpeContainerTypeRejectionCodes.ContainerBindingFailedNotRemoved,
+                    $"Further container '{containerId}' in the run's own container type: {notBound.Diagnostic}",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // Bound, or removed: nothing unbound remains of it.
+            pending.Remove(containerId);
+        }
+
+        KeepOnRecord(pending);
+        return null;
+
+        void KeepOnRecord(List<string> remaining)
+        {
+            if (run.InterStepState.SpeContainerCreation is { } creation)
+            {
+                creation.AdditionalContainerIds = remaining.Count == 0 ? null : remaining.ToList();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Persists the creation record (<paramref name="update"/> — <see cref="InterStepState.ContainerTypeId"/> and the typed
+    /// <see cref="InterStepState.SpeContainerCreation"/>) and withdraws any H7 hand-off, with the CancellationToken.None —
+    /// something was created, so the record is written even when the caller is cancelled. On a concurrent write the
+    /// record is MERGED over the current document and retried (it touches only H8's own fields) — never over another
+    /// creation's record: a current document naming a different type, or a root container that is neither the one this
+    /// entry started from (<paramref name="expectedRootContainerId"/>) nor the one it writes, is left alone. When it cannot
+    /// be persisted (the run is gone, or the merges keep losing), the refusal is QuarantineRequired and names the ids: the
+    /// root container is UNBOUND and unrecorded, so an operator binds or removes it.
+    /// </summary>
+    private async Task<(ProvisioningRun? Run, string? ETag, HandlerResult? Refusal)> RecordCreationAsync(
+        ProvisioningRun run,
+        string etag,
+        CreationUpdate update,
+        string? expectedRootContainerId,
+        HandlerEnvelope envelope)
+    {
+        for (var attempt = 1; attempt <= RecordMergeAttempts; attempt++)
+        {
+            ApplyCreationRecord(run, update);
+
+            var replace = await _repository.ReplaceRunAsync(run, etag, CancellationToken.None).ConfigureAwait(false);
+            switch (replace)
+            {
+                case ReplaceRunResult.Success success:
+                    _logger.LogInformation(
+                        "H8 recorded its creation ({Status}): runId={RunId} containerTypeId={ContainerTypeId} " +
+                        "rootContainerId={RootContainerId}",
+                        update.Status, run.RunId, update.ContainerTypeId ?? "(in doubt)", update.RootContainerId ?? "(none)");
+                    return (run, success.ETag, null);
+
+                case ReplaceRunResult.Conflict conflict:
+                    var current = conflict.Current.Run;
+                    if (current.CompletedPhases.Any(cp => string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)))
+                    {
+                        return (null, null, NotPersisted("a concurrent write completed H8"));
+                    }
+
+                    AdoptPreRound41HandOff(current);
+                    var currentRecord = ReadRecordedCreation(current);
+                    if (currentRecord.ContainerTypeId is { } currentType
+                        && !string.Equals(currentType, update.ContainerTypeId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Never overwrite another creation's record — that would orphan IT.
+                        return (null, null, NotPersisted($"the run already records container type '{currentType}'"));
+                    }
+
+                    if (currentRecord.RootContainerId is { } currentRoot
+                        && !string.Equals(currentRoot, update.RootContainerId, StringComparison.Ordinal)
+                        && !string.Equals(currentRoot, expectedRootContainerId, StringComparison.Ordinal))
+                    {
+                        return (null, null, NotPersisted($"the run already records root container '{currentRoot}'"));
+                    }
+
+                    _logger.LogWarning(
+                        "H8 creation record lost a concurrent write (attempt {Attempt}) — merging over the current run: runId={RunId}",
+                        attempt, run.RunId);
+                    (run, etag) = (current, conflict.Current.ETag);
+                    continue;
+
+                default:
+                    return (null, null, NotPersisted("the run was deleted"));
+            }
+        }
+
+        return (null, null, NotPersisted($"{RecordMergeAttempts} merges over concurrent writes all lost"));
+
+        HandlerResult NotPersisted(string reason)
+        {
+            var created = update.ContainerTypeId is null
+                ? "may have created a container type it cannot name"
+                : $"created container type '{update.ContainerTypeId}'";
+            var containers = new[] { update.RootContainerId }
+                .Concat(update.AdditionalContainerIds ?? Array.Empty<string>())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToList();
+            var diagnostic =
+                $"H8 {created}" +
+                (containers.Count == 0 ? string.Empty : $" and container(s) '{string.Join("', '", containers)}'") +
+                (update.RootContainerInDoubtSince is not null ? " (a root-container creation in it got no answer)" : string.Empty) +
+                $" but could not record that in run '{envelope.RunId}' ({reason}). A root container is UNBOUND — no SPE " +
+                "admin route reaches it: bind it with Backfill-SpeContainerBusinessUnitStamp.ps1 -Bind " +
+                "<containerId>=<rootBusinessUnitId>, or remove it, before this run is resumed.";
+            _logger.LogCritical(
+                "H8 creation NOT recorded: runId={RunId} customerId={CustomerId} containerTypeId={ContainerTypeId} " +
+                "containers={Containers} reason={Reason}",
+                envelope.RunId, envelope.CustomerId, update.ContainerTypeId ?? "(in doubt)", string.Join(",", containers), reason);
+            return new HandlerResult.Failure(
+                FailureClass.QuarantineRequired, SpeContainerTypeRejectionCodes.CreationRecordNotPersisted, diagnostic);
+        }
+    }
+
+    /// <summary>
+    /// Writes <paramref name="update"/> into the run: <see cref="InterStepState.ContainerTypeId"/> (when known), the typed
+    /// <see cref="InterStepState.SpeContainerCreation"/>, the T6 gate (Pending; its evidence is the operator's view, never
+    /// read back), and withdraws the H7 hand-off.
+    /// </summary>
+    private static void ApplyCreationRecord(ProvisioningRun run, CreationUpdate update)
+    {
+        if (update.ContainerTypeId is not null)
+        {
+            run.InterStepState.ContainerTypeId = update.ContainerTypeId;
+        }
+
+        run.InterStepState.SpeContainerId = null;
+        run.InterStepState.SpeContainerCreation = new SpeContainerCreationRecord
+        {
+            RootContainerId = update.RootContainerId,
+            AdditionalContainerIds = update.AdditionalContainerIds is { Count: > 0 } additional
+                ? additional.Where(id => !string.Equals(id, update.RootContainerId, StringComparison.Ordinal)).ToList()
+                : null,
+            ContainerTypeInDoubtSince = update.ContainerTypeInDoubtSince,
+            RootContainerInDoubtSince = update.RootContainerInDoubtSince,
+            Status = update.Status,
+            UpdatedAt = DateTimeOffset.UtcNow,
+        };
+        if (run.InterStepState.SpeContainerCreation.AdditionalContainerIds is { Count: 0 })
+        {
+            run.InterStepState.SpeContainerCreation.AdditionalContainerIds = null;
+        }
+
+        run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
+        {
+            Status = GateState.Pending,
+            VerifierHandler = HandlerIdentifier,
+            Evidence = BuildEvidence(update.RootContainerId, update.Status, verifiedViaAppOnlyToken: false),
+        };
+    }
+
+    private static string? Trimmed(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    /// <summary>What H8 has recorded (typed fields only — <see cref="ReadRecordedCreation"/>).</summary>
+    internal sealed record RecordedCreation(
+        string? ContainerTypeId,
+        string? RootContainerId,
+        IReadOnlyList<string> AdditionalContainerIds,
+        DateTimeOffset? ContainerTypeInDoubtSince,
+        DateTimeOffset? RootContainerInDoubtSince)
+    {
+        /// <summary>Every container the record names (root first).</summary>
+        public IEnumerable<string> AllContainerIds =>
+            (RootContainerId is null ? Array.Empty<string>() : new[] { RootContainerId }).Concat(AdditionalContainerIds);
+
+        /// <summary>
+        /// Containers, or a root-container creation in doubt, without a container type — a state H8 never writes (a
+        /// container lives in a type). Quarantined; nothing is created.
+        /// </summary>
+        public bool Inconsistent =>
+            ContainerTypeId is null && (RootContainerId is not null || AdditionalContainerIds.Count > 0 || RootContainerInDoubtSince is not null);
+    }
+
+    /// <summary>One write of H8's creation record (<see cref="ApplyCreationRecord"/>).</summary>
+    private sealed record CreationUpdate(
+        string? ContainerTypeId,
+        string? RootContainerId,
+        IReadOnlyList<string>? AdditionalContainerIds,
+        DateTimeOffset? ContainerTypeInDoubtSince,
+        DateTimeOffset? RootContainerInDoubtSince,
+        string Status);
+
+    /// <summary>
     /// Builds the gate evidence JSON. <paramref name="verifiedViaAppOnlyToken"/>
     /// is now an explicit parameter (task 131 fix — previously hardcoded
     /// <c>true</c> unconditionally, which would have produced misleading
@@ -683,13 +1334,16 @@ public sealed class H8SpeContainerTypeHandler : IProvisioningHandler
     /// verification has explicitly NOT happened yet).
     /// </summary>
     private static System.Text.Json.JsonElement BuildEvidence(
-        string rootContainerId, string verifiedStatus, bool verifiedViaAppOnlyToken)
+        string? rootContainerId, string verifiedStatus, bool verifiedViaAppOnlyToken, Guid? owningBusinessUnitId = null)
     {
+        // owningBusinessUnitId: the business unit the root container is stamped with (task 165, round 35 item 1);
+        // null while the container is not yet bound (the replication-pending wait).
         var doc = System.Text.Json.JsonSerializer.SerializeToElement(new
         {
             rootContainerId,
             verifiedStatus,
             verifiedViaAppOnlyToken,
+            owningBusinessUnitId = owningBusinessUnitId?.ToString("D"),
         });
         return doc;
     }

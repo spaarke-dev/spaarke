@@ -392,6 +392,12 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     public ConcurrentBag<string> CreatedContainerDisplayNames { get; } = new();
 
     /// <summary>
+    /// The owning business unit passed with each container create — the unit stamped on the container
+    /// (unified-access-control-r2 task 165, owner round 20 item 1).
+    /// </summary>
+    public ConcurrentBag<Guid> CreatedContainerBusinessUnits { get; } = new();
+
+    /// <summary>
     /// One recorded UPDATE. <c>Sequence</c> is a monotonic counter, because <see cref="Updates"/> is a
     /// <c>ConcurrentBag</c> and bags do NOT preserve insertion order.
     /// </summary>
@@ -642,6 +648,7 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         Updates.Clear();
         DelegationProbes.Clear();
         CreatedContainerDisplayNames.Clear();
+        CreatedContainerBusinessUnits.Clear();
         SecureBuMatchCount = 1;
         OwnerTeamMatchCount = 1;
         DefaultTeamCarriesOwnerTeamName = false;
@@ -1536,9 +1543,11 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         }
 
         public override Task<ContainerDto?> CreateContainerAsync(
-            Guid containerTypeId, string displayName, string? description = null, CancellationToken ct = default)
+            Guid containerTypeId, string displayName, Guid owningBusinessUnitId, string? description = null,
+            CancellationToken ct = default)
         {
             _fixture.CreatedContainerDisplayNames.Add(displayName);
+            _fixture.CreatedContainerBusinessUnits.Add(owningBusinessUnitId);
 
             return Task.FromResult<ContainerDto?>(
                 _fixture.SpeContainerCreationSucceeds

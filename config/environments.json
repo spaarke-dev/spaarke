@@ -71,6 +71,8 @@
       },
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": true,
+      "$comment_speAdminPlatformOperatorEnvironment": "Spaarke-OPERATED environment (unified-access-control-r2 task 165, owner round 49 item 1) — today the ONLY one (round 57 item 1). A JSON boolean, unquoted: Deploy-BffApi.ps1 fails on any other type, because PowerShell reads the string 'false' as true (round 57 item 3). Deploy-BffApi.ps1 sets App Service SpeAdmin__PlatformOperatorEnvironment=true on the slot(s) it deploys to, which lets the BFF's SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type (security alerts / secure score; container-type permissions / consumers / register) serve a root-unit admin. NEVER set this on a customer environment — the deploy FAILS when a customer environment carries the setting.",
       "$comment_migration": "Dev migrated 2026-05-24 from Windows spe-api-dev-67e2xz to Linux spaarke-bff-dev (canonical naming). Old env scheduled for decommission after stability period. See projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md."
     },
 
@@ -104,9 +106,11 @@
         "docIntelName": "spaarke-docintel-demo"
       },
       "requiredCorsOrigins": [],
-      "$comment_requiredCorsOrigins": "EMPTY BECAUSE THE ENVIRONMENT IS STOPPED — not because it was audited. Verified 2026-08-25: `az webapp show -n spaarke-bff-prod` reports state=Stopped, consistent with the r3 handoff decommissioning prod/demo. It serves no traffic, so it has no live front-end origins to require. ⚠️ AUDIT BEFORE RESTARTING: if this environment is ever brought back, enumerate its Static Web App origins here FIRST. The deploy-time gate in Deploy-BffApi.ps1 will pass vacuously against an empty array — that is correct for a stopped site and wrong for a running one.",
+      "$comment_requiredCorsOrigins": "EMPTY BECAUSE THE ENVIRONMENT IS STOPPED — not because it was audited. Verified 2026-08-25: `az webapp show -n spaarke-bff-prod` reports state=Stopped, consistent with the r3 handoff decommissioning prod/demo. It serves no traffic, so it has no live front-end origins to require. ⚠️ AUDIT BEFORE RESTARTING: if this environment is ever brought back, enumerate its Static Web App origins here FIRST. The deploy-time gate in Deploy-BffApi.ps1 will pass vacuously against an empty array — that is correct for a stopped site and wrong for a running one. NOTE (main-session round 62 item 2): 'demo' is NOT in Deploy-BffApi.ps1's -Environment ValidateSet (dev, staging, production), so today no deploy reads this entry; the stand-up change must also make it reachable through -Environment (add 'demo' to the ValidateSet) and deploy with -Environment demo, or this declaration and the gates keyed on it never run.",
       "dataverseRegion": "unitedstates",
-      "isLegacyNaming": false
+      "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": false,
+      "$comment_speAdminPlatformOperatorEnvironment": "NOT YET a Spaarke-operated environment (unified-access-control-r2 task 165, owner round 57 item 1). This stopped spaarke-bff-prod is the candidate for Spaarke's production operator environment; only dev carries the marker for now. The change that stands that environment up sets this to true (a JSON boolean, unquoted) together with its .bicepparam line, SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments and the App Service setting. Until then its tenant-wide and type-wide SPE admin routes refuse (fail closed). NOTE (main-session round 62 item 2): 'demo' is NOT in Deploy-BffApi.ps1's -Environment ValidateSet (dev, staging, production), so today no deploy reads this entry; the stand-up change must also make it reachable through -Environment (add 'demo' to the ValidateSet) and deploy with -Environment demo, or this declaration and the gates keyed on it never run."
     },
 
     "_template": {
@@ -142,7 +146,9 @@
       "requiredCorsOrigins": [],
       "$comment_requiredCorsOrigins": "REQUIRED (may be empty). Origins that MUST appear in this environment's Cors__AllowedOrigins__N App Settings. List ONLY origins CorsModule's suffix rules do not already match — so NOT *.dynamics.com / *.powerapps.com / *.powerappsportals.com. In practice this means your Azure Static Web App front-ends (Office add-ins, external SPA). Deploy-BffApi.ps1 asserts these after every deploy and fails if one is missing. Leaving the key ABSENT makes the deploy warn that the environment is unaudited; an explicit empty array asserts 'this environment genuinely has no SWA front-ends'.",
       "dataverseRegion": "unitedstates",
-      "isLegacyNaming": false
+      "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": false,
+      "$comment_speAdminPlatformOperatorEnvironment": "A CUSTOMER environment is false (or leaves the key out) — ALWAYS. true is only for a Spaarke-operated environment (today only dev; Spaarke's production operator environment adds it in the change that stands it up — round 57 item 1), and the value is a JSON boolean, never a string (round 57 item 3): it opens the SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type to that environment's root admin (unified-access-control-r2 task 165, owner round 49 item 1). Deploy-BffApi.ps1 fails a deploy to an environment that carries the setting without declaring it here."
     }
   }
 }

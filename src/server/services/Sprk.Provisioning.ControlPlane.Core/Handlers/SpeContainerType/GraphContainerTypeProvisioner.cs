@@ -73,6 +73,31 @@
 // The ONE targeted exception: the registration POST tolerates an ODataError
 // 409 Conflict (treated as "already registered," not a failure) — a
 // zero-new-call-shape defensive addition, not a speculative GET.
+// RESUME (unified-access-control-r2 task 165, owner rounds 41 + 49): the
+// handler RECORDS what this call created in the run's TYPED creation record,
+// immediately, and a re-entry never calls ProvisionAsync for a recorded root
+// container. When only the container type is recorded, the request carries
+// ExistingContainerTypeId: CreateAsync creates no type, LISTS the type's
+// containers and ADOPTS one already there (a creation whose answer was lost)
+// before it creates a root container — and creates none while an earlier
+// unanswered root-container POST may still appear (RootContainerCreationInDoubt
+// -> RootContainerNotYetVisible). EVERY fault after a Graph write was sent is
+// returned as a Failure, never thrown: an ODataError is Graph's answer (nothing
+// in doubt); any other fault (a client timeout — LinkedTimeout's
+// OperationCanceledException — a dropped connection, a 2xx without an id) marks
+// the write in flight as in doubt (ContainerTypeInDoubt / RootContainerInDoubt)
+// and reports the type it created, so the handler records what may exist. A
+// resume therefore never makes a second container type (undeletable, capped per
+// tenant) or a second root container while the first may exist unbound.
+//
+// BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1):
+// BindRootContainerAsync / BindNewContainerAsync stamp the root container with
+// the customer environment's ROOT business unit (custom property
+// Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName — the one
+// C# constant the BFF shares), read it back, and DELETE the container when the
+// stamp did not land. The handler calls it after verification. That bind step
+// IS unit-tested (GraphContainerTypeProvisionerBindTests: a GraphServiceClient
+// over a hand-written fake transport — never Mock<HttpMessageHandler>).
 //
 // NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
 // with the established project precedent (GraphAppRegistrationProvisioner.cs,
@@ -152,59 +177,131 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
             _options.CertLoadTimeout, cancellationToken).ConfigureAwait(false);
 
         var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(request.TenantId, request.OwningAppId, cert);
+        return await CreateAsync(graph, request, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The Graph part of <see cref="ProvisionAsync"/>: create the container type — UNLESS
+    /// <see cref="SpeContainerTypeProvisionRequest.ExistingContainerTypeId"/> names the one this run already created
+    /// (unified-access-control-r2 task 165, owner round 41 item 1: a resume never creates a second, undeletable type) —
+    /// register the owning app on it, then create the root container in it. A failure after the type exists reports it
+    /// (<see cref="SpeContainerTypeProvisionOutcome.Failure.CreatedContainerTypeId"/>) so the handler records it.
+    /// Internal so a test can drive it with a <c>GraphServiceClient</c> over a fake transport.
+    /// </summary>
+    internal async Task<SpeContainerTypeProvisionOutcome> CreateAsync(
+        GraphServiceClient graph,
+        SpeContainerTypeProvisionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(request);
 
         _logger.LogInformation(
             "H8 Graph SPE container-type provisioning starting: customerId={CustomerId} tenantId={TenantId} " +
-            "owningAppId={OwningAppId}",
-            request.CustomerId, request.TenantId, request.OwningAppId);
+            "owningAppId={OwningAppId} existingContainerTypeId={ExistingContainerTypeId}",
+            request.CustomerId, request.TenantId, request.OwningAppId, request.ExistingContainerTypeId ?? "(none)");
 
+        // The type this call created or reused — reported on every failure after it exists.
+        string? containerTypeId = string.IsNullOrWhiteSpace(request.ExistingContainerTypeId)
+            ? null
+            : request.ExistingContainerTypeId.Trim();
+
+        // The Graph call in flight — so a fault with no authoritative answer says WHAT may now exist (owner round 49
+        // item 2: no orphan type, no unbound root).
+        var step = CreationStep.None;
         try
         {
-            // (1) Create the container type (GOTCHA 1 — v1.0 GA shape).
-            using var createTypeTimeout = LinkedTimeout(cancellationToken);
-            var containerType = await graph.Storage.FileStorage.ContainerTypes.PostAsync(
-                new FileStorageContainerType
-                {
-                    Name = request.DisplayName,
-                    OwningAppId = Guid.Parse(request.OwningAppId),
-                },
-                cancellationToken: createTypeTimeout.Token).ConfigureAwait(false);
-
-            if (containerType is null || string.IsNullOrWhiteSpace(containerType.Id))
+            if (containerTypeId is null)
             {
-                return new SpeContainerTypeProvisionOutcome.Failure(
-                    $"Graph POST /storage/fileStorage/containerTypes returned no usable Id for customerId " +
-                    $"'{request.CustomerId}'.", IsDelegatedTokenTrap: false);
-            }
+                // (1) Create the container type (GOTCHA 1 — v1.0 GA shape).
+                step = CreationStep.ContainerTypePost;
+                using var createTypeTimeout = LinkedTimeout(cancellationToken);
+                var containerType = await graph.Storage.FileStorage.ContainerTypes.PostAsync(
+                    new FileStorageContainerType
+                    {
+                        Name = request.DisplayName,
+                        OwningAppId = Guid.Parse(request.OwningAppId),
+                    },
+                    cancellationToken: createTypeTimeout.Token).ConfigureAwait(false);
 
-            _logger.LogInformation(
-                "T6 cleared: container-type ID {ContainerTypeId} created via confidential-client cert-based auth.",
-                containerType.Id);
+                if (containerType is null || string.IsNullOrWhiteSpace(containerType.Id))
+                {
+                    // Graph answered 2xx — a type may well exist, but no one can name it.
+                    return new SpeContainerTypeProvisionOutcome.Failure(
+                        $"Graph POST /storage/fileStorage/containerTypes returned no usable Id for customerId " +
+                        $"'{request.CustomerId}' — a container type may have been created.", IsDelegatedTokenTrap: false,
+                        ContainerTypeInDoubt: true);
+                }
+
+                containerTypeId = containerType.Id;
+                step = CreationStep.None;
+                _logger.LogInformation(
+                    "T6 cleared: container-type ID {ContainerTypeId} created via confidential-client cert-based auth.",
+                    containerTypeId);
+            }
+            else
+            {
+                // (1') A resume: this run already created the type. A container already in it — one an earlier creation
+                // made whose answer was lost — is ADOPTED as the root container; creating another would leave it unbound.
+                step = CreationStep.ListContainers;
+                var existing = await ListContainersOfTypeAsync(graph, containerTypeId, cancellationToken).ConfigureAwait(false);
+                step = CreationStep.None;
+                if (existing.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "H8 adopts container {RootContainerId} already in its container type {ContainerTypeId} as the root " +
+                        "container ({Count} found) — nothing is created.",
+                        existing[0], containerTypeId, existing.Count);
+                    return new SpeContainerTypeProvisionOutcome.Success(new SpeContainerTypeProvisionOutputs(
+                        ContainerTypeId: containerTypeId,
+                        RootContainerId: existing[0],
+                        AdditionalContainerIds: existing.Skip(1).ToList(),
+                        Adopted: true));
+                }
+
+                if (request.RootContainerCreationInDoubt)
+                {
+                    return new SpeContainerTypeProvisionOutcome.RootContainerNotYetVisible(
+                        containerTypeId,
+                        $"Container type '{containerTypeId}' lists no container yet, but an earlier root-container creation " +
+                        "in it got no answer and may still appear (the SPE replication window) — nothing was created.");
+                }
+
+                _logger.LogInformation(
+                    "H8 reuses the container type {ContainerTypeId} this run already created — it holds no container, so " +
+                    "only a root container is created.", containerTypeId);
+            }
 
             // (2) Register the owning app's FULL permissions on the container
             // type (GOTCHA 2 — replaces the retired script's SharePoint REST
             // applicationPermissions PUT under a DIFFERENT token audience).
             // Non-409 failures propagate to the outer catch (ODataError) below
-            // for uniform T6-trap classification.
-            await EnsureRegistrationAsync(graph, containerType.Id, request, cancellationToken)
+            // for uniform T6-trap classification. Repeated on a reused type: a
+            // 409 is "already registered", and the first attempt may be the one
+            // that failed.
+            step = CreationStep.Registration;
+            await EnsureRegistrationAsync(graph, containerTypeId, request, cancellationToken)
                 .ConfigureAwait(false);
 
-            // (3) Create the root/test container within the new container type.
+            // (3) Create the root/test container within the container type.
+            step = CreationStep.RootContainerPost;
             using var createContainerTimeout = LinkedTimeout(cancellationToken);
             var container = await graph.Storage.FileStorage.Containers.PostAsync(
                 new FileStorageContainer
                 {
                     DisplayName = $"{request.DisplayName} - Root",
                     Description = "Root container for document storage - owned by BFF API app",
-                    ContainerTypeId = Guid.Parse(containerType.Id),
+                    ContainerTypeId = Guid.Parse(containerTypeId),
                 },
                 cancellationToken: createContainerTimeout.Token).ConfigureAwait(false);
 
             if (container is null || string.IsNullOrWhiteSpace(container.Id))
             {
+                // Graph answered 2xx — a container may exist; the resume lists the type and adopts it.
                 return new SpeContainerTypeProvisionOutcome.Failure(
                     $"Graph POST /storage/fileStorage/containers returned no usable Id for containerTypeId " +
-                    $"'{containerType.Id}' (customerId '{request.CustomerId}').", IsDelegatedTokenTrap: false);
+                    $"'{containerTypeId}' (customerId '{request.CustomerId}') — a root container may have been created.",
+                    IsDelegatedTokenTrap: false, CreatedContainerTypeId: containerTypeId, RootContainerInDoubt: true);
             }
 
             _logger.LogInformation(
@@ -212,25 +309,279 @@ public sealed class GraphContainerTypeProvisioner : ISpeContainerTypeProvisioner
                 container.Id);
 
             return new SpeContainerTypeProvisionOutcome.Success(new SpeContainerTypeProvisionOutputs(
-                ContainerTypeId: containerType.Id,
+                ContainerTypeId: containerTypeId,
                 RootContainerId: container.Id));
         }
         catch (ODataError ex)
         {
+            // Graph's own answer: the request in flight did NOT create anything (nothing is in doubt).
             var isTrap = SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError(ex);
             _logger.LogError(ex,
                 "H8 Graph SPE container-type provisioning ODataError: customerId={CustomerId} status={Status} " +
-                "isDelegatedTokenTrap={IsDelegatedTokenTrap}",
-                request.CustomerId, ex.ResponseStatusCode, isTrap);
+                "isDelegatedTokenTrap={IsDelegatedTokenTrap} containerTypeId={ContainerTypeId} step={Step}",
+                request.CustomerId, ex.ResponseStatusCode, isTrap, containerTypeId ?? "(none)", step);
             var diagnostic = isTrap
                 ? $"T6 silent-fail trap detected: Graph ODataError {ex.ResponseStatusCode} contains " +
                   $"'{SpeConfidentialClientGraphFactory.DelegatedTokenTrapPhrase}' for customerId " +
                   $"'{request.CustomerId}'. Confidential-client cert-based auth MUST be used for SPE " +
                   $"container-type creation (spec.md FR-33 / T6). {ex.Error?.Code} {ex.Error?.Message}"
-                : $"Graph ODataError {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message} " +
+                : $"Graph ODataError {ex.ResponseStatusCode} ({step}): {ex.Error?.Code} {ex.Error?.Message ?? ex.Message} " +
                   $"(customerId '{request.CustomerId}').";
-            return new SpeContainerTypeProvisionOutcome.Failure(diagnostic, IsDelegatedTokenTrap: isTrap);
+            return new SpeContainerTypeProvisionOutcome.Failure(
+                diagnostic, IsDelegatedTokenTrap: isTrap, CreatedContainerTypeId: containerTypeId);
         }
+        catch (Exception ex)
+        {
+            // NO authoritative answer (owner round 49 item 2): a dropped connection, a client-side timeout
+            // (LinkedTimeout raises OperationCanceledException), the caller's cancellation, an unreadable response. A
+            // write that was in flight may have happened. Never thrown — the handler must record what may exist, or a
+            // resume makes a second undeletable type or leaves a root container unbound.
+            _logger.LogError(ex,
+                "H8 Graph SPE container-type provisioning fault with no answer from Graph: customerId={CustomerId} " +
+                "containerTypeId={ContainerTypeId} step={Step}",
+                request.CustomerId, containerTypeId ?? "(none)", step);
+            var inDoubt = step switch
+            {
+                CreationStep.ContainerTypePost => " The container-type POST may have created a type.",
+                CreationStep.RootContainerPost => " The root-container POST may have created a container.",
+                _ => string.Empty,
+            };
+            return new SpeContainerTypeProvisionOutcome.Failure(
+                $"Graph {step} got no answer: {ex.GetType().Name}: {ex.Message} (customerId '{request.CustomerId}').{inDoubt}",
+                IsDelegatedTokenTrap: false,
+                CreatedContainerTypeId: containerTypeId,
+                ContainerTypeInDoubt: step == CreationStep.ContainerTypePost,
+                RootContainerInDoubt: step == CreationStep.RootContainerPost);
+        }
+    }
+
+    /// <summary>The Graph call <see cref="CreateAsync"/> has in flight — what a fault with no answer may have done.</summary>
+    private enum CreationStep
+    {
+        None,
+        ContainerTypePost,
+        ListContainers,
+        Registration,
+        RootContainerPost,
+    }
+
+    /// <summary>
+    /// The ids of every ACTIVE container in <paramref name="containerTypeId"/>, oldest first (then by id) — every page.
+    /// A 404 (the type not visible yet — the replication window) is an empty list. Any other fault propagates to
+    /// <see cref="CreateAsync"/>'s classification (a read: nothing is in doubt).
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ListContainersOfTypeAsync(
+        GraphServiceClient graph, string containerTypeId, CancellationToken cancellationToken)
+    {
+        var typeGuid = Guid.Parse(containerTypeId);
+        var found = new List<FileStorageContainer>();
+        try
+        {
+            using (var listTimeout = LinkedTimeout(cancellationToken))
+            {
+                var page = await graph.Storage.FileStorage.Containers.GetAsync(
+                    config =>
+                    {
+                        config.QueryParameters.Filter = $"containerTypeId eq {typeGuid:D}";
+                        config.QueryParameters.Select = new[] { "id", "containerTypeId", "createdDateTime" };
+                    },
+                    listTimeout.Token).ConfigureAwait(false);
+
+                while (page is not null)
+                {
+                    found.AddRange(page.Value ?? new List<FileStorageContainer>());
+                    if (string.IsNullOrWhiteSpace(page.OdataNextLink))
+                    {
+                        break;
+                    }
+
+                    page = await graph.Storage.FileStorage.Containers.WithUrl(page.OdataNextLink)
+                        .GetAsync(cancellationToken: listTimeout.Token).ConfigureAwait(false);
+                }
+            }
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogInformation(
+                "H8 container type {ContainerTypeId} is not visible to the container list yet (404) — it holds no visible container.",
+                containerTypeId);
+            return Array.Empty<string>();
+        }
+
+        return found
+            .Where(c => !string.IsNullOrWhiteSpace(c.Id) && (c.ContainerTypeId is null || c.ContainerTypeId == typeGuid))
+            .OrderBy(c => c.CreatedDateTime ?? DateTimeOffset.MaxValue)
+            .ThenBy(c => c.Id, StringComparer.Ordinal)
+            .Select(c => c.Id!)
+            .ToList();
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpeContainerBindOutcome> BindRootContainerAsync(
+        SpeContainerBindRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.VaultName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.CertSecretName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerId);
+
+        // Same T6 confidential-client identity that created the container (cert from the customer KV). A cert-load
+        // failure propagates: it happens before any Graph call, so nothing was changed.
+        using var cert = await SpeConfidentialClientGraphFactory.LoadCertificateAsync(
+            _sharedCredential, _clientOptions, request.VaultName, request.CertSecretName,
+            _options.CertLoadTimeout, cancellationToken).ConfigureAwait(false);
+
+        var graph = SpeConfidentialClientGraphFactory.BuildGraphClient(request.TenantId, request.OwningAppId, cert);
+        return await BindNewContainerAsync(graph, request.ContainerId, request.BusinessUnitId, cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// THE bind step for a container this handler created (unified-access-control-r2 task 165, owner round 35 item 1 —
+    /// the same rule the BFF's creation paths follow): <c>PATCH /storage/fileStorage/containers/{id}/customProperties</c>
+    /// with the property map as the BODY ROOT (Graph merges, so nothing else is touched), a single-container read-back
+    /// (<c>$select=id,customProperties</c> — the collection drops custom properties), and — when the stamp did not land,
+    /// for ANY reason — <c>DELETE /storage/fileStorage/containers/{id}</c>, so no unbound container is left behind.
+    /// Internal so a test can drive it with a <c>GraphServiceClient</c> over a fake transport.
+    /// </summary>
+    internal async Task<SpeContainerBindOutcome> BindNewContainerAsync(
+        GraphServiceClient graph,
+        string containerId,
+        Guid businessUnitId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(graph);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        string failure;
+        try
+        {
+            if (businessUnitId == Guid.Empty)
+            {
+                throw new InvalidOperationException("No owning business unit was resolved (Guid.Empty) — the container cannot be bound.");
+            }
+
+            await WriteStampAsync(graph, containerId, businessUnitId, cancellationToken).ConfigureAwait(false);
+
+            using var readTimeout = LinkedTimeout(cancellationToken);
+            var container = await graph.Storage.FileStorage.Containers[containerId]
+                .GetAsync(config => config.QueryParameters.Select = new[] { "id", "customProperties" }, readTimeout.Token)
+                .ConfigureAwait(false);
+
+            var stamped = ReadStamp(container);
+            if (stamped == businessUnitId)
+            {
+                _logger.LogInformation(
+                    "H8 root container {ContainerId} bound to business unit {BusinessUnitId} (stamp read back).",
+                    containerId, businessUnitId);
+                return new SpeContainerBindOutcome.Bound();
+            }
+
+            failure = $"The business-unit stamp did not read back on container '{containerId}' (read: " +
+                      $"'{stamped?.ToString() ?? "none"}', expected '{businessUnitId}').";
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            failure = ex is ODataError odata
+                ? $"Graph ODataError {odata.ResponseStatusCode} binding container '{containerId}': {odata.Error?.Code} {odata.Error?.Message ?? odata.Message}"
+                : $"Binding container '{containerId}' failed: {ex.GetType().Name}: {ex.Message}";
+        }
+
+        _logger.LogError(
+            "H8 root container {ContainerId} could not be bound to business unit {BusinessUnitId} — removing it. {Failure}",
+            containerId, businessUnitId, failure);
+
+        try
+        {
+            using var deleteTimeout = LinkedTimeout(CancellationToken.None);
+            await graph.Storage.FileStorage.Containers[containerId].DeleteAsync(cancellationToken: deleteTimeout.Token)
+                .ConfigureAwait(false);
+            return new SpeContainerBindOutcome.NotBound(failure + " The container was removed.", Removed: true);
+        }
+        catch (ODataError deleteEx) when (deleteEx.ResponseStatusCode == 404)
+        {
+            // Already gone (an earlier removal, or an operator's) — nothing unbound remains, and a resume must not keep
+            // trying to bind a container that no longer exists.
+            return new SpeContainerBindOutcome.NotBound(failure + " The container no longer exists.", Removed: true);
+        }
+        catch (Exception deleteEx)
+        {
+            _logger.LogCritical(deleteEx,
+                "H8 root container {ContainerId} is UNBOUND and could not be removed; no SPE admin route reaches it until " +
+                "the backfill binds it (-Bind) or an operator removes it.", containerId);
+            return new SpeContainerBindOutcome.NotBound(
+                failure + $" Removing it ALSO failed ({deleteEx.GetType().Name}: {deleteEx.Message}); container " +
+                $"'{containerId}' is left unbound.", Removed: false);
+        }
+    }
+
+    /// <summary>
+    /// <c>PATCH …/containers/{id}/customProperties</c> with <c>{"&lt;stamp&gt;": {"value": "&lt;unit&gt;", "isSearchable": false}}</c>
+    /// as the body root — the shape the BFF sends (<c>SpeAdminGraphService.WriteBusinessUnitStampAsync</c>), sent through
+    /// the SDK's request adapter so Graph failures arrive as <see cref="ODataError"/>.
+    /// </summary>
+    private async Task WriteStampAsync(
+        GraphServiceClient graph, string containerId, Guid businessUnitId, CancellationToken cancellationToken)
+    {
+        var payload = System.Text.Json.JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            [Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName] = new Dictionary<string, object>
+            {
+                ["value"] = businessUnitId.ToString("D"),
+                ["isSearchable"] = false,
+            },
+        });
+
+        var baseUrl = (graph.RequestAdapter.BaseUrl ?? "https://graph.microsoft.com/v1.0").TrimEnd('/');
+        var requestInfo = new Microsoft.Kiota.Abstractions.RequestInformation
+        {
+            HttpMethod = Microsoft.Kiota.Abstractions.Method.PATCH,
+            URI = new Uri($"{baseUrl}/storage/fileStorage/containers/{Uri.EscapeDataString(containerId)}/customProperties"),
+        };
+        requestInfo.Headers.Add("Accept", "application/json");
+        requestInfo.SetStreamContent(new MemoryStream(System.Text.Encoding.UTF8.GetBytes(payload)), "application/json");
+
+        var errorMapping = new Dictionary<string, Microsoft.Kiota.Abstractions.Serialization.ParsableFactory<Microsoft.Kiota.Abstractions.Serialization.IParsable>>
+        {
+            { "XXX", ODataError.CreateFromDiscriminatorValue },
+        };
+
+        using var timeout = LinkedTimeout(cancellationToken);
+        await graph.RequestAdapter.SendNoContentAsync(requestInfo, errorMapping, timeout.Token).ConfigureAwait(false);
+    }
+
+    /// <summary>The business unit the container's stamp names, or null when it carries none (or not one GUID).</summary>
+    private static Guid? ReadStamp(FileStorageContainer? container)
+    {
+        var properties = container?.CustomProperties?.AdditionalData;
+        if (properties is null)
+        {
+            return null;
+        }
+
+        foreach (var (name, raw) in properties)
+        {
+            if (!string.Equals(name?.Trim(), Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (raw is Microsoft.Kiota.Abstractions.Serialization.UntypedObject node
+                && node.GetValue().TryGetValue("value", out var valueNode)
+                && valueNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString text
+                && Guid.TryParse(text.GetValue()?.Trim(), out var unit))
+            {
+                return unit;
+            }
+
+            return null;
+        }
+
+        return null;
     }
 
     /// <summary>

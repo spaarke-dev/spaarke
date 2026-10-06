@@ -1824,7 +1824,10 @@ public partial class RouteAuthorizationGuardTests
                 return Regex.IsMatch(code, @"if\s*\(\s*requestedTenantIds\.Count\s*==\s*0\s*\)\s*\{\s*(?:[^{}]*?)return\s+await\s+next\s*\(");
 
             case "AddSpeAdminTenantScopeFilter":
-                return Regex.IsMatch(code, @"if\s*\(\s*!\s*TryReadConfigId\s*\([^)]*\)\s*\)\s*\{\s*return\s+await\s+next\s*\(");
+                // Task 165 rewrote the filter (per config, per container and per container type, fail CLOSED); the
+                // pass-through for a request that names NO configId is unchanged in kind — the handler's own 400 answers —
+                // so the pin follows the new spelling (batch-4 integration, 2026-10-05).
+                return Regex.IsMatch(code, @"if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*return\s+await\s+next\s*\(");
 
             case "AddReportingAuthorizationFilter":
                 return Regex.IsMatch(code, @"\.IsInRole\s*\(") && !ConsultsAny(code, decisions);
@@ -2446,7 +2449,7 @@ public partial class RouteAuthorizationGuardTests
                      "GET /healthz/catalog",
                      "GET /api/diagnostics/tenant-container-resolver",            // const path
                      "POST /api/onboarding/consent-callback",
-                     "GET /api/spe/configs/{id:guid}",                            // aggregator, extension form + nested group
+                     "GET /api/spe/configs/{configId:guid}",                      // aggregator, extension form + nested group
                      "GET /api/spe/containers/{containerId}",                     // aggregator, static form
                      "POST /api/compose/upload",
                      "GET /api/v1/external/projects/{id:guid}",
@@ -6313,13 +6316,18 @@ public partial class RouteAuthorizationGuardTests
         {
             "var group = app.MapGroup(\"/api/spe\").RequireAuthorization().AddSpeAdminAuthorizationFilter().AddSpeAdminTenantScopeFilter();",
             "var configs = group.MapGroup(\"/configs\");",
-            "configs.MapGet(\"/{id:guid}\", Get).AddEntityAccessFilter();",
+            "configs.MapGet(\"/{configId:guid}\", Get).AddEntityAccessFilter();",
         }).Select(r => Assess(r, Array.Empty<HandlerDecision>())).Single();
-        Assert.Equal("GET /api/spe/configs/{id:guid}", config.Key);
+        Assert.Equal("GET /api/spe/configs/{configId:guid}", config.Key);
         var swapped = RealAssessments.Value.Select(a => a.Key == config.Key ? config : a).ToList();
         var (_, removed) = PinDiff(swapped.Where(a => a.Credit == Credit.AdminOnly).Select(a => a.Key), AdminOnlyRoutes.SelectMany(g => g.Routes));
-        Assert.Equal(new[] { "GET /api/spe/configs/{id:guid}" }, removed);
-        Assert.Contains(WaiverViolations(swapped, Waivers), v => v.StartsWith("GET /api/spe/configs/{id:guid} ", StringComparison.Ordinal) && v.Contains("fingerprint changed"));
+        Assert.Equal(new[] { "GET /api/spe/configs/{configId:guid}" }, removed);
+        // Task 165's integration deleted the route's real waiver (S-73 resolved), so the InsufficientDecision waiver it
+        // carried before is re-stated here: a waiver recorded on the admin-only chain goes stale when the chain changes.
+        var withOldWaiver = Waivers.Append(Pending("GET /api/spe/configs/{configId:guid}", "165", Gap.InsufficientDecision,
+            "S-73 as it stood before task 165 (control fixture).",
+            observed: "AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter")).ToList();
+        Assert.Contains(WaiverViolations(swapped, withOldWaiver), v => v.StartsWith("GET /api/spe/configs/{configId:guid} ", StringComparison.Ordinal) && v.Contains("fingerprint changed"));
 
         // NOT admin: the Reporting role filter and the ExternalCollaboration scheme policy are flagged, not admin.
         foreach (var form in new[] { ".AddReportingAuthorizationFilter()", ".RequireAuthorization(AuthPolicies.ExternalCollaboration)" })
@@ -6673,7 +6681,7 @@ public partial class RouteAuthorizationGuardTests
             @"(if\s*\(\s*requestedTenantIds\.Count\s*==\s*0\s*\)\s*\{[^{}]*?)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
             "$1return Results.Problem(statusCode: 403);"),
         "AddSpeAdminTenantScopeFilter" => Regex.Replace(raw,
-            @"(if\s*\(\s*!\s*TryReadConfigId\s*\([^)]*\)\s*\)\s*\{\s*)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
+            @"(if\s*\(\s*present\.Count\s*==\s*0\s*\)\s*\{\s*)return\s+await\s+next\s*\(\s*context\s*\)\s*;",
             "$1return Results.NotFound();"),
         _ => raw + "\ninternal sealed class SeededDecision { private readonly CallerRecordAccessProbe _probe = null!; "
                  + "private readonly AuthorizationService _authorizationService = null!; void M() { _ = RetrievePrincipalAccess; } }",

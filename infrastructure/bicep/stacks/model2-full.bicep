@@ -65,6 +65,9 @@ param communicationDefaultMailbox string = ''
 @description('Display name for the default communication mailbox')
 param communicationDefaultDisplayName string = ''
 
+@description('TRUE ONLY for a Spaarke-operated environment (dev, Spaarke\'s own operator environment) — NEVER for a customer stamp. Emits SpeAdmin__PlatformOperatorEnvironment=true, which lets the BFF\'s SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type (security alerts / secure score, container-type permissions / consumers / register) serve a root-unit admin (unified-access-control-r2 task 165, owner round 49 item 1). Default false: the setting is not emitted and the BFF refuses those routes (fail closed).')
+param speAdminPlatformOperatorEnvironment bool = false
+
 @description('BFF User-Assigned Managed Identity name (T5 structural fix per task 029; ONE stable identity bound to prod + staging slots). Convention: sprk-{env}-{customerId}-uami per uami.bicep header.')
 param bffUamiName string = 'sprk-${environment}-${customerId}-uami'
 
@@ -231,7 +234,9 @@ module bffApi '../modules/app-service.bicep' = {
     // KV Secrets User grant to the UAMI is emitted by kvRbacAppService below.
     userAssignedIdentityResourceId: bffUami.outputs.id
     vnetIntegrationSubnetId: enableVnet ? vnet.outputs.snetAppId : ''
-    appSettings: {
+    // union: the Spaarke-operator marker is added ONLY when speAdminPlatformOperatorEnvironment is true (owner round 49
+    // item 1) — a customer stamp never carries the setting at all.
+    appSettings: union({
       // Customer runtime identity (D-14 / unified-access-control-r2 task 123). customerId names this
       // whole resource group and everything in it; before this setting, no line of BFF code could read
       // it. D-12 established that tenantId is IDENTICAL for every Model 1 customer, so tenant-keyed
@@ -283,7 +288,9 @@ module bffApi '../modules/app-service.bicep' = {
 
       // Service Bus queue name for communication jobs
       ServiceBus__CommunicationQueueName: 'sdap-communication'
-    }
+    }, speAdminPlatformOperatorEnvironment ? {
+      SpeAdmin__PlatformOperatorEnvironment: 'true'
+    } : {})
     tags: tags
   }
 }

@@ -93,6 +93,10 @@ public class SecureNamedOwnerTeamProvisioningTests : IClassFixture<ProvisionProj
         creatorShare.AccessRightsCsv.Should().Be(ProvisionProjectEndpoint.CreatorAccessRights);
 
         _fixture.CreatedContainerDisplayNames.Should().ContainSingle().Which.Should().Be(expectedContainerName);
+        _fixture.CreatedContainerBusinessUnits.Should().ContainSingle().Which.Should().Be(
+            ProvisionProjectTestFixture.SecureBuId,
+            "the secure record's own container is bound to the unit that owns the record — the Secure Record business " +
+            "unit — so no customer's SPE administrator reaches it through the admin plane (task 165, owner round 20)");
         _fixture.ContainerIdOf(recordId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId,
             "a secure root without its own container fails every upload closed (RecordContainerResolver)");
 
