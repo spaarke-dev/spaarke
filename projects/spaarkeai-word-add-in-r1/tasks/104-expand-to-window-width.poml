@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 7 (1) — Expand sizes the pane from the Office/browser WINDOW, not the screen, so it never overshoots a window that is not full screen</title>
     <phase>6 UAT round 7 (2026-10-06)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.ts` (`taskPaneWidthService.ts`) and its tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

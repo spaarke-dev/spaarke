@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 7 (3-4) — View Document and Copy Link confirm the click visibly, and the Profile's Summary area is resizable with the same handle as Find</title>
     <phase>6 UAT round 7 (2026-10-06)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx` (`SaveFlow.tsx`, `DocumentProfileSection.tsx`, `FindSplitPane.tsx`) and tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
