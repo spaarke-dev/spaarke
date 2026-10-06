@@ -157,13 +157,19 @@ internal sealed class AgentToolCatalogProjector
         //   contributes no AIFunctions. The conversational ability (NFR-01) is preserved
         //   unconditionally — even a zero-tool list yields a working conversational agent.
         //
-        // ADR-014 caching: the tool-list query happens at chat-session start (per-session,
-        //   not per-message). At ~10 chat tools per tenant, the Dataverse round-trip is
-        //   sub-100ms. Per task 011 POML notes ("don't over-engineer"), we DO NOT add a
+        // ADR-014 caching: the tool-list query runs on EVERY chat message, not once per
+        //   session — ChatEndpoints.SendMessageAsync builds a new agent per turn via
+        //   SprkChatAgentFactory.CreateAgentAsync → ResolveToolsAsync (corrected 2026-10-05,
+        //   issue #1295). At ~10 chat tools per tenant, the Dataverse round-trip is
+        //   sub-100ms. ListToolsAsync runs AnalysisToolService.MapJsonSchema for every row
+        //   it returns (playbook-only rows included) and each chat row's adapter ctor
+        //   validates again; both go through Draft202012MetaSchemaValidator, whose verdict
+        //   cache makes a repeated schema a ~µs lookup instead of a serialized evaluation
+        //   (0.1-0.2 ms small, 15-108 ms for a 32 KB schema). Per task 011 POML notes ("don't over-engineer"), we DO NOT add a
         //   Redis cache layer here. Tenant scoping is achieved via the in-memory per-call
         //   materialization (every CreateAgentAsync invocation re-queries; no cross-tenant
         //   leakage is possible because the list lives only in the captured method stack).
-        //   If session-start latency becomes measurable in production, an
+        //   If per-turn latency becomes measurable in production, an
         //   IDistributedCache layer keyed `r6:chat-tools:{tenantId}` with a short TTL can
         //   be inserted via the existing scopedProvider — but defer that to a follow-up.
         //
