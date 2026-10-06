@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 6 (5-6) — no main scroll bar on the pane (wheel/touch/keyboard scrolling kept), and an expand/collapse button in the toolbar that widens the pane as far as Office allows, up to 3x</title>
     <phase>6 UAT round 6 (2026-10-06)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx`/`.ts` (`TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `taskPaneWidthService.ts`) and their tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

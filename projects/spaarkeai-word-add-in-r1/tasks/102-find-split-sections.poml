@@ -3,7 +3,7 @@
   <metadata>
     <title>UAT round 6 (4) — Find shows "Similar Documents" and "Matching records" as two sections, each its own scrollable list, with a draggable divider between them; check the "Matter: Matter" / "Unknown" row labels</title>
     <phase>6 UAT round 6 (2026-10-06)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies production `.tsx` (`FindView.tsx`, `FindResultsList.tsx`) and their tests.</rigor-reason>
     <model-tier>sonnet</model-tier>
