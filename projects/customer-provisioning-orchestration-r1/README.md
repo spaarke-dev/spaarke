@@ -24,7 +24,7 @@
 
 ## Overview
 
-Build the single systematic process for standing up a new Spaarke customer environment (Dataverse + Azure + SPE + BFF) via one orchestrated pipeline. Three-layer architecture — L1 idempotent `IProvisioningHandler` handlers (H0–H14, 19 total), L2 control-plane .NET 10 App Service with Cosmos state, L3 `/provision-environment` Claude Code operator skill. Two deployment tiers per D3: Model 2 dedicated (regulated/enterprise default) and Model 1 shared trial/SMB.
+Build the single systematic process for standing up a new Spaarke customer environment (Dataverse + Azure + SPE + BFF) via one orchestrated pipeline. Three-layer architecture — L1 idempotent `IProvisioningHandler` handlers (H0–H14, 19 total), L2 control-plane .NET 10 App Service with Cosmos state, L3 `/provision-environment` Claude Code operator skill. Two tenancy models, both a dedicated per-customer stamp since D-12 (2026-09-28): Model 1 in Spaarke's Azure tenant (paid by Spaarke), Model 2 in the customer's tenant (paid by the customer). The shared trial/SMB tier (original D3) is retired.
 
 ## Quick Links
 

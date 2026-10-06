@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="230a" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H13's checks fit the dedicated stamp: I3 checks the partition keys the stamp template declares, no shared-platform assumption or wording remains, naming/I1 inputs ship with the Worker, dead shell-out options go</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T230 part 1 (G5)</phase>
+    <gate>after 229 (✅)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H13 probe code + options + tests; acceptance-gate semantics.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Acceptance-gate correctness: a wrong probe either blocks every stamp or passes a broken one.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>L2 Core/Tests and the Worker csproj only.</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, model1-dedicated, tenant-isolation, testing</tags>
+    <deps>229</deps>
+  </metadata>
+
+  <prompt>Audit and fix every H13 check that assumes a shared platform or would mis-judge a dedicated customer stamp.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, ARM SDK probes).</role>
+
+  <goal>
+    On a correctly provisioned dedicated stamp (Model 1 or Model 2) every H13 structural check passes, and on a broken one
+    it fails for the real reason. No H13 check, message or option refers to a shared platform, a shared vault pattern or
+    a Model 1 shared tier.
+  </goal>
+
+  <context>
+    <background>
+      Mapped 2026-10-06 (SESSION 40 exploration):
+      - I3 `CosmosPartitionKeyInvariantProbe` asserts every container's partition key is `/customerId`
+        (ExpectedPartitionKeyPath, :93, compared :235-240), but the stamp's containers (infrastructure/bicep/modules/
+        cosmos-db.bicep :96,127,159,205,239,279,310) use `/tenantId`, `/partitionKey`, `/subjectId` — so I3 would fail
+        every real stamp; its unit test treats `/tenantId` as a violation. On a dedicated stamp the account itself is the
+        customer boundary (one customer per Cosmos account); what can drift is a container deployed without the key the
+        template declares.
+      - Stale shared-platform wording: I2 `AiSearchTenantFilterInvariantProbe` :359-360 ("shared platform is
+        under-provisioned (Model 1)"), T2 `DataverseAppUserPairT2Probe` :145, T3 `GraphAppRoleParityT3Probe` :259.
+      - `NamingConformanceChecker` vault rule `^sprk-[a-z0-9]+-kv$` (:98-99) is the old shared-vault pattern (stamp vault =
+        `sprk-{customerId}-{env}-kv`, customer.bicep keyVaultName); it and the I1 verifier read repo files
+        (appsettings.template.json, Seed-ProductionKeyVault.ps1, environments.json, infrastructure/bicep, scripts/) that the
+        Worker csproj may not copy to its publish output (Deploy-ControlPlane.ps1 zips the publish folder) — verify what
+        each reads at runtime and what happens when it is absent.
+      - `H13AcceptanceOptions` :33-71 still carries shell-out settings (PwshExecutable, AzCliExecutable, script paths,
+        timeouts) from the retired az/pwsh implementations.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/** (I1–I5 probes, T1–T7 probes, NamingConformanceChecker, H13AcceptanceOptions, E2EAcceptanceModule)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/*.csproj; scripts/provisioning/Deploy-ControlPlane.ps1</file>
+      <file>infrastructure/bicep/modules/cosmos-db.bicep; infrastructure/bicep/customer.bicep (keyVaultName)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/*Probe*Tests.cs, NamingConformanceCheckerTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="I3">I3 compares each deployed container with the partition key `cosmos-db.bicep` declares for it (a parity test reads the bicep so the two cannot drift); a container missing its declared key, with a different key, or a declared container that is absent → Failed; ARM/RBAC trouble stays InfraFault.</constraint>
+    <constraint source="needed-or-remove">Options and inputs nothing reads go; an input a check needs at runtime must ship with the Worker (csproj content) or the check must not depend on it — no check may silently pass because its input is missing.</constraint>
+    <constraint source="tests">ArmSdkTestFakes / hand-written fakes; never Mock&lt;HttpMessageHandler&gt;.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">I3: declared-key table + bicep parity test; probe + tests.</step>
+    <step order="2">Wording: I2, T2, T3 and any other H13 text naming a shared platform / Model 1 shared tier.</step>
+    <step order="3">Naming checker + I1: stamp vault pattern; establish what files each reads at runtime; ship them with the Worker or drop the dependency; fail closed when absent; tests.</step>
+    <step order="4">Remove dead H13 shell-out options (and config/bicep app settings that set them).</step>
+    <step order="5">Verify (ControlPlane tests, ArchTests, Worker 0 warnings, Worker publish contains what the checks read); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">I3 passes a fake account whose containers carry exactly cosmos-db.bicep's keys and fails one with a missing/different key or a missing declared container; the probe's table equals the bicep's declarations (parity test).</criterion>
+    <criterion testable="true">`git grep -i "shared platform\|shared-platform\|Model 1 shared\|Model1Shared"` finds nothing live in Handlers/E2EAcceptance (history comments marked as such excepted).</criterion>
+    <criterion testable="true">The naming checker accepts `sprk-{customerId}-{env}-kv` and every input it and I1 read is in the Worker publish output, or the check fails closed without it (test).</criterion>
+    <criterion testable="true">No H13 option remains that nothing reads.</criterion>
+    <criterion testable="true">ControlPlane.Tests and ArchTests pass; Worker builds with 0 warnings.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A check turns out to need a live call to establish what the deployed shape is (ask before any live action).</trigger>
+    <trigger>The I3 invariant's spec meaning (FR-30 "/customerId predicate") conflicts with the dedicated-stamp reading — surface per CLAUDE.md §6.5 if a spec/ADR change is needed.</trigger>
+  </escalation>
+
+  <notes/>
+</task>

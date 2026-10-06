@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="230b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Keyless proof (D13): the BFF proves one managed-identity call per stamp service to H13 (401/403 fails acceptance, never a skip), L2 proves key auth is off on every resource, and a build-time guard stops key credentials coming back</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T230 part 2 (D13)</phase>
+    <gate>after 230a</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint (BFF §10), auth (app role, token audience), H3/H13 handler changes, ArchTest.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security-relevant: a new authenticated BFF surface and the forcing function for ADR-028 keyless stamps.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot path + skill/constraints docs (main session).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, bff-api, auth, model1-dedicated, testing</tags>
+    <deps>230a, 244, 246</deps>
+  </metadata>
+
+  <prompt>Make "the stamp is keyless" something H13 proves on every run, not something the templates merely intend.</prompt>
+
+  <role>SPAARKE platform developer (BFF, L2 control plane, Entra app roles).</role>
+
+  <goal>
+    D13: every BFF call to the customer's Azure services uses the stamp UAMI and key auth is disabled where Azure allows
+    it. After this task H13 refuses Ready unless (a) the BFF, with its own identity, made one real call to each stamp
+    service and none was refused, and (b) ARM shows key/local auth disabled on each resource and no key setting on either
+    slot. The OpenAI result is the ADR-028 E-2 measurement on a `kind: OpenAI` account (T235 retires or extends E-2 from it).
+  </goal>
+
+  <context>
+    <background>
+      Mapped 2026-10-06 (SESSION 40 exploration):
+      - No H13 check calls a stamp service as the stamp UAMI; only L2 can call AI Search with its own identity (L2 has no
+        data-plane role on Service Bus, OpenAI, Document Intelligence, Storage, Redis, Content Safety or Cosmos). The stamp
+        UAMI holds the needed roles (bff-runtime-rbac.bicep, openai/doc-intelligence/content-safety Cognitive Services
+        User, storage Blob Data Contributor, Cosmos Data Contributor, Redis access policy) but is usable only inside the
+        BFF (ADR-028: Kudu has no IDENTITY_ENDPOINT). So the per-service proof must run in the BFF.
+      - BFF credential paths: Service Bus ServiceBusClientFactory:72-95; AI Search SearchClientFactory:61-84 (and a
+        key-only CustomerOwned path in KnowledgeDeploymentService:318-325, 450-458); OpenAI AiModule:125-138 +
+        OpenAiClient:91-113; Document Intelligence TextExtractorService:105-127; Redis CacheModule (MI only when Endpoint
+        set); Blob SessionFileBlobStore:225; Cosmos AiPersistenceModule:101; Content Safety ContentSafetyAuthHandler:84-103.
+        Prompt Shield (PromptShieldService:145-157) and groundedness (GroundednessCheckService:137-155) fail OPEN on 401/403
+        with no distinct auth outcome.
+      - E2EValidationRunner requests an L2 token for `{bff host}/.default` (:481-482) but the BFF expects
+        `api://{appId}`; token failure or 401/403 makes its sample checks SKIP (:496-510, :673-682), and skips do not fail
+        H13 — so they never run for real.
+      - ADR-028 E-2 (:396-421): MI 401 on the shared dev `kind=AIServices` account; stamps deploy `kind: OpenAI` with local
+        auth disabled — T230's call is the first measurement.
+      - The real per-service measurement happens on the first live run (T186); this task builds and tests the mechanism.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/** (endpoint + module per bff-extensions.md; the credential factories above; Services/Ai/Safety)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/** (H3: BFF app registration) and Handlers/E2EAcceptance/** (H13, E2EValidationRunner)</file>
+      <file>infrastructure/bicep/modules/*.bicep (disableLocalAuth / allowSharedKeyAccess / accessKeysAuthentication)</file>
+      <file>tests/Spaarke.ArchTests/** (new key-credential ratchet)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (E-2); .claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="BFF §10">Placement justification, publish size against a fresh master build (same zip tool, short paths, file counts), CVE check, tests; endpoint mapped via a Map{Feature}Endpoints extension; unconditional registration.</constraint>
+    <constraint source="auth">The diagnostics endpoint accepts only an app-only token for the stamp's BFF audience carrying a dedicated app role that only the L2 Worker identity is assigned (H3 creates the role + assignment); it returns per-service status codes and timings only — no data, no secrets, no exception text beyond a code.</constraint>
+    <constraint source="fail-closed">A 401/403 from any service, a missing service configuration, or an unreachable endpoint fails H13 (QuarantineRequired for auth, Resumable for transient); never a skip. The sample-workload checks' auth skip goes the same way.</constraint>
+    <constraint source="D13">No key fallback is added; the ArchTest pins the existing "key if configured, else MI" sites (shared dev env) so a new key credential fails the build.</constraint>
+    <constraint source="owner">No live call, role assignment or deployment in this task — the live measurement is T186's; ask before anything live.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">BFF: authenticated keyless-diagnostics endpoint — one minimal call per service with the injected credentials (Service Bus, AI Search, OpenAI chat + embeddings, Document Intelligence, Blob, Redis, Cosmos, Content Safety Prompt Shield + groundedness); Content Safety's fail-open records a distinct auth outcome; tests; §10 measurements.</step>
+    <step order="2">H3: app role on the customer's BFF app registration + assignment to the L2 Worker identity; tests.</step>
+    <step order="3">H13: runner token audience `api://{appId}`; call the diagnostics endpoint; auth failures fail; ARM local-auth-off + no-key-setting check; tests.</step>
+    <step order="4">ArchTest key-credential ratchet; decide KnowledgeDeploymentService's key-only path (needed → MI, else remove).</step>
+    <step order="5">Docs: guide H13 row + §3.2 keyless, constraints, ADR-028 E-2 note (measurement pending T186), CHANGELOG; T186 checklist item.</step>
+    <step order="6">Verify (BFF + ControlPlane tests, ArchTests, builds 0 warnings, publish size); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">The endpoint refuses an anonymous call, a user token, and an app token without the role (401/403); with the role it returns one result per service; a service returning 401/403 is reported as refused, never as healthy.</criterion>
+    <criterion testable="true">H13 fails (QuarantineRequired) when the endpoint reports any service refused or a resource has local/key auth enabled or a slot carries a key setting; passes when all are proved; never skips on auth.</criterion>
+    <criterion testable="true">H3 creates the app role and assigns it to the L2 Worker identity idempotently.</criterion>
+    <criterion testable="true">The ArchTest fails when a new AzureKeyCredential / ApiKeyCredential / key-header site is added outside the pinned list.</criterion>
+    <criterion testable="true">BFF publish delta reported against a fresh master build; no new HIGH CVE; all suites green.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A service has no minimal call that is free of side effects or cost (e.g. groundedness/Prompt Shield billing) — record the cost; ask if it is material.</trigger>
+    <trigger>Adding the app role needs a permission the H3 identity does not hold.</trigger>
+    <trigger>ADR conflict (e.g. ADR-008 endpoint filters, ADR-028 MUSTs) → CLAUDE.md §6.5.</trigger>
+  </escalation>
+
+  <notes/>
+</task>
