@@ -1,6 +1,6 @@
 /**
  * xrmCapabilityAnalyzer — AST check that every `getXrm(...)` value is used only
- * for what its requested capability covers (task 081 rounds 5–7, reviews R4-2 / R5-1 / round-6 review).
+ * for what its requested capability covers (task 081 rounds 5–8; reviews R4-2, R5-1, rounds 6–7).
  *
  * Not a test file itself: `xrmCapabilityUsage.guard.test.ts` runs it over the
  * repository's `src/`, and over synthetic fixtures that prove each tracked
@@ -23,22 +23,27 @@
  *   `xrmContext` specifier. Any other reference to `getXrm` (passed, stored) is
  *   a blind spot, and so is an unrecognised `getXrm` that is destructured
  *   (`const { getXrm } = ui`) or read off a dynamic import. A dynamic `import()`
- *   of a module that exports `getXrm` is a blind spot unless every use of its
- *   value provably avoids `getXrm` (`m.Other`, `{ Other }`).
+ *   or `require()` of a module that exports `getXrm` — under ANY export name,
+ *   matched by dealiased symbol — is a blind spot unless every use of its value
+ *   provably avoids those names (`m.Other`, `{ Other }`).
  * - a call of a WRAPPER: a function, method, object-literal method or getter
  *   that RETURNS such a value, found by resolved symbol at every call site
  *   (`this.m()`, `svc.m()`, `new S().m()`, imports; a getter's `x.prop` read).
- *   An IIFE is followed to its own call. Each `return` is its own origin (no
- *   union across returns). A wrapper referenced other than by a call, and an
- *   ANONYMOUS returning function (default export, JSX prop, `o.f = () => …`),
- *   are blind spots.
+ *   A string-literal bracket call `svc['m']()` is a call. An IIFE is followed to
+ *   its own call. Each `return` is its own origin (no union across returns).
+ *   BLIND SPOTS: a wrapper referenced other than by a call (passed, stored,
+ *   destructured `const { m } = svc` / `const { x } = new G()`, its object-literal
+ *   holder passed to `Object.values` / `Object.entries`); an ANONYMOUS returning
+ *   function (default export, JSX prop, `o.f = () => …`); a wrapper with NO
+ *   resolved call; a class member that also exists on a type its class
+ *   `extends` / `implements` (calls through that type are not resolved).
  * - FORWARDING: when the capability is a parameter of the enclosing function
  *   (`function f(cap) { getXrm(cap)… }`), the value is analysed ONCE PER CALL
  *   SITE of that function, with the caller's argument (or the default) bound —
  *   through chains of such functions. Uses inside the function body are checked
  *   with each caller's capability; a `return` of the value continues at that
- *   call site. A forwarding function with no call site, or an anonymous one, is
- *   a blind spot.
+ *   call site. A forwarding function with no call site, an anonymous one, or one
+ *   that also exists on a base / interface type, is a blind spot.
  *
  * ## Followed
  * Parentheses, `!`, `as` / `<T>` / `satisfies`, `await`, the right side of `,`,
@@ -58,8 +63,9 @@
  * (`x is T`, `ReturnType<typeof getXrm>`), a declaration's own name or an
  * assignment target (a write, not a read), the left side of
  * `&&` or `,`, an expression statement, `void`, an import / export specifier, a
- * React dependency array (`[xrm]` as the last argument of a hook), the receiver
- * of `.bind` / `.call` / `.apply`, an argument to `console.*`.
+ * React dependency array (`[xrm]` as the last argument of a hook), `R` in
+ * `R.m.bind(R)` / `R.m.call(R, …)` / `.apply(R, …)` (its `R.m` read is already a
+ * use; any OTHER this-receiver is a blind spot), an argument to `console.*`.
  *
  * ## A USE and its COVERAGE
  * A use is `Root.member` with Root ∈ WebApi / Navigation / Utility / App / Page
@@ -80,8 +86,9 @@
  * nothing; a predicate that guarantees nothing is a blind spot. A predicate that
  * passes its parameter to a helper (`x => !!read(x)`) covers passing the value to
  * that same helper.
- * A capability that is a `let` / `var` reassigned anywhere, a spread, or any
- * other non-literal expression is a blind spot.
+ * A capability that is a `let` / `var` or a parameter WRITTEN anywhere (an
+ * assignment, a destructuring-assignment target, a for-in / for-of initializer,
+ * `++` / `--`), a spread, or any other non-literal expression is a blind spot.
  *
  * ## Remaining limits (assumptions, not reported)
  * 1. UNION credit, recorded as a note on each such site: a `?:` capability, a
@@ -89,15 +96,21 @@
  *    calls only the member its branch guaranteed is not checked.
  * 2. `WebApi` is assumed atomic.
  * 3. A value passed to the helper its predicate calls is treated as covered.
- * 4. A `getXrm` imported from an UNSCANNED module is matched by name and
- *    specifier (calls INTO unscanned modules are blind spots, not passes).
- * 5. A named wrapper that is never called: its value reaches nothing (dead code),
- *    so there is nothing to check and nothing is reported.
+ * 4. UNSCANNED modules: a `getXrm` imported from one is matched by its original
+ *    name and a `ui-components` / `xrmContext` specifier; a dynamic `import()` /
+ *    `require()` of one is checked only when its specifier matches those. (Calls
+ *    INTO unscanned modules are blind spots, not passes.)
+ * 5. Calls the type checker resolves to a DIFFERENT symbol are not seen as calls
+ *    of the wrapper: through a type the class does not declare in `extends` /
+ *    `implements` (structural typing), or reflectively (a computed key
+ *    `svc[k]()`, `{ ...svc }`, `for…in`, a member destructured in a PARAMETER).
+ *    Such calls are missed when the wrapper ALSO has resolved calls; with none it
+ *    is a blind spot (above).
  * 6. A site whose value reaches no `Root.member` use (a presence check) is not
  *    reported by the analyzer; the guard test pins those sites to an explicit,
  *    justified allow-list.
- * 7. Out of scope: reads of `window.Xrm` / `parent.Xrm` that never go through
- *    `getXrm`.
+ * 7. Only `src/` non-test files are scanned. Out of scope: reads of `window.Xrm`
+ *    / `parent.Xrm` that never go through `getXrm`.
  */
 
 import * as fs from 'fs';
@@ -348,8 +361,15 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
   // ---- global identifier index: dealiased symbol → references (any file)
   const refIndex = new Map<ts.Symbol, ts.Identifier[]>();
   const getXrmNamed: ts.Identifier[] = [];
+  /** `{ name }` / `{ name: x }` in object binding patterns (member destructuring). */
+  const bindingElements: ts.BindingElement[] = [];
+  /** `obj['name']` with a string-literal key. */
+  const literalElementAccesses: ts.ElementAccessExpression[] = [];
   for (const sf of sources) {
     const visit = (n: ts.Node) => {
+      if (ts.isBindingElement(n) && ts.isObjectBindingPattern(n.parent)) bindingElements.push(n);
+      if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression))
+        literalElementAccesses.push(n);
       if (ts.isIdentifier(n)) {
         const s = symbolOf(n);
         if (s) {
@@ -501,6 +521,57 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
           (functionOfSymbol(s) === fn || s.declarations?.includes(fn as unknown as ts.Declaration))
         )
           ids = ids.concat(l);
+    }
+    const isMember =
+      ts.isMethodDeclaration(fn) ||
+      ts.isGetAccessorDeclaration(fn) ||
+      ts.isPropertyAssignment(fn.parent) ||
+      ts.isPropertyDeclaration(fn.parent);
+    if (isMember) {
+      const name = fnName(fn);
+      const isOurs = (s: ts.Symbol | undefined): boolean =>
+        !!s &&
+        (s === key ||
+          functionOfSymbol(s) === fn ||
+          !!s.declarations?.some(d => d === (fn as ts.Node) || d === fn.parent));
+      // `svc['get']()`: a string-literal bracket access is a call (or a getter read) or an escape.
+      for (const ea of literalElementAccesses) {
+        if ((ea.argumentExpression as ts.StringLiteralLike).text !== name) continue;
+        const s =
+          dealias(checker.getSymbolAtLocation(ea.argumentExpression)) ??
+          checker.getTypeAtLocation(ea.expression).getProperty(name);
+        if (!isOurs(s)) continue;
+        const pp = ea.parent;
+        if (ts.isGetAccessorDeclaration(fn)) calls.push(ea);
+        else if (ts.isCallExpression(pp) && pp.expression === ea) calls.push(pp);
+        else escapes.push(ea);
+      }
+      // `const { get } = svc` / `const { x } = new G()`: the member leaves as a value.
+      for (const el of bindingElements) {
+        const prop = el.propertyName ?? el.name;
+        if (!ts.isIdentifier(prop) || prop.text !== name) continue;
+        const holder = el.parent.parent;
+        const init = ts.isVariableDeclaration(holder) ? holder.initializer : undefined;
+        const s = init ? checker.getTypeAtLocation(init).getProperty(name) : undefined;
+        if (isOurs(s)) escapes.push(el);
+      }
+      // `Object.values(svc)` / `Object.entries(svc)` over an object literal holding the wrapper.
+      const obj = ts.isPropertyAssignment(fn.parent) ? fn.parent.parent : fn.parent;
+      if (
+        ts.isObjectLiteralExpression(obj) &&
+        ts.isVariableDeclaration(obj.parent) &&
+        ts.isIdentifier(obj.parent.name)
+      ) {
+        for (const ref of referencesOf(checker.getSymbolAtLocation(obj.parent.name), obj.parent.name)) {
+          const call = ref.parent;
+          if (
+            ts.isCallExpression(call) &&
+            call.arguments.includes(ref) &&
+            /^Object\.(values|entries)$/.test(call.expression.getText())
+          )
+            escapes.push(call);
+        }
+      }
     }
     for (const id of ids) {
       if (ts.isGetAccessorDeclaration(fn)) {
@@ -687,16 +758,43 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     }
     for (const x of acc ?? []) if (!x.startsWith('helper:')) cov.entries.add(x);
   }
+  /**
+   * Whether `id` is WRITTEN: an assignment target (`x = …`, `x += …`), inside a
+   * destructuring-assignment target (`({ x } = o)`, `[x] = a`), a for-in / for-of
+   * initializer (`for (x of a)`), or `++` / `--`.
+   */
+  function isWriteRef(id: ts.Identifier): boolean {
+    let cur: ts.Node = id;
+    let p: ts.Node = id.parent;
+    if (
+      (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) &&
+      (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)
+    )
+      return true;
+    // Climb out of a destructuring-assignment pattern.
+    while (
+      ts.isParenthesizedExpression(p) ||
+      ts.isArrayLiteralExpression(p) ||
+      ts.isObjectLiteralExpression(p) ||
+      ts.isSpreadElement(p) ||
+      ts.isSpreadAssignment(p) ||
+      (ts.isShorthandPropertyAssignment(p) && p.name === cur) ||
+      (ts.isPropertyAssignment(p) && p.initializer === cur)
+    ) {
+      cur = p;
+      p = p.parent;
+    }
+    if (
+      ts.isBinaryExpression(p) &&
+      p.left === cur &&
+      p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+      p.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+    )
+      return true;
+    return (ts.isForInStatement(p) || ts.isForOfStatement(p)) && p.initializer === cur;
+  }
   function isReassigned(sym: ts.Symbol, decl: ts.Node): boolean {
-    return referencesOf(sym, (decl as ts.VariableDeclaration).name).some(id => {
-      const p = id.parent;
-      return (
-        ts.isBinaryExpression(p) &&
-        p.left === id &&
-        p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-        p.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-      );
-    });
+    return referencesOf(sym, (decl as ts.VariableDeclaration | ts.ParameterDeclaration).name).some(isWriteRef);
   }
   function resolveCoverage(arg: ts.Expression | undefined, env: Env = EMPTY_ENV, depth = 0): Coverage {
     const cov = newCov(arg ? arg.getText() : '(default)');
@@ -740,7 +838,9 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       const sym = symbolOf(e);
       const bound = sym && env.get(sym);
       const decl = sym?.declarations?.[0];
-      if (bound) merge(resolveCoverage(bound.expr, env, depth + 1));
+      if (decl && ts.isParameter(decl) && isReassigned(sym!, decl))
+        unknown(`capability parameter '${e.text}' is reassigned`);
+      else if (bound) merge(resolveCoverage(bound.expr, env, depth + 1));
       else if (decl && ts.isParameter(decl) && ts.isIdentifier(decl.name)) cov.forwardParams.add(decl);
       else if (decl && ts.isVariableDeclaration(decl) && decl.initializer) {
         const isConst = !!(ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const);
@@ -1058,13 +1158,28 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     // Passed as an argument.
     if (ts.isCallExpression(parent) && parent.arguments.includes(cur as ts.Expression)) {
       const callee = skipT(parent.expression);
-      // `fn.bind(xrm.Navigation)` / `.call(...)` / `.apply(...)`: the receiver, not an escape.
+      // `R.m.bind(R)` / `.call(R, …)` / `.apply(R, …)`: R is the receiver of its own method,
+      // whose `R.m` read is already a recorded use. Any OTHER `this` receiver is a blind spot.
       if (
         ts.isPropertyAccessExpression(callee) &&
         ['bind', 'call', 'apply'].includes(callee.name.text) &&
         parent.arguments[0] === cur
-      )
+      ) {
+        const method = skipT(callee.expression);
+        const sameReceiver = (a: ts.Expression, b: ts.Expression): boolean => {
+          const x = skipT(a);
+          const y = skipT(b);
+          if (ts.isIdentifier(x) && ts.isIdentifier(y)) return !!symbolOf(x) && symbolOf(x) === symbolOf(y);
+          return x.getText() === y.getText();
+        };
+        if (
+          (ts.isPropertyAccessExpression(method) || ts.isElementAccessExpression(method)) &&
+          sameReceiver(method.expression, cur as ts.Expression)
+        )
+          return;
+        blind(o, parent, `passed as the this-receiver of .${callee.name.text}()`);
         return;
+      }
       // Logging is not a use.
       if (
         ts.isPropertyAccessExpression(callee) &&
@@ -1255,7 +1370,32 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       return;
     }
     for (const e of escapes) blind(o, e, `wrapper ${fnName(fn)} referenced other than by a call`);
+    const base = baseMemberOf(fn);
+    if (base) blind(o, fn, `wrapper ${fnName(fn)} may also be called through ${base} (not resolved)`);
+    if (!calls.length)
+      blind(
+        o,
+        fn,
+        `returning wrapper ${fnName(fn)} has no resolved call (possibly called through an interface, base type or override)`
+      );
     for (const c of calls) propagate(c, fork(o));
+  }
+
+  /**
+   * A class member that also exists on a type its class extends or implements: calls
+   * through that base / interface type resolve to the BASE member, not to this one.
+   */
+  function baseMemberOf(fn: ts.FunctionLikeDeclaration): string | undefined {
+    if (!(ts.isMethodDeclaration(fn) || ts.isGetAccessorDeclaration(fn)) || !fn.name) return undefined;
+    const cls = fn.parent;
+    if (!ts.isClassLike(cls) || !cls.heritageClauses) return undefined;
+    const name = fn.name.getText();
+    for (const clause of cls.heritageClauses)
+      for (const t of clause.types) {
+        const type = checker.getTypeFromTypeNode(t);
+        if (type.getProperty(name)) return t.getText();
+      }
+    return undefined;
   }
 
   function newSite(at: ts.Node, cov: Coverage, requested: string, push = true): XrmSite {
@@ -1307,7 +1447,15 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       }
       for (const e of escapes)
         blind({ site: def }, e, `forwarding function ${fnName(fn)} referenced other than by a call`);
-      if (!calls.length) blind({ site: def }, fn, `forwarding function ${fnName(fn)} has no call site`);
+      if (!calls.length)
+        blind(
+          { site: def },
+          fn,
+          `forwarding function ${fnName(fn)} has no call site (possibly called through an interface, base type or override)`
+        );
+      const base = baseMemberOf(fn);
+      if (base)
+        blind({ site: def }, fn, `forwarding function ${fnName(fn)} may also be called through ${base} (not resolved)`);
       for (const c of calls) {
         const env2: Env = new Map(env);
         const args = argsOf(c);
@@ -1351,9 +1499,17 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     blind({ site: pseudo }, at, reason);
   }
   /** `import('…')` (through `await` / parentheses), or an identifier / parameter holding one's module value. */
+  /** `import('…')` or `require('…')`. */
+  function isModuleLoadCall(n: ts.Node): n is ts.CallExpression {
+    return (
+      ts.isCallExpression(n) &&
+      (n.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(n.expression) && n.expression.text === 'require' && n.arguments.length === 1))
+    );
+  }
   function isDynamicImportValue(e: ts.Expression): boolean {
     const x = skipT(e);
-    if (ts.isCallExpression(x) && x.expression.kind === ts.SyntaxKind.ImportKeyword) return true;
+    if (isModuleLoadCall(x)) return true;
     if (!ts.isIdentifier(x)) return false;
     const d = checker.getSymbolAtLocation(x)?.declarations?.[0];
     if (d && ts.isVariableDeclaration(d) && d.initializer) return isDynamicImportValue(d.initializer);
@@ -1384,38 +1540,45 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
   // provably avoid getXrm (`m.Other`, `{ Other }`), else it is a blind spot.
   for (const sf of sources) {
     const visit = (n: ts.Node) => {
-      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword) checkDynamicImport(n);
+      if (isModuleLoadCall(n)) checkDynamicImport(n);
       ts.forEachChild(n, visit);
     };
     visit(sf);
   }
   function checkDynamicImport(call: ts.CallExpression) {
+    const kind = call.expression.kind === ts.SyntaxKind.ImportKeyword ? 'dynamic import' : 'require';
     const arg = call.arguments[0];
     if (!arg || !ts.isStringLiteralLike(arg)) {
-      pseudoBlind(call, 'dynamic import with a non-literal specifier');
+      pseudoBlind(call, `${kind} with a non-literal specifier`);
       return;
     }
     const spec = arg.text;
     const target = resolveModule(spec, call.getSourceFile().fileName);
+    // The export NAMES under which the module exposes getXrm, matched by dealiased
+    // symbol (a renamed re-export `export { getXrm as lookupXrm }` counts).
+    let getXrmNames: Set<string>;
     if (target) {
       const modSym = checker.getSymbolAtLocation(program.getSourceFile(target)!);
-      const exportsGetXrm = !!modSym && checker.getExportsOfModule(modSym).some(e => e.name === 'getXrm');
-      if (!exportsGetXrm) return;
-    } else if (!/ui-components|xrmContext/.test(spec)) return;
-    const unsafe = (why: string) => pseudoBlind(call, `dynamic import of '${spec}' (exports getXrm): ${why}`);
+      getXrmNames = new Set(
+        (modSym ? checker.getExportsOfModule(modSym) : []).filter(e => isGetXrmSymbol(dealias(e))).map(e => e.name)
+      );
+      if (!getXrmNames.size) return;
+    } else if (/ui-components|xrmContext/.test(spec)) getXrmNames = new Set(['getXrm']);
+    else return;
+    const unsafe = (why: string) => pseudoBlind(call, `${kind} of '${spec}' (exports getXrm): ${why}`);
     const bindingSafe = (name: ts.BindingName): boolean => {
       if (ts.isIdentifier(name)) {
         const sym = checker.getSymbolAtLocation(name);
         return referencesOf(sym, name).every(ref => {
           const p = ref.parent;
-          return ts.isPropertyAccessExpression(p) && p.expression === ref && p.name.text !== 'getXrm';
+          return ts.isPropertyAccessExpression(p) && p.expression === ref && !getXrmNames.has(p.name.text);
         });
       }
       if (ts.isObjectBindingPattern(name))
         return name.elements.every(el => {
           if (el.dotDotDotToken) return false;
           const prop = (el.propertyName ?? el.name) as ts.Node;
-          return ts.isIdentifier(prop) && prop.text !== 'getXrm';
+          return ts.isIdentifier(prop) && !getXrmNames.has(prop.text);
         });
       return false;
     };
@@ -1435,7 +1598,7 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
         if (cb) unsafe('then() callback not followed');
         return;
       }
-      if (p.name.text === 'getXrm') unsafe('getXrm read from it');
+      if (getXrmNames.has(p.name.text)) unsafe(`${p.name.text} (getXrm) read from it`);
       return;
     }
     if (ts.isVariableDeclaration(p) && p.initializer === cur) {

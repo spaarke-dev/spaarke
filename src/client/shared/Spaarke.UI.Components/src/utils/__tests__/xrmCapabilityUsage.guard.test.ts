@@ -460,6 +460,154 @@ describe('getXrm capability guard — round 7 shapes fire', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Round 8 (review of round 7): calls through an interface / base / override,
+// reassignment, this-receivers, member escapes, require().
+// ---------------------------------------------------------------------------
+
+const R8_VIOLATIONS: Array<[string, Record<string, string>, string]> = [
+  [
+    "string-literal bracket call svc['get']()",
+    {
+      'a.ts':
+        IMPORT +
+        "const svc = {\n  get() {\n    return getXrm('navigation');\n  },\n};\nsvc['get']()!.Navigation.openForm({});",
+    },
+    'Navigation.openForm',
+  ],
+];
+
+const R8_BLIND_SPOTS: Array<[string, Record<string, string>, RegExp]> = [
+  [
+    'wrapper called only through an interface (with its own presence check)',
+    {
+      'a.ts':
+        IMPORT +
+        "interface I {\n  get(): any;\n}\nclass Impl implements I {\n  get() {\n    const x = getXrm('navigation');\n    return x ? x : undefined;\n  }\n}\nconst i: I = new Impl();\ni.get()!.Navigation.openForm({});",
+    },
+    /no resolved call|may also be called through/,
+  ],
+  [
+    'wrapper called directly AND through its interface',
+    {
+      'a.ts':
+        IMPORT +
+        "interface I {\n  get(): any;\n}\nclass Impl implements I {\n  get() {\n    return getXrm('navigation');\n  }\n}\nnew Impl().get()!.Navigation.navigateTo({});\nconst i: I = new Impl();\ni.get()!.Navigation.openForm({});",
+    },
+    /may also be called through I/,
+  ],
+  [
+    'override called through the base type',
+    {
+      'a.ts':
+        IMPORT +
+        "class B {\n  get(): any {\n    return null;\n  }\n  run() {\n    this.get().Navigation.openForm({});\n  }\n}\nexport class D extends B {\n  get() {\n    return getXrm('navigation');\n  }\n}",
+    },
+    /no resolved call|may also be called through B/,
+  ],
+  [
+    'capability parameter reassigned in the body',
+    {
+      'a.ts':
+        IMPORT +
+        "function f(cap: any) {\n  cap = 'navigation';\n  getXrm(cap)!.Navigation.openForm({});\n}\nf('openForm');",
+    },
+    /parameter 'cap' is reassigned/,
+  ],
+  [
+    'capability reassigned by a destructuring assignment',
+    {
+      'a.ts':
+        IMPORT +
+        "let cap: any = 'openForm';\n({ cap } = { cap: 'navigation' });\ngetXrm(cap)!.Navigation.openForm({});",
+    },
+    /reassigned/,
+  ],
+  [
+    'capability reassigned by a for-of initializer',
+    {
+      'a.ts':
+        IMPORT +
+        "let cap: any = 'openForm';\nfor (cap of ['navigation']) {\n  /* */\n}\ngetXrm(cap)!.Navigation.openForm({});",
+    },
+    /reassigned/,
+  ],
+  [
+    'value passed as another function’s this-receiver (fn.call)',
+    {
+      'a.ts':
+        IMPORT + "function open(this: any) {\n  this.Navigation.openForm({});\n}\nopen.call(getXrm('navigation'));",
+    },
+    /this-receiver/,
+  ],
+  [
+    'shorthand destructuring of a wrapper method (const { get } = svc)',
+    {
+      'a.ts':
+        IMPORT +
+        "const svc = {\n  get() {\n    return getXrm('navigation');\n  },\n};\nconst { get } = svc;\nget()!.Navigation.openForm({});",
+    },
+    /referenced other than by a call/,
+  ],
+  [
+    'destructuring a getter (const { x } = new G())',
+    {
+      'a.ts':
+        IMPORT +
+        "class G {\n  get x() {\n    return getXrm('navigation');\n  }\n}\nconst { x } = new G();\nx!.Navigation.openForm({});",
+    },
+    /referenced other than by a call/,
+  ],
+  [
+    'Object.values over a wrapper object',
+    {
+      'a.ts':
+        IMPORT +
+        "const svc = {\n  get() {\n    return getXrm('navigation');\n  },\n};\nfor (const f of Object.values(svc)) f()!.Navigation.openForm({});",
+    },
+    /referenced other than by a call/,
+  ],
+  [
+    "require('@spaarke/ui-components').getXrm",
+    {
+      'a.ts': "const ui = require('@spaarke/ui-components');\nui.getXrm('navigation')!.Navigation.openForm({});",
+    },
+    /require of '@spaarke\/ui-components'/,
+  ],
+  [
+    'dynamic import of a renamed re-export (matched by symbol, not by name)',
+    {
+      'barrel.ts': "export { getXrm as lookupXrm } from '@spaarke/ui-components';\n",
+      'a.ts': "import('./barrel').then(m => m.lookupXrm('navigation')!.Navigation.openForm({}));",
+    },
+    /dynamic import of '\.\/barrel'/,
+  ],
+];
+
+describe('getXrm capability guard — round 8 shapes fire', () => {
+  it.each(R8_VIOLATIONS)('%s', (_name, files, use) => {
+    expect(run(files).violations.map(v => v.use)).toContain(use);
+  });
+
+  it.each(R8_BLIND_SPOTS)('%s → blind spot', (_name, files, reason) => {
+    expect(
+      run(files)
+        .blindSpots.map(b => b.reason)
+        .some(x => reason.test(x))
+    ).toBe(true);
+  });
+
+  it('quiet: R.m.bind(R) and an untouched let capability', () => {
+    const r = run({
+      'a.ts':
+        IMPORT +
+        "const nav = getXrm('navigation')!.Navigation;\nconst go = nav.navigateTo.bind(nav);\ngo({});\nlet cap: any = 'openForm';\ngetXrm(cap)!.Navigation.openForm({});",
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.blindSpots).toEqual([]);
+  });
+});
+
 describe('getXrm capability guard — clean fixture stays silent', () => {
   it('correct capabilities raise nothing', () => {
     const r = run({
