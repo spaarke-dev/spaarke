@@ -1,6 +1,6 @@
 # Current Task State — Spaarke Ontology Platform R1
 
-> **Last Updated**: 2026-10-05 ~02:30 UTC, after the restart (main session)
+> **Last Updated**: 2026-10-06, pre-compaction handoff (main session, by context-handoff)
 > **Recovery**: read "Quick Recovery" first. This is the MAIN SESSION's orchestrator view. Tasks run as subagents;
 > per-task detail lives in each POML's `<completion>` element and in `notes/`. Sub-agents never edit this file.
 
@@ -10,64 +10,53 @@
 
 | Field | Value |
 |---|---|
-| **Task** | No main-session task. Four agents were dispatched after the restart (2026-10-05): **022 rework round 2**, **081 rework**, **094 per-PCF release build** (PR #1286), **096** (new: Json.Schema.Net race in AI tool-schema validation, own PR). |
-| **Status** | Machine healthy after the restart (27 dotnet procs, 12.6 GB free). **Both independent reviews FAILED with real findings:** 022 round 2 (13 findings, F3 decided: an `exists`-clause template token only when the clause pins the field to one value) and 081 (13 findings + escalation; decisions in `notes/081-progress.md`). Nightly PCF run dispatched on #1123's branch: run `37254845131`. |
-| **Next Action** | As each agent reports: **022** → re-run an independent review, then ONE full BFF suite on a quiet machine, then ✅. **081** → write the agent's record into `notes/081-progress.md`, independent re-review, one clean SpaarkeAi/UI.Components jest run, merge into this branch. **094** → apply its `.claude/CHANGELOG.md` text (main session only), confirm per-PCF verification numbers. **092** → quote all 18 jobs of run `37254845131` by log marker, rewrite PR #1123's body. **096** → record PR, mark ✅. Then **031** (nightly evaluator). |
-| **Decisions this session** | (a) The release build's PCF step builds **each PCF in production mode** (as the nightly workflow does), in #1286. The aggregate root build never worked: TS5083, then out of memory, and it was dev mode. (b) **Owner 2026-10-05: 081 ships as its OWN PR to master** after re-review (not via this branch): ~37 projects edit those shared packages. Main session moves 081's commits onto a branch off `origin/master`. (c) **#1123's FR-02 section-height change WITHDRAWN**: it would have regressed R2 UAT §5.6 (`803c77ace1`); agreed with unified-access-control-r2 on #1123 (owner decision relayed): #1123 reverts ONLY `buildDynamicWorkspaceConfig.ts`, keeps its versions of the four equivalent test files, **merges first**; #1293 rebases and keeps its unique parts (Tabster fix, todoScoreMappings pin, SprkModal heading, test (h), doc fixes, FR-02 spec amendment). |
-| **UI/UX decisions (owner, 2026-10-05)** | (1) **Prototype v4 is the UI/UX baseline** (`HANDOFF.md` @ `ae1cc9f`, v4, findings 1–40), refined during UAT in this project. Where v4 shows something the real solution cannot do, **flag it for the owner to resolve** (it was built without full project context). (2) **Ontology admin is IN R1** (owner delegated the call; coordinator chose R1): its own phase after 031–034 + the worklist core, sliced (a) read-only Rules view + On/Off + Retire, (b) rule-authoring wizard (save calls `PolicyVersionValidator.ValidateForSave`), (c) Classification admin. v4 §7 Email Review is a hand-off to the email project, not R1. (3) **One canonical modal/wizard approach**, supporting all wizard functionality and dark mode, without the unthemeable white OOB dialog header where avoidable. Three read-only investigations running → `notes/v4-reconciliation.md`, `notes/v4-prototype-vs-solution.md`, `notes/modal-wizard-canonical-approach.md`. UI kit work can start alongside 031–034 once reconciled. |
-| **Owner decisions 2026-10-05 (097)** | Event routes: apply the solution's established record-level authorization pattern before #1302 merges (security; routes were unreachable on master only because they crashed). Event date columns (due, final due, base, completed, approved, meeting): convert UserLocal → **Date Only** (one-way; ConvertDateAndTimeBehavior; record which solution owns them so the change ships). |
-| **Notice posted** | #1286 merged 2026-10-05 (`b9dcae48b`); pinned notice [#1308](https://github.com/spaarke-dev/spaarke/issues/1308) tells other projects a PCF build that now stops after merging master was already failing. |
-| **Branch / git** | `docs/ontology-platform-design` pushed and in sync. 12 commits behind master at restart. |
+| **Task** | No main-session task. Orchestrating. **Index: 57 tasks — 29 ✅ · 3 🔄 (081, 097, 098) · 25 🔲.** Drift check clean. |
+| **Background agents still running at handoff** (notifications arrive after compaction) | (1) **081 round 5** on PR #1309 (`C:\wt081m`, branch `fix/ui-duplication-cleanup-081`): fixing round-4 review R4-1..R4-9 — NavigatorPane metadata capability sites, an **AST-based** Xrm-capability guard (TypeScript compiler API), wrapper capabilities, PR audit table. (2) **098** (`C:\wt098`, branch `fix/event-dates-date-only`, based on #1302's head): fixing the surfaces the Date Only conversion broke in dev — ribbon/EventsPage complete writes (now HTTP 400), server writes in UTC (CommunicationRiActionService), previous-day readers (DataGrid date cell only for DateOnly columns, side pane, calendar, VisualHost, LegalWorkspace feed, ribbon dialogs); builds on #1309's `dateLocal.ts` helpers. Opens its PR **only after #1302 merges**. (3) **Prototype-vs-solution investigation** → `notes/v4-prototype-vs-solution.md` (not yet written; its helpers reported — see "UI/UX findings" below). |
+| **Next Action** | In order, as each completes: **(a) Merge #1302** (owner-approved) when its last running check finishes and no blocking check failed: `gh pr checks 1302`, then `gh pr merge 1302 --squash --delete-branch`; then mark 097 ✅ (POML status + `<completion>`, TASK-INDEX) and tell the 098 agent (or a fresh one) to rebase onto master and open its PR. **(b) #1309**: when round 5 reports, run ONE focused independent review of round 5; if it passes, ASK the owner to approve merging #1309 (merge it BEFORE 098; known conflict with #1302 = modify/delete on `EventDetailSidePane/src/components/TodoSection.tsx`, keep the deletion); then mark 081 ✅ and write its record into `notes/081-progress.md`. **(c) 098**: independent review of its PR, merge order after #1309; then ✅. **(d)** When `notes/v4-prototype-vs-solution.md` lands: commit it, then give the owner ONE consolidated decision list, **R-11 first** (see below), then update spec + add the new tasks (007, 008, 036, 043, 044, 056, 057, 058, Ontology admin slices). **(e)** Then 007/008, then **031**. |
+| **Branch / git** | `docs/ontology-platform-design` pushed and in sync at handoff (last `919db11e4`). |
 
-### Before running ANY full test suite
-The machine was starved: ~300 `dotnet` processes, **248 of them VS Code C# Dev Kit build hosts** (`visualstudio-projectsystem-buildhost`, >6 h old), ~4 GB free of 61.6 GB. Every full BFF suite today crashed or timed out on unrelated tests. **After the restart, check `Get-Process dotnet | Measure-Object` before trusting any suite result.**
+### Decisions waiting on the owner (bring as ONE list)
+1. 🔴 **R-11 — blocks 031**: `sprk_dedupekey` is a unique key and the 030 writer leaves a Resolved row Resolved, so a dismissed/resolved/superseded Signal can NEVER re-raise (breaks D-11's 30-day re-fire, Do-lane re-raise, supersede-and-re-raise on rule publish). Proposed: add an episode number to the key + a re-raise rule (`notes/v4-reconciliation.md` R-11, C-1). Also C-12 (no role can write `sprk_policyversion`, so derive version end from `sprk_currentversion`).
+2. **UI/UX (from the three notes)**: recording vs executing (most v4 actions have no write path; FR-18 promises recording only); who writes the Decision Record (user per the roles vs BFF writer per task 040); no non-chat gate entry point (task 053 assumes one); Decision Record can't hold v4's step/follow-on shape, no follow-on→decision link except email `correlationid`; Signal writer refuses event/work-assignment/service-request subjects (no Do-lane Signals yet); rules offer one proposed action (one text field) vs v4's 3–4; dropping FR-27's row ⋮ menu + `OutcomeCard` reuse (needs sign-off); FR-28 allows one new component vs v4's ~7; Ontology admin's home in the Console (no top bar in the real Console; nothing role-gates sections today) + D-13 amending D-3 + admin write identity; Assistant "why isn't X here?" needs an evaluation trace nothing records; Email Review vs spec A-5; v4's OS-theme fallback breaks ADR-021 (do not port); landing/source columns have no creating task; narrative is LLM-written today (062 is new work).
+3. **Modal (notes/modal-wizard-canonical-approach.md)**: adopt `SprkModal` envelope + `WizardShell` engine, delete `WizardModal`, launch in-app from our apps (white header = Dataverse `navigateTo` target:2 chrome, unthemeable); ADR-050 amendment (path B); ~7–9 dev-days; separately approve 5–8 days to move today's wizards off `navigateTo` when launched in-app.
+4. **Events (097)**: what counts as open/overdue event work (currently one named predicate `EventStatusCode.IsOpenWork` = Draft, Open, On Hold, Reassigned — owner may change it); two status columns (`statuscode` vs `sprk_eventstatus`); reschedule writes `sprk_duedate` while Briefing reads `sprk_finalduedate` first; "my events" misses team-owned events for users with no linked contact (needs `sprk_createdbyperson`, UAC-r2 task 146); re-parent does not re-own (known gap, #1034); confirm: Reassigned events can be completed/cancelled, soft-delete writes Cancelled, Completed stays Active (schema-required).
+5. **To Do composite score**: move its five 3/7/10 copies to calendar days? (re-ranks boards).
+6. **CI full-unit-test job** never completes (30-min timeout; 0 of the last 30 runs): owner asked "what is CI" — it was explained; options shard / raise to 90 / nightly / leave. Awaiting the choice.
+7. Still open from before: writer privileges on `Spaarke Ontology Service` + moving the writer into the customer BU.
 
-### Worktrees (all other work is committed and pushed)
-| Worktree | Branch | State at handoff |
-|---|---|---|
-| this one | `docs/ontology-platform-design` | clean, pushed |
-| `C:\wt081` | `ontology/081-cleanup` | WIP committed + pushed `89b5230f9`: C-8, C-11, C-13, C-17 implemented, tests mostly verified, final report pending (read the commit message) |
-| `C:\wt092` | `fix/master-build-test-baseline` (PR #1123) | WIP committed + pushed `e81d65e64`, clean |
-| `C:\wt094` | `fix/pcf-deploy-verify-build` (PR #1286) | clean, pushed |
-| `C:\wt095` | `fix/email-attachment-regex-timeout` (PR #1287) | clean, pushed |
-| `C:\wt093b`, `C:\wt091`, `C:\wt086`, `C:\wt089` | merged/PR branches | clean, pushed (removable) |
-| `C:\wt111m` | detached old master (publish-size baseline) | throwaway; re-measure master fresh instead |
-
-### Open PRs — merge order matters
-| PR | What | Merge |
-|---|---|---|
-| **#1123** | Master build/test repair: 9 PCFs (pdfjs stub, missing deps, flat-control webpack), 17 failing suites, **one user-visible fix** (FR-02 dashboard section height), 18 tsconfig `extends` fixes (WIP `e81d65e64`) | **after 092 finishes** |
-| **#1286** | Deploy procedures verify the REAL PCF build result (task 094) | **after #1123 AND after the release build's PCF step passes** (it now fails: first TS5083, fixed in #1123; then an out-of-memory building all 18 PCFs in one process, open) |
-| **#1287** | Flaky email-attachment test now tests production (task 095) | ready |
-| #1111 (draft) | This branch | at project end |
-
-Merged today: #1118, #1121, #1114, #1116, #1117, #1119, #1122, #1120, #1282, #1285. #1116 changes a Dataverse web resource and needs a deploy to take effect in dev.
-
-### Waiting on the owner
-1. **Writer privileges** (task 030 findings; owner leaned "the role should carry it"): add **AppendTo on `sprk_matter` and `sprk_communication` (Global)** and **Write on `sprk_signal` (Global)** to `Spaarke Ontology Service`; and move the writer app user (`3121bf1b-9fbf-f111-aaaf-0022482913fc`) into the **customer BU** (`Spaarke Business Unit 1` in dev), mirroring production (#1094). Until then communication-subject Signals fail (F26) and the matter path works only via the root default team's over-grant.
-2. ✅ **Prototype review closed** (2026-10-05): v4 `HANDOFF.md` @ `ae1cc9f` is the baseline. Resolve the flagged prototype-vs-solution inconsistencies before UI tasks start.
-3. **VS Code build hosts**: reload/close old worktree windows (the restart clears them).
-4. Merges in the order above.
-
-### Owner decisions made 2026-10-04 (all recorded in task files / spec)
+### Owner decisions made 2026-10-05 / 06 (recorded)
 | Decision | Where |
 |---|---|
-| ADR-028 path A for the writer's `ManagedIdentityCredential` — **approved** | spec.md §6 ADR Tensions |
-| No silent failure: writer refusals log EventId 50300 + metric; evaluator emits a per-run metric + last-success diagnostic; two alert rules at deploy | 030 code; 031 + 035 POMLs |
-| Nightly CI production PCF build (advisory) | done: #1282 + #1285 |
-| Merge the cleanup PRs | done except #1123/#1286/#1287 |
-| #1120 ADR-020 no-version-bump exception — approved, merged | — |
-| Fix the flaky email test in its own PR | #1287 |
+| Merge #1123, #1286, #1287, #1294, #1302 — **all merged except #1302 (approved, pending checks)** | TASK-INDEX |
+| ADR-009 path A for 096's verdict cache — approved | spec.md ADR Tensions |
+| v4 (`HANDOFF.md` @ `ae1cc9f`, findings 1–40) is the UI baseline; flag what the solution can't do; Ontology admin in R1 (coordinator's call, delegated); one canonical modal approach | design.md header/§11/§12, spec.md header/§8.2, project CLAUDE.md §3.3 |
+| SmartTodo's palette is the ONE due-urgency scheme (overdue red · 0–3 dark orange · 4–7 yellow · 8–10 grey · beyond none) | notes/081-progress.md |
+| 081 ships as its own PR to master | 081 POML notes |
+| Event routes: the solution's established record-level authorization pattern (done in #1302: caller-rights probe, AppendTo on parent, Create privilege, I-6 ownership) | PR #1302 |
+| Event date columns → Date Only (CanChangeDateTimeBehavior switched on; UTC conversion; 5 hand-corrected) — **done in spaarkedev1**; per-environment procedure in `docs/data-model/sprk_event-date-columns.md` (098 branch) | task 098 |
+| Pinned notice #1308 for other projects (PCF builds now stop on real failures) | GitHub |
 
-### Verified today (do not redo)
-- Ledger append-only for the writer, re-checked with the CORRECT method (`RetrieveUserPrivileges` ∪ `RetrieveTeamPrivileges`, plus live 403 on update/delete). `RetrieveUserPrivileges` alone understates team-inherited depth — see security-roles.md §9.2.
-- Signal ownership settled live: writer owns, `owningbusinessunit` = matter's BU (needs `EnableOwnershipAcrossBusinessUnits`, true in dev). A BU default team cannot own a Signal (403).
-- The root default team's `Spaarke Office Add In User` grants Deep Write/Assign/Share on every matter to all ~150 root-BU principals (known dev artifact, #1094).
-- `pcf-scripts build` exits 0 when webpack fails; the nightly workflow and #1286 judge from output.
-- `Json.Schema.Net` `Evaluate` is not thread-safe on a shared schema (022 locked it).
+### Open PRs and merge order
+| PR | Task | State |
+|---|---|---|
+| **#1302** | 097 events API repair | Approved; merge when green. Proven on real routes (master: create/get/list/complete returned 500) |
+| **#1309** | 081 shared UI cleanup | Round 5 running → focused review → ask owner → merge **before** 098 |
+| (098 PR, not yet open) | 098 date columns | After #1302; merge after #1309 |
+| #1293 (uac-r2's) | test repairs | Rebasing onto master per agreement |
+| #1111 (draft) | this branch | project end |
+
+### Housekeeping for the owner
+Delete by hand (sandbox blocks deleting under `C:\`; nothing tracks them): `C:\wt081-base`, `C:\wt097m`, `C:\wtz`, `C:\wt097\TestResults097`. Throwaway worktrees still registered: `C:\wt081b` (081 master baseline), `C:\wt092`, `C:\wt094`, `C:\wt095`, `C:\wt096` (merged), `C:\wt097`, `C:\wt098`, `C:\wt081`, `C:\wt081m` — remove merged ones after their PRs land.
+
+### Lessons from this session (do not relearn)
+- Every independent review found something real (022 ×3, 081 ×4, 097 ×4, 096, #1286). Keep the gate; review each rework round, focused on its diff.
+- "Proven live" must mean the **real route**, not replayed payloads (097 round 2 missed a nonexistent column that made create return 500 after writing).
+- Fixing a broken route can **expose** a latent hole (097: no record-level authorization once routes stopped crashing).
+- A one-way schema change breaks every reader/writer of the column — inventory them first (098).
+- Contended full suites give false failures; a failure counts only if it reproduces alone and not on master.
 
 ### Critical context in three sentences
-Tasks 021 (predicate compiler) and 030 (Signal writer) are done and committed; 022 (the fail-closed validation gate 031 must use) is done but awaits re-review. Every substantial task this project has had an independent review find something real (030 twice, 022, 094), so keep that gate. Several master-wide build defects surfaced along the way and are being fixed in their own PRs, not on this branch.
+The backend foundation (schema, roles, compiler 021, writer 030, gate 022) is done; the next build step, the evaluator 031, is blocked on the owner's R-11 decision. The UI baseline is prototype v4, reconciled in three notes with a consolidated owner decision list still to deliver. Most of the session went into master-wide defects the ontology work exposed (build pipeline, events API, AI schema race, date columns), each fixed in its own reviewed PR.
 
 ---
 
