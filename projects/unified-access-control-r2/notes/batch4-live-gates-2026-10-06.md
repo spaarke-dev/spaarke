@@ -100,6 +100,14 @@ Run against spaarke-bff-dev at master `891cfd9a3`, then `c339d6920` (hotfix #131
 - **Deleting a record doesn't revoke its Assigned-To contact grants.** The grant rows survive with an empty record lookup, because the lookup only clears its link. G6 left 2 ledger rows and 2 active grants this way; they're now deleted. Owner decision pending: should the reconciliation job deactivate grants whose record is gone?
 
 
+## Update: #1332 deployed (master cc96ea6d7); G9 PASS
+
+- **R4 (owner round 71) is live, report-only on dev.** The job planned 1 for a grant whose matter had been deleted, and changed nothing.
+- **The rootless Assigned-To ledger row was retired** (Revoked, `root-deleted`) about 2.5 minutes later.
+- **Minor:** the admin trigger's run id and the heartbeat's run id differ, though the correlation id matches.
+- **R4 only deactivates once the owner sets `ExternalAccess:Reconciliation:WritesEnabled`** (task 137).
+
+
 The per-group records follow, verbatim.
 
 
