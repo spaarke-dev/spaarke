@@ -232,12 +232,15 @@ public class EventStatusWritePathTests
     {
         var dv = EventService(EventStatusCode.Open, auditThrows: true);
         var log = new CapturingLogger();
+        using var metric = new AuditFailureMetric();
 
         var result = await EventEndpoints.DeleteEventAsync(EventId, dv.Object, log, default);
 
         StatusOf(result).Should().Be(StatusCodes.Status204NoContent,
             "the event write already committed; a 500 would invite a retry that repeats it");
-        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701);
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701
+            && e.EventId.Name == "EventAuditLogWriteFailed");
+        metric.CountFor("Deleted").Should().BeGreaterThanOrEqualTo(1, "event_audit_log_write_failures_total is incremented");
     }
 
     [Fact]
@@ -245,12 +248,14 @@ public class EventStatusWritePathTests
     {
         var dv = EventService(EventStatusCode.Open, auditThrows: true);
         var log = new CapturingLogger();
+        using var metric = new AuditFailureMetric();
 
         var result = await EventEndpoints.CompleteEventAsync(EventId, dv.Object, log, default);
 
         StatusOf(result).Should().Be(StatusCodes.Status200OK);
-        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701,
-            "never swallowed silently (the former helper logged a Warning)");
+        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701
+            && e.EventId.Name == "EventAuditLogWriteFailed", "never swallowed silently (the former helper logged a Warning)");
+        metric.CountFor("Completed").Should().BeGreaterThanOrEqualTo(1);
     }
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
@@ -273,6 +278,32 @@ public class EventStatusWritePathTests
         return dv;
     }
 
+    /// <summary>Listens to the event audit-failure counter (meter Sprk.Bff.Api.Events) for one test.</summary>
+    private sealed class AuditFailureMetric : IDisposable
+    {
+        private readonly System.Diagnostics.Metrics.MeterListener _listener = new();
+        private readonly System.Collections.Concurrent.ConcurrentDictionary<string, long> _byAction = new();
+
+        public AuditFailureMetric()
+        {
+            _listener.InstrumentPublished = (instrument, listener) =>
+            {
+                if (instrument.Meter.Name == EventEndpoints.MeterName && instrument.Name == "event_audit_log_write_failures_total")
+                    listener.EnableMeasurementEvents(instrument);
+            };
+            _listener.SetMeasurementEventCallback<long>((_, value, tags, _) =>
+            {
+                foreach (var tag in tags)
+                    if (tag.Key == "action" && tag.Value is string action)
+                        _byAction.AddOrUpdate(action, value, (_, existing) => existing + value);
+            });
+            _listener.Start();
+        }
+
+        public long CountFor(string action) => _byAction.TryGetValue(action, out var n) ? n : 0;
+
+        public void Dispose() => _listener.Dispose();
+    }
     private sealed class CapturingLogger : ILogger<Program>
     {
         public List<(LogLevel Level, EventId EventId, string Message)> Entries { get; } = new();

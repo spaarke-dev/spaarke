@@ -326,13 +326,26 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     public async Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(EventQueryFilter filter, CancellationToken ct = default)
     {
         var skip = filter.Skip;
+        var typeRefs = await GetRecordTypeRefIdsAsync(ct);
+        if (filter.RegardingRecordType is { } type && filter.RegardingRecordTypeRefId is null)
+        {
+            var logicalName = RegardingRecordType.GetEntityLogicalName(type);
+            if (logicalName is null || typeRefs is null || !typeRefs.TryGetValue(logicalName, out var refId))
+                throw new EventRegardingResolutionException($"Regarding record type {type} cannot be filtered: no sprk_recordtype_ref row.");
+            filter = filter with { RegardingRecordTypeRefId = refId };
+        }
+
         var url = BuildQueryEventsUrl(filter);
 
         _logger.LogDebug("Querying events: {Url}", url);
 
         try
         {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Get, url, ct);
+            // Security review: when the caller is named, the query runs IMPERSONATED as them (MSCRMCallerID —
+            // ADR-028 A5, the same seam as every workforce list), so Dataverse itself trims to the events they may
+            // see. An empty id is refused by the helper (fail closed), never degraded to an app-only list.
+            using var request = await CreateAuthenticatedRequestAsync(
+                HttpMethod.Get, url, ct, impersonateSystemUserId: filter.ImpersonateSystemUserId);
             request.Headers.Add("Prefer", "odata.include-annotations=\"OData.Community.Display.V1.FormattedValue\"");
 
             var response = await _httpClient.SendAsync(request, ct);
@@ -344,7 +357,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
             // Dataverse rejects $skip ("Skip Clause is not supported in CRM"); the URL asks for skip+top rows and the
             // page is cut here. See BuildQueryEventsUrl.
-            var events = data.Value.Skip(Math.Max(0, skip)).Select(MapToEventEntity).ToArray();
+            var typeByRefId = ReverseTypeMap(typeRefs);
+            var events = data.Value.Skip(Math.Max(0, skip)).Select(row => MapToEventEntity(row, typeByRefId)).ToArray();
             return (events, data.Count);
         }
         catch (Exception ex)
@@ -372,7 +386,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     private const string EventSelectCommon =
         "sprk_eventid,sprk_eventname,sprk_description,_sprk_eventtype_ref_value,sprk_regardingrecordid," +
-        "sprk_regardingrecordname,_sprk_regardingrecordtype_value,_sprk_regardingaccount_value," +
+        "sprk_regardingrecordname,_sprk_regardingrecordtype_value,sprk_regardingrecordtypelogicalname,_sprk_regardingaccount_value," +
         "_sprk_regardinganalysis_value,_sprk_regardingcontact_value,_sprk_regardinginvoice_value," +
         "_sprk_regardingmatter_value,_sprk_regardingproject_value,_sprk_regardingbudget_value," +
         "_sprk_regardingworkassignment_value,sprk_basedate,sprk_duedate,sprk_completeddate,statecode,statuscode," +
@@ -380,6 +394,33 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
     private static readonly string EventTypeExpand = $"$expand={EventTypeNavigationProperty}($select=sprk_name)";
 
+    private IReadOnlyDictionary<string, Guid>? _eventRecordTypeRefIds;
+
+    /// <summary>
+    /// logical name → <c>sprk_recordtype_ref</c> id for the 8 API regarding types, read once and cached. Null when the
+    /// catalog cannot be read (reads then fall back to lookups; a type FILTER refuses).
+    /// </summary>
+    private async Task<IReadOnlyDictionary<string, Guid>?> GetRecordTypeRefIdsAsync(CancellationToken ct)
+    {
+        if (_eventRecordTypeRefIds is not null)
+            return _eventRecordTypeRefIds;
+        try
+        {
+            var names = RegardingRecordType.AllTypes.Select(t => RegardingRecordType.GetEntityLogicalName(t)!).ToArray();
+            _eventRecordTypeRefIds = await LookupRecordTypeIdsAsync(names, ct);
+            return _eventRecordTypeRefIds;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "sprk_recordtype_ref catalog could not be read; event regarding types fall back to lookups.");
+            return null;
+        }
+    }
+
+    private static IReadOnlyDictionary<Guid, int>? ReverseTypeMap(IReadOnlyDictionary<string, Guid>? byLogicalName) =>
+        byLogicalName?
+            .Where(kv => RegardingRecordType.FromEntityLogicalName(kv.Key) is not null)
+            .ToDictionary(kv => kv.Value, kv => RegardingRecordType.FromEntityLogicalName(kv.Key)!.Value);
     /// <summary>The GET <c>sprk_events</c> URL <see cref="QueryEventsAsync"/> sends. Internal for tests.</summary>
     internal static string BuildQueryEventsUrl(
         int? regardingRecordType, string? regardingRecordId, Guid? eventTypeId, int? statusCode, int? priority,
@@ -399,15 +440,30 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         var (dueDateFrom, dueDateTo, skip, top, ownerUserId) = (f.DueDateFrom, f.DueDateTo, f.Skip, f.Top, f.OwnerUserId);
         var filters = new List<string>();
 
-        // Owner filter — scopes results to a specific user (used by Copilot integration)
-        if (ownerUserId.HasValue)
+        // "Mine" scope (Copilot: "my tasks"). Security review: BFF-created events are OWNED by the BFF application user
+        // (registry I-6) and name the person they are for in sprk_assignedto (task 152 S1), so an owner-only filter hid
+        // every event the user created through the BFF. Mine = owned by the caller OR assigned to the caller's linked
+        // contact. Visibility itself is NOT this filter's job — it is the impersonated read's.
+        if (ownerUserId.HasValue && f.AssignedToContactId is { } mineContact)
+            filters.Add($"(_ownerid_value eq {ownerUserId.Value} or _sprk_assignedto_value eq {mineContact:D})");
+        else if (ownerUserId.HasValue)
             filters.Add($"_ownerid_value eq {ownerUserId.Value}");
+        else if (f.AssignedToContactId is { } onlyContact)
+            filters.Add($"_sprk_assignedto_value eq {onlyContact:D}");
 
         // The record type is the entity-specific regarding lookup being populated (ADR-024: at most one is). The
         // former `sprk_regardingrecordtype eq <int>` compared a LOOKUP to a number and was rejected.
-        if (regardingRecordType.HasValue
-            && RegardingRecordType.GetLookupFieldName(regardingRecordType.Value) is { } lookupField)
-            filters.Add($"_{lookupField}_value ne null");
+        // Review H3: filter on the ADR-024 TYPE column, not on a specific lookup — a core-ancestor-stamped row carries
+        // its child's lookup AND a matter/project lookup, so "matter lookup populated" would also match an invoice's
+        // event. The type LOOKUP (sprk_regardingrecordtype → sprk_recordtype_ref) is used rather than the
+        // sprk_regardingrecordtypelogicalname text: live (spaarkedev1, 2026-10-05) 65 of 76 events carry the lookup and
+        // 0 carry the text (only this BFF writes it), so filtering on the text would empty every existing list.
+        if (regardingRecordType.HasValue)
+        {
+            if (f.RegardingRecordTypeRefId is not { } typeRefId)
+                throw new InvalidOperationException("The regarding type filter must be resolved to its sprk_recordtype_ref row first.");
+            filters.Add($"_sprk_regardingrecordtype_value eq {typeRefId:D}");
+        }
 
         if (!string.IsNullOrEmpty(regardingRecordId))
             filters.Add($"sprk_regardingrecordid eq '{regardingRecordId.Replace("'", "''")}'");
@@ -470,7 +526,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             var data = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct);
             if (data == null) return null;
 
-            return MapToEventEntity(data);
+            return MapToEventEntity(data, ReverseTypeMap(await GetRecordTypeRefIdsAsync(ct)));
         }
         catch (Exception ex)
         {
@@ -539,7 +595,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (request.AssignedToContactId is { } assignedTo && assignedTo != Guid.Empty)
             payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
 
-        ApplyRegarding(payload, request.RegardingRecordType, regarding, clearOtherLookups: false);
+        ApplyRegarding(payload, request.RegardingRecordType, regarding, clearOtherLookups: false, request.AncestorStamps);
 
         return payload;
     }
@@ -556,7 +612,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// <exception cref="InvalidOperationException">A regarding type was requested but not resolved — the caller must
     /// resolve first; an unresolved type is never written (it would leave the old type bound).</exception>
     private static void ApplyRegarding(
-        Dictionary<string, object?> payload, int? requestedType, ResolvedEventRegarding? regarding, bool clearOtherLookups)
+        Dictionary<string, object?> payload, int? requestedType, ResolvedEventRegarding? regarding, bool clearOtherLookups,
+        IReadOnlyList<EventAncestorStamp>? ancestorStamps)
     {
         if (requestedType is null)
             return;
@@ -586,6 +643,17 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         payload["sprk_regardingrecordnumber"] = regarding.RecordNumber;
         payload["sprk_regardingrecordurl"] = RegardingRecordType.BuildRecordUrl(regarding.EntityLogicalName, recordId);
         payload[RegardingRecordType.RecordTypeLogicalNameField] = regarding.EntityLogicalName;
+
+        // Review H2: FR-26 core-ancestor stamps are written LAST — after the clear-all-14 loop above — so a re-parent
+        // to a CHILD record (invoice, analysis …) keeps its derived matter/project lookup instead of wiping it.
+        foreach (var stamp in ancestorStamps ?? Array.Empty<EventAncestorStamp>())
+        {
+            var stampNav = RegardingRecordType.GetEventNavigationPropertyByLookup(stamp.LookupAttribute)
+                ?? throw new InvalidOperationException($"sprk_event has no regarding lookup '{stamp.LookupAttribute}'.");
+            var stampSet = RegardingRecordType.GetEntitySetNameByLogicalName(stamp.EntityLogicalName)
+                ?? throw new InvalidOperationException($"No entity set is known for '{stamp.EntityLogicalName}'.");
+            payload[$"{stampNav}@odata.bind"] = $"/{stampSet}({stamp.RecordId:D})";
+        }
     }
 
     /// <summary>
@@ -611,13 +679,28 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (!Guid.TryParse(recordId, out var parentId) || parentId == Guid.Empty)
             throw new EventRegardingResolutionException("RegardingRecordId must be a non-empty GUID.");
 
-        var typeRefs = await LookupRecordTypeIdsAsync(new[] { logicalName }, ct);
-        if (!typeRefs.TryGetValue(logicalName, out var typeRefId))
+        // The sprk_recordtype_ref catalog row names the parent's reference-number column (review M2): one source for
+        // "which column is the number", shared with the communication engine's identifier rung.
+        var catalogUrl =
+            $"{RegardingRecordType.RecordTypeRefEntitySet}?$select=sprk_recordtype_refid,sprk_regardingrecordnumberfield" +
+            $"&$filter=sprk_recordlogicalname eq '{logicalName}' and statecode eq 0&$top=1";
+        var catalogResponse = await SendGetAsync(catalogUrl, ct);
+        catalogResponse.EnsureSuccessStatusCode();
+        var catalog = await catalogResponse.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        var catalogRow = catalog?.Value.FirstOrDefault();
+        if (catalogRow is null
+            || !catalogRow.TryGetValue("sprk_recordtype_refid", out var refIdEl)
+            || !Guid.TryParse(refIdEl.GetString(), out var typeRefId))
             throw new EventRegardingResolutionException(
                 $"No sprk_recordtype_ref row exists for '{logicalName}'; the regarding parent cannot be recorded consistently.");
 
+        static string? Read(Dictionary<string, JsonElement> row, string? field) =>
+            field is not null && row.TryGetValue(field, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
         var nameField = RegardingRecordType.GetPrimaryNameField(logicalName);
-        var numberField = RegardingRecordType.GetReferenceNumberField(logicalName);
+        var numberField = Read(catalogRow, "sprk_regardingrecordnumberfield")?.Trim();
+        if (string.IsNullOrEmpty(numberField)) numberField = null;
+
         var columns = new List<string> { $"{logicalName}id" };
         if (nameField is not null) columns.Add(nameField);
         if (numberField is not null) columns.Add(numberField);
@@ -630,12 +713,13 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
 
         var parent = await response.Content.ReadFromJsonAsync<Dictionary<string, JsonElement>>(cancellationToken: ct)
             ?? new Dictionary<string, JsonElement>();
-        static string? Read(Dictionary<string, JsonElement> row, string? field) =>
-            field is not null && row.TryGetValue(field, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
 
-        var name = !string.IsNullOrWhiteSpace(recordName) ? recordName : Read(parent, nameField);
+        // Review M2: the parent's own name WINS over a caller-supplied one (a caller cannot label an event with a
+        // name the record does not have); the caller's is used only when the record has no readable name.
+        var name = Read(parent, nameField) ?? (string.IsNullOrWhiteSpace(recordName) ? null : recordName);
         return new ResolvedEventRegarding(recordType.Value, parentId, logicalName, typeRefId, name, Read(parent, numberField));
     }
+
     public async Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
     {
         var regarding = await ResolveEventRegardingAsync(request.RegardingRecordType, request.RegardingRecordId, request.RegardingRecordName, ct);
@@ -690,7 +774,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             payload["statecode"] = EventStatusCode.GetStateCode(request.StatusCode.Value);
         }
 
-        ApplyRegarding(payload, request.RegardingRecordType, regarding, clearOtherLookups: true);
+        ApplyRegarding(payload, request.RegardingRecordType, regarding, clearOtherLookups: true, request.AncestorStamps);
 
         return payload;
     }
@@ -1824,7 +1908,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     // Entity Mapping Helpers
     // ========================================
 
-    internal static EventEntity MapToEventEntity(Dictionary<string, JsonElement> data)
+    internal static EventEntity MapToEventEntity(
+        Dictionary<string, JsonElement> data, IReadOnlyDictionary<Guid, int>? typeByRecordTypeRefId = null)
     {
         return new EventEntity
         {
@@ -1865,11 +1950,20 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
                 ? rrn.GetString() : null,
             // Task 097: sprk_regardingrecordtype is a LOOKUP (no int to read); the API's 0..7 type is the mapped
             // entity-specific regarding lookup that is populated (ADR-024: at most one).
-            RegardingRecordType = RegardingRecordType.AllTypes
-                .Where(t => RegardingRecordType.GetLookupFieldName(t) is { } f
-                    && data.TryGetValue($"_{f}_value", out var v) && v.ValueKind == JsonValueKind.String)
-                .Select(t => (int?)t)
-                .FirstOrDefault(),
+            // Review H3: the ADR-024 type column first; only when it is empty (rows written by other paths) fall back to
+            // the populated lookups, CHILD types before CORE (a stamped row has both).
+            RegardingRecordType = RegardingRecordType.FromEntityLogicalName(
+                    data.TryGetValue(RegardingRecordType.RecordTypeLogicalNameField, out var rtl) && rtl.ValueKind == JsonValueKind.String
+                        ? rtl.GetString() : null)
+                ?? (typeByRecordTypeRefId is not null
+                    && data.TryGetValue("_sprk_regardingrecordtype_value", out var rtRef) && rtRef.ValueKind == JsonValueKind.String
+                    && Guid.TryParse(rtRef.GetString(), out var rtRefId) && typeByRecordTypeRefId.TryGetValue(rtRefId, out var rtType)
+                        ? rtType : (int?)null)
+                ?? RegardingRecordType.TypeResolutionOrder
+                    .Where(t => RegardingRecordType.GetLookupFieldName(t) is { } f
+                        && data.TryGetValue($"_{f}_value", out var v) && v.ValueKind == JsonValueKind.String)
+                    .Select(t => (int?)t)
+                    .FirstOrDefault(),
             RegardingAccountId = data.TryGetValue("_sprk_regardingaccount_value", out var racc) && racc.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(racc.GetString()!) : null,
             RegardingAnalysisId = data.TryGetValue("_sprk_regardinganalysis_value", out var rana) && rana.ValueKind != JsonValueKind.Null

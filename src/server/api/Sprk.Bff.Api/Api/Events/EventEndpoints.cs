@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 // Type aliases to resolve ambiguity between API DTOs and Dataverse models
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
@@ -10,6 +11,7 @@ using ApiUpdateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.UpdateEventRequest;
 using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 using DataverseUpdateEventRequest = Spaarke.Dataverse.UpdateEventRequest;
 using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.Events;
 
@@ -66,6 +68,7 @@ public static class EventEndpoints
 
         // GET /api/v1/events/{id} - Get single event by ID
         group.MapGet("/{id:guid}", GetEventByIdAsync)
+            .AddEventRecordAccessFilter(EventAccessFilter.ReadOperation)
             .WithName("GetEventById")
             .WithSummary("Get a single event by ID")
             .WithDescription("Returns the event with the specified ID. Returns 404 if the event does not exist.")
@@ -76,6 +79,7 @@ public static class EventEndpoints
 
         // DELETE /api/v1/events/{id} - Soft delete (set status to Canceled)
         group.MapDelete("/{id:guid}", DeleteEventAsync)
+            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
             .WithName("DeleteEvent")
             .WithSummary("Soft delete an event")
             .WithDescription("Soft deletes the event by setting its status to Canceled. " +
@@ -87,6 +91,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events - Create a new event
         group.MapPost("/", CreateEventAsync)
+            .AddEventParentAccessFilter()
             .WithName("CreateEvent")
             .WithSummary("Create a new event")
             .WithDescription("Creates a new Event record in Dataverse. Subject is required. " +
@@ -98,6 +103,8 @@ public static class EventEndpoints
 
         // PUT /api/v1/events/{id} - Update an existing event
         group.MapPut("/{id:guid}", UpdateEventAsync)
+            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
+            .AddEventParentAccessFilter()
             .WithName("UpdateEvent")
             .WithSummary("Update an existing event")
             .WithDescription("Updates an existing Event record in Dataverse. Only specified fields are updated. " +
@@ -110,6 +117,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events/{id}/complete - Mark event as completed
         group.MapPost("/{id:guid}/complete", CompleteEventAsync)
+            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
             .WithName("CompleteEvent")
             .WithSummary("Mark an event as completed")
             .WithDescription("Changes the event status to Completed (659490002, which stays Active). " +
@@ -123,6 +131,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events/{id}/cancel - Mark event as canceled
         group.MapPost("/{id:guid}/cancel", CancelEventAsync)
+            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
             .WithName("CancelEvent")
             .WithSummary("Mark an event as canceled")
             .WithDescription("Changes the event status to Cancelled (659490004, Inactive). " +
@@ -136,6 +145,7 @@ public static class EventEndpoints
 
         // GET /api/v1/events/{id}/logs - Get event log entries
         group.MapGet("/{id:guid}/logs", GetEventLogsAsync)
+            .AddEventRecordAccessFilter(EventAccessFilter.ReadOperation)
             .WithName("GetEventLogs")
             .WithSummary("Get event log entries")
             .WithDescription("Returns all log entries for the specified event, tracking state transitions. " +
@@ -164,7 +174,7 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Paginated list of events.</returns>
-    private static async Task<IResult> GetEventsAsync(
+    internal static async Task<IResult> GetEventsAsync(
         [FromQuery] int? regardingRecordType,
         [FromQuery] string? regardingRecordId,
         [FromQuery] Guid? eventTypeId,
@@ -178,6 +188,7 @@ public static class EventEndpoints
         HttpContext httpContext = null!,
         IEventDataverseService dataverseService = null!,
         ICommunicationDataverseService communicationService = null!,
+        Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
     {
@@ -246,32 +257,52 @@ public static class EventEndpoints
 
         try
         {
-            // Map Entra OID → Dataverse systemuserid for owner-scoped queries.
-            // _ownerid_value in Dataverse is the systemuserid GUID, not the Entra OID.
-            Guid? ownerUserId = null;
+            // Security review: the list is the caller's view, not the application's. Resolve the caller's
+            // systemuser, then run the query IMPERSONATED as them (ADR-028 A5 — the workforce list seam, the same one
+            // PortfolioService and OfficeSearchService use), so Dataverse itself drops every event they may not read.
+            // An unresolvable caller cannot be impersonated → refuse (fail closed); never an app-only list.
+            Guid? callerSystemUserId = null;
             var oid = ExtractOid(httpContext);
             if (!string.IsNullOrEmpty(oid))
+                callerSystemUserId = await communicationService.QuerySystemUserByAzureAdOidAsync(oid, ct);
+
+            if (callerSystemUserId is not { } systemUserId || systemUserId == Guid.Empty)
             {
-                ownerUserId = await communicationService.QuerySystemUserByAzureAdOidAsync(oid, ct);
-                logger.LogInformation(
-                    "[EVENTS] OID {Oid} → Dataverse systemuserid {SystemUserId}",
-                    oid, ownerUserId?.ToString() ?? "not found");
+                logger.LogWarning("[EVENTS] Caller oid {Oid} does not resolve to a systemuser; refusing the list (fail closed).", oid);
+                return ProblemDetailsHelper.Forbidden(
+                    EventAccessFilter.DeniedReasonCode, "Your account could not be resolved, so events cannot be listed.",
+                    httpContext.TraceIdentifier);
             }
 
-            var events = await QueryEventsAsync(
-                dataverseService,
-                regardingRecordType,
-                regardingRecordId,
-                eventTypeId,
-                statusCode,
-                priority,
-                dueDateFrom,
-                dueDateTo,
-                pageNumber,
-                pageSize,
-                ownerUserId,
-                ct);
+            // "Mine": owned by the caller OR assigned to the caller's linked contact (BFF-created events are owned by
+            // the BFF application user and name their person in sprk_assignedto — task 152 S1).
+            Guid? linkedContact = null;
+            try
+            {
+                linkedContact = (await identity.ResolveAsync(systemUserId, ct)).ContactId;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "[EVENTS] Linked contact for {SystemUserId} could not be resolved; listing owned events only.", systemUserId);
+            }
 
+            var skip = (pageNumber - 1) * pageSize;
+            var (entities, totalCount) = await dataverseService.QueryEventsAsync(new EventQueryFilter
+            {
+                RegardingRecordType = regardingRecordType,
+                RegardingRecordId = regardingRecordId,
+                EventTypeId = eventTypeId,
+                StatusCode = statusCode,
+                Priority = priority,
+                DueDateFrom = dueDateFrom,
+                DueDateTo = dueDateTo,
+                Skip = skip,
+                Top = pageSize,
+                OwnerUserId = systemUserId,
+                AssignedToContactId = linkedContact is { } c && c != Guid.Empty ? c : null,
+                ImpersonateSystemUserId = systemUserId,
+            }, ct);
+            var events = (Items: entities.Select(MapEntityToDto).ToArray(), TotalCount: totalCount);
             var response = new EventListResponse
             {
                 Items = events.Items,
@@ -285,6 +316,10 @@ public static class EventEndpoints
                 events.Items.Length, pageNumber, response.TotalPages, events.TotalCount);
 
             return TypedResults.Ok(response);
+        }
+        catch (EventRegardingResolutionException rex)
+        {
+            return Results.ValidationProblem(new Dictionary<string, string[]> { ["regardingRecordType"] = [rex.Message] });
         }
         catch (Exception ex)
         {
@@ -370,6 +405,7 @@ public static class EventEndpoints
         Spaarke.Dataverse.IGenericEntityService genericEntityService,
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -432,10 +468,14 @@ public static class EventEndpoints
             var assignedToContactId = await ResolveActingUserContactAsync(
                 callerResolver, identity, httpContext, logger, ct);
 
+            // Review H2 (registry I-1): the FR-26 core-ancestor stamp, derived BEFORE the write; fail closed.
+            var stamps = await DeriveAncestorStampsAsync(coreAncestors, request.RegardingRecordType, request.RegardingRecordId, logger, ct);
+
             var (eventId, createdOn) = await CreateEventInDataverseAsync(
                 dataverseService,
                 request,
                 assignedToContactId,
+                stamps,
                 logger,
                 ct);
 
@@ -463,6 +503,12 @@ public static class EventEndpoints
 
             return TypedResults.Created($"/api/v1/events/{eventId}", response);
         }
+        catch (AncestorDerivationFailedException adx)
+        {
+            logger.LogError("Event create refused: core-ancestor derivation failed (FR-26 / NFR-01): {Error}", adx.Message);
+            return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Core-ancestor derivation failed",
+                detail: "The event was not created: the records it refers to could not be resolved to their matter/project.");
+        }
         catch (EventRegardingResolutionException rex)
         {
             // Task 097 review F3c: an unresolvable regarding parent is a client error and nothing was written.
@@ -489,10 +535,11 @@ public static class EventEndpoints
     /// <param name="logger">Logger for diagnostics.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>200 OK with updated event on success, 404 if not found, or 400 if validation fails.</returns>
-    private static async Task<IResult> UpdateEventAsync(
+    internal static async Task<IResult> UpdateEventAsync(
         Guid id,
         [FromBody] ApiUpdateEventRequest request,
         IEventDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -571,10 +618,14 @@ public static class EventEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
+            // Review H2: a re-parent derives the NEW parent's core ancestors before the write; fail closed.
+            var stamps = await DeriveAncestorStampsAsync(coreAncestors, request.RegardingRecordType, request.RegardingRecordId, logger, ct);
+
             await UpdateEventInDataverseAsync(
                 dataverseService,
                 id,
                 request,
+                stamps,
                 logger,
                 ct);
 
@@ -589,6 +640,12 @@ public static class EventEndpoints
                 id, updatedDto.Subject);
 
             return TypedResults.Ok(updatedDto);
+        }
+        catch (AncestorDerivationFailedException adx)
+        {
+            logger.LogError("Event update refused: core-ancestor derivation failed (FR-26 / NFR-01): {Error}", adx.Message);
+            return Results.Problem(statusCode: StatusCodes.Status500InternalServerError, title: "Core-ancestor derivation failed",
+                detail: "The event was not changed: the new parent could not be resolved to its matter/project.");
         }
         catch (EventRegardingResolutionException rex)
         {
@@ -655,45 +712,6 @@ public static class EventEndpoints
                 title: "Internal Server Error",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
         }
-    }
-
-    /// <summary>
-    /// Queries events from Dataverse with filtering and pagination.
-    /// </summary>
-    private static async Task<(EventDto[] Items, int TotalCount)> QueryEventsAsync(
-        IEventDataverseService dataverseService,
-        int? regardingRecordType,
-        string? regardingRecordId,
-        Guid? eventTypeId,
-        int? statusCode,
-        int? priority,
-        DateTime? dueDateFrom,
-        DateTime? dueDateTo,
-        int pageNumber,
-        int pageSize,
-        Guid? ownerUserId,
-        CancellationToken ct)
-    {
-        // Calculate skip for pagination
-        var skip = (pageNumber - 1) * pageSize;
-
-        // Query events from Dataverse
-        var (entities, totalCount) = await dataverseService.QueryEventsAsync(
-            regardingRecordType,
-            regardingRecordId,
-            eventTypeId,
-            statusCode,
-            priority,
-            dueDateFrom,
-            dueDateTo,
-            skip,
-            pageSize,
-            ownerUserId,
-            ct);
-
-        // Map entities to DTOs
-        var events = entities.Select(MapEntityToDto).ToArray();
-        return (events, totalCount);
     }
 
     /// <summary>
@@ -827,6 +845,7 @@ public static class EventEndpoints
         IEventDataverseService dataverseService,
         ApiCreateEventRequest request,
         Guid? assignedToContactId,
+        IReadOnlyList<EventAncestorStamp>? ancestorStamps,
         ILogger logger,
         CancellationToken ct)
     {
@@ -843,6 +862,7 @@ public static class EventEndpoints
             RegardingRecordId = request.RegardingRecordId?.ToString(),
             RegardingRecordName = request.RegardingRecordName,
             AssignedToContactId = assignedToContactId,
+            AncestorStamps = ancestorStamps,
         };
 
         // Create the event record
@@ -864,6 +884,7 @@ public static class EventEndpoints
         IEventDataverseService dataverseService,
         Guid id,
         ApiUpdateEventRequest request,
+        IReadOnlyList<EventAncestorStamp>? ancestorStamps,
         ILogger logger,
         CancellationToken ct)
     {
@@ -879,7 +900,8 @@ public static class EventEndpoints
             StatusCode = request.StatusCode,
             RegardingRecordType = request.RegardingRecordType,
             RegardingRecordId = request.RegardingRecordId?.ToString(),
-            RegardingRecordName = request.RegardingRecordName
+            RegardingRecordName = request.RegardingRecordName,
+            AncestorStamps = ancestorStamps,
         };
 
         // Update the event record
@@ -960,7 +982,7 @@ public static class EventEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
-            // Validate status transition: Can only complete if status is Draft, Planned, Open, or OnHold
+            // Validate status transition: only from open work (EventStatusCode.IsOpenWork: Draft, Open, On Hold, Reassigned)
             if (!CanCompleteEvent(existing.StatusCode))
             {
                 var validStatuses = GetValidStatusesForCompletion();
@@ -1045,7 +1067,7 @@ public static class EventEndpoints
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.4");
             }
 
-            // Validate status transition: Can only cancel if status is Draft, Planned, Open, or OnHold
+            // Validate status transition: only from open work (EventStatusCode.IsOpenWork: Draft, Open, On Hold, Reassigned)
             if (!CanCancelEvent(existing.StatusCode))
             {
                 var validStatuses = GetValidStatusesForCancellation();
@@ -1273,5 +1295,42 @@ public static class EventEndpoints
                 "Event audit log write failed AFTER the event write committed. EventId={EventId}, Action={Action}",
                 eventId, EventLogAction.GetDisplayName(action));
         }
+    }
+
+    /// <summary>
+    /// FR-26 core-ancestor stamps for an event's regarding parent (task 097 review H2, registry I-1) — the same call
+    /// <c>TaskActionCore</c> makes, through the shared <see cref="Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver"/>,
+    /// for writers whose payload is a JSON body (<c>DeriveForHostAsync</c>). Null when no parent is named. A failed
+    /// derivation THROWS: an unstamped event would be invisible to everyone whose access comes from the parent's
+    /// matter/project (NFR-01 fail closed) — so the write does not happen.
+    /// </summary>
+    internal static async Task<IReadOnlyList<EventAncestorStamp>?> DeriveAncestorStampsAsync(
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        int? regardingRecordType,
+        Guid? regardingRecordId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (regardingRecordType is not { } type || regardingRecordId is not { } parentId || parentId == Guid.Empty
+            || Spaarke.Dataverse.RegardingRecordType.GetEntityLogicalName(type) is not { } parentLogicalName)
+            return null;
+
+        var outcome = await coreAncestors.DeriveForHostAsync("sprk_event", parentLogicalName, parentId, ct);
+        if (!outcome.Succeeded)
+            throw new AncestorDerivationFailedException(outcome.Error ?? "Core-ancestor derivation failed.");
+
+        if (outcome.Unstampable.Count > 0)
+            logger.LogWarning("sprk_event cannot carry derived ancestor lookup(s) {Lookups} (FR-26 gap).",
+                string.Join(", ", outcome.Unstampable));
+
+        return outcome.Stamps
+            .Select(s => new EventAncestorStamp(s.LookupAttribute, s.EntityType, s.RecordId))
+            .ToList();
+    }
+
+    /// <summary>Core-ancestor derivation failed; the event write is refused (fail closed).</summary>
+    internal sealed class AncestorDerivationFailedException : Exception
+    {
+        public AncestorDerivationFailedException(string message) : base(message) { }
     }
 }

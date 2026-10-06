@@ -180,9 +180,12 @@ public sealed class TodoGenerationService : IScheduledJob
     internal const int StatusCodeCompleted = 2;            // Inactive
     internal const int StatusCodeDismissed = 659490002;    // Inactive
 
-    /// <summary>Event statuses Rules 1 and 3 never generate a To Do for (excluded in the query; review F5).</summary>
-    internal static readonly IReadOnlyCollection<int> ExcludedFromGeneration =
-        new[] { EventStatusCode.Completed, EventStatusCode.Cancelled };
+    /// <summary>
+    /// Event statuses Rules 1 and 3 never generate a To Do for, excluded IN the query (review F5): everything that is not
+    /// open work — Completed, Closed, Cancelled, Transferred, No Further Action (review L2). Defined by the one
+    /// predicate <see cref="EventStatusCode.IsOpenWork"/>, so the owner's decision on "open work" changes one place.
+    /// </summary>
+    internal static readonly IReadOnlyCollection<int> ExcludedFromGeneration = EventStatusCode.NotOpenWork;
 
     /// <summary>statecode values for sprk_todo.</summary>
     private const int StateCodeActive = 0;

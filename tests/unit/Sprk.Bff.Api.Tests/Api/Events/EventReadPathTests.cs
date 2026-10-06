@@ -163,22 +163,77 @@ public class EventReadPathTests
         payload["sprk_regardingrecordurl"].Should().NotBeNull();
         payload.Keys.Should().NotContain("sprk_regardingrecordtype");
     }
+
+    [Fact]
+    public void UpdatePayload_ReparentToAChild_KeepsTheDerivedCoreAncestorStamp_AfterTheClear()
+    {
+        // Review H2: the clear-all-14 loop used to wipe the FR-26 stamp (this test previously locked that in).
+        var invoiceId = Guid.NewGuid();
+        var invoiceRef = Guid.NewGuid();
+        var payload = DataverseWebApiService.BuildUpdateEventPayload(new DataverseUpdateEventRequest
+        {
+            RegardingRecordType = RegardingRecordType.Invoice,
+            RegardingRecordId = invoiceId.ToString(),
+            AncestorStamps = new[] { new EventAncestorStamp("sprk_regardingmatter", "sprk_matter", MatterId) },
+        }, new ResolvedEventRegarding(RegardingRecordType.Invoice, invoiceId, "sprk_invoice", invoiceRef, "INV-1", "INV-0001"));
+
+        payload["sprk_RegardingInvoice@odata.bind"].Should().Be($"/sprk_invoices({invoiceId:D})");
+        payload["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({MatterId:D})",
+            "the derived core ancestor is written after the clear, so it survives");
+        payload["sprk_RegardingProject@odata.bind"].Should().BeNull();
+        payload["sprk_regardingrecordtypelogicalname"].Should().Be("sprk_invoice");
+    }
+
+    [Fact]
+    public void CreatePayload_WritesTheAncestorStamp()
+    {
+        var invoiceId = Guid.NewGuid();
+        var payload = DataverseWebApiService.BuildCreateEventPayload(new DataverseCreateEventRequest
+        {
+            Name = "Filing",
+            RegardingRecordType = RegardingRecordType.Invoice,
+            RegardingRecordId = invoiceId.ToString(),
+            AncestorStamps = new[] { new EventAncestorStamp("sprk_regardingmatter", "sprk_matter", MatterId) },
+        }, new ResolvedEventRegarding(RegardingRecordType.Invoice, invoiceId, "sprk_invoice", Guid.NewGuid(), "INV-1", null));
+
+        payload["sprk_RegardingMatter@odata.bind"].Should().Be($"/sprk_matters({MatterId:D})");
+        payload["sprk_RegardingInvoice@odata.bind"].Should().Be($"/sprk_invoices({invoiceId:D})");
+    }
+
     // ── Read URLs: every column exists, the expand uses the navigation property, no $skip ───────────────────
 
     [Fact]
     public void QueryUrl_SelectsOnlyLiveColumns_ExpandsByNavProp_AndNeverSendsSkip()
     {
-        var url = DataverseWebApiService.BuildQueryEventsUrl(
-            RegardingRecordType.Matter, null, null, EventStatusCode.Open, EventPriority.High,
-            null, null, skip: 50, top: 50, ownerUserId: null);
+        var url = DataverseWebApiService.BuildQueryEventsUrl(new EventQueryFilter
+        {
+            RegardingRecordType = RegardingRecordType.Matter,
+            RegardingRecordTypeRefId = MatterTypeRefId,
+            StatusCode = EventStatusCode.Open,
+            Priority = EventPriority.High,
+            Skip = 50,
+            Top = 50,
+        });
 
         AssertLiveColumns(url);
         url.Should().NotContain("$skip", "Dataverse: 'Skip Clause is not supported in CRM'");
         url.Should().Contain("$top=100", "skip + top rows are fetched and the page is cut in memory");
         url.Should().Contain("sprk_eventid asc", "review F4: a stable tiebreaker so in-memory pages never overlap or skip rows");
-        url.Should().Contain("_sprk_regardingmatter_value ne null");
-        url.Should().NotContain("sprk_regardingrecordtype eq");
+        url.Should().Contain($"_sprk_regardingrecordtype_value eq {MatterTypeRefId:D}",
+            "review H3: filter on the ADR-024 type, not 'matter lookup populated' (a stamped invoice event has one too)");
+        url.Should().NotContain("_sprk_regardingmatter_value ne null");
         url.Should().Contain("sprk_priority eq 100000002");
+    }
+
+    [Fact]
+    public void QueryUrl_MineScope_IsOwnerOrAssignedContact()
+    {
+        var owner = Guid.NewGuid();
+        var contact = Guid.NewGuid();
+        var url = DataverseWebApiService.BuildQueryEventsUrl(new EventQueryFilter { OwnerUserId = owner, AssignedToContactId = contact });
+
+        url.Should().Contain($"(_ownerid_value eq {owner} or _sprk_assignedto_value eq {contact:D})",
+            "BFF-created events are owned by the application user and name their person in sprk_assignedto");
     }
 
     [Fact]
@@ -188,21 +243,17 @@ public class EventReadPathTests
 
         AssertLiveColumns(url);
         url.Should().NotContain("_sprk_relatedevent_value");
+        url.Should().Contain("sprk_regardingrecordtypelogicalname");
     }
 
     [Fact]
-    public void Mapper_ReadsTheExpandedEventType_AndDerivesTheRegardingType()
+    public void Mapper_ReadsTheExpandedEventType_AndTheRegardingTypeFromTheTypeColumn()
     {
-        var row = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>($$"""
-            {
-              "sprk_eventid": "{{Guid.NewGuid()}}",
-              "sprk_eventname": "Filing",
-              "statecode": 0, "statuscode": 659490001, "sprk_priority": 100000002,
-              "_sprk_regardingmatter_value": "{{MatterId}}",
-              "_sprk_regardingrecordtype_value": "{{MatterTypeRefId}}",
-              "sprk_EventType_Ref": { "sprk_name": "Task" }
-            }
-            """)!;
+        var row = Row($$"""
+            "sprk_regardingrecordtypelogicalname": "sprk_matter",
+            "_sprk_regardingmatter_value": "{{MatterId}}",
+            "sprk_EventType_Ref": { "sprk_name": "Task" }
+            """);
 
         var entity = DataverseWebApiService.MapToEventEntity(row);
 
@@ -212,6 +263,36 @@ public class EventReadPathTests
         entity.Priority.Should().Be(100000002);
     }
 
+    [Fact]
+    public void Mapper_AStampedChildRow_IsTheChild_NotItsMatter()
+    {
+        // Review H3: a core-ancestor-stamped row carries the invoice AND the matter lookup; with no type column the
+        // fallback tries CHILD types before CORE types.
+        var row = Row($$"""
+            "_sprk_regardinginvoice_value": "{{Guid.NewGuid()}}",
+            "_sprk_regardingmatter_value": "{{MatterId}}"
+            """);
+
+        DataverseWebApiService.MapToEventEntity(row).RegardingRecordType.Should().Be(RegardingRecordType.Invoice);
+    }
+
+    [Fact]
+    public void Mapper_TheTypeLookup_IsUsedWhenTheTypeTextIsEmpty()
+    {
+        // Live (2026-10-05): 65 of 76 events carry the type LOOKUP and none the logical-name text.
+        var row = Row($$"""
+            "_sprk_regardingrecordtype_value": "{{MatterTypeRefId}}",
+            "_sprk_regardinginvoice_value": "{{Guid.NewGuid()}}",
+            "_sprk_regardingmatter_value": "{{MatterId}}"
+            """);
+
+        DataverseWebApiService.MapToEventEntity(row, new Dictionary<Guid, int> { [MatterTypeRefId] = RegardingRecordType.Matter })
+            .RegardingRecordType.Should().Be(RegardingRecordType.Matter, "the recorded type wins over the lookup fallback");
+    }
+
+    private static Dictionary<string, JsonElement> Row(string extra) =>
+        JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(
+            $$"""{ "sprk_eventid": "{{Guid.NewGuid()}}", "sprk_eventname": "Filing", "statecode": 0, "statuscode": 659490001, "sprk_priority": 100000002, {{extra}} }""")!;
     // ── External SPA events: sprk_eventname / statuscode (review F2), never sprk_name / sprk_status ─────────
 
     [Fact]

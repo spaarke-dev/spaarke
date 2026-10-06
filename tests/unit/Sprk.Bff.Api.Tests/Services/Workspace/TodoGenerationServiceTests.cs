@@ -280,6 +280,17 @@ public class TodoGenerationServiceTests
     }
 
     [Fact]
+    public void Rules1And3_ExcludeEverythingThatIsNotOpenWork_ViaTheOnePredicate()
+    {
+        // Review L2: the exclusion is "not open work" (EventStatusCode.IsOpenWork), not just Completed/Cancelled.
+        TodoGenerationService.ExcludedFromGeneration.Should().BeEquivalentTo(new[]
+        {
+            EventStatusCode.Completed, EventStatusCode.Closed, EventStatusCode.Cancelled,
+            EventStatusCode.Transferred, EventStatusCode.NoFurtherAction,
+        });
+        TodoGenerationService.ExcludedFromGeneration.Should().OnlyContain(s => !EventStatusCode.IsOpenWork(s));
+    }
+    [Fact]
     public void ToDoStatusConstants_MatchTheLiveVerifiedEntitySchema()
     {
         // ADR-038 rule 1: the constants are pinned to src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md,

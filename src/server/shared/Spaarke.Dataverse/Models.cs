@@ -958,6 +958,9 @@ public class CreateEventRequest
     /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
     /// </summary>
     public Guid? AssignedToContactId { get; set; }
+
+    /// <summary>FR-26 core-ancestor stamps for the regarding parent (BFF-derived; written after the regarding).</summary>
+    public IReadOnlyList<EventAncestorStamp>? AncestorStamps { get; set; }
 }
 
 /// <summary>
@@ -995,6 +998,9 @@ public class UpdateEventRequest
 
     /// <summary>Regarding record name</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>FR-26 core-ancestor stamps for the NEW regarding parent (BFF-derived; written after the clear).</summary>
+    public IReadOnlyList<EventAncestorStamp>? AncestorStamps { get; set; }
 }
 
 /// <summary>
@@ -1132,11 +1138,23 @@ public static class EventStatusCode
     }
 
     /// <summary>
-    /// Statuses that still represent open work — the ones an event may be completed or cancelled from:
-    /// Draft, Open, On Hold, Reassigned.
+    /// THE definition of "open work" for events — the ONE place to change when the owner decides it (task 097 review
+    /// L2; owner decision pending). Today's reading: Draft, Open, On Hold, Reassigned.
+    /// <list type="bullet">
+    ///   <item>Open, On Hold, Reassigned: Active statuses whose label says the work is not finished.</item>
+    ///   <item>Draft: included because it is where the client CreateEventWizard and every Dataverse-form create LAND
+    ///   (the platform default; live 2026-10-05: most events are Draft), and the LegalWorkspace / SmartTodo Overdue
+    ///   filters already treat Draft as live work. Excluding it would make most user-created events un-completable.</item>
+    ///   <item>Not open: Completed and Closed (Active, but finished), Cancelled, Transferred, No Further Action.</item>
+    /// </list>
+    /// Used by the complete/cancel gate and by the To Do generation rules (<see cref="NotOpenWork"/>).
     /// </summary>
     public static bool IsOpenWork(int statusCode) =>
         statusCode is Draft or Open or OnHold or Reassigned;
+
+    /// <summary>Every live status that is NOT open work (<see cref="IsOpenWork"/>), for server-side exclusion.</summary>
+    public static IReadOnlyCollection<int> NotOpenWork { get; } =
+        All.Select(s => s.Value).Where(v => !IsOpenWork(v)).ToArray();
 
     /// <summary>The live label for <paramref name="statusCode"/>, or "Unknown".</summary>
     public static string GetDisplayName(int statusCode)
@@ -1171,6 +1189,16 @@ public sealed record EventQueryFilter
 
     /// <summary>Status reasons excluded server-side (<c>statuscode ne …</c>).</summary>
     public IReadOnlyCollection<int>? ExcludeStatusCodes { get; init; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for <see cref="RegardingRecordType"/> (resolved by the service).</summary>
+    public Guid? RegardingRecordTypeRefId { get; init; }
+
+    /// <summary>"Mine" also includes events assigned to this contact (OR with <see cref="OwnerUserId"/>).</summary>
+    public Guid? AssignedToContactId { get; init; }
+
+    /// <summary>Run the query IMPERSONATED as this systemuser (MSCRMCallerID), so Dataverse trims to what they may see.
+    /// Null = app-only (internal jobs). <see cref="Guid.Empty"/> is refused (fail closed).</summary>
+    public Guid? ImpersonateSystemUserId { get; init; }
 }
 /// <summary>
 /// The regarding parent of a <c>sprk_event</c> write, fully resolved against Dataverse BEFORE the write: the API type
@@ -1185,6 +1213,12 @@ public sealed record ResolvedEventRegarding(
     string? RecordName,
     string? RecordNumber);
 
+/// <summary>
+/// A core-ancestor stamp to write onto a <c>sprk_event</c> (FR-26): the regarding LOOKUP attribute, the ancestor's
+/// entity logical name and id. Derived by the BFF's CoreAncestorResolver (Spaarke.Dataverse cannot reference it) and
+/// written by the event payload builders AFTER the re-parent clear, so it is never wiped (task 097 review H2).
+/// </summary>
+public sealed record EventAncestorStamp(string LookupAttribute, string EntityLogicalName, Guid RecordId);
 /// <summary>
 /// A regarding parent that cannot be resolved (unknown type, missing/invalid id, no <c>sprk_recordtype_ref</c> row, or
 /// the parent record does not exist). The endpoints turn it into a 400 with this message — never a partial write that
@@ -1431,19 +1465,30 @@ public static class RegardingRecordType
         _ => null
     };
 
-    /// <summary>The Web API entity set of the regarding entity.</summary>
-    public static string? GetEntitySetName(int recordType) => recordType switch
+    /// <summary>The Web API entity set of the regarding entity (via the one logical-name map below).</summary>
+    public static string? GetEntitySetName(int recordType) =>
+        GetEntityLogicalName(recordType) is { } logicalName ? GetEntitySetNameByLogicalName(logicalName) : null;
+
+    /// <summary>The API type (0..7) for a regarding entity logical name, or null when this API does not map it.</summary>
+    public static int? FromEntityLogicalName(string? entityLogicalName) =>
+        AllTypes.Where(t => string.Equals(GetEntityLogicalName(t), entityLogicalName, StringComparison.OrdinalIgnoreCase))
+            .Select(t => (int?)t).FirstOrDefault();
+
+    /// <summary>
+    /// Fallback order for deriving the API type from populated lookups when <c>sprk_regardingrecordtypelogicalname</c>
+    /// is empty (rows written by other paths). CHILD types first, then unclassified, then CORE: a core-ancestor-stamped
+    /// row carries the child's lookup AND its matter/project lookup, and the child is the real parent (review H3).
+    /// </summary>
+    public static IReadOnlyList<int> TypeResolutionOrder { get; } = new[]
     {
-        Project => "sprk_projects",
-        Matter => "sprk_matters",
-        Invoice => "sprk_invoices",
-        Analysis => "sprk_analysises",
-        Account => "accounts",
-        Contact => "contacts",
-        WorkAssignment => "sprk_workassignments",
-        Budget => "sprk_budgets",
-        _ => null
+        Invoice, Analysis, Budget, Account, Contact, WorkAssignment, Matter, Project
     };
+
+    /// <summary>The <c>sprk_event</c> navigation property for one of its regarding lookup ATTRIBUTES (e.g.
+    /// <c>sprk_regardingmatter</c> → <c>sprk_RegardingMatter</c>), or null.</summary>
+    public static string? GetEventNavigationPropertyByLookup(string lookupAttribute) =>
+        AllEventRegardingNavigationProperties.FirstOrDefault(
+            nav => string.Equals(nav, lookupAttribute, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>Every record type this API maps (0..7).</summary>
     public static IReadOnlyList<int> AllTypes { get; } = new[]
@@ -1491,11 +1536,44 @@ public static class RegardingRecordType
         _ => null,
     };
 
-    /// <summary>Primary display-name attribute for a target entity (ADR-024 sprk_regardingrecordname source).</summary>
+    // ── THE regarding-target catalogue (task 097 review M2) ────────────────────────────────────────────────
+    // ONE map from a regarding target's logical name to its display-name attribute and its Web API entity set,
+    // for every target any writer uses. Merged from the BFF's RegardingNameFields (which now delegates here) and
+    // the sprk_event writer's own table. Verified live (spaarkedev1, 2026-10-05, EntityDefinitions): the
+    // analysis set is `sprk_analysises` (RegardingNameFields said `sprk_analyses`, a 404) and the organization
+    // primary name is `sprk_organizationname` (it said `sprk_name`).
+
+    /// <summary>Primary display-name attribute for a regarding target (ADR-024 sprk_regardingrecordname source).</summary>
     public static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
     {
         "sprk_matter" => "sprk_mattername",
         "sprk_project" => "sprk_projectname",
+        "sprk_invoice" => "sprk_name",
+        "sprk_event" => "sprk_eventname",
+        "sprk_workassignment" => "sprk_name",
+        "sprk_servicerequest" => "sprk_name",
+        "sprk_budget" => "sprk_name",
+        "sprk_analysis" => "sprk_name",
+        "sprk_organization" => "sprk_organizationname",
+        "contact" => "fullname",
+        "account" => "name",
+        _ => null,
+    };
+
+    /// <summary>Web API entity set (collection) of a regarding target. Keys identical to <see cref="GetPrimaryNameField"/>.</summary>
+    public static string? GetEntitySetNameByLogicalName(string entityLogicalName) => entityLogicalName switch
+    {
+        "sprk_matter" => "sprk_matters",
+        "sprk_project" => "sprk_projects",
+        "sprk_invoice" => "sprk_invoices",
+        "sprk_event" => "sprk_events",
+        "sprk_workassignment" => "sprk_workassignments",
+        "sprk_servicerequest" => "sprk_servicerequests",
+        "sprk_budget" => "sprk_budgets",
+        "sprk_analysis" => "sprk_analysises",
+        "sprk_organization" => "sprk_organizations",
+        "contact" => "contacts",
+        "account" => "accounts",
         _ => null,
     };
 

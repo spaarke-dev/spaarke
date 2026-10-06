@@ -233,6 +233,7 @@ public class EventEndpointsMembershipPublishingTests
             Dataverse.Object,
             CallerResolver.Object,
             Identity.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             new DefaultHttpContext { TraceIdentifier = TraceId },
             NullLogger<Program>.Instance,
             CancellationToken.None);
