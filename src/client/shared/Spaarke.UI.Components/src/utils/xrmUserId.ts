@@ -35,3 +35,5 @@ export function getXrmUserId(): string | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return readXrmUserId(getXrm((x: any) => !!readXrmUserId(x)));
 }
+
+// scratch (081 round 8 router proof)
