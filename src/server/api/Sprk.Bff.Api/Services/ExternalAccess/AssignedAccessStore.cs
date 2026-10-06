@@ -137,6 +137,14 @@ public static class AssignedAccessReason
     public const string AssignmentEnded = "assignment-ended";
 
     /// <summary>
+    /// Owner round 71 (2026-10-06): the row's record (project, matter or work assignment) was DELETED — its root lookup was
+    /// emptied by the relationship's RemoveLink cascade and a read of the record its key names answered "not found". Written
+    /// with <see cref="AssignedAccessState.Revoked"/> by <see cref="AssignedAccessReconciliationJob"/>; no access is changed
+    /// (the grant row it may name is ended by <see cref="ExternalAccessReconciliationJob"/>'s rule R4).
+    /// </summary>
+    public const string RootDeleted = "root-deleted";
+
+    /// <summary>
     /// Task 158 r1 (owner round 30): an inherited row whose principal already held the parent's mirror on the filed record
     /// when it was passed on — direct access the parent's unshare never removes.
     /// </summary>
@@ -917,6 +925,51 @@ public class AssignedAccessStore
             .Distinct()
             .ToList();
         return (roots, truncated);
+    }
+
+    /// <summary>
+    /// Owner round 71 (2026-10-06): live Assigned-To ledger rows (any state but Revoked) whose EVERY root lookup is empty —
+    /// what a deleted matter or work assignment leaves behind (their ledger relationships are RemoveLink; a project's is
+    /// Cascade, so its rows are deleted with it). <see cref="ScanLedgerRootsAsync"/> drops such rows (they name no root to
+    /// materialize), so without this they stay live forever and count toward its bound. Inherited-share rows are left out,
+    /// exactly as there. <c>Truncated</c> when more exist than one scan reads. Exceptions propagate.
+    /// </summary>
+    internal virtual async Task<(IReadOnlyList<AssignedAccessLedgerRow> Rows, bool Truncated)> ScanRootlessLedgerRowsAsync(CancellationToken ct)
+    {
+        var rows = await _dataverse.QueryAsync<AssignedAccessLedgerRow>(
+            EntitySet,
+            filter: $"statecode eq 0 and sprk_state ne {(int)AssignedAccessState.Revoked} and " +
+                    "_sprk_project_value eq null and _sprk_matter_value eq null and _sprk_workassignment_value eq null and " +
+                    $"(sprk_sourcefield eq null or not startswith(sprk_sourcefield,'{InheritedSourcePrefix}'))",
+            select: LedgerSelect,
+            top: MaxScanRows + 1,
+            cancellationToken: ct).ConfigureAwait(false);
+
+        var live = rows.Where(r => r.Id != Guid.Empty).ToList();
+        return live.Count > MaxScanRows ? (live.Take(MaxScanRows).ToList(), true) : (live, false);
+    }
+
+    /// <summary>
+    /// The record a ledger row's KEY names (<see cref="LedgerKey"/>: <c>{rootLogicalName}:{rootId}:…</c>) — the row's
+    /// record id kept as text, which survives the lookup being emptied. <c>null</c> when the key is absent or not of that
+    /// shape.
+    /// </summary>
+    internal static AssignedRootRef? RootFromLedgerKey(string? ledgerKey)
+    {
+        if (string.IsNullOrWhiteSpace(ledgerKey))
+            return null;
+
+        var parts = ledgerKey.Split(':');
+        if (parts.Length < 3 || !Guid.TryParseExact(parts[1], "D", out var id) || id == Guid.Empty)
+            return null;
+
+        foreach (var type in new[] { ExternalGrantRootType.Project, ExternalGrantRootType.Matter, ExternalGrantRootType.WorkAssignment })
+        {
+            if (string.Equals(parts[0], ExternalGrantRoot.LogicalNameFor(type), StringComparison.OrdinalIgnoreCase))
+                return new AssignedRootRef(type, id, null);
+        }
+
+        return null;
     }
 
     /// <summary>The root a ledger row is held at, or <c>null</c> for a row with none.</summary>
