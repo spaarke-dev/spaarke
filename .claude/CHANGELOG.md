@@ -16,7 +16,7 @@ Investigation into why projects went from 20–50 tasks/day (Jan–Mar) to 1–4
   - `task-execute` Step 0 gains a size guard. Steps 8.5 and 11 now rewrite instead of accumulating.
   - `current-task.template.md` updated.
 - **Review/verify loops had no stopping rule.** `code-review` hands filtering to task-execute Step 9.5, but Step 9.5 only said "fix → re-run".
-  - Step 9.5 gains "Finding triage and round limits": classes F1–F4 fix-now and K1–K4 known-limit; 2 fix rounds re-verifying the fix diff only; 1 adversarial-verifier pass (2 for auth/security/tenant-isolation); escalate any F1 still open.
+  - Step 9.5 gains "Finding triage and round limits": classes F1–F4 fix-now and K1–K4 known-limit; 2 fix rounds re-verifying the fix diff plus its direct callers and callees (affected suites re-run); 1 adversarial-verifier pass (2 for auth/security/tenant-isolation); escalate any F1 still open.
   - This generalizes the owner's own `unified-access-control-r2` rule (rounds 56/59).
   - `code-review` suggests a class per finding and scopes re-reviews to the fix diff.
   - Root `CLAUDE.md` §8.5 "Coverage-first review" bullet extended by one sentence so it binds session-written workflow scripts too.

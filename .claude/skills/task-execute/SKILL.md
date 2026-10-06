@@ -679,7 +679,9 @@ AFTER all implementation steps and acceptance criteria verified:
      → KNOWN-LIMIT classes (K1-K4): one line each in task notes + PR, no fix round
      → A genuine product or policy choice: ask the user (batch the questions)
 
-   AFTER fixing: RE-RUN code-review on the FIX DIFF ONLY (not the whole task surface).
+   AFTER fixing: RE-RUN code-review on the FIX SCOPE: the fix diff plus the code that
+   directly calls or is called by the changed lines (not the whole task surface).
+   RE-RUN the affected test suites.
    STOP at the round cap below.
 
 2. RUN adr-check on modified files:
@@ -757,8 +759,8 @@ UPDATE current-task.md:
 **Over-engineering check (applies to every fix).** A new column, job, setting or abstraction needs a realistic failure behind it, and a fix is never bigger than the problem. Prefer reusing an existing component (CLAUDE.md §11).
 
 **Round limits:**
-1. **Review → fix round 1 → re-verify the fix diff → (only if F1–F4 remain) fix round 2 → stop.**
-2. **Re-verification scope is the fix diff,** not the task's whole surface. A fresh full review after every fix is what generated an endless supply of new findings.
+1. **Review → fix round 1 → re-verify the fix scope → (only if F1–F4 remain) fix round 2 → stop.**
+2. **Re-verification scope is the fix diff plus its direct callers and callees,** not the task's whole surface. Including callers and callees catches a fix that breaks adjacent code. Re-running the affected test suites remains mandatory. A fresh full review after every fix is what generated an endless supply of new findings.
 3. **After round 2,** escalate any F1 still open to the user (root §6). Never accept it silently and never start round 3. Record anything else that remains as a known limit.
 4. **Adversarial-verifier passes** (workflow scripts, verify-after-execute lanes) follow the same classes and caps: **one** verifier pass per task. A second pass is allowed only for tasks tagged `auth`, `security` or `tenant-isolation`, and it is scoped to the fix diff.
 5. **Flag diminishing returns proactively.** If a round produced only K-class findings, say so and stop. Don't continue rounds silently.
