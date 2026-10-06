@@ -1043,6 +1043,30 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
      - (b) the reconciliation job removes a share held by a user flagged external on a Restricted record;
      - (c) Manage Access shows such a share as "External user — no access" until it is removed.
 
+## Round 68 (2026-10-06). BINDING. OWNER decisions on the batch-4 live-gate findings.
+
+1. **G149-2:** a Web API `GrantAccess`/`RevokeAccess` is an acceptable stand-in for the model-driven Share dialog. Task 149 completes on the G149-1/G149-2 evidence.
+2. **Create-then-open on secure records:** the Events API and Office to-do routes create rows with no inline share, so the creator can't open a new row for up to 2 minutes, until the share-mirror job runs. ACCEPTED (inside the existing window).
+3. **Empty SPE containers from the gate runs:** delete them. None is referenced by any Dataverse project, matter, work assignment, business unit or document (checked 2026-10-06). The BFF has no container-delete route and the admin's Graph token is refused, so deletion is an operator step (SharePoint admin). The 15 ids:
+   - `b!1jQ90fRNREqIkel3wEl2txG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!4ltjdXaQMEGKlLr47q0m6RG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!8qdU0gEubUSu29rQVtpvehG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!DuRySBK9FkKk2wSDxRigwhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!ECpwsE3P2Em14S3B84uYOxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!HBRbokLXnUGzaDLSTdNFvM5RFHtaaUZCi0Jm-xs-hDQV_6QuLuKmR4jrMdC6UgMm`
+   - `b!HkqHE0XETUCPMjmQJXU3YBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!IRjcuov6dU-QV2n8wNvGgxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!Q93-JrZ7fUmviHObJDHmyhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!UhVkyYyZrEKopsCjLi3dfxG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!UhxDf-Qp9UKCLyeglKKvdhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!ZxwACqn6EEKP99-lPgOiBhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!_0H4eQgAXkm7AAo66_apUBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!_yZXxbMiOESIRAX0EKNSlhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+   - `b!qZ9Qj5EIfkKIBIESyeRL1xG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+4. **Event `b52562e5`** has a record type and no regarding link, so its two to-dos stay unstampable. That is fine.
+5. **Make Secure on a record that already has documents** strands those documents for every OBO read path, until the broker-only document task lands. The owner chose NOT to add a temporary guard ("it just risks a regression and somehow missing the reversion later"). Recorded as a known risk.
+6. **Broker-only document gap (upload403 investigation):** a new task is ADDED to the front of batch 5. Its scope depends on the Office-edit option, which is pending.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.

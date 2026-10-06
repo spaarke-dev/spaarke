@@ -4,7 +4,7 @@
     <title>C10 part 2 (sharees) — internal users shared on a secure parent see exactly its children once the children are owned by the memberless secure team: verify Dataverse cascading share live first; otherwise the BFF mirrors the parent's share set onto each child at create and fans out on share/unshare — never wider than the parent</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "internal sharees' access to children")</phase>
     <gate>after 144, 145 and 146 are merged. Part A (live cascade verification) is startable as soon as 144 and 145 are live in dev. SHIP-TOGETHER partner of task 146 (146 must not reach a shared environment without this).</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization .cs change on the POA share path (tags bff-api, auth, security) plus a possible Dataverse relationship-schema change; live verification gate.</rigor-reason>
     <model-tier>opus</model-tier>
