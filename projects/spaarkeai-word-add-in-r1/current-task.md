@@ -30,6 +30,5 @@
 | Publish size | 097: +4,188 B vs master merge base (Compress-Archive Optimal, 192=192 files); 100: +15.6 KB |
 
 ## Critical context
-- The Graph sharing link is refused for every SPE file ("not supported on CSP Container site"); 096 removed it from all pane paths. The share-link ROUTE and the shared composer's "Link" option still use it — recommendation in `notes/096-email-tab.md` §4 (owner not yet asked).
+- Graph refuses sharing links on every SPE file. Owner decided 2026-10-05: document links open the Spaarke record; 098 shipped that in the shared composer. Only the now-unused share-link ROUTE remains (retirement handed to UAC-r2 — "Waiting on others").
 - Local add-in build needs the CI env values from `.github/workflows/deploy-office-addins.yml` (see CLAUDE.md "Standing directives & gotchas").
-- ⚠️ TASK-INDEX row 097 may still read ⛔ blocked with the 2026-10-04 text — update it when 097 closes.
