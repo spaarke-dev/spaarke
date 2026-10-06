@@ -58,7 +58,7 @@ public class AnalysisOptions
 
     /// <summary>
     /// Default RAG deployment model for new customers.
-    /// Options: "Shared" (multi-tenant), "Dedicated" (customer index), "CustomerOwned" (BYOK)
+    /// Options: "Shared" (multi-tenant), "Dedicated" (customer index)
     /// Maps to configuration for sprk_knowledgedeployment entity.
     /// </summary>
     public RagDeploymentModel DefaultRagModel { get; set; } = RagDeploymentModel.Shared;
@@ -175,7 +175,6 @@ public class AnalysisOptions
 
     /// <summary>
     /// Customer tenant ID for cross-tenant scenarios.
-    /// Required for CustomerOwned RAG deployment model.
     /// Maps to Dataverse Environment Variable: sprk_CustomerTenantId
     /// </summary>
     public string? CustomerTenantId { get; set; }
@@ -205,9 +204,5 @@ public enum RagDeploymentModel
     /// </summary>
     Dedicated,
 
-    /// <summary>
-    /// Customer-owned index in customer's Azure tenant (Model 3).
-    /// Full data sovereignty and compliance.
-    /// </summary>
-    CustomerOwned
+    // CustomerOwned (an index in another subscription, reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b.
 }

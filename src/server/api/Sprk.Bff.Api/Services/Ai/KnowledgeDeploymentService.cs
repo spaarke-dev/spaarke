@@ -1,8 +1,6 @@
 using System.Collections.Concurrent;
-using Azure;
 using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
-using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -11,23 +9,21 @@ namespace Sprk.Bff.Api.Services.Ai;
 
 /// <summary>
 /// Manages RAG knowledge deployments and provides SearchClient routing.
-/// Implements the 3 deployment models: Shared, Dedicated, CustomerOwned.
+/// Implements the 2 deployment models: Shared and Dedicated. Both reach the stamp's own AI Search service through
+/// the shared <c>SearchIndexClient</c> (managed identity).
 /// </summary>
 /// <remarks>
-/// Phase 1 Implementation:
-/// - Shared and Dedicated models fully supported
-/// - CustomerOwned model requires Key Vault integration (connection strings)
 /// - Deployment configs cached in-memory (TRACKED: GitHub #229 - Dataverse persistence)
+/// - The key-only "CustomerOwned" model (API key from Key Vault) was removed by customer-provisioning-orchestration-r1 task 230b: unreachable, and a
+///   stamp holds no key (owner D13).
 ///
 /// Index naming (configurable via AnalysisOptions):
 /// - Shared: Uses AnalysisOptions.SharedIndexName (single multi-tenant index)
 /// - Dedicated: "{tenantId}-knowledge" (per-customer index)
-/// - CustomerOwned: Customer-specified index name
 /// </remarks>
 public class KnowledgeDeploymentService : IKnowledgeDeploymentService
 {
     private readonly SearchIndexClient _searchIndexClient;
-    private readonly SecretClient? _secretClient;
     private readonly AnalysisOptions _options;
     private readonly AiSearchOptions? _aiSearchOptions;
     private readonly IAllowedIndexesProvider? _allowedIndexesProvider;
@@ -65,12 +61,10 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
         SearchIndexClient searchIndexClient,
         IOptions<AnalysisOptions> options,
         ILogger<KnowledgeDeploymentService> logger,
-        SecretClient? secretClient = null,
         IOptions<AiSearchOptions>? aiSearchOptions = null,
         IAllowedIndexesProvider? allowedIndexesProvider = null)
     {
         _searchIndexClient = searchIndexClient;
-        _secretClient = secretClient;
         _options = options.Value;
         _aiSearchOptions = aiSearchOptions?.Value;
         _allowedIndexesProvider = allowedIndexesProvider;
@@ -289,62 +283,6 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
         return Task.FromResult(savedConfig);
     }
 
-    /// <inheritdoc />
-    public async Task<DeploymentValidationResult> ValidateCustomerOwnedDeploymentAsync(
-        KnowledgeDeploymentConfig config,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(config);
-
-        if (config.Model != RagDeploymentModel.CustomerOwned)
-        {
-            return DeploymentValidationResult.Failure("Validation only applicable to CustomerOwned deployments");
-        }
-
-        if (string.IsNullOrEmpty(config.SearchEndpoint))
-        {
-            return DeploymentValidationResult.Failure("SearchEndpoint is required for CustomerOwned deployment");
-        }
-
-        if (string.IsNullOrEmpty(config.ApiKeySecretName))
-        {
-            return DeploymentValidationResult.Failure("ApiKeySecretName is required for CustomerOwned deployment");
-        }
-
-        _logger.LogInformation("Validating CustomerOwned deployment for tenant {TenantId}", config.TenantId);
-
-        try
-        {
-            // Get API key from Key Vault
-            var apiKey = await GetApiKeyFromKeyVaultAsync(config.ApiKeySecretName, cancellationToken);
-
-            // Create client and test connection
-            var client = new SearchClient(
-                new Uri(config.SearchEndpoint),
-                config.IndexName,
-                new AzureKeyCredential(apiKey));
-
-            // Try to get document count to validate connectivity
-            var response = await client.GetDocumentCountAsync(cancellationToken);
-
-            _logger.LogInformation("CustomerOwned deployment validated successfully. Document count: {Count}",
-                response.Value);
-
-            return DeploymentValidationResult.Success(response.Value);
-        }
-        catch (RequestFailedException ex)
-        {
-            _logger.LogWarning(ex, "CustomerOwned deployment validation failed for tenant {TenantId}", config.TenantId);
-            return DeploymentValidationResult.Failure($"Azure AI Search error: {ex.Message}");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error validating CustomerOwned deployment for tenant {TenantId}",
-                config.TenantId);
-            return DeploymentValidationResult.Failure($"Validation error: {ex.Message}");
-        }
-    }
-
     #region Private Methods
 
     private KnowledgeDeploymentConfig CreateDefaultConfig(string tenantId)
@@ -378,15 +316,6 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
                 IsActive = true,
                 CreatedAt = DateTimeOffset.UtcNow
             },
-            RagDeploymentModel.CustomerOwned => new KnowledgeDeploymentConfig
-            {
-                Id = Guid.NewGuid(),
-                TenantId = tenantId,
-                Name = $"Customer-Owned Deployment - {tenantId}",
-                Model = RagDeploymentModel.CustomerOwned,
-                IsActive = false, // Requires manual configuration
-                CreatedAt = DateTimeOffset.UtcNow
-            },
             _ => throw new ArgumentOutOfRangeException(nameof(model), model, "Unknown deployment model")
         };
     }
@@ -406,7 +335,6 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
         {
             RagDeploymentModel.Shared => CreateSharedClient(config),
             RagDeploymentModel.Dedicated => CreateDedicatedClient(config),
-            RagDeploymentModel.CustomerOwned => await CreateCustomerOwnedClientAsync(config, cancellationToken),
             _ => throw new ArgumentOutOfRangeException(nameof(config.Model), config.Model, "Unknown deployment model")
         };
 
@@ -429,54 +357,6 @@ public class KnowledgeDeploymentService : IKnowledgeDeploymentService
 
         // Dedicated indexes are still in our subscription, just with different index names
         return _searchIndexClient.GetSearchClient(config.IndexName);
-    }
-
-    private async Task<SearchClient> CreateCustomerOwnedClientAsync(
-        KnowledgeDeploymentConfig config,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrEmpty(config.SearchEndpoint))
-        {
-            throw new InvalidOperationException(
-                $"CustomerOwned deployment for tenant {config.TenantId} requires SearchEndpoint");
-        }
-
-        if (string.IsNullOrEmpty(config.ApiKeySecretName))
-        {
-            throw new InvalidOperationException(
-                $"CustomerOwned deployment for tenant {config.TenantId} requires ApiKeySecretName");
-        }
-
-        _logger.LogDebug("Creating CustomerOwned SearchClient for tenant {TenantId}, endpoint={Endpoint}",
-            config.TenantId, config.SearchEndpoint);
-
-        var apiKey = await GetApiKeyFromKeyVaultAsync(config.ApiKeySecretName, cancellationToken);
-
-        return new SearchClient(
-            new Uri(config.SearchEndpoint),
-            config.IndexName,
-            new AzureKeyCredential(apiKey));
-    }
-
-    private async Task<string> GetApiKeyFromKeyVaultAsync(
-        string secretName,
-        CancellationToken cancellationToken)
-    {
-        if (_secretClient == null)
-        {
-            throw new InvalidOperationException(
-                "Key Vault SecretClient not configured. Required for CustomerOwned deployments.");
-        }
-
-        _logger.LogDebug("Retrieving API key from Key Vault: {SecretName}", secretName);
-
-        // Parse secret name (format: kv://{vault-name}/{secret-name} or just secret-name)
-        var actualSecretName = secretName.StartsWith("kv://")
-            ? secretName.Split('/').Last()
-            : secretName;
-
-        var secret = await _secretClient.GetSecretAsync(actualSecretName, cancellationToken: cancellationToken);
-        return secret.Value.Value;
     }
 
     private static string SanitizeTenantId(string tenantId)

@@ -196,6 +196,9 @@ builder.Services.AddAiSafetyModule(builder.Configuration, builder.Environment);
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);
 
+// Keyless proof (customer-provisioning task 230b): one managed-identity call per stamp service, for H13.
+builder.Services.AddKeylessProofModule();
+
 // AI Platform R2: chat extensions (prompt builder, latency telemetry, playbook candidate selection)
 builder.Services.AddAiChatModule(builder.Configuration);
 

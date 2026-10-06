@@ -97,6 +97,17 @@ public static class AiSafetyModule
         })
         .AddHttpMessageHandler<ContentSafetyAuthHandler>();
 
+        // Task 230b — the keyless proof's Content Safety client: same base address, same ContentSafetyAuthHandler, but a
+        // timeout long enough for the identity's answer to arrive (the client above is held to the Prompt Shield budget,
+        // so a probe through it would report a timeout, not a refusal). Used only by AiKeylessProbe.
+        services.AddHttpClient(Sprk.Bff.Api.Services.Ai.Diagnostics.AiKeylessProbe.ContentSafetyProbeHttpClientName, client =>
+        {
+            client.BaseAddress = contentSafetyBaseAddress;
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.Timeout = Sprk.Bff.Api.Infrastructure.Diagnostics.KeylessProbeRunner.DefaultTimeout;
+        })
+        .AddHttpMessageHandler<ContentSafetyAuthHandler>();
+
         // PromptShieldTelemetry — singleton: Meter instances are thread-safe and long-lived.
         // ADR-010: no interface needed (single implementation, no seam required for testing).
         services.AddSingleton<PromptShieldTelemetry>();

@@ -10,6 +10,7 @@ using Sprk.Bff.Api.Api.FieldMappings;
 using Sprk.Bff.Api.Api.Finance;
 using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Api.Membership;
+using Sprk.Bff.Api.Api.Platform;
 using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
@@ -318,6 +319,8 @@ public static class EndpointMappingExtensions
 
         app.MapVisualizationEndpoints();
         app.MapResilienceEndpoints();
+        // Keyless proof for provisioning's acceptance gate (task 230b) — app role held only by the L2 Worker identity.
+        app.MapKeylessProofEndpoints();
 
         // POST /api/ai/document-intelligence/match-records and /associate-record (RecordMatchEndpoints) were
         // REMOVED by unified-access-control-r2 task 164 (owner round 10 item 1): no caller in the repo and not

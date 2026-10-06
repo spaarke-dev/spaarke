@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Azure.Identity;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Services.Ai.Safety;
@@ -17,7 +18,9 @@ namespace Sprk.Bff.Api.Services.Ai.Safety;
 ///   - HTTP 5xx (server err) → log warning, return <see cref="PromptShieldResult.FailOpen"/>
 ///   - Timeout (&gt;100ms)   → log warning, return <see cref="PromptShieldResult.FailOpen"/>
 ///   - Network error         → log warning, return <see cref="PromptShieldResult.FailOpen"/>
-///   - Auth failure          → log warning, return <see cref="PromptShieldResult.FailOpen"/>
+///   - Auth failure (HTTP 401/403, or no token) → log ERROR, return
+///     <see cref="PromptShieldResult.FailOpenAuthRefused"/> — a distinct outcome
+///     (<c>failed_open_auth</c>), because it is not transient (task 230b)
 ///
 /// Auth is attached by <see cref="ContentSafetyAuthHandler"/> on the named HttpClient
 /// (managed-identity bearer or API key — assessment rec 3). Every scan outcome is counted
@@ -32,8 +35,8 @@ public sealed class PromptShieldService : IPromptShieldService
     /// <summary>Named HttpClient registered in <see cref="Infrastructure.DI.AiSafetyModule"/>.</summary>
     public const string HttpClientName = "ContentSafety";
 
-    private const string ApiPath = "contentsafety/text:shieldPrompt";
-    private const string ApiVersion = "2024-09-01";
+    internal const string ApiPath = "contentsafety/text:shieldPrompt";
+    internal const string ApiVersion = "2024-09-01";
 
     /// <summary>Configuration key for the Prompt Shield call deadline, in milliseconds.</summary>
     public const string TimeoutMsConfigKey = "AiSafety:PromptShield:TimeoutMs";
@@ -117,12 +120,17 @@ public sealed class PromptShieldService : IPromptShieldService
                 request.Documents?.Count ?? 0, latencyMs);
 
             _telemetry.RecordScan(result, latencyMs);
+            if (result.AuthRefused)
+            {
+                _telemetry.RecordFailOpen("auth", latencyMs);
+            }
 
             // Shield-coverage counter (assessment rec 2a): CallApiAsync returns FailedOpen
-            // results for 429 / 5xx / unparseable responses without throwing, so classify
-            // from the result — not just the exception paths below.
+            // results for 401 / 403 / 429 / 5xx / unparseable responses without throwing, so
+            // classify from the result — not just the exception paths below.
             _aiTelemetry.RecordShieldEvaluation(
                 result.IsBlocked ? AiTelemetry.ShieldOutcomeBlocked
+                : result.AuthRefused ? AiTelemetry.ShieldOutcomeFailedOpenAuth
                 : result.FailedOpen ? AiTelemetry.ShieldOutcomeFailedOpenError
                 : AiTelemetry.ShieldOutcomeCompleted);
 
@@ -141,6 +149,21 @@ public sealed class PromptShieldService : IPromptShieldService
             _telemetry.RecordFailOpen("timeout", latencyMs);
             _aiTelemetry.RecordShieldEvaluation(AiTelemetry.ShieldOutcomeFailedOpenTimeout);
             return PromptShieldResult.FailOpen(latencyMs);
+        }
+        catch (Exception ex) when (ex is AuthenticationFailedException or CredentialUnavailableException)
+        {
+            // The managed identity could not produce a token: every scan fails open until it is fixed.
+            sw.Stop();
+            var latencyMs = sw.Elapsed.TotalMilliseconds;
+
+            _logger.LogError(ex,
+                "PromptShield AUTH FAILURE: no Content Safety token for the BFF identity. Failing open — " +
+                "every request proceeds to the LLM unshielded until the credential is fixed. docCount={DocCount}",
+                request.Documents?.Count ?? 0);
+
+            _telemetry.RecordFailOpen("auth", latencyMs);
+            _aiTelemetry.RecordShieldEvaluation(AiTelemetry.ShieldOutcomeFailedOpenAuth);
+            return PromptShieldResult.FailOpenAuthRefused(latencyMs);
         }
         catch (Exception ex)
         {
@@ -180,6 +203,16 @@ public sealed class PromptShieldService : IPromptShieldService
             "application/json");
 
         using var response = await client.SendAsync(httpRequest, ct).ConfigureAwait(false);
+
+        if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            _logger.LogError(
+                "PromptShield AUTH FAILURE: Content Safety refused the BFF identity (HTTP {StatusCode}). Failing open — " +
+                "every request proceeds to the LLM unshielded until the identity holds Cognitive Services User on the " +
+                "Content Safety account.",
+                (int)response.StatusCode);
+            return PromptShieldResult.FailOpenAuthRefused(0);
+        }
 
         if (response.StatusCode == HttpStatusCode.TooManyRequests)
         {
