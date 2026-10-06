@@ -355,6 +355,8 @@ function Write-MaskedRecovery([string]$Column, [string]$Cause) {
 }
 
 foreach ($column in $Columns) {
+    # Dataverse cannot field-secure a column in an alternate key (0x80060896); sprk_graphitemid_uk is load-bearing (dedup, Compose upsert). Owner decision 2026-10-06.
+    if ($Table -eq 'sprk_document' -and $column -eq 'sprk_graphitemid') { Report 'INFO' 'sprk_graphitemid not field-secured: part of alternate key sprk_graphitemid_uk (Dataverse 0x80060896); re-pointing is bounded by the locked drive id + the unique key + the BFF strict pointer check'; continue }
     $attr = try { Invoke-DvGet "EntityDefinitions(LogicalName='$Table')/Attributes(LogicalName='$column')?`$select=IsSecured" } catch { $null }
     if (-not $attr) { continue }   # (p7) reported it; -Apply was refused above
     $specs = @(@{ P = $reader; Name = $ReaderProfileName; Create = 0 }, @{ P = $writer; Name = $WriterProfileName; Create = 4 })

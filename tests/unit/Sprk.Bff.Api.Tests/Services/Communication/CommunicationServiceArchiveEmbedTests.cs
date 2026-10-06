@@ -171,9 +171,11 @@ public class CommunicationServiceArchiveEmbedTests
             .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == AttachmentEntity), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>(attachments)));
 
-        // Not yet archived — FindExistingArchiveDocumentAsync returns empty.
+        // Not yet archived — FindExistingArchiveDocumentAsync returns empty. The lookup must filter on the SAME column the
+        // archive create writes (sprk_relatedcommunication); a query on any other column gets no answer here and fails the test.
         entityService
-            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == DocumentEntity), It.IsAny<CancellationToken>()))
+            .Setup(s => s.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == DocumentEntity
+                && q.Criteria.Conditions.Any(c => c.AttributeName == "sprk_relatedcommunication")), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection(new List<Entity>()));
 
         entityService

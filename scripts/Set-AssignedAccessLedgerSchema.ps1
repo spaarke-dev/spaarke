@@ -93,8 +93,8 @@ $StringColumns = @(
 )
 $Lookups = @(
     @{ Name = 'sprk_project';              Schema = 'sprk_Project';              Target = 'sprk_project';              Rel = 'sprk_sprk_project_sprk_assignedaccess_project';                Delete = 'Cascade';    Label = 'Project' }
-    @{ Name = 'sprk_matter';               Schema = 'sprk_Matter';               Target = 'sprk_matter';               Rel = 'sprk_sprk_matter_sprk_assignedaccess_matter';                  Delete = 'Cascade';    Label = 'Matter' }
-    @{ Name = 'sprk_workassignment';       Schema = 'sprk_WorkAssignment';       Target = 'sprk_workassignment';       Rel = 'sprk_sprk_workassignment_sprk_assignedaccess_workassignment';  Delete = 'Cascade';    Label = 'Work Assignment' }
+    @{ Name = 'sprk_matter';               Schema = 'sprk_Matter';               Target = 'sprk_matter';               Rel = 'sprk_sprk_matter_sprk_assignedaccess_matter';                  Delete = 'RemoveLink'; Label = 'Matter' }
+    @{ Name = 'sprk_workassignment';       Schema = 'sprk_WorkAssignment';       Target = 'sprk_workassignment';       Rel = 'sprk_sprk_workassignment_sprk_assignedaccess_workassignment';  Delete = 'RemoveLink'; Label = 'Work Assignment' }
     @{ Name = 'sprk_subjectcontact';       Schema = 'sprk_SubjectContact';       Target = 'contact';                   Rel = 'sprk_contact_sprk_assignedaccess_subjectcontact';             Delete = 'RemoveLink'; Label = 'Subject Contact' }
     @{ Name = 'sprk_subjectorganization';  Schema = 'sprk_SubjectOrganization';  Target = 'sprk_organization';         Rel = 'sprk_sprk_organization_sprk_assignedaccess_subjectorg';       Delete = 'RemoveLink'; Label = 'Subject Organization' }
     @{ Name = 'sprk_subjectsystemuser';    Schema = 'sprk_SubjectSystemUser';    Target = 'systemuser';                Rel = 'sprk_systemuser_sprk_assignedaccess_subjectsystemuser';       Delete = 'RemoveLink'; Label = 'Subject User' }
@@ -103,6 +103,9 @@ $Lookups = @(
     @{ Name = 'sprk_externalrecordaccess'; Schema = 'sprk_ExternalRecordAccess'; Target = 'sprk_externalrecordaccess'; Rel = 'sprk_sprk_externalrecordaccess_sprk_assignedaccess_grant';    Delete = 'RemoveLink'; Label = 'Grant' }
 )
 $AllowedWriterRoles = @('System Administrator', 'System Customizer')
+# Microsoft platform roles Dataverse grants on every new table. Allowed only while every holder is an application user
+# (no person, no team) — checked below, never assumed from the name.
+$PlatformServiceRoles = @('Service Writer', 'Service Deleter')
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
 $token = az account get-access-token --resource $EnvironmentUrl --query accessToken -o tsv 2>$null
@@ -337,10 +340,24 @@ if (-not $privs) { if ($entity) { Report 'FAIL' 'the table privileges could not 
 else {
     foreach ($p in @($privs.value)) {
         $holders = @((Try-DvGet "roleprivilegescollection?`$select=roleid&`$filter=privilegeid eq $($p.privilegeid)").value)
-        $roleNames = foreach ($h in $holders) { (Try-DvGet "roles($($h.roleid))?`$select=name").name }
-        $roleNames = @($roleNames | Where-Object { $_ } | Sort-Object -Unique)
+        $roles = foreach ($h in $holders) { Try-DvGet "roles($($h.roleid))?`$select=roleid,name" }
+        $roles = @($roles | Where-Object { $_ })
+        $roleNames = @($roles | ForEach-Object { $_.name } | Sort-Object -Unique)
         $writer = $p.name -match '^prv(Create|Write|Delete)'
-        $unexpected = @($roleNames | Where-Object { $_ -notin $AllowedWriterRoles })
+        $unexpected = @(foreach ($r in $roles) {
+            if ($r.name -in $AllowedWriterRoles) { continue }
+            if ($r.name -in $PlatformServiceRoles) {
+                # A platform service role passes only if no person and no team holds it.
+                $userRead = Try-DvGet "roles($($r.roleid))/systemuserroles_association?`$select=applicationid"
+                $teamRead = Try-DvGet "roles($($r.roleid))/teamroles_association?`$select=teamid"
+                if (-not $userRead -or -not $teamRead) { "$($r.name) (its holders could not be read)"; continue }
+                $people = @(@($userRead.value) | Where-Object { -not $_.applicationid })
+                if ($people.Count -eq 0 -and @($teamRead.value).Count -eq 0) { continue }
+                "$($r.name) (held by a person or a team)"; continue
+            }
+            $r.name
+        })
+        $unexpected = @($unexpected | Sort-Object -Unique)
         if ($writer -and $unexpected.Count -gt 0) { Report 'FAIL' "$($p.name) held by non-admin role(s): $($unexpected -join ', ') — only the BFF writes the ledger" }
         else { Report 'OK' "$($p.name): $(if ($roleNames.Count) { $roleNames -join ', ' } else { '(no role)' })" }
     }
