@@ -129,7 +129,7 @@
       second container — operator rule "resume, never start a new run" (guide §7.5, provisioning.md); building it needs a
       cross-run Cosmos query on IProvisioningRunRepository. Reader interface name kept (master's seam; rename = churn).
       Tests added: H8 R8 (x3) .. R12; isolation: revoke/remove foreign → failed results, bulk foreign → ContainerNotInScopeError.
-    - BFF §10: no package change; the BFF code changes are guard routing (+0 dependencies) — publish delta measured at commit.
+    - BFF §10 publish size (fresh short-path worktrees, Compress-Archive Optimal, incl. PDBs): origin/master dc469d4a2 = 36.13 MB / 192 files; branch 4cd7dee3b (merge + T227e) = 36.15 MB / 192 files → +0.02 MB for ALL of this branch's unmerged BFF work. No package change (no CVE delta).
     - T186 live unknowns added: Worker identity can read environmentvariabledefinitions/values in the customer env;
       marker PATCH succeeds right after the bind PATCH on the same container.
   </notes>
