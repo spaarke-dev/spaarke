@@ -44,6 +44,37 @@ public sealed class ArmTemplateInspectorTests
 
         result.HasUnpinnedModelDeployment.Should().BeFalse(result.UnpinnedModelReference);
         result.HasInvalidKvRefIdentity.Should().BeFalse(result.KvRefIdentityReference);
+        result.MissingRequiredOutputs.Should().BeEmpty("customer.json must declare every output H2a requires (R4)");
+    }
+
+    [Fact]
+    public void Inspect_TemplateMissingRequiredOutputs_FailsR4_NamingThem()
+    {
+        var declared = ArmDeploymentRunner.RequiredOutputNames.Where(n => n is not ("contentSafetyEndpoint" or "redisEndpoint"))
+            .Select(n => $"\"{n}\":{{\"type\":\"string\",\"value\":\"x\"}}");
+        var json = "{\"resources\":[],\"outputs\":{" + string.Join(",", declared) + "}}";
+
+        Inspect(json).MissingRequiredOutputs.Should().Equal("redisEndpoint", "contentSafetyEndpoint");
+        Inspect("""{"resources":[]}""").MissingRequiredOutputs.Should().Equal(ArmDeploymentRunner.RequiredOutputNames,
+            "a template with no outputs object declares none of them");
+    }
+
+    /// <summary>
+    /// R4's list must match what the runner maps: every output <c>ArmDeploymentRunner</c> reads with <c>ReadString</c>
+    /// is required by H2a, except <c>resourceGroupName</c> (it has a fallback). A new output added to MapOutputs and to
+    /// H2a's check but not to <see cref="ArmDeploymentRunner.RequiredOutputNames"/> fails here.
+    /// </summary>
+    [Fact]
+    public void RequiredOutputNames_AreExactlyTheStringOutputsTheRunnerMaps()
+    {
+        var source = File.ReadAllText(Path.Combine(RepoRoot(), "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core",
+            "Handlers", "BicepInfraDeploy", "ArmDeploymentRunner.cs"));
+        var mapped = System.Text.RegularExpressions.Regex.Matches(source, @"ReadString\(root, ""([A-Za-z]+)""\)")
+            .Select(m => m.Groups[1].Value)
+            .Where(n => n != "resourceGroupName")
+            .Distinct();
+
+        mapped.Should().BeEquivalentTo(ArmDeploymentRunner.RequiredOutputNames);
     }
 
     [Theory]

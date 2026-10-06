@@ -51,6 +51,9 @@ param(
     [string]$ContainerTypeId,
 
     [Parameter(Mandatory = $true)]
+    [string]$ContentSafetyEndpoint,
+
+    [Parameter(Mandatory = $true)]
     [string]$CosmosEndpoint,
 
     [Parameter(Mandatory = $true)]
@@ -89,7 +92,7 @@ function Format-KvRef {
 $settings = @(
     "AgentToken__ClientId=$(Format-KvRef 'BFF-API-ClientId')",
     "AgentToken__TenantId=$(Format-KvRef 'TenantId')",
-    "AiSafety__ContentSafety__ApiKey=$(Format-KvRef 'ContentSafety-ApiKey')",
+    "AiSafety__ContentSafety__Endpoint=$ContentSafetyEndpoint",
     "AiSafety__ContentSafety__ManagedIdentity__Enabled=true",
     "AiSearch__Endpoint=$(Format-KvRef 'AiSearch-Endpoint')",
     "AiSearch__ManagedIdentity__Enabled=true",

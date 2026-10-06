@@ -377,6 +377,16 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                 return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                     BicepDeployRejectionCodes.KvRefIdentityInvalid, diagnostic, cancellationToken).ConfigureAwait(false);
             }
+            if (inspection.MissingRequiredOutputs is { Count: > 0 } undeclaredOutputs)
+            {
+                // Task 246 (R4): checked before any ARM call — nothing has been deployed, so Resumable.
+                var diagnostic =
+                    $"ARM template '{template.ArmJsonBlobName}' does not declare the output(s) H2a requires: " +
+                    $"{string.Join(", ", undeclaredOutputs)}. It was published before they were added. Nothing was " +
+                    "deployed. Publish the current customer template (publish-provisioning-arm-artifacts.yml) and resume.";
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    BicepDeployRejectionCodes.TemplateOutputsMissing, diagnostic, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         // (7.5) HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10:
@@ -704,6 +714,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         Check(outputs.KeyVaultUri, nameof(BicepDeployOutputs.KeyVaultUri));
         Check(outputs.ServiceBusFullyQualifiedNamespace, nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace));
         Check(outputs.RedisEndpoint, nameof(BicepDeployOutputs.RedisEndpoint));
+        Check(outputs.ContentSafetyEndpoint, nameof(BicepDeployOutputs.ContentSafetyEndpoint));
         return missing;
     }
 
@@ -814,6 +825,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         run.InterStepState.MiResourceId = outputs.UserAssignedIdentityResourceId;
         run.InterStepState.ServiceBusFullyQualifiedNamespace = outputs.ServiceBusFullyQualifiedNamespace;
         run.InterStepState.RedisEndpoint = outputs.RedisEndpoint;
+        run.InterStepState.ContentSafetyEndpoint = outputs.ContentSafetyEndpoint;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

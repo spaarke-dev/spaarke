@@ -124,20 +124,20 @@ public sealed class KvSecretValueResolverTests
     [Fact]
     public async Task ResolveAsync_FromRunParametersEntry_CopiesRealValueFromReferencedVault()
     {
-        const string knownValue = "content-safety-api-key-operator-supplied";
+        const string knownValue = "vendor-api-key-operator-supplied";
         var handler = new FakeSourceVaultHandler { KnownValue = knownValue };
         var resolver = NewResolver(handler);
-        var entry = new KvSecretEntry("ContentSafety-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters);
+        var entry = new KvSecretEntry("Vendor-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters);
         var request = NewRequest(new Dictionary<string, KeyVaultSecretRef>(StringComparer.Ordinal)
         {
-            ["ContentSafety-ApiKey"] = new KeyVaultSecretRef(SourceVaultName, "operator-supplied-content-safety-key"),
+            ["Vendor-ApiKey"] = new KeyVaultSecretRef(SourceVaultName, "operator-supplied-vendor-key"),
         });
 
         var resolution = await resolver.ResolveAsync(entry, request, CancellationToken.None);
 
         var resolved = resolution.Should().BeOfType<KvSecretValueResolution.Resolved>().Subject;
         resolved.Value.Should().Be(knownValue);
-        handler.RequestedSecretNames.Should().ContainSingle().Which.Should().Be("operator-supplied-content-safety-key");
+        handler.RequestedSecretNames.Should().ContainSingle().Which.Should().Be("operator-supplied-vendor-key");
     }
 
     // ---------- T4 missing reference -> honest failure, no fabricated value ----------

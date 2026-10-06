@@ -215,15 +215,6 @@ if ($SeedPlaceholders) {
     Write-Host '  SKIP: Compose-Webhook-SigningKey (value_source=generated; supplied downstream)' -ForegroundColor Gray
 }
 
-# ---- ContentSafety-ApiKey (ai) ----
-# Purpose: Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-# Value source: from-run-parameter
-if ($SeedPlaceholders) {
-    Set-VaultSecret -Name 'ContentSafety-ApiKey' -Value 'placeholder-from-run-parameter' -Description 'Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.' -Category 'ai'
-} else {
-    Write-Host '  SKIP: ContentSafety-ApiKey (value_source=from-run-parameter; supplied downstream)' -ForegroundColor Gray
-}
-
 # ---- Dataverse-ClientSecret (auth) ----
 # Purpose: OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track).
 # Value source: from-existing-kv

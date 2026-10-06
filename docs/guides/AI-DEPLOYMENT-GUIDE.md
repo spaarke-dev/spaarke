@@ -28,8 +28,8 @@
 
 > **Version**: 3.0
 > **Created**: 2025-12-28
-> **Updated**: 2026-05-17 (Auth v2 callout added 2026-05-20)
-> **Last Reviewed**: 2026-05-17
+> **Updated**: 2026-10-06 (§9.2 / §9.4 Content Safety corrected — keyless; task 246) (Auth v2 callout added 2026-05-20)
+> **Last Reviewed**: 2026-05-17 (§9.2 / §9.4 Content Safety re-verified 2026-10-06)
 > **Projects**: AI Document Intelligence R1 + R2 + R3 + Email-to-Document R2 + RAG Pipeline R1 + AI Platform Unification R2
 
 ---
@@ -793,12 +793,21 @@ Add the following App Service settings for R2 services:
 | `CosmosPersistence__Endpoint` | `https://spaarke-cosmos-{env}.documents.azure.com:443/` | Cosmos DB account endpoint |
 | `CosmosPersistence__DatabaseName` | `spaarke-ai` | Target database name |
 
-**Azure AI Content Safety**:
+**Azure AI Content Safety** (keyless — corrected 2026-10-06, task 246):
 
 | Setting | Value | Description |
 |---------|-------|-------------|
-| `AiSafety__ContentSafety__Endpoint` | `https://spaarke-contentsafety-{env}.cognitiveservices.azure.com/` | Content Safety REST API endpoint |
-| `AiSafety__ContentSafety__ApiKey` | (from Key Vault) | Content Safety API key (supports dynamic rotation) |
+| `AiSafety__ContentSafety__Endpoint` | `https://{account}.cognitiveservices.azure.com/` | **Required** outside Development/Testing: the BFF refuses to start without it. There is no default. |
+| `AiSafety__ContentSafety__ManagedIdentity__Enabled` | `true` | Authenticate with the BFF's managed identity (Microsoft Entra bearer token). |
+| `AiSafety__PromptShield__ChatPipelineEnabled` | `true` / `false` | Pre-LLM Prompt Shield scan in the chat pipeline (template default `false`). Enable only after the endpoint and role are in place. |
+
+Where `{account}` is:
+- **Shared dev**: `spaarke-openai-dev` — the multi-service AIServices account (RG `spe-infrastructure-westus2`) also serves Content Safety. There is no `spaarke-contentsafety-dev` account.
+- **Customer stamps**: `sprk-{customer}-{env}-contentsafety` (kind `ContentSafety`, local auth disabled), deployed by `infrastructure/bicep/customer.bicep` via `modules/content-safety.bicep`. `customer.bicep` sets the endpoint setting and provisioning handler H4b re-applies it from H2a's `contentSafetyEndpoint` output — no manual step.
+
+**Role**: the BFF identity needs **Cognitive Services User** on the account. "Cognitive Services OpenAI User" does NOT cover Content Safety dataActions. Customer stamps grant it to the stamp's user-assigned managed identity in Bicep.
+
+**No API key**: do not create, store, or configure a Content Safety key for a deployed environment. `AiSafety__ContentSafety__ApiKey` is read only when set, for local development; if it is non-empty and managed identity is not enabled, the BFF sends the key instead of a token.
 
 ```bash
 # Set Cosmos DB configuration
@@ -809,13 +818,13 @@ az webapp config appsettings set \
     "CosmosPersistence__Endpoint=https://spaarke-cosmos-dev.documents.azure.com:443/" \
     "CosmosPersistence__DatabaseName=spaarke-ai"
 
-# Set Content Safety configuration
+# Set Content Safety configuration (shared dev BFF; customer stamps get it from customer.bicep + H4b)
 az webapp config appsettings set \
-  --name spe-api-dev-67e2xz \
-  --resource-group spe-infrastructure-westus2 \
+  --name spaarke-bff-dev \
+  --resource-group rg-spaarke-dev \
   --settings \
-    "AiSafety__ContentSafety__Endpoint=https://spaarke-contentsafety-dev.cognitiveservices.azure.com/" \
-    "AiSafety__ContentSafety__ApiKey=<api-key>"
+    "AiSafety__ContentSafety__Endpoint=https://spaarke-openai-dev.cognitiveservices.azure.com/" \
+    "AiSafety__ContentSafety__ManagedIdentity__Enabled=true"
 ```
 
 ### 9.3 SpaarkeAi Web Resource Deployment
@@ -842,8 +851,11 @@ npm run build:prod
 # 1. Verify Cosmos DB is accessible (check API startup logs)
 # Look for: "CosmosClient initialized" or no CosmosPersistence errors
 
-# 2. Verify Content Safety is configured
-# Look for: no "AiSafety:ContentSafety:ApiKey is not configured" warnings
+# 2. Verify Content Safety answers (keyless, read-only; your az login needs Cognitive Services User)
+.\scripts\Verify-ContentSafetyResource.ps1   # shared dev defaults: spe-infrastructure-westus2 / spaarke-openai-dev
+# Customer stamp: -SubscriptionId <sub> -ResourceGroup <stamp-rg> -ResourceName sprk-{customer}-{env}-contentsafety
+# A missing AiSafety__ContentSafety__Endpoint stops the BFF at startup (outside Development/Testing).
+# Coverage: run scripts/kql/ai-metering/shield-coverage.kql and confirm a non-zero completed count.
 
 # 3. Verify SpaarkeAi web resource is deployed
 pac solution list

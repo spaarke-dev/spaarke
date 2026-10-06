@@ -59,6 +59,9 @@ param location string = 'westus2'
 @description('Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it.')
 param openAiLocation string = 'westus3'
 
+@description('Azure region for the Azure AI Content Safety account (task 246). It must offer BOTH Prompt Shields and Groundedness Detection; per the Microsoft region table (2026-09-18) the US regions with both are westus, eastus, eastus2 and canadaeast. westus2 (the stamp default location) has no Groundedness Detection, so this does NOT follow `location`: default westus, the nearest such region to westus2 (keeps the Prompt Shield call inside its deadline). Split-region like openAiLocation.')
+param contentSafetyLocation string = 'westus'
+
 // --- Storage Account options ---
 
 @description('SKU for the customer Storage Account')
@@ -195,6 +198,9 @@ var logAnalyticsName = 'sprk-${customerId}-${environmentName}-logs'
 
 // Document Intelligence: sprk-{customer}-{env}-docintel (per design.md §7.1 naming convention).
 var docIntelligenceName = 'sprk-${customerId}-${environmentName}-docintel'
+
+// Azure AI Content Safety: sprk-{customer}-{env}-contentsafety (task 246; also the custom subdomain).
+var contentSafetyName = 'sprk-${customerId}-${environmentName}-contentsafety'
 
 // Azure Managed Redis: sprk-{customer}-{env}-redis (task 128b naming; Managed Redis since task 242).
 var redisCacheName = 'sprk-${customerId}-${environmentName}-redis'
@@ -440,6 +446,27 @@ module docIntelligence 'modules/doc-intelligence.bicep' = {
 }
 
 // ============================================================================
+// AZURE AI CONTENT SAFETY (task 246, plan G26)
+// The stamp's own safety perimeter for the BFF's Prompt Shield + groundedness checks. Before this,
+// a stamp had no Content Safety resource and the BFF fell back to a hard-coded dev endpoint.
+// Keyless like its siblings (owner D13): custom subdomain + local auth disabled; the UAMI holds
+// Cognitive Services User via the module. `contentSafetyEndpoint` output name is LOAD-BEARING --
+// ArmDeploymentRunner.MapOutputs reads it into InterStepState for H4b.
+// ============================================================================
+
+module contentSafety 'modules/content-safety.bicep' = {
+  scope: rg
+  name: 'contentSafety-${baseName}'
+  params: {
+    contentSafetyName: contentSafetyName
+    location: contentSafetyLocation
+    sku: 'S0'
+    userAssignedIdentityPrincipalId: uami.outputs.principalId
+    tags: tags
+  }
+}
+
+// ============================================================================
 // REDIS CACHE — Azure Managed Redis, Microsoft Entra only (task 242, owner D12/D13)
 // Balanced_B0 with high availability by default; one database ('default', port 10000,
 // OSSCluster, AllKeysLRU) with access keys DISABLED. The stamp UAMI is the only identity
@@ -632,6 +659,11 @@ module bffApi 'modules/app-service.bicep' = {
 
       // Document Intelligence (per-customer, task 128b)
       DOC_INTELLIGENCE_ENDPOINT: docIntelligence.outputs.docIntelligenceEndpoint
+
+      // Content Safety (per-customer, task 246). The BFF refuses to start outside Development/Testing
+      // without this setting; it authenticates with the UAMI (H4b also sets
+      // AiSafety__ContentSafety__ManagedIdentity__Enabled=true and re-applies this endpoint from H2a's output).
+      AiSafety__ContentSafety__Endpoint: contentSafety.outputs.contentSafetyEndpoint
 
       // Monitoring (per-customer App Insights, task 128b)
       APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
@@ -827,6 +859,12 @@ output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
 // reaches Document Intelligence with its UAMI (T243). ---
 output docIntelligenceEndpoint string = docIntelligence.outputs.docIntelligenceEndpoint
 output docIntelligenceName string = docIntelligence.outputs.docIntelligenceName
+
+// --- Azure AI Content Safety (task 246). Output name is LOAD-BEARING: ArmDeploymentRunner.MapOutputs
+// reads it into BicepDeployOutputs.ContentSafetyEndpoint -> InterStepState -> H4b's
+// AiSafety__ContentSafety__Endpoint. No key output: local auth is disabled. ---
+output contentSafetyEndpoint string = contentSafety.outputs.contentSafetyEndpoint
+output contentSafetyName string = contentSafety.outputs.contentSafetyName
 
 // --- Monitoring: App Insights + Log Analytics (task 128b / Phase C). Raw
 // `connectionString`/`instrumentationKey` are intentionally NOT echoed here —

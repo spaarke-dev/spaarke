@@ -3,8 +3,8 @@
 > Owner: customer-provisioning-orchestration-r1 task 034
 > Wave: C2 (Bicep + UAMI)
 > Mode: Build
-> Started: 2026-10-05 22:18:47Z
-> Finished: 2026-10-05 22:18:47Z
+> Started: 2026-10-05 22:50:42Z
+> Finished: 2026-10-05 22:50:59Z
 > Test customer: itsttest in dev (westus2)
 
 ---
@@ -13,7 +13,7 @@
 
 | Stack | Owner | Expected | Actual | Warnings | Errors |
 |---|---|---|---|---|---|
-| customer | task 027 | PASS | [OK] PASS | 0 | 0 |
+| customer | task 027 | PASS | [OK] PASS | 8 | 0 |
 | platform | task 031 | PASS | [OK] PASS | 0 | 0 |
 | platform-controlplane | task 033 | PASS | [OK] PASS | 0 | 0 |
 

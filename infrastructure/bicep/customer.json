@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "2355619395462746037"
+      "templateHash": "7400174533689753051"
     }
   },
   "parameters": {
@@ -41,6 +41,13 @@
       "defaultValue": "westus3",
       "metadata": {
         "description": "Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy: westus2 platform services + westus3 OpenAI (see operator memory reference_azure_fresh_sub_regional_gotchas). Split-region is intentional: westus3 has richer OpenAI catalog + higher frontier-tier TPM; westus2 has richer platform-service SKUs. Cross-region OpenAI adds ~15-25ms per call (negligible vs AI inference time) and ~5-15 dollars per month egress for trial customers (rounding error for production). Override to co-locate ONLY when data-residency or single-region compliance requires it."
+      }
+    },
+    "contentSafetyLocation": {
+      "type": "string",
+      "defaultValue": "westus",
+      "metadata": {
+        "description": "Azure region for the Azure AI Content Safety account (task 246). It must offer BOTH Prompt Shields and Groundedness Detection; per the Microsoft region table (2026-09-18) the US regions with both are westus, eastus, eastus2 and canadaeast. westus2 (the stamp default location) has no Groundedness Detection, so this does NOT follow `location`: default westus, the nearest such region to westus2 (keeps the Prompt Shield call inside its deadline). Split-region like openAiLocation."
       }
     },
     "storageSku": {
@@ -231,6 +238,7 @@
     "appInsightsName": "[format('sprk-{0}-{1}-insights', parameters('customerId'), parameters('environmentName'))]",
     "logAnalyticsName": "[format('sprk-{0}-{1}-logs', parameters('customerId'), parameters('environmentName'))]",
     "docIntelligenceName": "[format('sprk-{0}-{1}-docintel', parameters('customerId'), parameters('environmentName'))]",
+    "contentSafetyName": "[format('sprk-{0}-{1}-contentsafety', parameters('customerId'), parameters('environmentName'))]",
     "redisCacheName": "[format('sprk-{0}-{1}-redis', parameters('customerId'), parameters('environmentName'))]",
     "acsDeadLetterContainerName": "acs-eventgrid-deadletter",
     "effectiveStorageContainers": "[if(parameters('deployAcsMessaging'), union(parameters('storageContainers'), createArray(variables('acsDeadLetterContainerName'))), parameters('storageContainers'))]"
@@ -2181,6 +2189,151 @@
     {
       "type": "Microsoft.Resources/deployments",
       "apiVersion": "2025-04-01",
+      "name": "[format('contentSafety-{0}', variables('baseName'))]",
+      "resourceGroup": "[variables('resourceGroupName')]",
+      "properties": {
+        "expressionEvaluationOptions": {
+          "scope": "inner"
+        },
+        "mode": "Incremental",
+        "parameters": {
+          "contentSafetyName": {
+            "value": "[variables('contentSafetyName')]"
+          },
+          "location": {
+            "value": "[parameters('contentSafetyLocation')]"
+          },
+          "sku": {
+            "value": "S0"
+          },
+          "userAssignedIdentityPrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName'))), '2025-04-01').outputs.principalId.value]"
+          },
+          "tags": {
+            "value": "[parameters('tags')]"
+          }
+        },
+        "template": {
+          "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+          "contentVersion": "1.0.0.0",
+          "metadata": {
+            "_generator": {
+              "name": "bicep",
+              "version": "0.46.1.21595",
+              "templateHash": "7400408321149340614"
+            }
+          },
+          "parameters": {
+            "contentSafetyName": {
+              "type": "string",
+              "metadata": {
+                "description": "Name of the Azure AI Content Safety resource (also its custom subdomain)"
+              }
+            },
+            "location": {
+              "type": "string",
+              "defaultValue": "[resourceGroup().location]",
+              "metadata": {
+                "description": "Location for the resource. It must offer Prompt Shields AND Groundedness Detection (US: westus, eastus, eastus2, canadaeast; not westus2)."
+              }
+            },
+            "sku": {
+              "type": "string",
+              "defaultValue": "S0",
+              "allowedValues": [
+                "F0",
+                "S0"
+              ],
+              "metadata": {
+                "description": "SKU for Content Safety. S0 is the paid tier (billed per call); F0 is free with a low call limit."
+              }
+            },
+            "disablePublicNetworkAccess": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Disable public network access. Set true after confirming private endpoint connectivity."
+              }
+            },
+            "userAssignedIdentityPrincipalId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this account. The stamp BFF calls Prompt Shields and Groundedness Detection with it. Empty default skips the assignment. Emitted assignment sets principalType=ServicePrincipal."
+              }
+            },
+            "tags": {
+              "type": "object",
+              "defaultValue": {},
+              "metadata": {
+                "description": "Tags for the resource"
+              }
+            }
+          },
+          "variables": {
+            "cognitiveServicesUserRoleId": "a97b65f3-24c7-4388-baec-2e87135dc908"
+          },
+          "resources": [
+            {
+              "type": "Microsoft.CognitiveServices/accounts",
+              "apiVersion": "2024-10-01",
+              "name": "[parameters('contentSafetyName')]",
+              "location": "[parameters('location')]",
+              "tags": "[parameters('tags')]",
+              "kind": "ContentSafety",
+              "sku": {
+                "name": "[parameters('sku')]"
+              },
+              "properties": {
+                "customSubDomainName": "[parameters('contentSafetyName')]",
+                "publicNetworkAccess": "[if(parameters('disablePublicNetworkAccess'), 'Disabled', 'Enabled')]",
+                "networkAcls": {
+                  "defaultAction": "[if(parameters('disablePublicNetworkAccess'), 'Deny', 'Allow')]"
+                },
+                "disableLocalAuth": true
+              }
+            },
+            {
+              "condition": "[not(empty(parameters('userAssignedIdentityPrincipalId')))]",
+              "type": "Microsoft.Authorization/roleAssignments",
+              "apiVersion": "2022-04-01",
+              "scope": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('contentSafetyName'))]",
+              "name": "[guid(resourceId('Microsoft.CognitiveServices/accounts', parameters('contentSafetyName')), parameters('userAssignedIdentityPrincipalId'), variables('cognitiveServicesUserRoleId'))]",
+              "properties": {
+                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('cognitiveServicesUserRoleId'))]",
+                "principalId": "[parameters('userAssignedIdentityPrincipalId')]",
+                "principalType": "ServicePrincipal",
+                "description": "Per-customer UAMI calls Content Safety (Prompt Shields, Groundedness Detection) via DefaultAzureCredential (task 246 / ADR-028)"
+              },
+              "dependsOn": [
+                "[resourceId('Microsoft.CognitiveServices/accounts', parameters('contentSafetyName'))]"
+              ]
+            }
+          ],
+          "outputs": {
+            "contentSafetyId": {
+              "type": "string",
+              "value": "[resourceId('Microsoft.CognitiveServices/accounts', parameters('contentSafetyName'))]"
+            },
+            "contentSafetyName": {
+              "type": "string",
+              "value": "[parameters('contentSafetyName')]"
+            },
+            "contentSafetyEndpoint": {
+              "type": "string",
+              "value": "[reference(resourceId('Microsoft.CognitiveServices/accounts', parameters('contentSafetyName')), '2024-10-01').endpoint]"
+            }
+          }
+        }
+      },
+      "dependsOn": [
+        "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('uami-{0}', variables('baseName')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Resources/deployments",
+      "apiVersion": "2025-04-01",
       "name": "[format('redisCache-{0}', variables('baseName'))]",
       "resourceGroup": "[variables('resourceGroupName')]",
       "properties": {
@@ -3107,6 +3260,7 @@
               "OPENAI_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName'))), '2025-04-01').outputs.openAiEndpoint.value]",
               "AI_SEARCH_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName'))), '2025-04-01').outputs.searchServiceEndpoint.value]",
               "DOC_INTELLIGENCE_ENDPOINT": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceEndpoint.value]",
+              "AiSafety__ContentSafety__Endpoint": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('contentSafety-{0}', variables('baseName'))), '2025-04-01').outputs.contentSafetyEndpoint.value]",
               "APPLICATIONINSIGHTS_CONNECTION_STRING": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName'))), '2025-04-01').outputs.connectionString.value]",
               "ApplicationInsightsAgent_EXTENSION_VERSION": "~3"
             }
@@ -3250,6 +3404,7 @@
       "dependsOn": [
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('aiSearch-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('appServicePlan-{0}', variables('baseName')))]",
+        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('contentSafety-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('monitoring-{0}', variables('baseName')))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('openAi-{0}', variables('baseName')))]",
@@ -3686,7 +3841,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "6850126951709465381"
+              "templateHash": "8055898094389550450"
             }
           },
           "parameters": {
@@ -3926,26 +4081,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'ContentSafety-ApiKey')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'ContentSafety-ApiKey')]",
-              "properties": {
-                "value": "[parameters('secretValues')['ContentSafety-ApiKey']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-run-parameter"
-              },
-              "tags": {
-                "canonicalName": "ContentSafety-ApiKey",
-                "category": "ai",
-                "rotation": "90-days",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'DocumentIntelligence-Endpoint')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4102,7 +4237,6 @@
                 "Communication-WebhookUrl",
                 "Compose-Webhook-ClientState",
                 "Compose-Webhook-SigningKey",
-                "ContentSafety-ApiKey",
                 "Dataverse-ClientSecret",
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",
@@ -4199,6 +4333,14 @@
     "docIntelligenceName": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('docIntelligence-{0}', variables('baseName'))), '2025-04-01').outputs.docIntelligenceName.value]"
+    },
+    "contentSafetyEndpoint": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('contentSafety-{0}', variables('baseName'))), '2025-04-01').outputs.contentSafetyEndpoint.value]"
+    },
+    "contentSafetyName": {
+      "type": "string",
+      "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', format('contentSafety-{0}', variables('baseName'))), '2025-04-01').outputs.contentSafetyName.value]"
     },
     "appInsightsName": {
       "type": "string",

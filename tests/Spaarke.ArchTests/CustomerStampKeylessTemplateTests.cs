@@ -18,7 +18,7 @@ namespace Spaarke.ArchTests;
 /// came back before because nothing stopped them (plan D13, "no forcing function"); this is that forcing function on
 /// the template side, and T230's one-real-MI-call-per-service is the runtime side.</para>
 /// <para><b>MAINTENANCE PROCEDURE</b>: a failure names the resource or expression. Fix the module — do not add an
-/// exemption. A new resource of a type already listed (e.g. a Content Safety account, T246, is a
+/// exemption. A new resource of a type already listed (e.g. the Content Safety account T246 added is a
 /// <c>Microsoft.CognitiveServices/accounts</c>) is checked automatically — raise its minimum count. A NEW resource TYPE that
 /// supports <c>disableLocalAuth</c> belongs in <see cref="LocalAuthTypes"/>, or in the documented exclusions below with a
 /// reason. Regenerate <c>customer.json</c> with <c>az bicep build --file customer.bicep --outfile customer.json</c> after
@@ -37,7 +37,7 @@ public class CustomerStampKeylessTemplateTests
     private static readonly IReadOnlyDictionary<string, int> LocalAuthTypes = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase)
     {
         ["Microsoft.Search/searchServices"] = 1,
-        ["Microsoft.CognitiveServices/accounts"] = 2, // OpenAI + Document Intelligence
+        ["Microsoft.CognitiveServices/accounts"] = 3, // OpenAI + Document Intelligence + Content Safety (T246)
         ["Microsoft.ServiceBus/namespaces"] = 1,
         ["Microsoft.DocumentDB/databaseAccounts"] = 1, // Cosmos — added by the owner 2026-10-06
         ["Microsoft.SignalRService/signalR"] = 0, // optional (signalrEnabled); checked whenever present

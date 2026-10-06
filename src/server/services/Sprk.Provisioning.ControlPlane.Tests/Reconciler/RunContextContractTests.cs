@@ -499,10 +499,8 @@ public sealed class RunContextContractTests
     private static readonly string[] PinnedManifestGaps =
     [
         // T245b: Dataverse-ServiceUrl moved to H4b per_env_settings (from-h5-output). T225b (owner D18): the
-        // Spaarke-shared vendor keys (Bing Search, LlamaParse) left the catalog. ContentSafety-ApiKey is NOT a
-        // Spaarke vendor key — stamps have no Content Safety resource and D13 keeps Key Vault for keys with no MI
-        // alternative (plan G26).
-        "ContentSafety-ApiKey→T246",
+        // Spaarke-shared vendor keys (Bing Search, LlamaParse) left the catalog. T246 (plan G26): ContentSafety-ApiKey
+        // left too — each stamp has its own keyless Content Safety account, reached with the UAMI.
         "SPE-DefaultContainerId→T227",                 // from-bicep-output, but containers are created at runtime (H8,
         "SPE-CommunicationArchiveContainerId→T227",    // after H4) — customer.bicep has no value to write (plan G18)
         // T225b (G21): Dataverse-ClientSecret / BFF-API-ClientSecret are no longer gaps — new stamps are secret-free
@@ -575,7 +573,7 @@ public sealed class RunContextContractTests
             new("Generated-One", KvSecretOperation.Upsert, KvSecretValueSource.Generated),
             new("TenantId", KvSecretOperation.Upsert, KvSecretValueSource.FromIntakeParameter),
             new(GraphAppRegistrationProvisioner.ClientIdSecretName, KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg),
-            new("ContentSafety-ApiKey", KvSecretOperation.Upsert, KvSecretValueSource.FromRunParameters),   // a pinned, owned gap
+            new("SPE-DefaultContainerId", KvSecretOperation.Upsert, KvSecretValueSource.FromBicepOutput),   // a pinned, owned gap
         ];
         var intakeMap = new Dictionary<string, string>(StringComparer.Ordinal) { ["TenantId"] = IntakeParameterCatalog.TenantId };
         var bicepWrites = new HashSet<string>(StringComparer.Ordinal) { "From-Bicep" };
@@ -583,7 +581,7 @@ public sealed class RunContextContractTests
         var (problems, gaps) = ClassifyManifestEntries(sanctioned, intakeMap, H3WrittenSecretNames, bicepWrites, PinnedManifestGapOwners());
 
         problems.Should().BeEmpty();
-        gaps.Should().BeEquivalentTo(["ContentSafety-ApiKey→T246"]);
+        gaps.Should().BeEquivalentTo(["SPE-DefaultContainerId→T227"]);
     }
 
     /// <summary>The KV secrets H3's provisioner commits itself; H4 skips their <c>written-by-h3</c> entries.</summary>
@@ -692,9 +690,10 @@ public sealed class RunContextContractTests
     private static readonly IReadOnlyDictionary<string, string> RunSecretsReaders = new Dictionary<string, string>(StringComparer.Ordinal)
     {
         // Hands the whole map to the KV writer, which consults it only for manifest entries that still
-        // need a ref (FromRunParameters / FromExistingKvSecret) — each pinned with an owner in
-        // PinnedManifestGaps (rule g). Retires with those gaps (T246 / T227 / T225b).
-        [HandlerIds.H4] = "manifest secrets pinned in PinnedManifestGaps",
+        // need a ref (FromRunParameters / FromExistingKvSecret). Since T246 no manifest entry is
+        // FromRunParameters; the two FromExistingKvSecret client secrets are omitted on secret-free stamps
+        // (the default) and read a ref only under SecretFreeIdentityRollback (T225b).
+        [HandlerIds.H4] = "client secrets under SecretFreeIdentityRollback only",
     };
 
     private static readonly IReadOnlySet<string> InterStepStatePropertyNames =

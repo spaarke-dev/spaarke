@@ -53,6 +53,8 @@ public static class PerEnvSourceCatalog
         Output("from-h2a-output:service_bus_fqns", HandlerIds.H2a, nameof(InterStepState.ServiceBusFullyQualifiedNamespace), r => r.InterStepState.ServiceBusFullyQualifiedNamespace),
         // T242: the stamp's Azure Managed Redis endpoint (host:10000) — a plain setting; the cache has no keys.
         Output("from-h2a-output:redis_endpoint", HandlerIds.H2a, nameof(InterStepState.RedisEndpoint), r => r.InterStepState.RedisEndpoint),
+        // T246: the stamp's Azure AI Content Safety endpoint — a plain setting; the account has local auth disabled.
+        Output("from-h2a-output:content_safety_endpoint", HandlerIds.H2a, nameof(InterStepState.ContentSafetyEndpoint), r => r.InterStepState.ContentSafetyEndpoint),
         Output("from-h3-output:bff_app_client_id", HandlerIds.H3, nameof(InterStepState.BffAppRegId), r => r.InterStepState.BffAppRegId),
         // T245b: the Dataverse environment URL — a plain app setting (it was a KV secret H4 could never
         // write: H5 runs after H4). H4b ← H5 in the DAG.

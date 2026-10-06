@@ -45,8 +45,8 @@
 //                               keyVaultReferenceIdentity resolves KV
 //                               references exactly ONE hop, so ANY secret
 //                               consumed via a customer-vault KV-ref app
-//                               setting (e.g. TenantId, Dataverse-ServiceUrl,
-//                               ContentSafety-ApiKey) needs its REAL cleartext
+//                               setting (e.g. TenantId,
+//                               Communication-DefaultMailbox) needs its REAL cleartext
 //                               landed in the target vault — a nested
 //                               "write the pointer, not the value" behavior
 //                               would silently break every such consumer,

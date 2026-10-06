@@ -36,14 +36,14 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 37, 2026-10-06)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 38, 2026-10-06)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T246** — Per-customer Azure AI Content Safety, keyless (G26) — POML NOT YET AUTHORED (author from plan §7 row T246 the same way T244 was: facts first, closed AC). T244 ✅ 2026-10-06. |
-| **Step** | Between tasks — T244 committed + pushed on the branch (no PR yet; batch with T246 or open when the owner wants). |
-| **Status** | not-started (T246). Open owner items: W7 — deploy the L2 Api template before its next L2 Api code deploy. S36 owner items closed in S37: dev alerts redeployed; SPE config 68f9a952 cleared; SPE grant for mi-bff-api-dev done (Graph API; 01:38 UTC sync 'All 3 concern(s) synced successfully'). |
-| **Next Action** | Author `tasks/246-*.poml` from plan row T246 (modules/content-safety.bicep: kind ContentSafety, disableLocalAuth true, custom subdomain; wire into customer.bicep; Cognitive Services User for the stamp UAMI; per_env_settings AiSafety__ContentSafety__Endpoint from an H2a output; drop ContentSafety-ApiKey + its PinnedManifestGaps pin; BFF: remove the hard-coded dev-endpoint fallback -> fail at boot when unset, BFF §10 publish-size + CVE). CustomerStampKeylessTemplateTests will require disableLocalAuth on the new account (raise the CognitiveServices minimum to 3). Then task-execute T246. |
+| **Task** | **T246** — Per-customer Azure AI Content Safety, keyless (G26). POML `tasks/246-per-customer-content-safety-keyless.poml` (authored S38). |
+| **Step** | 8 of 8: verify. Steps 1-7 DONE uncommitted (module keyless + UAMI role; customer.bicep wiring + customer.json; L2 ContentSafetyEndpoint chain + tests; manifest/generated; RunContextContractTests; BFF AiSafetyModule boot check + AiSafetyModuleTests; Verify-ContentSafetyResource.ps1 keyless; inventory/guide/provisioning.md/CHANGELOG/plan/T242c note). ControlPlane.Tests 2119/0/1; keyless ArchTests 11/11. Docs-drift sub-agent editing 4 docs (auth-AI-azure-resources, auth-azure-resources, AI-DEPLOYMENT-GUIDE, AI-ARCHITECTURE). Pending: BFF unit tests, publish size + CVE, e2e dry run, Step 9.5. |
+| **Status** | in-progress (FULL rigor). Open owner item unchanged: W7 — deploy the L2 Api template before its next L2 Api code deploy. |
+| **Next Action** | Follow POML steps 1→8. Facts (read-only, S38): dev BFF sets AiSafety__ContentSafety__Endpoint=spaarke-openai-dev (unaffected); fallback host spaarke-contentsafety-dev does NOT exist; demo BFF (stopped) has no AiSafety setting → T242c must set it; shared-prod app stopped/retired. Endpoint chain copies T242 redisEndpoint. |
 | **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 

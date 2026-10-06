@@ -331,6 +331,9 @@ environments:
       # Redis: Azure Managed Redis, Microsoft Entra only (T242/T242b, 2026-10-05). The BFF reads the plain
       # setting Redis__Endpoint and signs in with its managed identity — no key, no connection string.
       redis_endpoint: spaarke-bff-redis-dev.westus2.redis.azure.net:10000
+      # Content Safety (T246): served by the multi-service AIServices account spaarke-openai-dev (eastus); the BFF
+      # calls it with its managed identity (Cognitive Services User). Required at BFF startup outside Development/Testing.
+      content_safety_endpoint: https://spaarke-openai-dev.cognitiveservices.azure.com/
       secrets:
         # api_client_secret / graph_api_client_secret REMOVED 2026-08-24 (spaarke-auth-v4 task 033).
         # The BFF identity is secret-free: it authenticates with a Managed-Identity-issued federated
@@ -599,6 +602,9 @@ environments:
       app_registration_ref: app_registrations.bff_api # TBD: confirm if demo uses separate app reg
       # Redis: Azure Managed Redis, Microsoft Entra only (T242b) — the BFF identity mi-bff-api-demo holds the access policy.
       redis_endpoint: spaarke-bff-redis-demo.westus2.redis.azure.net:10000
+      # Content Safety (T246): NOT set on spaarke-bff-demo (checked 2026-10-06). The BFF refuses to start without
+      # AiSafety__ContentSafety__Endpoint outside Development/Testing — task 242c must set it before demo runs again.
+      content_safety_endpoint: null
       secrets: {} # the former kv:API-CLIENT-SECRET does not exist in sprk-demo-kv (checked 2026-10-05)
 
     dataverse:

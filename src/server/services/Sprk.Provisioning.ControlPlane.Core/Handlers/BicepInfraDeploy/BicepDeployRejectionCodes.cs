@@ -99,6 +99,14 @@ public static class BicepDeployRejectionCodes
     public const string BicepDeployOutputsIncomplete = "bicep-deploy-outputs-incomplete";
 
     /// <summary>
+    /// Task 246: the resolved ARM template does not DECLARE an output H2a requires
+    /// (<see cref="ArmDeploymentRunner.RequiredOutputNames"/>) — typically a template published before the
+    /// output was added, resolved by a newer worker. Caught before any ARM call, so nothing was deployed:
+    /// Resumable once the current template is published (publish-provisioning-arm-artifacts.yml).
+    /// </summary>
+    public const string TemplateOutputsMissing = "template-outputs-missing";
+
+    /// <summary>
     /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10 verbatim.
     /// One of H2a's globally-namespaced resource names (Storage account /
     /// Service Bus namespace / Key Vault when covered) is already taken by

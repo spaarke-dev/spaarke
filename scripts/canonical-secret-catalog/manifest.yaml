@@ -382,23 +382,11 @@ secrets:
   #     message); no value exists in any Spaarke vault.
   # Their value source (copy from the Spaarke platform vault) went with them.
 
-  - canonical_name: 'ContentSafety-ApiKey'
-    category: 'ai'
-    purpose: >-
-      Azure AI Content Safety API key. Used by PromptShieldService +
-      GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity
-      Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey;
-      the KV ref remains for local-dev + fallback.
-    consumers:
-      - 'BFF: AiSafety:ContentSafety:ApiKey'
-    rotation_cadence: '90-days'
-    never_delete: false
-    exception_note: 'Prefer MI when AiSafety:ContentSafety:ManagedIdentity:Enabled=true.'
-    aliases: []
-    value_source: 'from-run-parameter'
-    app_settings:
-      - 'AiSafety__ContentSafety__ApiKey'
-    tags: ['ai', 'key']
+  # T246 (owner D13, plan G26, 2026-10-06): 'ContentSafety-ApiKey' REMOVED. Every stamp now has its own
+  # Azure AI Content Safety account (customer.bicep, kind ContentSafety, local auth disabled) and the BFF
+  # calls it with the stamp UAMI (AiSafety__ContentSafety__ManagedIdentity__Enabled=true, Cognitive Services
+  # User on the account). The endpoint is a plain app setting (per_env_settings below, from H2a's
+  # `contentSafetyEndpoint` output). The entry was from-run-parameter, a channel nothing ever wrote.
 
   # ==========================================================================
   # Communication (email + webhooks)
@@ -894,6 +882,18 @@ per_env_settings:
     required: true
     notes: >-
       Auth-v4 §10.2 entry 8. Enables MI-authenticated Azure AI Content Safety
-      calls (PromptShieldService / GroundednessCheckService), preferring MI
-      over the ContentSafety-ApiKey secret per that secret's own exception
-      note above. Global literal.
+      calls (PromptShieldService / GroundednessCheckService). The stamp's
+      Content Safety account has local auth disabled (task 246), so MI is the
+      only path; no stamp is given an API key. Global literal.
+
+  - key: 'AiSafety__ContentSafety__Endpoint'
+    per_env_source: 'from-h2a-output:content_safety_endpoint'
+    iOptionsModule: 'AiSafetyOptions'
+    required: true
+    notes: >-
+      Task 246 (plan G26). The stamp's own Azure AI Content Safety endpoint
+      (customer.bicep output `contentSafetyEndpoint`). Not a secret: local
+      auth is disabled and the BFF calls with its UAMI. Outside Development
+      and Testing the BFF refuses to start without it (it used to fall back to
+      a hard-coded dev endpoint). customer.bicep sets the same value on
+      deploy; H4b keeps it on upgrades.

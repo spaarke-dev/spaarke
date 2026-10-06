@@ -762,7 +762,7 @@ Every Model 2 customer environment deploys a dedicated, isolated set of Azure re
 | 11 | **Document Intelligence** | `doc-intelligence.bicep` | S0 | prebuilt-layout model (see 7.5) |
 | 12 | **App Insights + Log Analytics** | `monitoring.bicep` | PerGB2018 | 90-day retention, resource permissions enabled |
 | 13 | **SignalR** (optional / Null-Object) *(v3 added)* | `signalr.bicep` | Free F1 / Standard S1 | Notifications spine realtime per ADR-034. Feature-gated (`Notifications:SignalRSpine:Enabled`). |
-| 14 | **Content Safety** (optional) | `content-safety.bicep` | S0 | West US 2 or East US 2 only (Prompt Shields requirement) |
+| 14 | **Content Safety** (every stamp since T246; local auth disabled, UAMI = Cognitive Services User) | `content-safety.bicep` | S0 (billed per call) | `contentSafetyLocation` (default `westus`) must offer Prompt Shields + Groundedness Detection — westus2 has no Groundedness (region table 2026-09-18) |
 | 15 | **AI Foundry Hub + Project** (optional) | `ai-foundry-hub.bicep` | Basic | Prompt Flow orchestration, attached to storage + KV + insights |
 
 **Shared-vs-dedicated disposition** (per §3A A1 + INVENTORY §11 + v3.2 Redis correction):
@@ -772,6 +772,8 @@ Every Model 2 customer environment deploys a dedicated, isolated set of Azure re
 | 🔴 Always dedicated (cheap / customer-owned) | Dataverse, SPE, KV secrets, Storage, UAMI, Entra app config, **Cosmos runtime data (v3.2 correction: dedicated in both models)** | dedicated | dedicated |
 | 🟡 Fixed-floor levers (§3A A1 amendment) | App Service Plan, Azure OpenAI, AI Search | **shared** (metered per D19) | dedicated |
 | 🟢 Safely shareable | Service Bus, App Insights/Log Analytics, Content Safety, Doc Intelligence, SignalR | shared | dedicated |
+
+> **Superseded (D-12, 2026-09-30; T246, 2026-10-06)**: Model 1 is a dedicated stamp, so every row above is dedicated in both models. D-12 still rates Content Safety *shareable* (permitted, not required); each stamp has its own keyless account since T246.
 | 🔵 Per-environment (Model 1) / 🟢 Dedicated per-customer (Model 2) — **split v3.6, task 128b E2 reconciliation** | Redis Cache — Model 1: per Q-E FR-12, `scripts/Deploy-RedisCache.ps1` deploys once per env, all customers within that env share (v3.2, unchanged). Model 2: `customer.bicep`-provisioned via `redis.bicep` (v3.6 reinstated) — env=customer 1:1 in this template, so per-environment collapses to per-customer | shared | dedicated per-customer |
 
 ### 7.3 Sub-Resource Configuration
@@ -839,7 +841,7 @@ Model version pinning per ADR-020. Embedding model change requires full AI Searc
 12. Document Intelligence
 13. **SignalR** (optional)
 14. App Service (BFF, .NET 10, depends on plan + KV + all AI/data service endpoints; **`keyVaultReferenceIdentity` PATCHed to UAMI as post-deploy step per T1**)
-15. Content Safety (optional)
+15. Content Safety (every stamp since T246)
 16. AI Foundry Hub + Project (optional)
 
 **Then, after Bicep completes** (post-H2a): H2b (7 canonical AI Search indexes via `scripts/ai-search/Deploy-AllIndexes.ps1`), H4 (KV secrets population via canonical secret-catalog manifest per Phase H + `keyVaultReferenceIdentity` PATCH per T1), then H3 onward per DAG.
@@ -1869,6 +1871,7 @@ Before every U3 (Bicep infra) upgrade, run `az deployment group what-if` to dete
   - **Phase E (conditional per D20)** — `[Required]` annotations on 26 `IOptions<T>` classes + `.ValidateDataAnnotations().ValidateOnStart()` middleware. **Skipped if r3 owns as CI gate.** No new endpoints; no new packages; middleware adds ~1 registration. Expected publish-size delta: ~0.
   - **Phase B (conditional per D20)** — Graph app-role compile-time constant + H10 SDK helper reading the constant. **Skipped if r3 owns as ArchTest.** No new endpoints; one new class + one helper. Expected publish-size delta: <~0.05 MB.
   - **T242 (owner D12/D13, 2026-10-04)** — Redis Entra authentication in the **existing** `CacheModule` (no new endpoint, service, interface or options class: `RedisOptions` gains `Endpoint`; an internal overload takes the two network steps as delegates for tests). Placement: in the BFF, because the BFF is the Redis client — the authentication mode is a property of its existing cache registration, not a new capability, so no other host fits. Packages: `Microsoft.Azure.StackExchangeRedis` 3.3.1 (+ `Microsoft.Extensions.Azure` transitive) and `StackExchange.Redis` 2.7.27 → 2.13.17. Measured from fresh short-path worktrees with `Compress-Archive` (PDBs incl.): master **45.66 MB / 212 files** vs branch **45.88 MB / 214 files** = **+0.22 MB** (the 2 new DLLs + a larger StackExchange.Redis). `dotnet list package --vulnerable --include-transitive`: none (BFF, ControlPlane.Core). Tests: `CacheModuleTests` (mode selection, credential path, endpoint-wins cut-over, credential-in-endpoint refusal, null-database contract).
+  - **T246 (plan G26, 2026-10-06)** — Content Safety endpoint becomes a startup requirement in the **existing** `AiSafetyModule` (no new endpoint, service, interface, options class, DI registration or package; all registrations stay unconditional). In the BFF because it changes an existing module's configuration contract: the hard-coded dev-endpoint fallback is removed, the endpoint is required outside Development/Testing, and an unset endpoint in Development/Testing leaves the named client without a base address so scans fail open through the existing catch blocks. Follows the T242 `CacheModule` startup-check precedent (raw configuration read at registration, `isLocalLike` carve-out) rather than a new options class. Publish-size delta measured against a fresh master build (task notes).
   - All changes MUST follow the CLAUDE.md §10 BFF Hygiene checklist: load `.claude/constraints/bff-extensions.md`, publish-size verification (60 MB ceiling), test update obligation, no new HIGH CVEs.
 - **Registry schema extension**: Dataverse-only (**9 new columns v3**, was 6 v2 — adds `sprk_currentrunid`, `sprk_tenancymodel`, `sprk_tenantid`).
 - **`customer.bicep` extension**: Infrastructure-as-Code only. Adds per-customer AI resources (OpenAI, AI Search, Doc Intelligence, App Insights) **+ Cosmos DB (v3, R11) + optional SignalR (v3)** — no BFF code changes.

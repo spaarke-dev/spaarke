@@ -448,6 +448,20 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
     }
 
     /// <summary>
+    /// The ARM outputs H2a cannot complete without — every name <see cref="MapOutputs"/> reads into a field that
+    /// H2a's <c>MissingOutputs</c> check requires (<c>resourceGroupName</c> has a fallback and <c>signalrEnabled</c>
+    /// is a flag, so neither is listed). <see cref="ArmTemplateInspector"/> checks the resolved template declares
+    /// them all BEFORE deploying (task 246): a template published before an output was added would otherwise
+    /// deploy for ~20 minutes and then quarantine the run.
+    /// </summary>
+    internal static readonly IReadOnlyList<string> RequiredOutputNames =
+    [
+        "userAssignedIdentityResourceId", "userAssignedIdentityObjectId", "userAssignedIdentityClientId",
+        "appServiceName", "appServiceStagingSlotName", "openAiEndpoint", "aiSearchEndpoint", "cosmosAccountEndpoint",
+        "keyVaultName", "keyVaultUri", "serviceBusEndpoint", "redisEndpoint", "contentSafetyEndpoint",
+    ];
+
+    /// <summary>
     /// Maps the ARM deployment's raw <c>outputs</c> BinaryData (ARM output
     /// shape: <c>{ "key": { "type": "...", "value": ... } }</c>) onto
     /// <see cref="BicepDeployOutputs"/>. An output the template did not emit
@@ -509,6 +523,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
                 ? ServiceBusFullyQualifiedNamespaceFromEndpoint(ReadString(root, "serviceBusEndpoint"))
                 : string.Empty,
             RedisEndpoint = hasRoot ? ReadString(root, "redisEndpoint") : string.Empty,
+            ContentSafetyEndpoint = hasRoot ? ReadString(root, "contentSafetyEndpoint") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
     }

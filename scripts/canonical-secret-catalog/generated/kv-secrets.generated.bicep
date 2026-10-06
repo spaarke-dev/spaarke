@@ -269,26 +269,6 @@ resource kv_compose_Webhook_SigningKey 'Microsoft.KeyVault/vaults/secrets@2023-0
   }
 }
 
-// ContentSafety-ApiKey — Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-resource kv_contentSafety_ApiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'ContentSafety-ApiKey')) {
-  parent: keyVault
-  name: 'ContentSafety-ApiKey'
-  properties: {
-    value: secretValues['ContentSafety-ApiKey']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-run-parameter'
-  }
-  tags: {
-    canonicalName: 'ContentSafety-ApiKey'
-    category: 'ai'
-    rotation: '90-days'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // Dataverse-ClientSecret — OBO + shared-lib Dataverse client-credentials secret. Consumed by DataverseWebApiService (shared lib) and DataverseServiceClientImpl (via API_CLIENT_SECRET). BINDING never-delete per r3 handoff §4a and spec.md MUST rules — removing this secret CRASHES the BFF at startup. Retirement is gated on the #3b shared-lib ClientSecret->MI migration (code-quality-and-assurance-r3 task 011 / NG1 track).
 // BINDING never-delete (spec.md MUST rule + r3 handoff §4a) — NOT declared as an ARM
 // resource: ARM cannot skip-if-exists, so this secret is managed exclusively out-of-band
@@ -452,7 +432,6 @@ output canonicalSecretNames array = [
   'Communication-WebhookUrl'
   'Compose-Webhook-ClientState'
   'Compose-Webhook-SigningKey'
-  'ContentSafety-ApiKey'
   'Dataverse-ClientSecret'
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'

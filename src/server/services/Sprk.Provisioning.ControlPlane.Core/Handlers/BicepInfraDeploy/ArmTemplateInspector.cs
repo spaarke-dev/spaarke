@@ -10,6 +10,9 @@
 //   R3 (HANDLER-10 / F16): no `keyVaultReferenceIdentity` set to the literal
 //      `SystemAssigned` — with a UAMI-only App Service that silently breaks
 //      every @Microsoft.KeyVault(...) reference (ADR-028, spec FR-33 T1).
+//   R4 (task 246): the template declares every output H2a requires
+//      (ArmDeploymentRunner.RequiredOutputNames). A template published before an
+//      output was added would otherwise deploy and then quarantine the run.
 //
 // WHY THE TEMPLATE, NOT THE .bicep SOURCE: its predecessor
 // (FileBicepTemplateInspector) read infrastructure/bicep/*.bicep from
@@ -73,17 +76,33 @@ public sealed class ArmTemplateInspector
         using var document = JsonDocument.Parse(request.Template.Json);
         var unpinned = FindUnpinnedModelDeployment(document.RootElement);
         var kvRefIdentity = FindSystemAssignedKvRefIdentity(document.RootElement);
+        var missingOutputs = FindMissingRequiredOutputs(document.RootElement);
 
         _logger.LogInformation(
-            "ArmTemplateInspector: template={TemplateKey} blob={Blob} version={Version} unpinnedModel={Unpinned} kvRefIdentityInvalid={KvRefInvalid}",
+            "ArmTemplateInspector: template={TemplateKey} blob={Blob} version={Version} unpinnedModel={Unpinned} kvRefIdentityInvalid={KvRefInvalid} missingOutputs={MissingOutputs}",
             request.Template.TemplateKey, request.Template.ArmJsonBlobName, request.Template.Version,
-            unpinned is not null, kvRefIdentity is not null);
+            unpinned is not null, kvRefIdentity is not null, missingOutputs.Count);
 
         return new BicepTemplateInspectionResult(
             HasUnpinnedModelDeployment: unpinned is not null,
             UnpinnedModelReference: unpinned ?? string.Empty,
             HasInvalidKvRefIdentity: kvRefIdentity is not null,
-            KvRefIdentityReference: kvRefIdentity ?? string.Empty);
+            KvRefIdentityReference: kvRefIdentity ?? string.Empty,
+            MissingRequiredOutputs: missingOutputs);
+    }
+
+    /// <summary>
+    /// R4: the names in <see cref="ArmDeploymentRunner.RequiredOutputNames"/> that the template's top-level
+    /// <c>outputs</c> object does not declare (ordinal), in list order. Empty when all are declared.
+    /// </summary>
+    internal static IReadOnlyList<string> FindMissingRequiredOutputs(JsonElement root)
+    {
+        var declared = root.ValueKind == JsonValueKind.Object
+                       && root.TryGetProperty("outputs", out var outputs)
+                       && outputs.ValueKind == JsonValueKind.Object
+            ? outputs.EnumerateObject().Select(o => o.Name).ToHashSet(StringComparer.Ordinal)
+            : new HashSet<string>(StringComparer.Ordinal);
+        return ArmDeploymentRunner.RequiredOutputNames.Where(name => !declared.Contains(name)).ToList();
     }
 
     /// <summary>
@@ -242,8 +261,12 @@ public sealed class ArmTemplateInspector
 /// Citation of the invalid kvRefIdentity (JSON path + observed value). Empty when the flag is
 /// <c>false</c>.
 /// </param>
+/// <param name="MissingRequiredOutputs">
+/// Task 246 (R4): required ARM outputs the template does not declare; <c>null</c> or empty when it declares all.
+/// </param>
 public sealed record BicepTemplateInspectionResult(
     bool HasUnpinnedModelDeployment,
     string UnpinnedModelReference,
     bool HasInvalidKvRefIdentity = false,
-    string KvRefIdentityReference = "");
+    string KvRefIdentityReference = "",
+    IReadOnlyList<string>? MissingRequiredOutputs = null);

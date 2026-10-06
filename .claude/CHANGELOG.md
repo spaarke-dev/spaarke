@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Customer stamps get their own keyless Content Safety (T246, plan G26)
+
+`customer-provisioning-orchestration-r1` T246.
+
+- **`.claude/constraints/provisioning.md`**: the keyless-stamp rule now lists Content Safety, and states that its
+  endpoint is a plain app setting the BFF requires outside Development/Testing — never a fallback to a shared or dev
+  account (the BFF used to default to a non-existent dev endpoint and fail open).
+
 ###### 2026-10-06 — Customer stamps are keyless (T244, owner D13)
 
 `customer-provisioning-orchestration-r1` T244 (plan G16).

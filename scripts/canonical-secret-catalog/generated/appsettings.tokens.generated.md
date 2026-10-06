@@ -33,7 +33,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `Communication-WebhookUrl` | communication | N/A | - | from-bicep-output |
 | `Compose-Webhook-ClientState` | compose | 90-days | - | generated |
 | `Compose-Webhook-SigningKey` | compose | 90-days-or-on-incident | - | generated |
-| `ContentSafety-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Dataverse-ClientSecret` | auth | manual-on-incident | YES | from-existing-kv |
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
@@ -223,20 +222,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - `Compose__Webhook__SigningKey`
 - **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
   - `compose-webhook-signingkey`
-
-### `ContentSafety-ApiKey`
-
-- **Category**: ai
-- **Purpose**: Azure AI Content Safety API key. Used by PromptShieldService + GroundednessCheckService. Per AiSafety:ContentSafety:ManagedIdentity Enabled=true, the ContentSafetyAuthHandler prefers MI over ApiKey; the KV ref remains for local-dev + fallback.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: ai, key
-- **Exception note**: Prefer MI when AiSafety:ContentSafety:ManagedIdentity:Enabled=true.
-- **Consumers**:
-  - BFF: AiSafety:ContentSafety:ApiKey
-- **App-setting keys**:
-  - `AiSafety__ContentSafety__ApiKey`
 
 ### `Dataverse-ClientSecret`
 

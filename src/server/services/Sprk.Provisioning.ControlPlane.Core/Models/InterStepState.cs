@@ -163,6 +163,16 @@ public sealed class InterStepState
     [ProducedBy(HandlerIds.H2a)]
     public string? RedisEndpoint { get; set; }
 
+    /// <summary>
+    /// The customer Azure AI Content Safety endpoint (H2a output — ARM output <c>contentSafetyEndpoint</c>).
+    /// H4b sets it as the BFF's <c>AiSafety__ContentSafety__Endpoint</c>; the BFF calls with the stamp UAMI (no key exists).
+    /// </summary>
+    /// <remarks>CONTROLLED SCHEMA EXTENSION (task 246, plan G26).</remarks>
+    [JsonPropertyName("contentSafetyEndpoint")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [ProducedBy(HandlerIds.H2a)]
+    public string? ContentSafetyEndpoint { get; set; }
+
     /// <summary>Dataverse `systemuser` GUID for the MI/UAMI Dataverse App User (H10 output; T2 trap subject).</summary>
     [JsonPropertyName("systemUserId")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

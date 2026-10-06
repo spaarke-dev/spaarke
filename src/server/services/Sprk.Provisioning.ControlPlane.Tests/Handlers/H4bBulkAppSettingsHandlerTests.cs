@@ -137,6 +137,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
             ["uami_client_id"] = ("-UamiClientId", "00000000-1111-2222-3333-555555555555"),
             ["service_bus_fqns"] = ("-ServiceBusFqns", "spaarke-acme-prod-sbus.servicebus.windows.net"),
             ["redis_endpoint"] = ("-RedisEndpoint", "sprk-acme-prod-redis.westus2.redis.azure.net:10000"),   // T242: H2a's RedisEndpoint
+            ["content_safety_endpoint"] = ("-ContentSafetyEndpoint", "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/"),   // T246: H2a's ContentSafetyEndpoint
             ["bff_app_client_id"] = ("-BffAppClientId", "00000000-aaaa-bbbb-cccc-999999999999"),
             ["tenant_id"] = ("-TenantId", TenantId),
             ["container_type_id"] = ("-ContainerTypeId", "00000000-dead-beef-0000-000000000001"),
@@ -784,6 +785,7 @@ public sealed class H4bBulkAppSettingsHandlerTests
         s.CosmosEndpoint = "https://sprk-prod-cosmos.documents.azure.com/";
         s.MiClientId = "00000000-1111-2222-3333-555555555555";
         s.ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net";
+        s.ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/";   // H2a output (task 246 — AiSafety__ContentSafety__Endpoint)
         s.RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000";   // H2a output (task 242 — Redis__Endpoint)
         s.BffAppRegId = "00000000-aaaa-bbbb-cccc-999999999999";
         s.DataverseEnvUrl = "https://acme.crm.dynamics.com/";   // H5 output (task 245b — Dataverse__ServiceUrl)

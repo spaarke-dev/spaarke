@@ -66,8 +66,13 @@ public sealed class H2aBicepInfraDeployHandlerTests
     private const string SubscriptionId = "sub-cus-acme-prod";
     // Task 245b: H2a's idempotency version is the resolved template's content version.
     private const string BicepVer = "abc123def456";
+    // Declares every output H2a requires (inspector rule R4, task 246) — like the real customer.json.
     private static readonly ResolvedArmTemplate TestTemplate =
-        new("customer", "customer-arm-2026.10.01-1.json", """{"resources":[]}""", BicepVer);
+        new("customer", "customer-arm-2026.10.01-1.json", TemplateDeclaring(ArmDeploymentRunner.RequiredOutputNames), BicepVer);
+
+    private static string TemplateDeclaring(IEnumerable<string> outputNames) =>
+        "{\"resources\":[],\"outputs\":{" +
+        string.Join(",", outputNames.Select(n => $"\"{n}\":{{\"type\":\"string\",\"value\":\"x\"}}")) + "}}";
     private const string ExpectedUamiRid = "/subscriptions/x/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
     // ---------- T1 happy path — Model 2 dedicated ----------
@@ -108,6 +113,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun.InterStepState.ServiceBusFullyQualifiedNamespace.Should().Be("spaarke-acme-prod-sbus.servicebus.windows.net");
         // Task 242 — the Managed Redis endpoint H4b sets as Redis__Endpoint.
         repo.LastWrittenRun.InterStepState.RedisEndpoint.Should().Be("sprk-acme-prod-redis.westus2.redis.azure.net:10000");
+        // Task 246 — the Content Safety endpoint H4b sets as AiSafety__ContentSafety__Endpoint.
+        repo.LastWrittenRun.InterStepState.ContentSafetyEndpoint.Should().Be("https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/");
 
         // Each collaborator called exactly once.
         runner.CallCount.Should().Be(1);
@@ -432,6 +439,30 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.CallCount.Should().Be(0);
     }
 
+    [Fact]
+    public async Task TemplateMissingARequiredOutput_FailsResumable_BeforeDeploying()
+    {
+        // Task 246 (R4): a template published before contentSafetyEndpoint existed, resolved by this worker. It must
+        // stop here — Resumable, nothing deployed — not deploy for ~20 minutes and then quarantine on the outputs.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-246");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        runner.Template = TestTemplate with
+        {
+            Json = TemplateDeclaring(ArmDeploymentRunner.RequiredOutputNames.Where(n => n != "contentSafetyEndpoint")),
+        };
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), RealInspector());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.TemplateOutputsMissing);
+        failure.Diagnostic.Should().Contain("contentSafetyEndpoint").And.Contain("publish-provisioning-arm-artifacts.yml");
+        runner.CallCount.Should().Be(0, "nothing is deployed when the template cannot satisfy H2a's outputs");
+    }
+
     // ---------- T9 upgrade-mode drift REJECT ----------
 
     [Fact]
@@ -705,6 +736,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             KeyVaultUri = "https://kv.vault.azure.net/",
             ServiceBusFullyQualifiedNamespace = "ns.servicebus.windows.net",
             RedisEndpoint = "r.westus2.redis.azure.net:10000",
+            ContentSafetyEndpoint = "https://cs.cognitiveservices.azure.com/",
             SignalRDeployed = false,
         };
         var runner = FakeBicepDeployRunner.Success(incomplete);
@@ -724,6 +756,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
     [InlineData(nameof(BicepDeployOutputs.KeyVaultUri))]
     [InlineData(nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace))]
     [InlineData(nameof(BicepDeployOutputs.RedisEndpoint))]
+    [InlineData(nameof(BicepDeployOutputs.ContentSafetyEndpoint))]
     public async Task RunnerReturnsBlankStampOutput_FailsQuarantineRequired_NamingTheField(string blankField)
     {
         // Task 245a: the three outputs H2a now persists for downstream handlers are
@@ -747,6 +780,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
             ServiceBusFullyQualifiedNamespace = blankField == nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace)
                 ? "" : complete.ServiceBusFullyQualifiedNamespace,
             RedisEndpoint = blankField == nameof(BicepDeployOutputs.RedisEndpoint) ? "" : complete.RedisEndpoint,
+            ContentSafetyEndpoint = blankField == nameof(BicepDeployOutputs.ContentSafetyEndpoint) ? "" : complete.ContentSafetyEndpoint,
             SignalRDeployed = false,
         };
         var handler = BuildHandler(repo, FakeBicepDeployRunner.Success(outputs), FakeArmKeyVaultRefProbe.Match(),
@@ -1033,6 +1067,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         KeyVaultUri = "https://sprk-acme-prod-kv.vault.azure.net/",
         ServiceBusFullyQualifiedNamespace = "spaarke-acme-prod-sbus.servicebus.windows.net",
         RedisEndpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000",
+        ContentSafetyEndpoint = "https://sprk-acme-prod-contentsafety.cognitiveservices.azure.com/",
         SignalRDeployed = signalRDeployed,
     };
 

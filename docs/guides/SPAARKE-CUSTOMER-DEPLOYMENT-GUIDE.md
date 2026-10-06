@@ -228,10 +228,10 @@ pass anyway.**
 **Dedicated per customer**: Dataverse environment · SPE container-type + root container ·
 **Entra app registration (BFF)** · App Service + Plan · Azure OpenAI · AI Search · Cosmos DB ·
 **Redis (Azure Managed Redis Balanced_B0, HA, Entra only)** · Storage · Key Vault · Service Bus · Document Intelligence ·
-App Insights + Log Analytics · UAMI · Power BI workspace.
+**Content Safety (T246, Entra only)** · App Insights + Log Analytics · UAMI · Power BI workspace.
 
-**Keyless (owner D13, T244)**: AI Search, Azure OpenAI, Document Intelligence, Service Bus, Cosmos DB and (when
-enabled) SignalR have local (key/SAS) auth disabled, Storage has shared-key access disabled, and Redis has access keys
+**Keyless (owner D13, T244)**: AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB
+and (when enabled) SignalR have local (key/SAS) auth disabled, Storage has shared-key access disabled, and Redis has access keys
 disabled (T242). The BFF reaches every one with the stamp UAMI; L2 holds Search roles for H2b and the H13 probe. The
 template emits no key or connection-string output. Not keyless by design: App Insights ingestion (connection string)
 and the ACS resource (its local-auth setting is unverified on the pinned API; the BFF already uses its identity).
@@ -240,6 +240,10 @@ and the ACS resource (its local-auth setting is unverified on the pinned API; th
 runtime: **Static Web Apps** (Office add-ins + external SPA) and **Content Safety**. The list is **CLOSED**;
 the admission test is *holds no privileged legal content at rest*. Full criteria:
 `projects/unified-access-control-r2/notes/D-12-resource-sharing-analysis.md`.
+Shareable is permitted, not required: since **T246** every stamp has its **own** Content Safety account
+(`sprk-{customerId}-{env}-contentsafety`, keyless). S0 is billed per call with no fixed fee, so it costs nothing
+idle, keeps customer prompt text inside the stamp, and needs no `customerId` discriminator. The BFF refuses to
+start outside Development/Testing without `AiSafety__ContentSafety__Endpoint` (customer.bicep + H4b set it).
 
 🔴 **The BFF Entra app registration is per customer — D-13, BINDING, do not re-open.** The app registration
 determines the Dataverse **application user**, which is assigned to exactly one **business unit**, and every
@@ -463,7 +467,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
 | **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
-| **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
+| **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
 | **H2b** | AI Search indexes | Provision the 7 canonical indexes (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) on the stamp's own AI Search service via the SDK (`SearchIndexClientProvisioner`, L2 identity), then verify them — same path for both models (T225b) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
 | **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |

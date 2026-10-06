@@ -158,6 +158,7 @@ $script:AllowedPerEnvSources = @(
     'from-h2a-output:uami_client_id',
     'from-h2a-output:service_bus_fqns',
     'from-h2a-output:redis_endpoint',
+    'from-h2a-output:content_safety_endpoint',
     'from-h3-output:bff_app_client_id',
     'from-h5-output:dataverse_env_url',
     'from-intake-parameter:tenant_id',

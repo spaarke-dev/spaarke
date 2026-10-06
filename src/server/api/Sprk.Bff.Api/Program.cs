@@ -188,7 +188,7 @@ builder.Services.AddInsightsIngestModule();
 builder.Services.AddInsightsFacadeModule();
 
 // AI Platform R2: safety perimeter (content safety, prompt shield, groundedness)
-builder.Services.AddAiSafetyModule(builder.Configuration);
+builder.Services.AddAiSafetyModule(builder.Configuration, builder.Environment);
 
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);
