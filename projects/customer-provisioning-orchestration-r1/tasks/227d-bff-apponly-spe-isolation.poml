@@ -132,6 +132,7 @@
       failure), W12 (ArchTest regexes: method groups, search/shares/sites/drive), S1 (only OwnedContainerIds is a list),
       S2/S3 (cache keys, forget after restore), S4 docs, S6 tests, S7 README, S8 (above), S10. Accepted: S5 (ContentDedupDetector
       treats a refusal as "no dedup" — runs after an upload to an owned drive); W13 → T186 live check.
+    - BFF §10: Publish size (fresh short-path worktrees, `Compress-Archive` Optimal, PDBs incl.): pre-task `34f7a0888` **45.88 MB / 173 files** vs task `1e8089c77` **45.89 MB / 173 files** = **+0.01 MB**. Fresh `origin/master` `d254d7166` = 36.13 MB / 169 files — the gap is QuestPDF (removed on master by another project, not yet merged here), not this task. `dotnet list package --vulnerable --include-transitive`: none.
     - ROLLOUT (before 227d reaches an environment): containers that predate the marker are refused app-only. dev needs
       SharePointEmbedded__OwnedContainerIds = b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh,b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN
       (b!yLRd… is EmailProcessing default already; Dataverse query 2026-10-06: 2 BU containers + 1 secure project). demo:
