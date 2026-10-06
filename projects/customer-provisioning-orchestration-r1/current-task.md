@@ -46,16 +46,30 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 39, 2026-10-06)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 40, 2026-10-06)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T229** (cost model for dedicated stamps — G4, G13) and **T230** (H13 acceptance for dedicated Model 1 — G5 — + keyless proof, D13). Neither has a POML yet. |
+| **Task** | **T230b** — keyless proof (D13): `tasks/230b-keyless-proof-per-service.poml` (FULL, opus/high, BFF hot path + auth). |
 | **Step** | 0 — not started. |
-| **Status** | pending. |
-| **Next Action** | Read `notes/model1-dedicated-remediation-plan.md` §7 rows T229 + T230 (lines ~208-209). T229: drop `shared-trial` (H0 tiers, intake.schema.json Model 1 example `tier: shared-trial`, the `warnAndProceed` "Model 1 shared-trial ONLY" text), H13 `Model1MarginalEnvelopeUsd` → dedicated-stamp envelope, intake `costEnvelopePolicy` text, `RequireCostEnvelopeForModel2De…`. T230: audit H13 verifiers for shared-platform assumptions + one real MI call per service. Write `tasks/229-*.poml` / `tasks/230-*.poml` (POML format: copy `tasks/228-…poml`), add TASK-INDEX rows, then task-execute each. Dependencies: both after 228 ✅. |
-| **Owner items (open)** | (1) W7. (2) Dev rollout of T227d — set `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (live; ask first). (3) **NEW (T228)**: remove the L2 UAMI's old Contributor role assignment on the platform subscription — no longer deployed (live; ask first). (4) **NEW G36**: ADR-027 management group for customer subscriptions (tenant-level owner action; then a small task). |
-| **Order** | … → T227 (a–g ✅) → ~~T228~~ ✅ → **T229 + T230** → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c / T241 when the owner wants them. |
+| **Status** | pending. Tree clean at `bbe03c217` (pushed). |
+| **Next Action** | `task-execute` 230b. Facts from the SESSION 40 exploration are in the POML `<background>`: only the stamp UAMI (inside the BFF) can call each service → new authenticated BFF diagnostics endpoint (app role only the L2 Worker identity holds; H3 creates role + assignment); H13 calls it + ARM "local auth off / no key setting" check; runner token audience `{host}/.default` → `api://{appId}`; auth must FAIL, never skip; Content Safety fail-open needs a distinct auth outcome; ArchTest ratchet on AzureKeyCredential/ApiKeyCredential sites; decide KnowledgeDeploymentService key-only path. BFF §10: publish size vs FRESH master (short paths, same zip tool, file counts), CVE, tests. No live action. |
+| **Owner items (open)** | (1) W7. (2) `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (live; ask first). (3) Remove the L2 UAMI's old Contributor on the platform subscription (live; ask first). (4) G36 customer-subscriptions management group (ADR-027). G37 ANSWERED 2026-10-06 → T254. |
+| **Order** | … → T229 ✅ → T230a ✅ → **T230b** → T254 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → **T253** (G38) → T186. T242c / T241 when the owner wants them. |
+
+### SESSION 40 outcomes
+
+- **T229 ✅** (`f9627fac1`): `CostEnvelopeIntake` — tier (smb|enterprise|dedicated) + estimatedMonthlyUsd required for every model at POST /api/runs and H0; no shared-trial / warnAndProceed / costEnvelopePolicy / Model-2-only strictness; H0Options + H13 options ValidateOnStart; H13 one `DedicatedStampEnvelopeUsd` = $400 (list prices westus2: $337.04 fixed); skill Step 1b-ter + Step 2 hard stop.
+- **T230 split** → 230a ✅ / 230b. **T230a ✅** (`7b55890a7`): I3 = cosmos-db.bicep declared containers/keys (membership drift logged, not failed); H13 runtime invariants I2–I5 (I1 = ArchTest); H13 per-run naming check removed → merge-blocking `naming-conformance` job in `ci-tier1-blocking.yml` (the Router's required check — `sdap-ci.yml` is NOT required); R3 vault rule accepts `sprk-{customerId}-{env}-kv` (no reserved ids/env tokens, case-sensitive, ≤24); Seed-ProductionKeyVault.ps1 VaultName mandatory.
+- **New tasks**: **T253** (G38) — H4b runs `pwsh` + a generated script, H6 runs `pac` on a `DOTNETCORE|10.0` Worker with neither tool nor `scripts/` → both fail live; before T186. **T254** (G37, owner: no cap by default, per-customer limit when desired; BFF must map TenantBudgetExceededException → 429, today 500).
+- Board #438: 210 / 190.
+
+### Rules learned (SESSION 40)
+
+- `sdap-ci.yml` is not a required check and its jobs are `continue-on-error`; a gate that must block goes in `ci-tier1-blocking.yml` (Router).
+- Before declaring a per-run H13 check fixed, ask where its inputs live at runtime: the Worker publish has no `scripts/` or `infrastructure/`, and the host has no pwsh/pac.
+- `string.Create(IFormatProvider, …)` does not accept `$"" + $""` concatenation — format with `ToString("F2", CultureInfo.InvariantCulture)`.
+- `tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1` fails 27/27 locally under Pester 6.2 at HEAD (pre-existing; not in CI).
 
 ### T228 outcome (SESSION 39)
 
