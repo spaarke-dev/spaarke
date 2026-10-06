@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — ci-cd skill lists the blocking Tier 1 Xrm Capability Guard (ontology task 081 round 7, PR #1309)
+
+`.claude/skills/ci-cd/SKILL.md`: the Tier 1 row adds `Xrm Capability Guard (getXrm AST scan)`, a BLOCKING job in
+`ci-tier1-blocking.yml` that runs on `src/client/**`, `src/solutions/**` or workflow changes, and the advisory
+DataGrid External-Host Gate, which the row was missing. The troubleshooting table gains its row. The job is an
+owner-approved (2026-10-06) CLAUDE.md §6.5 path-A exception to the workflow's "do not extend without spec
+amendment" (ci-cd-unit-test-remediation-r1 FR-A02), scoped to this one job.
+
 ###### 2026-10-05 — bff-deploy route verification and smoke check; FAILURE-MODES AP-15 (unified-access-control-r2 tasks 140, 166, 167)
 
 `.claude/skills/bff-deploy/SKILL.md`: §9c's smoke check moves from the retired anonymous `/healthz/dataverse/doc/{id}` to
