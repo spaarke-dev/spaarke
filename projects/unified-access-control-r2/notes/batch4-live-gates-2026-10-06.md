@@ -59,6 +59,32 @@ Run against spaarke-bff-dev at master `891cfd9a3`, then `c339d6920` (hotfix #131
 - **BFF restart:** spaarke-bff-dev restarted on its own at about 20:00Z (brief 503; no deployment or settings change in the activity log).
 
 
+## Update: G6 (tasks 163-169, API part)
+
+- **163:** (a), (b) interim and (c) PASS. (b) literal and (d) are BLOCKED-BY-171; (d) and (e) are UI checks.
+- **164:** all gates run PASS, except the admin playbook list (D-G6-1).
+- **165:** (a), (c) root half and (k) PASS. The 503 vs 404 question: secure containers stamped after 165 return 200; unresolvable ids return 503 (F-G6-1).
+- **166:** PASS for §17.1, a, b, c, h, 13, 15b, 24/25, 27 and the workspace field-security refusal. 19 is proven by tests only. (e)+ and 12 are BLOCKED by D-G6-3.
+- **167:** smoke PASS.
+- **168:** all four -Verify exit 0.
+- **169:** the invoice form has a To Do subgrid, so its probe (4) runs in the owner session.
+
+**New defects:**
+- D-G6-1: every playbook list returns empty (`/$count?$filter=` is a 400, read as "table not provisioned"). Class (a), pre-dates 164.
+- D-G6-2: an API-created playbook is owned by the BFF app, so its creator cannot edit or share it. Class (a)/(b).
+- F-G6-1: an unresolvable container id returns 503, where the spec says 404. Class (f)/(d).
+- All three are being fixed on `fix/uac-r2-playbook-list-owner-spe404`.
+
+**Other-lane issues filed:**
+- #1324: the notification playbook Condition node fails on every run.
+- #1325: AI catalog drift (`/healthz/catalog` 503).
+- #1326: matter-health-single schema and index drift.
+
+**2 more empty SPE containers to delete:**
+- `b!7zUY_IuXrUKb3492YsfnVhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+- `b!tEidDpRRbU2whrkDMjCtzBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+
+
 The per-group records follow, verbatim.
 
 
@@ -969,3 +995,228 @@ None new. D1 (G3/G4, 0x80040223) and D-G5-2 (enforce 403) are confirmed fixed li
 | 1. G148-2 creator unsecure | **PASS**: 200, sweepComplete true, sharesRevoked 1, root share mask 0, 6 children → BU1 default team, issecure false; 7 RevokeAccess 204, no 0x80040223 |
 | 2. 133 (e) undo on creator-owned record | **PASS** (platform replay with the fixed owner-impersonated revoke: mask 0 = pre-call). Endpoint `sharesRestored:true` not live-reachable; covered by #1322 tests + gate 1 |
 | 3. 158-b round 58 via /no-access/enforce | **PASS**: 200, removed [N on WA, mask 1], read back mask 0 / 403 in 5 s before any job tick; inactive-entry enforce 409; entry deactivated + deleted |
+
+---
+
+# G6
+
+## G6 results — UAC-r2 batch-4 dev live gates: tasks 163, 164, 165, 166, 167 smoke, 168 -Verify, 169 precheck (2026-10-06)
+
+Agent: G6. Environment: spaarkedev1 / spaarke-bff-dev (batch 4 + hotfixes #1319, #1320). Code read from C:\wtG @ b403c7713 (read-only).
+Identities: admin = ralph.schroeder (1d02f31c); tu1 = testuser1 (8d7bad7a, BU1, non-admin); uac.child = d6f8f439 (impersonated reads only).
+Helpers: scratchpad\gates\g6\ (g6lib.py, ai.py = App Insights REST query, per-gate t*.py); raw log g6\g6log.txt; state g6\g6state.json.
+
+### Task 167 smoke
+- **Unsigned call → 401: PASS.** 19:22:21Z anonymous `GET /api/v1/external/me`, `GET /api/ai/playbooks`, `POST /api/memory/pins`, and an unmapped `GET /api/does-not-exist-g6` → each **401**, `WWW-Authenticate: Bearer` (the fallback policy). The same unmapped route with a bearer → 404.
+- **12 polls of /healthz in 60 s → no 429: PASS.** 19:22:24–19:23:24Z, one poll every 5 s: 12 × 200 ("Healthy").
+- **/healthz/catalog → 200: FAIL on the expected status, NOT a 167 defect (data).** 19:23:27Z anonymous `GET /healthz/catalog` → **503 "Unhealthy"** (anonymous reach and rate limit work; it was not 401/429).
+  App Insights: `Health check ai-catalog-reconciliation with status Unhealthy … AI catalog drift detected (ADR-039 / FR-P0-04 boot reconciliation): Binding rows without ConsumerTypes constant …: agreement-classify, compose-make-concise, compose-rewrite-instruction, create-project, create-todo, list-tasks, nda-review, nda-standard-summary; …`.
+  Also `compose-identity-key` Degraded (`sprk_graphitemid_uk was NOT FOUND on sprk_document`).
+  Pre-existing: the same Unhealthy result is logged since at least 2026-10-04T02:51Z (before the batch-4 deploy). Dev catalog data drift owned by the AI-catalog lane — class (f) for this gate; owner item.
+
+### Task 168 -Verify (read-only, admin, run from C:\wtG @ b403c7713) — PASS (all four exit 0)
+Outputs: g6\v168-*.out (19:24–19:26Z).
+- `Add-AnalysisRegardingRecordUrlColumn.ps1 -Verify` → **exit 0** "VERIFY PASS" (sprk_analysis.sprk_regardingrecordurl String/Url/500 matches; ships in SpaarkeMaster).
+- `Add-RegardingFilingPickerToForms.ps1 -Verify` → **exit 0**. All six target forms (eaf22dcb, 90d2eff7, 835b8ee8, b58ec3d8, d408a721, eca59df4) "complete — nothing to do"; WORKFLOW_REFERENCE 0 on each table; prerequisites present.
+- `Lock-CoreAncestorStampColumnsOnForms.ps1 -Verify` → **exit 0**. Locked on the To Do main, Event main / quick create / modal / Assign Work, Message main and Analysis main forms; no refusal. Both editable home grids (sprk_event, sprk_analysis) reported as handed to the grid script.
+- `Set-SpaarkeGridCustomizerOnChildGrids.ps1 -Verify` → **exit 0**. SpaarkeGridCustomizer v1.1.1 present and in SpaarkeMaster; set on form factors 0/1/2 of both grids, XML and JSON.
+- So the 168 apply steps have already been run on dev (earlier session). No apply mode was run by me.
+
+### Task 169 precheck (admin reads the invoice forms) — answer: **YES**
+- 5 sprk_invoice forms. **"Invoice main form" 93aa1c69 (type 2, active)** has a **sprk_todo subgrid** (relationship `sprk_sprk_invoice_sprk_todo_RegardingInvoice`). The other four (Information ×3, Invoice quick create) have no subgrid.
+- So the 169 auto-detect UI probe (step 3) is runnable in the owner session on that form. The UI probes were NOT run (NOT NOW).
+
+### Task 165 (SPE admin / record matching)
+#### (a) record matching — PASS
+- Flag `DocumentIntelligence__RecordMatchingEnabled` = **true** (boolean; names only read otherwise). Also seen: `SpeAdmin__PlatformOperatorEnvironment` = true, `DocumentPointer__StrictDerivedContainer` = true.
+- 19:27:12Z tu1 `GET /api/admin/record-matching/status` → **403**; tu1 `POST /api/admin/record-matching/sync {}` → **403** (empty body; no side effect: admin status afterwards still `lastSyncTime: null`).
+- 19:27:14Z admin `GET …/status` → **200** `{indexName: "spaarke-records-index", documentCount: 0, lastSyncTime: null, isHealthy: false}`. (I did not run sync as admin: a write.)
+#### (c) root half — PASS, with one finding (F-G6-1)
+- admin `GET /api/spe/security/score?configId=c3a25b9a…` → **403 "Security API Access Denied"** from Graph (`GetSecureScore: Auth token does not contain valid permissions…`), NOT `spe.admin.deny.platform_operator_required`. App Insights: "SPE Admin authorization granted …" and then the Graph call: the operator rule passed and the handler ran. The Graph 403 is the app's missing SecurityEvents grant (pre-existing; not a 165 gate).
+  Control: tu1 → 403 "does not have the Spaarke administrator permission" (no admin app role).
+- `GET /api/spe/containers?configId=c3a25b9a…` (admin) → 200, **19 containers**. Every one is BOUND (customproperties read per container): 4 to the root BU 06fbf21c (b!vzGD…, and the three former test containers b!DcvT…, b!rAta…, b!c8YR… — so the backfill `-Bind` has run), 1 to Spaarke Demo 9271b764 (b!yLRd…), and **14 secure-record containers to the Secure Record unit d9ec0b6f** (every container provisioned today by G3/G4/G5).
+- Dashboard: `unattributedContainerCount 0`, totals 19 = the 19 bound containers. No unbound container is counted.
+- Per-container GET as admin: BU container → 200; post-165 secure containers b!8qdU… and b!ECpw… → **200** (bound to Secure Record, in the root admin's reach); `b!AAAA…` → **404** `spe.admin.deny.container_out_of_scope` (log "reason absent"); the BU container through the OTHER config 68f9a952 (other type) → the same **404**.
+- **The G4 conflict, resolved**: the 503 is NOT the behaviour for secure containers. G4's two "secure" containers were b!MVasATu… (65a3fab2's pre-165 container) and the orphan b!HBRbo…. Neither is visible to the BFF identity under either config (list of config 68f9a952 is empty). Graph answers `400 "Invalid hostname for this tenancy"` for each, and the binding read treats that as a fault → **503 `spe.admin.deny.scope_unverifiable` "Try again shortly"**.
+  The same 503 comes back for ANY container id whose site part does not resolve: a real id with one character changed (`b!8qdU…vfhG…`), a truncated id `b!DcvTfUkibESq`, and `b!doesnotexistG6…`. Only ids Graph answers 404 for (e.g. `b!AAAA…`) get the uniform 404.
+- **F-G6-1 (class (f), with a (d) aspect):** per 165 §11.3 "a container Graph does not find … answer ONE 404". In practice most absent ids get a deterministic 503 with wrong retry advice. For a leaf admin it is also an existence distinction: another customer's real container answers 404 (out_of_scope), a non-existent id 503 (adversarial-only, SPE admins only). Fails closed; nothing is acted on. Fix direction (not applied): map Graph's 400 "Invalid hostname for this tenancy" on the single-container binding read to "absent" (null). G4 finding 3 is the same root cause. Pending #1313 for b!MVasATu itself.
+#### (k) dashboard — PASS
+- 19:29:01Z admin `GET /api/spe/dashboard/metrics` → 200 with `storageUsedInBytesByConfig` {68f9a952: 0, c3a25b9a: 938471932} and `unattributedContainerCount 0` (also `storageReportingContainerCountByConfig`, unattributed storage fields, syncHealth Healthy, lastSyncedAt 19:15:04Z, 4 concerns all succeeded).
+#### NOT NOW (per inventory)
+- Leaf-admin gates (b)(g)(j) — need a BU1 SPE admin (Entra role grant, owner). Write probes (c-write)(g-write)(j-write)(f) — owner approval. SpeAdminApp UI (d).
+
+
+> **Build note:** the main session deployed #1322 (OneDeploy 19:47:19–25Z). Calls before 19:47Z hit the batch-4 + #1319/#1320 build; later calls hit the #1322 build. The app also flapped 502/503 around 20:00–20:09Z (no new deployment recorded). Every call answered 502/503 was retried; none is counted as a result.
+
+### Shared test data (admin, created 19:33–19:36Z)
+- Secure matter **M 6a935ad6-bcc1-f111-a05c-3833c5e9614d** and secure project **P 6f935ad6-bcc1-f111-a05c-3833c5e9614d**, "UAC gate 163 M/P 2026-10-06 (G6)". Each provisioned by admin → 200: Secure Record Owners team, Secure Record unit, own containers **b!7zUY_IuXrUKb3492YsfnVhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN** (M) and **b!tEidDpRRbU2whrkDMjCtzBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN** (P). tu1 RetrievePrincipalAccess (RPA) = None on both.
+- **D** = 18af9cdf-d3a6-f111-aaab-7ced8ddc4a05 "Canadian Patent Specification.docx": root BU, tu1 RPA None (an existing row, not modified).
+- **DR** = 77bcfa39-dabc-f111-aaaf-3833c5e9614d "Invoice-10044725.pdf": BU1, in b!vzGD…, tu1 full rights (existing, not modified).
+- Negatives ran 19:35Z. Then `/share-user` tu1 Collaborate (mask 262167) on M and P at 19:41:12–16Z (200 "created"). Positives ran ≥ 60 s later.
+
+### Task 163 (search / RAG / insights)
+#### (a) — PASS
+- **Non-reader (19:35Z), tu1 without access to M/P**:
+  - `POST /api/insights/ask {question:"matter-health-single", subject:"matter:M", parameters:{}}` → **404** `sdap.access.deny.record_unavailable` "The requested record was not found."
+  - `/insights/search {subject:"project:P"}`, `/insights/assistant/query {subject:"project:P", forceMode:"rag"}` and `/workspace/ai/summary {entityType:"sprk_project", entityId:P}` → each **404**, the same body.
+  - Each is **byte-identical** (minus traceId) to the same call with a random GUID (4/4 compared).
+- `/ask` with `parameters:{tenantId:"x"}` → **400** `errorCode playbook.parameter-rejected` "Playbook parameter 'tenantId' is not accepted: it is set by the server…" (before any rights query: tu1 had no access).
+- **Reader / writer (19:43–19:44Z, tu1 Collaborate = Read+Write)**:
+  - `/insights/search P` → **200** (results [] — nothing indexed for P).
+  - `/assistant/query P rag` → **200** `path:"rag"`.
+  - `/workspace/ai/summary P` → **200** (analysis text, suggestedActions).
+  - `/ask M matter-health-single` → **200**: authorization passed, binding resolved (insights-ask), engine invoked.
+  - The run itself declined (`reason: no-artifact-produced`) because of dev data drift (observation O-G6-2). No write reached M (modifiedon unchanged 19:33:59Z).
+- **Write rule (round 16 item 1)**: tu1 narrowed to View on M (19:50:20Z; RPA = ReadAccess only), 70 s wait.
+  - `/ask M matter-health-single` → **404**, the uniform body (Read is not enough for the writing playbook).
+  - In the same state `/insights/search matter:M` → 200 and `/assistant/query matter:M rag` → 200 (Read suffices).
+#### (b) interim — PASS (secure-matter form BLOCKED-BY-171)
+- Four queries, `POST /api/ai/rag/search {topK:20, minScore:0}`, admin vs tu1. Each document checked with RPA as tu1:
+  - "Canadian patent specification": admin 20 rows (19 tu1-unreadable), tu1 1 row.
+  - "IN THE CANADIAN PATENT OFFICE Commissioner of Patents": 20 (17 unreadable) / tu1 3.
+  - "non-disclosure agreement confidential information": 20 (20 unreadable) / tu1 **0**.
+  - "invoice total amount due": 20 (17 unreadable) / tu1 3.
+- **0 rows tu1 cannot read** in any tu1 result, and no tu1-unreadable admin hit appears for tu1. totalCount = rows returned.
+- Secure-matter document form: BLOCKED-BY-171 (no bytes can be uploaded into a secure container).
+#### (c) — PASS
+- With a bearer (tu1), each → **404**: POST knowledge/test-search, POST admin/knowledge/index-references, POST rag/index/batch, DELETE rag/source/{id}, GET knowledge/indexes/x/documents, POST knowledge/indexes/reindex/{id}, POST and DELETE admin/knowledge/index-reference/{id}.
+- tu1 `POST /api/ai/rag/index {}` → **403**; tu1 `DELETE /api/ai/rag/{id}?tenantId=…` → **403**.
+
+### Task 164 (chat / agent / playbooks)
+#### §10a by-id — PASS (deny branch not reachable live)
+- tu1 `GET /api/ai/playbooks/by-id/18cf3cc8…` (Document Profile, public) → **200**.
+- tu1 `by-id/4a72f99c…` (Summarize File, private) → **200**, because tu1 holds ReadAccess on it (RPA).
+- Random GUID → **404** "Playbook Not Found" `sdap.access.deny.record_unavailable`.
+- Every private playbook on dev is readable by tu1 (all 9 checked: org-level read), so the "private + no Read → identical 404" branch cannot be shown with tu1. Proven by tests only.
+#### §10c execute — PASS
+- tu1 `POST /api/ai/playbooks/e62f30c6…(Quick Document Review)/execute {documentIds:[D]}` → **403** ProblemDetails (not SSE) "You do not have access to one or more of the requested records."; a random document id → the same 403.
+- Read-only document **RO 4468b968-bec1-f111-a05a-7c1e520a989f** (admin create + GrantAccess ReadAccess to tu1; RPA = ReadAccess): Document Profile execute → **403**, and RO's modifiedon is unchanged.
+- QDR with readable DR → **200 text/event-stream** (run a0adfd8b…, node events streamed; the stream was closed after 6 KB).
+#### §10e owner rule — PASS (with D-G6-1, D-G6-2)
+- Admin-owned playbook 4babdf0a-4f60-f111-ab0b-7c1e521b425f ("New Playbook", _ownerid = admin):
+  - tu1 `PUT` → **403** "You do not have permission to modify this playbook".
+  - admin `PUT` (a body without actions, so the handler's own validation refuses it) → **400** "At least one action or tool must be specified". So the owner filter passed and the handler ran; nothing written (modifiedon 2026-06-04 unchanged). App Insights shows `(systemuserid resolved: True)` on the deny path.
+- **"GET /api/ai/playbooks as admin lists admin's own" — FAIL → D-G6-1** (pre-existing; not caused by 164):
+  - `/api/ai/playbooks/` → 200 `totalCount 0` (admin owns 34 by OData).
+  - `/api/ai/playbooks/public` → 0; `/api/ai/chat/playbooks` → `[]`; `/api/agent/playbooks` → `[]`.
+- Throwaway playbook fd66de7b-bdc1-f111-a05c-3833c5e9614d created by admin `POST /api/ai/playbooks/` (201) is owned by the BFF app user 8793f4b0, not admin. Admin's PUT on it → 403 → D-G6-2.
+#### §10f / POML h, i retired routes — PASS
+With a bearer (tu1), each → **404**: GET and POST /api/ai/prompts, GET /api/ai/prompts/{id}, POST /api/ai/prompts/{id}/render, GET /api/ai/playbooks/by-name/Document%20Profile, POST document-intelligence/match-records, POST document-intelligence/associate-record, PUT playbooks/{id}/nodes/reorder.
+#### POML (a) — PASS
+tu1 `POST /api/ai/chat/sessions` with `hostContext {sprk_matter, M}`, with a random matter, with `documentId D` and with a random documentId → each **403** `sdap.access.deny.insufficient_rights` "You do not have access to one or more of the records this conversation uses." All four bodies identical.
+#### POML (b) — PASS
+- After the share (tu1 Collaborate on M), tu1 created session 3bb4d279… hosted on M → **201**.
+- `POST …/messages` → **200 SSE**. Tool call `SYS-Dataverse_Describe tables/sprk_matter/records/M`; reply "This matter is called "UAC gate 163 M 2026-10-06 (G6)"", with citations, then done.
+#### POML (c), (d) — PASS
+- tu1's own session 05b396fb… was created on DR (201).
+- `PATCH …/context {documentId:DR, hostContext:{sprk_matter, M}}` (before the share) → **403**. The session's Dataverse row (sprk_aichatsummary 5a5e1d1a) is unchanged: versionnumber 27131068, modifiedon = its create time, sprk_documentid = DR. `/restore` was identical before and after.
+- `POST …/messages {documentId:D}` → **403 application/problem+json**, before any stream.
+#### POML (e) / §12.9 (n) — PASS; case recorded
+- tu1 `POST /api/ai/analysis/create` (anchor DR) → 201 **A1 fbae65bb-bec1-f111-a05c-0022482913fc**. The wizard-shape session `{documentId:DR, hostContext:{sprk_analysisoutput, A1}}` → **201**, no warning.
+- A standalone analysis **A2 1381202b-699e-486f-b80d-8ea3ebfceac4** created by tu1 through `POST /api/v1/child-records/sprk_analysis`: the response was 502 because the #1322 deploy restarted the app mid-request, but the row WAS written (harness timing, not a defect).
+  - Session hosted on A2 → **201**, not 403: task 162's personal rule for standalone analyses is live.
+  - Control: another person's standalone analysis f46b4105 (admin's; tu1 RPA None) → **403**.
+#### §12.9 (k) parameters — PASS
+- `/execute` requires a non-empty `documentIds` before the parameter policy runs (400 "DocumentIds is required…"), so the probes sent `documentIds:[DR]`. Playbook = 29051c80 "New Documents on Your Matters" (public).
+- `timeWindowHours:"24'/>"` → **400** `playbook.parameter-rejected` "…its value is not of the declared type."
+- `userId:<guid>` → **400** `playbook.parameter-rejected` "…set by the server".
+- `timeWindowHours:"48"` → **200 SSE**. Its Query New Documents node returned **exactly 1 record: KD1 824c927d-bec1-f111-a05a-7c1e520a989f** (created by admin, owner tu1 — so `eq-userid` resolved to tu1). It did not return KD2 b000727c-bec1-f111-a05c-0022482913fc (owner admin, created in the same window).
+- The run then failed at "Check Results" ("Invalid condition configuration JSON … $.condition.left"): pre-existing, see O-G6-3. So no notification was created (checked: 0 appnotifications for tu1).
+#### (d) agent status, (f) Compose reply, (g) UI consumers, (j) Copilot agent, (l)(m) UI: NOT RUN (UI or owner session; not in G6 scope).
+
+### Task 166 (memory / Compose / remaining routes)
+#### §17.1 — PASS
+Anonymous `GET /healthz/dataverse` → 200 `{status:"healthy"}`.
+#### (a) pins — PASS
+- Before the share: tu1 `POST /api/memory/pins {pinType:"matter-fact", matterId:M}` → **403** "You do not have permission to pin content to this matter."; tu1's pin list then holds 0 pins.
+- After the share (AppendTo): the same call → **201**, pinId 334f7e35002742148d97ae1f7ca82ea3 (listed). Deleted afterwards (204; 0 pins left).
+#### (b) Compose — PASS (check-changes negative only on an absent item)
+- tu1 `POST /api/compose/upload {sessionId: <admin's session 30657035…>, documentId: DR}` → **404** "Uploaded File Not Available" — byte-identical to a random sessionId (cache not read).
+- `check-changes`: tu1 is an SPE member of BOTH containers that hold files on dev (b!vzGD… and Demo b!yLRd…; read from container permissions as admin). Every other container holds no item. So no real item exists that tu1 cannot see through SPE.
+  - A random item → **404** `sdap.compose.deny.document_not_visible`; the DR item → 200.
+  - A Demo-container item whose Dataverse row tu1 cannot read (7e7091d3, RPA None) → **200** with name and eTag. That is correct under the rule (the check is tu1's own OBO SPE read; tu1 holds a hand-added container role) — see O-G6-4.
+#### (c) pointer refusal — PASS
+- tu1 `PUT /api/v1/documents/KD1 {graphDriveId:…}` → **400** `sdap.documents.pointer_field_refused` (fields ["GraphDriveId"]); `{graphItemId:…}` → the same 400.
+- Admin read-back: pointer null, hasfile false, modifiedon unchanged.
+#### (e) UpdateRelated push — 404 half PASS; positive half **BLOCKED by D-G6-3**
+- Fixtures:
+  - matter ME ac6486f1-bfc1-f111-a05a-7c1e520a989f (BU1 team, attorney1 = a contact), with child invoices INV_W 868b15f0 (tu1 Write), INV_R 888b15f0 (tu1 Read only) and INV_N 8a8b15f0 (none);
+  - matter MN 848b15f0 (admin, tu1 None) with child INV_X 8c8b15f0.
+- tu1 push from MN → **404** "Source record not found", identical to a random matter. No child's modifiedon changed.
+- tu1 push from ME → **500** (D-G6-3), and no child changed. Reported to main at about 19:58Z; main confirmed and is fixing it on a separate branch.
+#### (h) — PASS
+- tu1 → **404** for POST /api/v1/work-assignments, POST /api/compose/documents/{x}/promote, GET /api/memory/records/sprk_matter/{x}, GET /api/memory/records, GET /api/workspace/state and GET /healthz/dataverse/doc/{x}.
+- Anonymous /healthz/dataverse/doc/{x} → 401 (fallback policy).
+#### 12 Matter → Invoice push — **BLOCKED by D-G6-3**
+Admin push ME → sprk_invoice → 500; all three invoices unchanged (attorney1 still null).
+#### 13 — PASS (Redis-down: proven by tests, not run)
+- tu1 `POST /api/compose/documents/{RO}/refresh-profile` (Read only) → **403**; on D (no access) → **403**. Both rows unchanged.
+- `POST /api/compose/active-document`, tu1's own session:
+  - `documentId:D` → **404** "Document Not Found"; a random document → the same 404;
+  - admin's session + DR → **404** "Session Not Found";
+  - control: own session + DR → 200.
+#### 15b — PASS
+- Scratch row **SD 22ed7855-c0c1-f111-a05c-3833c5e9614d** (admin, BU1 team; tu1 full rights). Admin set `sprk_graphdriveid` = b!ECpw… (G4's orphan C1: bound to the Secure Record unit, named by no record or business unit) and a fake item id.
+- tu1 `GET /api/documents/SD/download` → **409** `document_storage_unverified`; `GET /api/v1/documents/SD/download` → **409**, the same title. No bytes served. SD deleted.
+#### 19 FLS push — "no FLS-mapped profile; proven by tests"
+All 8 mapped source columns on sprk_matter have IsSecured = false.
+#### 24/25 checks — PASS
+- `sprk_relocationpending` set on **0** rows. `sprk_relocatedversions` is set on 367 rows (the migration has run). StrictDerivedContainer = true.
+- Versions (tu1 and admin agree): 360852e4 "Examiner Report 3.docx" → 200, 2 versions (2.0 2026-09-17 Ralph Schroeder; 1.0 2026-09-10 "SharePoint App"); 5c29b0fe "Teams Meeting Test Document…" → 200, 1 version. There is no pre-move record to compare against.
+- tu1 downloads (`/api/documents/{id}/download`) → **200** for each:
+  - 3ff21ca8 Grant Proposal docx (3.2 MB);
+  - 29482e22 new Word doc created through the Console;
+  - 8bcf064a Word add-in save;
+  - 7b00ed8f archived .eml (message/rfc822);
+  - 77bcfa39 relocated person-upload pdf.
+  No email-attachment row was in the sample.
+#### 27 (403 part) — PASS
+- tu1 created row **KT fc7a0dba-bfc1-f111-a05c-3833c5e9614d** with its own Dataverse token. `POST /api/v1/documents/KT/file {driveId: b!vzGD…, itemId: DR's item}` → **403** `document_file_attach_refused` / `NotTheUploader`. Row unchanged, pointer null.
+#### Reporting
+- 11/18/26/g: NOT RUN (workspace unset by owner decision).
+- sprk_workspaceid field-security refusal — **PASS**:
+  - admin seeded sprk_report f5a81c88-c0c1-f111-a05c-3833c5e9614d (BU1 team; tu1 full rights);
+  - tu1 own Dataverse `PATCH sprk_workspaceid` → **403 0x8004f507** "does not have update permissions to a Workspace ID secured field on entity Report";
+  - control: the name PATCH → 204; read-back workspaceid null.
+
+### Records created + cleanup (all deleted 20:10Z; each read-back 404; a final name sweep over 7 tables finds 0)
+- Secure M 6a935ad6-bcc1-f111-a05c-3833c5e9614d and P 6f935ad6-bcc1-f111-a05c-3833c5e9614d: unsecured through the API first (200, **sweepComplete: true**), then deleted. No ledger rows referenced them.
+- Documents RO 4468b968-bec1-f111-a05a-7c1e520a989f, KD1 824c927d-bec1-f111-a05a-7c1e520a989f, KD2 b000727c-bec1-f111-a05c-0022482913fc, KT fc7a0dba-bfc1-f111-a05c-3833c5e9614d, SD 22ed7855-c0c1-f111-a05c-3833c5e9614d.
+- Analyses A1 fbae65bb-bec1-f111-a05c-0022482913fc, A2 1381202b-699e-486f-b80d-8ea3ebfceac4.
+- Matters ME ac6486f1-bfc1-f111-a05a-7c1e520a989f, MN 848b15f0-bfc1-f111-a05c-3833c5e9614d; invoices 868b15f0-, 888b15f0-, 8a8b15f0-, 8c8b15f0- (all -bfc1-f111-a05c-3833c5e9614d).
+- Report f5a81c88-c0c1-f111-a05c-3833c5e9614d; playbook fd66de7b-bdc1-f111-a05c-3833c5e9614d.
+- Pin 334f7e35002742148d97ae1f7ca82ea3 (204).
+- Chat sessions 05b396fb…, 3bb4d279…, 0a6dd278…, af1433cb… (tu1) and 30657035… (admin): DELETE 204 each, after retries through the 20:00Z flapping. Their 5 sprk_aichatsummary rows were deleted (204).
+- Unchanged by me: 65a3fab2, every existing document/playbook used read-only, all app settings, testuser1's flags.
+- **SPE containers left in place (not deleted):** M b!7zUY_IuXrUKb3492YsfnVhG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN; P b!tEidDpRRbU2whrkDMjCtzBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN. Both empty.
+
+### Defects (classified)
+- **D-G6-3 (a) broken real path, fails closed — field-mapping push 500 on every profile.**
+  - `FieldMappingEndpoints.BuildSourceRecordQuery` selects lookup columns by logical name (`$select=sprk_assignedattorney1…`). Dataverse answers 400 0x80060888 (reproduced as admin; the `_…_value` form → 200), and the route returns 500. Introduced with #1312 (task 166 r2).
+  - All 4 active Matter→X profiles map Lookup columns, so UpdateRelated is broken for all of them. No data written.
+  - Reported; main confirmed (lookup WRITES also need `nav@odata.bind`) and is fixing it.
+- **D-G6-1 (a) broken real path, pre-existing (2025-12-29 count URL; swallowed into an empty list since 2026-05-21) — every playbook list is empty.**
+  - `PlaybookService.ExecuteListQueryAsync` calls `sprk_analysisplaybooks/$count?$filter=…`, and Dataverse answers 400 "Could not find a property named '_ownerid_value' on type 'Edm.Int32'".
+  - The 400 is treated as "table not provisioned" → empty list: `/api/ai/playbooks`, `/public`, `/api/ai/chat/playbooks` and `/api/agent/playbooks` all return 0 items (admin owns 34).
+  - Not a security issue (fails empty), but 164 §10e's "lists U2's playbooks" cannot pass. Fix direction: `?$filter=…&$count=true`.
+- **D-G6-2 (a)/(b) — a playbook created through `POST /api/ai/playbooks/` is owned by the BFF app user (8793f4b0), not the caller.** `CreatePlaybookAsync` creates app-only and never sets the owner, so under 164's owner rule the creator can never PUT, share or unshare their own playbook (403). Fails closed. Likely pre-existing; owner decides (set `ownerid` to the caller's systemuserid on create).
+- **F-G6-1 (f) with a (d) aspect** — SPE admin per-container GET answers 503 `scope_unverifiable` "Try again shortly" for any container id whose site part does not resolve. Graph answers 400 "Invalid hostname for this tenancy" and the binding read treats it as a fault. This explains G4's 503s; secure containers themselves answer 200.
+
+### Observations (not gate failures)
+- **O-G6-1 (f) data:** `/healthz/catalog` 503 — AI catalog drift (Binding rows without a ConsumerTypes constant) since at least 2026-10-04; compose-identity-key Degraded.
+- **O-G6-2 (data, Insights lane):** matter-health-single cannot produce an artifact on dev.
+  - `sprk_kpiassessment` has no `sprk_grade` column (QueryDataverse node fails).
+  - spaarke-insights-index has no `matterId` field (IndexRetrieve 400).
+  - `/ask` therefore always declines `no-artifact-produced`.
+- **O-G6-3 (a) pre-existing, other lane:** notification playbooks' Condition node fails ("Invalid condition configuration JSON … $.condition.left") on every run — about 52–56 failures a day since at least 2026-09-30. So scheduled notification playbooks never create notifications.
+- **O-G6-4:** check-changes and other OBO SPE checks authorize by SPE container membership. tu1's hand-added roles on b!vzGD… and b!yLRd… let it read an item whose Dataverse row it cannot read. This is consistent with the rule. Under owner round 69/70 (broker-only, task 171) these OBO checks will need revisiting.
+- **O-G6-5:** after #1322 deployed, `/unsecure-project` by the creator returned `sweepComplete: true` (G5's O-1 no longer reproduced).
+- **O-G6-6:** `/execute` checks `documentIds` non-empty BEFORE the parameter policy, so a notification playbook (no documents) cannot be run through `/execute` without a dummy document id. Minor (f).
+
+### For the owner
+1. D-G6-3 (being fixed by main). 166 (e)-positive and 12 to re-run after that fix.
+2. D-G6-1 and D-G6-2: playbook list `$count` query; the playbook create owner.
+3. F-G6-1: map Graph "Invalid hostname for this tenancy" to the uniform 404.
+4. O-G6-1 to O-G6-3: data / other-lane items (catalog drift, Insights schema/index drift, notification Condition node).
+5. Two more SPE containers (b!7zUY…, b!tEid…) await the orphan-container decision.
+6. 169: the Invoice main form has a To Do subgrid, so the auto-detect probe can run in the owner session.
