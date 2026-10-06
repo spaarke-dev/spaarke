@@ -33,7 +33,7 @@ import {
 } from '../../services/PolymorphicResolverService';
 import type { INavPropEntry } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
-import { getXrm } from '../../utils/xrmContext';
+import { getXrmUserId } from '../../utils/xrmUserId';
 import { syncAssignedAccess } from '../../services/assignedAccessSync';
 
 // Re-export shared search helpers for use by step components
@@ -57,7 +57,7 @@ export {
 /**
  * Resolve the current Dataverse user ID from the host Xrm global.
  *
- * Walks `window` → `window.parent` → `window.top` to find an `Xrm.Utility.getGlobalContext()`
+ * Walks the frames (shared `getXrm` walk, via `utils/xrmUserId`) for an `Xrm.Utility.getGlobalContext()`
  * (Code Page hosted in a Power App iframe) or `Xrm.Utility.getUserId()` (PCF / direct host).
  * Returns `''` (empty) when no Xrm context is reachable — caller treats that as "skip cascade".
  *
@@ -65,30 +65,9 @@ export {
  * preserves the "current user" semantics of FR-WIZ-04.
  */
 function _getCurrentUserId(): string {
-  // Shared cross-frame walker (task 081 / C-8) — was a per-frame loop.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // getGlobalContext, else Utility.getUserId — the nearest frame with either (per frame).
-    const xrm: any = getXrm(
-      (x: any) => typeof x.Utility?.getGlobalContext === 'function' || typeof x.Utility?.getUserId === 'function'
-    );
-    if (xrm?.Utility?.getGlobalContext) {
-      const ctx = xrm.Utility.getGlobalContext();
-      const userId = ctx?.userSettings?.userId;
-      if (typeof userId === 'string' && userId.trim() !== '') {
-        return cleanGuid(userId);
-      }
-    }
-    if (typeof xrm?.Utility?.getUserId === 'function') {
-      const userId = xrm.Utility.getUserId();
-      if (typeof userId === 'string' && userId.trim() !== '') {
-        return cleanGuid(userId);
-      }
-    }
-  } catch {
-    /* defensive: a host getter threw */
-  }
-  return '';
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? '';
 }
 
 /**

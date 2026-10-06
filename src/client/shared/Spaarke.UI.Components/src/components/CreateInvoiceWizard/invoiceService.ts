@@ -36,7 +36,7 @@ import {
   _resetNavPropCacheForTests,
 } from '../../services/PolymorphicResolverService';
 import { applyFieldMappings } from '../../services/FieldMappingService';
-import { getXrm } from '../../utils/xrmContext';
+import { getXrmUserId } from '../../utils/xrmUserId';
 
 // ---------------------------------------------------------------------------
 // Result type
@@ -88,30 +88,9 @@ function _resolveLookupHint(entityLogicalName: string): string {
 // ---------------------------------------------------------------------------
 
 function _getCurrentUserId(): string {
-  // Shared cross-frame walker (task 081 / C-8) — was a per-frame loop.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    // getGlobalContext, else Utility.getUserId — the nearest frame with either (per frame).
-    const xrm: any = getXrm(
-      (x: any) => typeof x.Utility?.getGlobalContext === 'function' || typeof x.Utility?.getUserId === 'function'
-    );
-    if (xrm?.Utility?.getGlobalContext) {
-      const ctx = xrm.Utility.getGlobalContext();
-      const userId = ctx?.userSettings?.userId;
-      if (typeof userId === 'string' && userId.trim() !== '') {
-        return cleanGuid(userId);
-      }
-    }
-    if (typeof xrm?.Utility?.getUserId === 'function') {
-      const userId = xrm.Utility.getUserId();
-      if (typeof userId === 'string' && userId.trim() !== '') {
-        return cleanGuid(userId);
-      }
-    }
-  } catch {
-    /* defensive: a host getter threw */
-  }
-  return '';
+  // The shared helper: the nearest frame with a NON-EMPTY user id; a frame answering
+  // with an empty id is skipped, as the pre-081 per-frame loop did (task 081 round 6).
+  return getXrmUserId() ?? '';
 }
 
 // ---------------------------------------------------------------------------
