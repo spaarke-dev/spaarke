@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-06 SESSION 38 — T246 ✅, **T247 ✅** (see its POML notes). Next: **T227** (no POML yet — create it from plan row T227, then execute). Older header text below is history.
+> **Last Updated**: 2026-10-06 SESSION 38 — T246 ✅, **T247 ✅** (see its POML notes). Next: **T227a** → 227b → 227c (POMLs created 2026-10-06 from the T227 fact sheet). Older header text below is history.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,11 +40,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T227** — Entra + SPE topology for per-customer Model 1 (plan row T227 in `notes/model1-dedicated-remediation-plan.md`; no POML yet). |
+| **Task** | **T227a** — retire shared BFF app-reg paths (G2) (`tasks/227a-retire-shared-bff-app-regs.poml`); then 227b (H8 grants, G9), 227c (H8 container-id secrets, G18). |
 | **Step** | 0 — not started. |
 | **Status** | pending. Owner item unchanged: W7. |
-| **Next Action** | Create `tasks/227-*.poml` from plan row T227 (retire shared Trial1/Model1 BFF paths in `Register-EntraAppRegistrations.ps1` + `spaarke-constants.yaml` (G2); per-customer `applicationPermissionGrants` (G9 — verify grant limits, decide handler); topology doc §3A; G18 — real writer for `SPE-DefaultContainerId` / `SPE-CommunicationArchiveContainerId` and drop their `PinnedManifestGaps` pins), add the TASK-INDEX row, then run task-execute. |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+| **Next Action** | Run task-execute on `tasks/227a-retire-shared-bff-app-regs.poml`. The fact sheet (file:line evidence for G2/G9/G18) is summarised in each POML `<context>`. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a→b→c) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 
 ### T247 outcome (SESSION 38)

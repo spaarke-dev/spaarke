@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H8 grants the customer's BFF identities access to the "Spaarke Model 1" container type (plan G9)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (gap G9)</phase>
+    <gate>after 227a</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 handler code (.cs) calling Graph as the SPE owning app; auth-adjacent; tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>One idempotent GET-then-PUT step in an existing handler, reusing the T248 owning-app client.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>provisioning, provisioning-handler, l2-controlplane, spe, auth, model1-dedicated, testing</tags>
+    <deps>227a</deps>
+  </metadata>
+
+  <prompt>Before H8 creates the customer's container, grant the stamp UAMI and the customer's BFF app registration access to the Spaarke Model 1 container type.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, Microsoft Graph SPE APIs). Follow the provisioning and auth constraints.</role>
+
+  <goal>
+    H8 ensures two applicationPermissionGrants on the container-type registration — the stamp UAMI (InterStepState.MiClientId,
+    application full / delegated full) and the BFF app registration (InterStepState.BffAppRegId, delegated full / application
+    none) — as the owning app, idempotently, before creating the container. H13 verifies both grants by GET.
+  </goal>
+
+  <justification>
+    <existing>H8SpeContainerHandler (owning-app Graph client via SpeConfidentialClientGraphFactory + SpeContainerOptions.TryGetOwner); SpeOwnerCredentialProbe (registration GET); scripts/Register-BffMiWithContainerType.ps1 (same PUT, beta, certificate).</existing>
+    <extension>Add a grant step inside H8 — it already holds the owning-app client, owner lookup and container type id, and runs after H3 and H2a. No new handler or DAG node.</extension>
+    <cost-of-doing-nothing>The customer BFF's SPE calls (OBO as the BFF app; app-only as the UAMI) get 403: no handler grants either identity on the container type, so every document operation on a new stamp fails.</cost-of-doing-nothing>
+  </justification>
+
+  <context>
+    <background>
+      Microsoft Learn (v1.0): PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{appId}
+      body { delegatedPermissions: [..], applicationPermissions: [..] } → 201; app permission FileStorageContainerTypeReg.Selected
+      (changes limited to registrations owned by the calling app); grants may take up to one hour to propagate. The owning app's
+      MI-FIC token (T248) carries FileStorageContainerTypeReg.Selected (live probe 2026-10-03). Topology doc :287-292: a grant for
+      the app registration does not cover the UAMI. H10 separately gives the UAMI Graph app role FileStorageContainer.Selected.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/H8SpeContainerHandler.cs (+ GraphContainerProvisioner.cs, SpeConfidentialClientGraphFactory.cs)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/SpeOwnerCredentialProbe.cs (registration GET pattern)</file>
+      <file>H13 acceptance probes (grant verification)</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A/§5; SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md container-type registration row; SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <decisions>
+    <decision date="2026-10-06" by="agent, from evidence">The grant step lives in H8 (not a new handler): H8 already owns the owning-app client and runs after H3 + H2a.</decision>
+    <decision date="2026-10-06" by="agent, from evidence">Permissions mirror dev's registration: UAMI application full + delegated full; BFF app delegated full, application none. Least-privilege trimming needs a BFF call-site audit — out of scope.</decision>
+    <decision date="2026-10-06" by="agent, from evidence">H8 does not wait for propagation; H13 (runs last) verifies the grants by GET.</decision>
+  </decisions>
+
+  <constraints>
+    <constraint source="idempotent">GET the grant first; PUT only when missing or different. Failure → Resumable with a code naming the app id; never Quarantine for a Graph 5xx/429.</constraint>
+    <constraint source="I5">Token is per-tenant (explicit tenant id); no ambient credential.</constraint>
+    <constraint source="tests">Tests use the existing H8 test transport (no Mock&lt;HttpMessageHandler&gt; per ADR-038); cover: both PUTs sent with the right bodies as the owning app; second run sends no PUT; missing BffAppRegId / MiClientId → fail before any Graph call; 403 → Resumable.</constraint>
+    <constraint source="scope">No live Graph change in this task.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">H8: grant step (GET-then-PUT for both identities) before container create; inputs declared in HandlerRunInputs if new.</step>
+    <step order="2">H13: verify both grants (GET) — extend the existing SPE acceptance probe.</step>
+    <step order="3">Tests; docs (topology §3A/§5, inventory row, runbook).</step>
+    <step order="4">Verify (ControlPlane.Tests, Worker build, ArchTests); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">H8 test: a run sends PUT applicationPermissionGrants/{MiClientId} and /{BffAppRegId} with the stated bodies before the container POST; a re-run sends no PUT.</criterion>
+    <criterion testable="true">H8 test: missing BffAppRegId or MiClientId fails before any Graph request; a 403 on the PUT is Resumable.</criterion>
+    <criterion testable="true">H13 test: a missing grant fails the SPE acceptance probe with a code naming the app id.</criterion>
+    <criterion testable="true">ControlPlane.Tests, Worker build and ArchTests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+  </notes>
+</task>
