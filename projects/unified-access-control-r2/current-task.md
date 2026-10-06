@@ -1,6 +1,7 @@
 # Current Task State — `unified-access-control-r2`
 
 > **Last Updated**: 2026-10-05 (checkpoint #14, by context-handoff before /compact). Supersedes #13. Read the Quick Recovery table first.
+> **Refresh (before /compact):** `sweepmerge` is still finishing 165 in `C:\wt4i`, with uncommitted work there. Its sub-agent wrote and passed the five `ProvenByTest_` proof tests for S-24, S-18, S-78, S-64 and S-65 (5/5). `sweepmerge` is now building and running the full suites. Its completion notice arrives after the compact: review it, then push integ (Next Action step 1). Do NOT edit `C:\wt4i` while it is running.
 
 ## Quick Recovery (READ THIS FIRST)
 
