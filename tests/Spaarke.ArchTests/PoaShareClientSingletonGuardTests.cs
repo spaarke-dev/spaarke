@@ -479,11 +479,22 @@ public class PoaShareClientSingletonGuardTests
         target.DeclaringType == typeof(IRecordShareWriteObserver)
         && target.Name == nameof(IRecordShareWriteObserver.OnRecordShareWrittenAsync);
 
-    /// <summary>The client's three public POA writes, by the names C1 / C2 pin (compile-checked through <c>nameof</c>).</summary>
+    /// <summary>
+    /// The client's public POA writes, by the three names C1 / C2 pin (compile-checked through <c>nameof</c>) — EVERY overload
+    /// of each: <c>RevokeAccessAsync</c> has two (app-only, and the one that revokes the record owner's own share as the
+    /// owner — unified-access-control-r2, 0x80040223), and each must reach a notifying sender.
+    /// </summary>
     private static IReadOnlyList<MethodInfo> ClientPoaWrites() =>
         PoaWriteMethodNames
-            .Select(name => typeof(DataverseWebApiService).GetMethod(name, BindingFlags.Public | BindingFlags.Instance)
-                            ?? throw new InvalidOperationException($"DataverseWebApiService.{name} is not a public instance method."))
+            .SelectMany(name =>
+            {
+                var overloads = typeof(DataverseWebApiService).GetMethods(BindingFlags.Public | BindingFlags.Instance)
+                    .Where(m => m.Name == name)
+                    .ToList();
+                return overloads.Count > 0
+                    ? overloads
+                    : throw new InvalidOperationException($"DataverseWebApiService.{name} is not a public instance method.");
+            })
             .ToList();
 
     /// <summary>
