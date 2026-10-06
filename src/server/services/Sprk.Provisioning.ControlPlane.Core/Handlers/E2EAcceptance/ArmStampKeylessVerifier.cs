@@ -10,7 +10,8 @@
 //      Storage; accessKeysAuthentication=Disabled on every Azure Managed Redis database. The set mirrors
 //      CustomerStampKeylessTemplateTests (its exclusions — Application Insights ingestion and ACS — too); a parity test
 //      in that file reads THIS file so the two cannot drift;
-//   3. lists the app settings and connection strings of the stamp App Service and of every slot, and refuses any key
+//   3. lists the app settings and connection strings of every App Service in the group (the BFF always included) and of
+//      every slot, and refuses any key
 //      setting (StampKeySettingCatalog — the settings the BFF would use a key from; pinned against the BFF's
 //      key-credential sites by tests/Spaarke.ArchTests/KeyCredentialCensusTests) and any value shaped like a key.
 // Violations name resources and settings only — never a value.
@@ -55,6 +56,11 @@ public sealed class ArmStampKeylessVerifier : IStampKeylessVerifier
             p.TryGetProperty("allowSharedKeyAccess", out var v) && v.ValueKind == JsonValueKind.False ? null : "allowSharedKeyAccess is not false"),
         // Redis Enterprise keys live on the DATABASE (accessKeysAuthentication) — read through the cluster.
         ["Microsoft.Cache/redisEnterprise"] = new(RedisEnterpriseApiVersion, 1, _ => null),
+        // Not in today's stamp, but key-capable: checked whenever present so one added later cannot slip through.
+        ["Microsoft.Cache/redis"] = new("2024-03-01", 0, p => IsTrue(p, "disableAccessKeyAuthentication") ? null : "disableAccessKeyAuthentication is not true"),
+        ["Microsoft.EventHub/namespaces"] = new("2024-01-01", 0, p => IsTrue(p, "disableLocalAuth") ? null : "disableLocalAuth is not true"),
+        ["Microsoft.AppConfiguration/configurationStores"] = new("2023-03-01", 0, p => IsTrue(p, "disableLocalAuth") ? null : "disableLocalAuth is not true"),
+        ["Microsoft.EventGrid/topics"] = new("2022-06-15", 0, p => IsTrue(p, "disableLocalAuth") ? null : "disableLocalAuth is not true"),
     };
 
     private readonly IHttpClientFactory _httpClientFactory;
@@ -90,6 +96,13 @@ public sealed class ArmStampKeylessVerifier : IStampKeylessVerifier
             // (1) + (2) keyed resources.
             var groupId = $"/subscriptions/{request.SubscriptionId}/resourceGroups/{request.ResourceGroupName}";
             var resources = await arm.ListAsync($"{groupId}/resources?api-version={ResourcesApiVersion}", cancellationToken).ConfigureAwait(false);
+            var sites = resources
+                .Where(r => string.Equals(r.GetProperty("type").GetString(), "Microsoft.Web/sites", StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.GetProperty("name").GetString() ?? string.Empty)
+                .Append(request.AppServiceName)
+                .Where(n => n.Length > 0)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
             var counts = KeyedTypes.Keys.ToDictionary(k => k, _ => 0, StringComparer.OrdinalIgnoreCase);
 
             foreach (var resource in resources)
@@ -141,29 +154,32 @@ public sealed class ArmStampKeylessVerifier : IStampKeylessVerifier
                 }
             }
 
-            // (3) App Service settings — the production slot and every deployment slot.
-            var siteId = $"{groupId}/providers/Microsoft.Web/sites/{request.AppServiceName}";
-            var slotScopes = new List<(string Label, string Id)> { ("production", siteId) };
-            foreach (var slot in await arm.ListAsync($"{siteId}/slots?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false))
+            // (3) App Service settings — every site in the stamp group (the BFF included), production and every slot.
+            foreach (var site in sites)
             {
-                var full = slot.GetProperty("name").GetString() ?? string.Empty; // "{site}/{slot}"
-                var slotName = full.Contains('/') ? full[(full.LastIndexOf('/') + 1)..] : full;
-                slotScopes.Add((slotName, $"{siteId}/slots/{slotName}"));
-            }
+                var siteId = $"{groupId}/providers/Microsoft.Web/sites/{site}";
+                var slotScopes = new List<(string Label, string Id)> { ("production", siteId) };
+                foreach (var slot in await arm.ListAsync($"{siteId}/slots?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false))
+                {
+                    var full = slot.GetProperty("name").GetString() ?? string.Empty; // "{site}/{slot}"
+                    var slotName = full.Contains('/') ? full[(full.LastIndexOf('/') + 1)..] : full;
+                    slotScopes.Add((slotName, $"{siteId}/slots/{slotName}"));
+                }
 
-            foreach (var (label, scopeId) in slotScopes)
-            {
-                var settings = await arm.PostAsync($"{scopeId}/config/appsettings/list?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false);
-                foreach (var name in StampKeySettingCatalog.KeyBearingSettingNames(PropertyPairs(settings, connectionStrings: false)))
+                foreach (var (label, scopeId) in slotScopes)
                 {
-                    violations.Add($"App Service '{request.AppServiceName}' slot '{label}': app setting '{name}' is a key");
+                    var settings = await arm.PostAsync($"{scopeId}/config/appsettings/list?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false);
+                    foreach (var name in StampKeySettingCatalog.KeyBearingSettingNames(PropertyPairs(settings, connectionStrings: false)))
+                    {
+                        violations.Add($"App Service '{site}' slot '{label}': app setting '{name}' is a key");
+                    }
+                    var connections = await arm.PostAsync($"{scopeId}/config/connectionstrings/list?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false);
+                    foreach (var name in StampKeySettingCatalog.KeyBearingSettingNames(PropertyPairs(connections, connectionStrings: true)))
+                    {
+                        violations.Add($"App Service '{site}' slot '{label}': connection string '{name}' is a key");
+                    }
+                    checkedItems.Add($"{site}[{label}]");
                 }
-                var connections = await arm.PostAsync($"{scopeId}/config/connectionstrings/list?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false);
-                foreach (var name in StampKeySettingCatalog.KeyBearingSettingNames(PropertyPairs(connections, connectionStrings: true)))
-                {
-                    violations.Add($"App Service '{request.AppServiceName}' slot '{label}': connection string '{name}' is a key");
-                }
-                checkedItems.Add($"{request.AppServiceName}[{label}]");
             }
 
             if (violations.Count > 0)
@@ -228,6 +244,11 @@ public sealed class ArmStampKeylessVerifier : IStampKeylessVerifier
                     items.AddRange(value.EnumerateArray());
                 }
                 next = page.TryGetProperty("nextLink", out var link) && link.ValueKind == JsonValueKind.String ? link.GetString() : null;
+                // The ARM bearer token follows nextLink — only ever to ARM itself.
+                if (next is not null && !next.StartsWith(ArmBase + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new InvalidOperationException("ARM returned a nextLink outside management.azure.com; not followed.");
+                }
             }
             return items;
         }

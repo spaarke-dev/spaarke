@@ -8,6 +8,7 @@ using Spaarke.Contracts.Provisioning;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Diagnostics;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Ai.Safety;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Domain.Ai;
@@ -31,7 +32,7 @@ public class AiKeylessProbeTests
                 ["AzureOpenAI:ChatModelName"] = "gpt",
                 ["DocumentIntelligence:AiSearchKey"] = "k",
                 ["DocumentIntelligence:AiSearchEndpoint"] = "https://search.example",
-                ["AiSafety:ContentSafety:ApiKey"] = "k",
+                [ContentSafetyAuthHandler.ApiKeyConfigKey] = "k", // the probe names the same setting the handler reads
             },
             new DocumentIntelligenceOptions
             {
@@ -100,13 +101,37 @@ public class AiKeylessProbeTests
         Outcome(results, KeylessProofContract.Services.Cosmos).Code.Should().Be("setting-missing:CosmosPersistence:Endpoint");
     }
 
+    [Theory]
+    [InlineData(System.Net.HttpStatusCode.Forbidden, "refused")]
+    [InlineData(System.Net.HttpStatusCode.Unauthorized, "refused")]
+    [InlineData(System.Net.HttpStatusCode.OK, "proved")]
+    public async Task ProbeAsync_ContentSafetyAnswer_IsReportedAsIs(System.Net.HttpStatusCode status, string expected)
+    {
+        var results = await Probe(new Dictionary<string, string?>(), new DocumentIntelligenceOptions(), new StatusClientFactory(status))
+            .ProbeAsync(CancellationToken.None);
+
+        Outcome(results, KeylessProofContract.Services.ContentSafetyPromptShield).Outcome.Should().Be(expected);
+        Outcome(results, KeylessProofContract.Services.ContentSafetyGroundedness).Outcome.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_AnInvalidBlobEndpoint_IsNotConfigured_NotAServiceFailure()
+    {
+        var results = await Probe(
+                new Dictionary<string, string?> { ["SessionFileStore:BlobEndpoint"] = "http://not-https.example" },
+                new DocumentIntelligenceOptions())
+            .ProbeAsync(CancellationToken.None);
+
+        Outcome(results, KeylessProofContract.Services.BlobStorage).Outcome.Should().Be(KeylessProofContract.Outcomes.NotConfigured);
+    }
+
     private static (string Outcome, string Code) Outcome(IReadOnlyList<KeylessProbeResult> results, string service)
     {
         var result = results.Single(r => r.Service == service);
         return (result.Outcome, result.Code);
     }
 
-    private static AiKeylessProbe Probe(Dictionary<string, string?> settings, DocumentIntelligenceOptions docIntel)
+    private static AiKeylessProbe Probe(Dictionary<string, string?> settings, DocumentIntelligenceOptions docIntel, IHttpClientFactory? clients = null)
     {
         var configuration = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
         var credential = new NeverCalledCredential();
@@ -115,7 +140,7 @@ public class AiKeylessProbeTests
             Options.Create(docIntel),
             credential,
             new CosmosClient("https://cosmos.example:443/", credential),
-            new NoBaseAddressHttpClientFactory(),
+            clients ?? new NoBaseAddressHttpClientFactory(),
             NullLogger<AiKeylessProbe>.Instance);
     }
 
@@ -126,6 +151,18 @@ public class AiKeylessProbeTests
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
             => throw new InvalidOperationException("no probe in these tests may reach a service");
+    }
+
+    /// <summary>A Content Safety probe client whose transport answers <paramref name="status"/> (the auth handler is not under test here).</summary>
+    private sealed class StatusClientFactory(System.Net.HttpStatusCode status) : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new(new StatusHandler(status)) { BaseAddress = new Uri("https://cs.example/") };
+
+        private sealed class StatusHandler(System.Net.HttpStatusCode status) : HttpMessageHandler
+        {
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                => Task.FromResult(new HttpResponseMessage(status) { Content = new StringContent("{}") });
+        }
     }
 
     /// <summary>AiSafetyModule leaves the probe client without a base address when no endpoint is configured.</summary>

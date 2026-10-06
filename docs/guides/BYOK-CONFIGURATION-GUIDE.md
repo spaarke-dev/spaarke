@@ -55,13 +55,13 @@
 | **Azure AI Foundry** | Dedicated project per customer | Dedicated project per customer | Customer-provisioned project |
 | **Azure OpenAI** | Dedicated per customer, Spaarke-managed | Dedicated per customer | Customer-managed |
 | **Encryption Keys** | Spaarke-managed (MSFT CMK) | Spaarke-managed (MSFT CMK) | Customer-managed keys (true BYOK) |
-| **AI Search Index** | **Dedicated AI Search service per customer** | **Dedicated AI Search service per customer** | Customer-provisioned |
+| **AI Search Index** | **Dedicated AI Search service per customer** | **Dedicated AI Search service per customer** | Same as Model 2 — the stamp's own AI Search, managed identity, no key |
 | **Bing Connection** | Spaarke-registered, per customer project | Spaarke-registered, per customer project | Customer-registered in their project |
 | **BFF app registration** | Per customer, in Spaarke's tenant (D-13) | Per customer, in the customer's tenant (D-13) | Same as Model 2 |
 | **BFF Foundry Endpoint** | `AgentService:Endpoint` → that customer's project | `AgentService:Endpoint` → that customer's project | `AgentService:Endpoint` → customer project |
 | **Agent ID** | `AgentService:AgentId` → per-customer deploy | `AgentService:AgentId` → per-customer deploy | `AgentService:AgentId` → customer-deployed |
-| **AnalysisOptions:DefaultRagModel** | `Dedicated` | `Dedicated` | `CustomerOwned` |
-| **AnalysisOptions:CustomerTenantId** | Not required | Not required | **Required** — customer's Azure AD tenant |
+| **AnalysisOptions:DefaultRagModel** | `Dedicated` | `Dedicated` | `Dedicated` |
+| **AnalysisOptions:CustomerTenantId** | Not required | Not required | Not required |
 | **H0.5 admin consent** | not required | **required** | **required** |
 | **Azure Lighthouse delegation** | not required | **required** | **required** |
 
@@ -72,7 +72,9 @@ tenant owns the subscription.
 (`spaarke-knowledge-index-v2`) shared across customers, isolated by a `tenantId` filter. Under Model 1 every
 customer presents **Spaarke's** tenant GUID, so that filter separates Entra tenants only and delivers **no
 customer isolation at all** — while reporting success. The enum value still exists in code; treat it as
-never-provision and use `Dedicated` (or `CustomerOwned` for BYOK).
+never-provision and use `Dedicated` — including for Model 2 + BYOK.
+
+The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
 ⚠️ `tenantId` is **not** a customer discriminator. Any resource that legitimately stays shared needs a
 `customerId` discriminator instead. The closed exception list is **Static Web Apps** (Office add-ins +
@@ -165,16 +167,17 @@ because auth uses Managed Identity through the Azure AI Projects SDK (ADR-015).
 **Config section**: `Analysis`
 **DI validation**: `ValidateDataAnnotations().ValidateOnStart()` — fail-fast at startup.
 
-The `Analysis` section includes the **deployment model selector** (`DefaultRagModel`) and
-the keys needed for customer-owned RAG deployments.
+The `Analysis` section includes the **deployment model selector** (`DefaultRagModel`).
+
+> The former `CustomerOwned` value was removed (task 230b, 2026-10-06) — see the note under the Deployment Model Matrix.
 
 | Config Key | Env Var (App Service) | Type | Required | Default | Purpose |
 |------------|-----------------------|------|----------|---------|---------|
 | `Analysis:Enabled` | `Analysis__Enabled` | `bool` | Yes | `true` | Master kill switch for the Analysis feature. |
-| `Analysis:DefaultRagModel` | `Analysis__DefaultRagModel` | `enum` | No | `Shared` | RAG deployment model. **Set `Dedicated` for Model 1 and Model 2; `CustomerOwned` for Model 2 + BYOK.** 🔴 The code default `Shared` is **RETIRED — never provision it** (see the Deployment Model Matrix above); it keys isolation on `tenantId`, which cannot separate customers under Model 1. Set this key explicitly on every deployment. |
-| `Analysis:SharedIndexName` | `Analysis__SharedIndexName` | `string` | No | `spaarke-knowledge-index-v2` | AI Search index name for the retired `Shared` model. Unused when `DefaultRagModel` is `Dedicated` or `CustomerOwned` — i.e. always, going forward. |
-| `Analysis:CustomerTenantId` | `Analysis__CustomerTenantId` | `string` | When CustomerOwned | — | Customer's Azure AD tenant ID for cross-tenant scenarios. |
-| `Analysis:KeyVaultUrl` | `Analysis__KeyVaultUrl` | `string` | When CustomerOwned | — | Customer Key Vault URL for secret resolution at runtime. |
+| `Analysis:DefaultRagModel` | `Analysis__DefaultRagModel` | `enum` | No | `Shared` | RAG deployment model. **Set `Dedicated` for Model 1 and Model 2 (including Model 2 + BYOK).** Only `Shared` and `Dedicated` bind; any other value fails at startup. 🔴 The code default `Shared` is **RETIRED — never provision it** (see the Deployment Model Matrix above); it keys isolation on `tenantId`, which cannot separate customers under Model 1. Set this key explicitly on every deployment. |
+| `Analysis:SharedIndexName` | `Analysis__SharedIndexName` | `string` | No | `spaarke-knowledge-index-v2` | AI Search index name for the retired `Shared` model. Unused when `DefaultRagModel` is `Dedicated` — i.e. always, going forward. |
+| `Analysis:CustomerTenantId` | `Analysis__CustomerTenantId` | `string` | No | — | Customer's Azure AD tenant ID for cross-tenant scenarios. Not read by any code path. |
+| `Analysis:KeyVaultUrl` | `Analysis__KeyVaultUrl` | `string` | No | — | Customer Key Vault URL for secret resolution at runtime. Not read by any code path. |
 | `Analysis:PromptFlowEndpoint` | `Analysis__PromptFlowEndpoint` | `string` | No | — | AI Foundry Prompt Flow endpoint (optional; falls back to direct Azure OpenAI). |
 | `Analysis:DeploymentEnvironment` | `Analysis__DeploymentEnvironment` | `string` | No | `Development` | Environment label for logging and telemetry. |
 
@@ -313,7 +316,6 @@ Use this checklist when deploying to a customer-owned Azure AI Foundry project.
 - [ ] Customer has created an Azure OpenAI resource and deployed a model that supports the Assistants API (GPT-4o or GPT-4o-mini recommended).
 - [ ] Customer has created a Bing Grounding connection in their Foundry project (if `BingGrounding:Enabled = true`).
 - [ ] Managed Identity of the BFF App Service is granted `Contributor` (or `AI Developer`) on the customer's Foundry project.
-- [ ] Customer's Azure AI Search index exists (for `CustomerOwned` RAG model).
 
 ### Agent deployment
 
@@ -327,10 +329,9 @@ Use this checklist when deploying to a customer-owned Azure AI Foundry project.
 - [ ] Set `AgentService:Endpoint` to the customer's Foundry project endpoint URL.
 - [ ] Set `AgentService:AgentId` to the agent ID from the deployment step.
 - [ ] Set `BingGrounding:BingConnectionName` to the connection name registered in the customer's project (if Bing enabled).
-- [ ] Set `Analysis:DefaultRagModel = CustomerOwned`.
-- [ ] Set `Analysis:CustomerTenantId` to the customer's Azure AD tenant ID.
+- [ ] Set `Analysis:DefaultRagModel = Dedicated` (the stamp's own AI Search, reached with the BFF's managed identity — no key).
 - [ ] Set `AzureOpenAI:Endpoint` to the customer's Azure OpenAI endpoint (if customer provides their own OpenAI).
-- [ ] Verify `AiSearch:Endpoint` points to the customer's AI Search resource (if customer provides their own).
+- [ ] Verify `AiSearch:Endpoint` points to the stamp's own AI Search service.
 
 ### Verification
 
@@ -414,10 +415,11 @@ must be substituted by the deployment pipeline or Key Vault references.
   // ─── Analysis (RAG deployment model selector) ────────────────────────────────
   "Analysis": {
     "Enabled": true,
-    "DefaultRagModel": "Dedicated", // Dedicated (Model 1 + Model 2) | CustomerOwned (BYOK).
+    "DefaultRagModel": "Dedicated", // Dedicated (Model 1 + Model 2, incl. BYOK). Only Shared | Dedicated bind.
                                     // "Shared" is RETIRED — never provision it (D-12).
-    "CustomerTenantId": null,    // Required for CustomerOwned model
-    "KeyVaultUrl": null,         // Required for CustomerOwned model
+                                    // CustomerOwned was removed (task 230b) — fails at startup.
+    "CustomerTenantId": null,    // Not read by any code path
+    "KeyVaultUrl": null,         // Not read by any code path
     // ... (see AnalysisOptions.cs for full schema)
   }
 }

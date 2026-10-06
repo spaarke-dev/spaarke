@@ -79,7 +79,7 @@ This guide covers the complete deployment of AI Document Intelligence for the Sp
 
 **R3 Scope (RAG Infrastructure)** *(Phase 1 Complete)*:
 - RAG knowledge index (`spaarke-knowledge-index-v2`) with hybrid search (3072-dim vectors)
-- Per-customer RAG deployment: `Dedicated` (the default — a dedicated AI Search service per customer) or `CustomerOwned` (BYOK, in the customer's own subscription). The former `Shared` value is **retired — never provision it**; see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
+- Per-customer RAG deployment: `Dedicated` (the default — a dedicated AI Search service per customer, in Model 1 and Model 2 alike). The former `CustomerOwned` value was removed (task 230b) and the former `Shared` value is **retired — never provision it**; see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models).
 - `IKnowledgeDeploymentService` for SearchClient routing
 - `IRagService` for hybrid search with semantic ranking
 - Redis caching for embeddings
@@ -578,7 +578,7 @@ az search index list \
 | `speFileId` | Edm.String | SharePoint Embedded file ID |
 | `fileName` | Edm.String | Original file name |
 | `deploymentId` | Edm.String | Deployment model ID |
-| `deploymentModel` | Edm.String | Shared/Dedicated/CustomerOwned |
+| `deploymentModel` | Edm.String | Shared/Dedicated |
 
 ### 6.2 RAG Services Registration
 
@@ -600,13 +600,14 @@ The following services are registered in `Program.cs` when AI Search is configur
 
 ### 6.3 Deployment Models
 
-The RAG system supports 3 deployment models configured per tenant:
+The RAG system supports 2 deployment models configured per tenant:
 
 | Model | Index Location | Configuration |
 |-------|---------------|---------------|
-| **Shared** | `spaarke-knowledge-index-v2` | Default, `tenantId` filter for isolation |
+| **Shared** | `spaarke-knowledge-index-v2` | 🔴 Retired — never provision (see [`RAG-ARCHITECTURE.md`](RAG-ARCHITECTURE.md#deployment-models)) |
 | **Dedicated** | `{tenantId}-knowledge` | Per-customer index, requires index creation |
-| **CustomerOwned** | Customer Azure AI Search | Requires Key Vault secret for API key |
+
+The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
 **Default Shared Index**: Configure via `Analysis__SharedIndexName` in App Service. Default: `spaarke-knowledge-index-v2`.
 

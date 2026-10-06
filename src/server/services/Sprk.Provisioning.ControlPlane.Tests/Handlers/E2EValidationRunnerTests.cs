@@ -267,16 +267,91 @@ public sealed class E2EValidationRunnerTests
     }
 
     [Fact]
-    public async Task RunAsync_BffBuildWithoutTheRoute_404_IsAFailure()
+    public async Task RunAsync_BffBuildWithoutTheRoute_404_IsInconclusive_RedeployThenResume()
     {
         var handler = new FakeBffHttpMessageHandler(req =>
             IsKeylessProof(req) ? new HttpResponseMessage(HttpStatusCode.NotFound) : HappyResponder(req));
 
         var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
 
-        outcome.Should().BeOfType<E2EValidationOutcome.Failure>()
+        outcome.Should().BeOfType<E2EValidationOutcome.Inconclusive>()
             .Which.Diagnostic.Should().Contain("404").And.Contain("230b");
     }
+
+    [Fact]
+    public async Task RunAsync_ABffError500_IsAFailure_NotTransient()
+    {
+        var handler = new FakeBffHttpMessageHandler(req =>
+            IsKeylessProof(req) ? new HttpResponseMessage(HttpStatusCode.InternalServerError) : HappyResponder(req));
+
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Which.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+    }
+
+    [Fact]
+    public async Task RunAsync_PlainHttpBff_NeverSendsTheToken_AndFails()
+    {
+        var credential = new FakeTokenCredential();
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
+
+        var outcome = await BuildRunner(handler, credential).RunAsync(BuildRequest(bffApiUrl: "http://bff-acme.azurewebsites.net"), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>().Which.ChecksFailed.Should().Equal(E2EValidationRunner.CheckKeylessProof);
+        credential.RequestedScopes.Should().BeEmpty();
+        handler.RequestedUrls.Should().NotContain(u => u.EndsWith(KeylessProofContract.Route, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ATokenWithoutTheRole_FailsWithTheTokenCacheDiagnostic_WithoutCallingTheBff()
+    {
+        var jwt = "eyJhbGciOiJub25lIn0." + Base64Url("{\"aud\":\"api://x\",\"roles\":[\"Other.Role\"]}") + ".";
+        var handler = new FakeBffHttpMessageHandler(HappyResponder);
+
+        var outcome = await BuildRunner(handler, new FakeTokenCredential(jwt)).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.Diagnostic.Should().Contain("carries no").And.Contain("24 hours").And.Contain("Other.Role");
+        handler.RequestedUrls.Should().NotContain(u => u.EndsWith(KeylessProofContract.Route, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task RunAsync_ATokenCarryingTheRole_IsSent()
+    {
+        var jwt = "eyJhbGciOiJub25lIn0." + Base64Url("{\"roles\":[\"" + KeylessProofContract.AppRoleValue + "\"]}") + ".";
+
+        var outcome = await BuildRunner(new FakeBffHttpMessageHandler(HappyResponder), new FakeTokenCredential(jwt))
+            .RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Success>();
+    }
+
+    [Fact]
+    public async Task RunAsync_AStatusNumberThatIsNotAnInt_IsDropped_TheOutcomeStillDecides()
+    {
+        var body = KeylessBody().Replace("\"statusCode\":200", "\"statusCode\":1e100", StringComparison.Ordinal);
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req) ? Json(body) : HappyResponder(req));
+
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Success>();
+    }
+
+    [Fact]
+    public async Task RunAsync_AnUnreachableThenARefusedDuplicate_TheRefusalWins()
+    {
+        var body = KeylessBody((KeylessProofContract.Services.Cosmos, KeylessProofContract.Outcomes.Unreachable, "timeout"))
+            .Replace("]}", ",{\"service\":\"cosmos\",\"outcome\":\"refused\",\"code\":\"http-403\"}]}", StringComparison.Ordinal);
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req) ? Json(body) : HappyResponder(req));
+
+        var outcome = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        outcome.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.Cosmos);
+    }
+
+    private static string Base64Url(string json)
+        => Convert.ToBase64String(Encoding.UTF8.GetBytes(json)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     [Fact]
     public async Task RunAsync_NoTokenForTheBff_IsAFailure()
@@ -792,12 +867,16 @@ public sealed class E2EValidationRunnerTests
     {
         public const string TokenValue = "fake-keyless-proof-token";
 
+        private readonly string _token;
+
+        public FakeTokenCredential(string token = TokenValue) => _token = token;
+
         public List<string> RequestedScopes { get; } = new();
 
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
         {
             RequestedScopes.AddRange(requestContext.Scopes);
-            return new(TokenValue, DateTimeOffset.UtcNow.AddHours(1));
+            return new(_token, DateTimeOffset.UtcNow.AddHours(1));
         }
 
         public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)

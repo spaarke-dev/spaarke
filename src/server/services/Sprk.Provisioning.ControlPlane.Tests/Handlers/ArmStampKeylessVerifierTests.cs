@@ -132,6 +132,24 @@ public sealed class ArmStampKeylessVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_AnotherSiteInTheGroupWithAKey_Fails()
+    {
+        var arm = new FakeArm();
+        arm.Resources.Add(new("Microsoft.Web/sites", "acme-helper"));
+        arm.SlotSettings["helper"] = new() { ["ServiceBus__ConnectionString"] = "Endpoint=sb://x/;SharedAccessKeyName=r;SharedAccessKey=k" };
+
+        (await FailedWith(arm)).Should().ContainSingle().Which.Should().Contain("acme-helper").And.Contain("ServiceBus__ConnectionString");
+    }
+
+    [Fact]
+    public async Task VerifyAsync_ANextLinkOutsideArm_IsNotFollowed_InfraFault()
+    {
+        var arm = new FakeArm { PageSize = 3, NextLinkHost = "https://evil.example" };
+
+        (await Verify(arm)).Should().BeOfType<StampKeylessOutcome.InfraFault>().Which.Diagnostic.Should().Contain("nextLink");
+    }
+
+    [Fact]
     public async Task VerifyAsync_ArmRefusesTheL2Identity_IsAnInfraFault_NotAPass()
     {
         var arm = new FakeArm { Status = HttpStatusCode.Forbidden };
@@ -171,6 +189,7 @@ public sealed class ArmStampKeylessVerifierTests
         public string RedisAccessKeys { get; init; } = "Disabled";
         public int PageSize { get; init; } = 100;
         public HttpStatusCode Status { get; init; } = HttpStatusCode.OK;
+        public string NextLinkHost { get; init; } = "https://management.azure.com";
 
         public Dictionary<string, Dictionary<string, string>> SlotSettings { get; } = new()
         {
@@ -200,17 +219,19 @@ public sealed class ArmStampKeylessVerifierTests
                 });
                 var body = new JsonObject { ["value"] = new JsonArray(page.ToArray<JsonNode?>()) };
                 if (skip + PageSize < Resources.Count)
-                    body["nextLink"] = $"https://management.azure.com{Group}/resources?api-version=2021-04-01&skip={skip + PageSize}";
+                    body["nextLink"] = $"{NextLinkHost}{Group}/resources?api-version=2021-04-01&skip={skip + PageSize}";
                 return Json(body);
             }
             if (path == $"{site}/slots")
                 return Json(new JsonObject { ["value"] = new JsonArray(new JsonObject { ["name"] = $"{Site}/staging" }) });
+            if (path.EndsWith("/slots", StringComparison.Ordinal))
+                return Json(new JsonObject { ["value"] = new JsonArray() }); // other sites: no slots
             if (path.EndsWith("/config/appsettings/list", StringComparison.Ordinal))
-                return Json(new JsonObject { ["properties"] = ToObject(SlotSettings[SlotOf(path, site)]) });
+                return Json(new JsonObject { ["properties"] = ToObject(SlotSettings.GetValueOrDefault(SlotOf(path, site)) ?? new()) });
             if (path.EndsWith("/config/connectionstrings/list", StringComparison.Ordinal))
             {
                 var props = new JsonObject();
-                foreach (var (name, value) in ConnectionStrings[SlotOf(path, site)])
+                foreach (var (name, value) in ConnectionStrings.GetValueOrDefault(SlotOf(path, site)) ?? new())
                     props[name] = new JsonObject { ["value"] = value, ["type"] = "Custom" };
                 return Json(new JsonObject { ["properties"] = props });
             }
@@ -225,7 +246,9 @@ public sealed class ArmStampKeylessVerifierTests
         }
 
         private static string SlotOf(string path, string site)
-            => path.StartsWith(site + "/slots/", StringComparison.Ordinal) ? path[(site.Length + 7)..].Split('/')[0] : "production";
+            => path.StartsWith(site + "/slots/", StringComparison.Ordinal) ? path[(site.Length + 7)..].Split('/')[0]
+             : path.StartsWith(site + "/", StringComparison.Ordinal) ? "production"
+             : "helper"; // any other site in the group
 
         private static JsonObject ToObject(Dictionary<string, string> settings)
         {

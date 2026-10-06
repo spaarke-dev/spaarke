@@ -29,6 +29,7 @@ public sealed class KeylessProofService
     private readonly IOptions<RedisOptions> _redisOptions;
     private readonly IConnectionMultiplexer _redis;
     private readonly TokenCredential _credential;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<KeylessProofService> _logger;
 
     public KeylessProofService(
@@ -37,6 +38,7 @@ public sealed class KeylessProofService
         IOptions<RedisOptions> redisOptions,
         IConnectionMultiplexer redis,
         TokenCredential credential,
+        IConfiguration configuration,
         ILogger<KeylessProofService> logger)
     {
         _aiProbe = aiProbe;
@@ -44,6 +46,7 @@ public sealed class KeylessProofService
         _redisOptions = redisOptions;
         _redis = redis;
         _credential = credential;
+        _configuration = configuration;
         _logger = logger;
     }
 
@@ -96,7 +99,10 @@ public sealed class KeylessProofService
             return Task.FromResult(KeylessProbeRunner.NotConfigured(service, "Redis:Enabled"));
         // Without an endpoint the multiplexer was built from a connection string (CacheModule) — a key.
         if (string.IsNullOrWhiteSpace(options.Endpoint))
-            return Task.FromResult(KeylessProbeRunner.KeyCredential(service, "Redis:ConnectionString"));
+        {
+            return Task.FromResult(KeylessProbeRunner.KeyCredential(service,
+                string.IsNullOrWhiteSpace(_configuration["ConnectionStrings:Redis"]) ? "Redis:ConnectionString" : "ConnectionStrings:Redis"));
+        }
 
         return KeylessProbeRunner.RunAsync(service, async token =>
         {

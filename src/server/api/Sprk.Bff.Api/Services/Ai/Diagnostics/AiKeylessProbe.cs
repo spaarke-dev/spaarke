@@ -28,8 +28,9 @@ namespace Sprk.Bff.Api.Services.Ai.Diagnostics;
 /// <see cref="KeylessProofContract.Outcomes.KeyCredential"/> instead of calling — the key-selection rules mirrored here are
 /// those of <c>AiModule.BuildInnerClient</c>, <c>OpenAiClient</c>, <c>TextExtractorService</c>,
 /// <see cref="SearchClientFactory"/> and <see cref="ContentSafetyAuthHandler"/>.</para>
-/// <para><b>Side effects and cost.</b> Every call is read-only. Chat is capped at 16 output tokens and the
-/// embedding input is three words; Prompt Shield and groundedness are one text record each; Document
+/// <para><b>Side effects and cost.</b> Every call is read-only. Chat asks for a one-word reply (no output-token cap:
+/// reasoning-model deployments reject <c>max_tokens</c>, which would fail a healthy stamp) and the embedding input is
+/// four words; Prompt Shield and groundedness are one text record each; Document
 /// Intelligence's resource-details read is free. Together a fraction of a cent per H13 run.</para>
 /// <para>Content Safety goes through <see cref="ContentSafetyProbeHttpClientName"/>: the production client's timeout
 /// is the Prompt Shield budget (~550 ms), short enough that a probe through it would report a timeout instead of the
@@ -107,8 +108,7 @@ public sealed class AiKeylessProbe : IAiKeylessProbe
             var chat = new AzureOpenAIClient(new Uri(endpoint), _credential).GetChatClient(model);
             var result = await chat.CompleteChatAsync(
                 [new UserChatMessage("Reply with the single word OK.")],
-                new ChatCompletionOptions { MaxOutputTokenCount = 16 },
-                token).ConfigureAwait(false);
+                cancellationToken: token).ConfigureAwait(false);
             return result.GetRawResponse().Status;
         }, _logger, ct);
     }
@@ -195,11 +195,21 @@ public sealed class AiKeylessProbe : IAiKeylessProbe
         var endpoint = _configuration[SessionFileBlobStore.BlobEndpointConfigKey];
         if (string.IsNullOrWhiteSpace(endpoint))
             return Task.FromResult(KeylessProbeRunner.NotConfigured(service, SessionFileBlobStore.BlobEndpointConfigKey));
+        Uri endpointUri;
+        string containerName;
+        try
+        {
+            endpointUri = SessionFileBlobStore.ValidateConfiguration(
+                endpoint, _configuration[SessionFileBlobStore.ContainerNameConfigKey], out containerName);
+        }
+        catch (InvalidOperationException)
+        {
+            // An invalid endpoint or container name is a configuration fault, not a service answer.
+            return Task.FromResult(KeylessProbeRunner.NotConfigured(service, SessionFileBlobStore.BlobEndpointConfigKey));
+        }
 
         return KeylessProbeRunner.RunAsync(service, async token =>
         {
-            var endpointUri = SessionFileBlobStore.ValidateConfiguration(
-                endpoint, _configuration[SessionFileBlobStore.ContainerNameConfigKey], out var containerName);
             var container = new BlobServiceClient(endpointUri, _credential).GetBlobContainerClient(containerName);
             // One listing page of at most one name: proves blob read access; the name is discarded.
             await foreach (var page in container.GetBlobsAsync(cancellationToken: token).AsPages(pageSizeHint: 1).ConfigureAwait(false))
@@ -215,7 +225,7 @@ public sealed class AiKeylessProbe : IAiKeylessProbe
         if (!string.IsNullOrWhiteSpace(_configuration[ContentSafetyAuthHandler.ApiKeyConfigKey])
             && !_configuration.GetValue<bool>(ContentSafetyAuthHandler.ManagedIdentityEnabledConfigKey))
         {
-            return Task.FromResult(KeylessProbeRunner.KeyCredential(service, ContentSafetyAuthHandler.ApiKeyConfigKey));
+            return Task.FromResult(KeylessProbeRunner.KeyCredential(service, "AiSafety:ContentSafety:ApiKey")); // = ContentSafetyAuthHandler.ApiKeyConfigKey (pinned by AiKeylessProbeTests)
         }
 
         var client = _httpClientFactory.CreateClient(ContentSafetyProbeHttpClientName);

@@ -119,10 +119,15 @@ public sealed class PromptShieldService : IPromptShieldService
                 result.IsBlocked, result.BlockReason,
                 request.Documents?.Count ?? 0, latencyMs);
 
-            _telemetry.RecordScan(result, latencyMs);
-            if (result.AuthRefused)
+            // One latency sample per scan: a fail-open (429 / 5xx / 401 / 403 / unparseable) is recorded as a fail-open,
+            // never also as a completed scan.
+            if (result.FailedOpen)
             {
-                _telemetry.RecordFailOpen("auth", latencyMs);
+                _telemetry.RecordFailOpen(result.AuthRefused ? "auth" : "error", latencyMs);
+            }
+            else
+            {
+                _telemetry.RecordScan(result, latencyMs);
             }
 
             // Shield-coverage counter (assessment rec 2a): CallApiAsync returns FailedOpen

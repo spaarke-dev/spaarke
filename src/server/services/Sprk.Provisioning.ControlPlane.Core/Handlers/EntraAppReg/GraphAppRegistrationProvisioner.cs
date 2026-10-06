@@ -501,8 +501,18 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
         => assignments?.Any(a => a.PrincipalId == principalId && a.AppRoleId == appRoleId) == true;
 
     /// <summary>
-    /// Assigns the keyless-proof role on the BFF service principal to the L2 Worker identity, idempotently. Retries the
-    /// POST while Entra has not yet propagated a just-added role. Returns null on success or a Failure.
+    /// Assignments of <paramref name="appRoleId"/> to anyone but <paramref name="principalId"/> — the role admits a caller
+    /// to the stamp's keyless proof, so only the L2 Worker identity may hold it (task 230b).
+    /// </summary>
+    internal static IReadOnlyList<AppRoleAssignment> ForeignRoleHolders(IEnumerable<AppRoleAssignment>? assignments, Guid principalId, Guid appRoleId)
+        => (assignments ?? Enumerable.Empty<AppRoleAssignment>())
+            .Where(a => a.AppRoleId == appRoleId && a.PrincipalId != principalId && !string.IsNullOrWhiteSpace(a.Id))
+            .ToList();
+
+    /// <summary>
+    /// Assigns the keyless-proof role on the BFF service principal to the L2 Worker identity, idempotently, and removes
+    /// the role from anyone else (only L2 may hold it). Retries while Entra has not yet propagated a just-added role
+    /// (400) or a just-created service principal (404). Returns null on success or a Failure.
     /// </summary>
     private async Task<EntraAppRegOutcome?> EnsureKeylessProofRoleAssignmentAsync(
         GraphServiceClient graph, Application app, string servicePrincipalId, EntraAppRegRequest request, CancellationToken ct)
@@ -529,6 +539,17 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
 
                 var existing = await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo
                     .GetAsync(rc => rc.QueryParameters.Top = 999, timeoutCts.Token).ConfigureAwait(false);
+
+                foreach (var foreign in ForeignRoleHolders(existing?.Value, principalId, appRoleId))
+                {
+                    _logger.LogWarning(
+                        "H3 removing the keyless-proof role from {PrincipalType} {PrincipalId} ({PrincipalName}) — only the L2 " +
+                        "identity may hold it (task 230b). customerId={CustomerId}",
+                        foreign.PrincipalType, foreign.PrincipalId, foreign.PrincipalDisplayName, request.CustomerId);
+                    await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo[foreign.Id]
+                        .DeleteAsync(cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+                }
+
                 if (HasRoleAssignment(existing?.Value, principalId, appRoleId))
                 {
                     return null;
@@ -546,13 +567,13 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                     request.CustomerId, app.AppId, principalId);
                 return null;
             }
-            catch (ODataError ex) when (ex.ResponseStatusCode == 400 && attempt < _options.FicExchangeRetryCount)
+            catch (ODataError ex) when (ex.ResponseStatusCode is 400 or 404 && attempt < _options.RoleAssignmentRetryCount)
             {
-                // A role added moments ago may not be visible to the assignment endpoint yet.
+                // A role added moments ago (400) or a service principal created moments ago (404) may not be visible yet.
                 _logger.LogInformation(ex,
-                    "H3 keyless-proof role assignment attempt {Attempt}/{Max} returned 400 — retrying after propagation delay.",
-                    attempt, _options.FicExchangeRetryCount);
-                await Task.Delay(_options.FicExchangeRetryDelay, ct).ConfigureAwait(false);
+                    "H3 keyless-proof role assignment attempt {Attempt}/{Max} returned {Status} — retrying after propagation delay.",
+                    attempt, _options.RoleAssignmentRetryCount, ex.ResponseStatusCode);
+                await Task.Delay(_options.RoleAssignmentRetryDelay, ct).ConfigureAwait(false);
             }
             catch (ODataError ex)
             {

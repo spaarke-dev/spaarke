@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Spaarke.Contracts.Provisioning;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.Filters;
@@ -34,8 +35,10 @@ public static class KeylessProofAuthorizationFilterExtensions
 /// but the check costs nothing and keeps the rule true if a future change lets users hold the role: a token with a
 /// <c>scp</c> claim acts for a user and is refused. A token whose <c>idtyp</c> claim is present and is not
 /// <c>app</c> is refused too.</para>
-/// <para>The audience and issuer are validated by the default JwtBearer scheme before this filter runs (this BFF's
-/// app registration, this tenant).</para>
+/// <para><b>Tenant and audience are pinned here too</b> (defence in depth, task 230b review F2). The default JwtBearer
+/// scheme validates them, but it also accepts the Copilot audience (<c>AgentToken:CopilotAudience</c>) and the app
+/// registration is multi-tenant: the filter admits only a token whose <c>tid</c> is <c>AzureAd:TenantId</c> and whose
+/// <c>aud</c> is this BFF's client id or <c>api://{client id}</c>. Missing configuration refuses.</para>
 /// </remarks>
 public sealed class KeylessProofAuthorizationFilter : IEndpointFilter
 {
@@ -71,10 +74,11 @@ public sealed class KeylessProofAuthorizationFilter : IEndpointFilter
                 });
         }
 
-        if (!IsAdmitted(user))
+        var configuration = httpContext.RequestServices.GetService<IConfiguration>();
+        if (!IsAdmitted(user, configuration?["AzureAd:TenantId"], configuration?["AzureAd:ClientId"]))
         {
             _logger?.LogWarning(
-                "Keyless proof denied: caller appid={AppId} is not an application holding the {Role} role.",
+                "Keyless proof denied: caller appid={AppId} is not an application of this tenant holding the {Role} role for this API.",
                 user.FindFirst("appid")?.Value ?? user.FindFirst("azp")?.Value, KeylessProofContract.AppRoleValue);
 
             return ProblemDetailsHelper.Forbidden(
@@ -83,19 +87,38 @@ public sealed class KeylessProofAuthorizationFilter : IEndpointFilter
                 traceId: httpContext.TraceIdentifier);
         }
 
+        _logger?.LogInformation(
+            "Keyless proof admitted: caller appid={AppId} oid={ObjectId}.",
+            user.FindFirst("appid")?.Value ?? user.FindFirst("azp")?.Value,
+            CallerResolution.ResolveObjectId(user));
         return await next(context);
     }
 
-    /// <summary>True for an app-only token carrying the keyless-proof role.</summary>
-    internal static bool IsAdmitted(ClaimsPrincipal user)
+    /// <summary>
+    /// True for an app-only token of <paramref name="tenantId"/>, issued for this API (<paramref name="clientId"/> or
+    /// <c>api://{clientId}</c>), carrying the keyless-proof role. A missing tenant or client id refuses.
+    /// </summary>
+    internal static bool IsAdmitted(ClaimsPrincipal user, string? tenantId, string? clientId)
     {
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(clientId))
+        {
+            return false;
+        }
+
         var actsForUser = user.HasClaim(c => c.Type is ScopeClaim or ScopeClaimLong);
         var idtyp = user.FindFirst("idtyp")?.Value;
         var appOnly = !actsForUser && (idtyp is null || string.Equals(idtyp, "app", StringComparison.Ordinal));
 
+        var tid = user.FindFirst("tid")?.Value ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        var thisTenant = string.Equals(tid?.Trim(), tenantId.Trim(), StringComparison.OrdinalIgnoreCase);
+
+        var audience = user.FindFirst("aud")?.Value;
+        var thisApi = string.Equals(audience, clientId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(audience, $"api://{clientId}", StringComparison.OrdinalIgnoreCase);
+
         var hasRole = user.IsInRole(KeylessProofContract.AppRoleValue)
             || user.HasClaim(c => (c.Type is "roles" or ClaimTypes.Role) && c.Value == KeylessProofContract.AppRoleValue);
 
-        return appOnly && hasRole;
+        return appOnly && thisTenant && thisApi && hasRole;
     }
 }

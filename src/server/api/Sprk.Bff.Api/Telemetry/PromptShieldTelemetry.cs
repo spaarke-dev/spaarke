@@ -74,7 +74,7 @@ public sealed class PromptShieldTelemetry : IDisposable
     /// <summary>
     /// Records a fail-open outcome (service unavailable — request allowed through with warning).
     /// </summary>
-    /// <param name="cause"><c>timeout</c> or <c>error</c></param>
+    /// <param name="cause"><c>timeout</c>, <c>error</c>, or <c>auth</c> (Content Safety refused the identity — task 230b)</param>
     /// <param name="latencyMs">Elapsed time before the failure was detected.</param>
     public void RecordFailOpen(string cause, double latencyMs)
     {

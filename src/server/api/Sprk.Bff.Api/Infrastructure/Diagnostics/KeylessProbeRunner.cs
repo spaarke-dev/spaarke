@@ -1,5 +1,4 @@
 using System.ClientModel;
-using System.Diagnostics;
 using System.Net;
 using Azure;
 using Azure.Identity;
@@ -38,28 +37,31 @@ public static class KeylessProbeRunner
         Func<CancellationToken, Task<int?>> probe,
         ILogger logger,
         CancellationToken cancellationToken,
-        TimeSpan? timeout = null)
+        TimeSpan? timeout = null,
+        TimeProvider? timeProvider = null)
     {
-        var stopwatch = Stopwatch.StartNew();
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        limit.CancelAfter(timeout ?? DefaultTimeout);
+        var clock = timeProvider ?? TimeProvider.System;
+        var started = clock.GetTimestamp();
+        using var deadline = new CancellationTokenSource(timeout ?? DefaultTimeout, clock);
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        long ElapsedMs() => (long)clock.GetElapsedTime(started).TotalMilliseconds;
 
         try
         {
             var status = await probe(limit.Token).ConfigureAwait(false);
-            return new KeylessProbeResult(service, KeylessProofContract.Outcomes.Proved, status, stopwatch.ElapsedMilliseconds, "ok");
+            return new KeylessProbeResult(service, KeylessProofContract.Outcomes.Proved, status, ElapsedMs(), "ok");
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning("Keyless probe {Service} timed out after {ElapsedMs} ms.", service, stopwatch.ElapsedMilliseconds);
-            return new KeylessProbeResult(service, KeylessProofContract.Outcomes.Unreachable, null, stopwatch.ElapsedMilliseconds, "timeout");
+            logger.LogWarning("Keyless probe {Service} timed out after {ElapsedMs} ms.", service, ElapsedMs());
+            return new KeylessProbeResult(service, KeylessProofContract.Outcomes.Unreachable, null, ElapsedMs(), "timeout");
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             var (outcome, status, code) = Classify(ex);
             // The exception stays in the BFF's own log; the response carries the code only.
             logger.LogWarning(ex, "Keyless probe {Service}: {Outcome} ({Code}).", service, outcome, code);
-            return new KeylessProbeResult(service, outcome, status, stopwatch.ElapsedMilliseconds, code);
+            return new KeylessProbeResult(service, outcome, status, ElapsedMs(), code);
         }
     }
 
@@ -74,6 +76,9 @@ public static class KeylessProbeRunner
     /// <summary>Maps an exception thrown by an Azure SDK (or a token credential) to an outcome, status and code.</summary>
     internal static (string Outcome, int? Status, string Code) Classify(Exception ex) => ex switch
     {
+        // The Azure SDK retry layers throw AggregateException("Retry failed after N tries") when every attempt failed:
+        // a refusal among them is a refusal; otherwise the worst inner verdict (all transport faults → unreachable).
+        AggregateException { InnerExceptions.Count: > 0 } agg => Worst(agg.InnerExceptions.Select(Classify)),
         AuthenticationFailedException or CredentialUnavailableException
             => (KeylessProofContract.Outcomes.Refused, null, "token-unavailable"),
         RequestFailedException rfe => FromStatus(rfe.Status),
@@ -91,12 +96,22 @@ public static class KeylessProbeRunner
         },
         RedisServerException rse when rse.Message.Contains("NOAUTH", StringComparison.OrdinalIgnoreCase)
                                     || rse.Message.Contains("WRONGPASS", StringComparison.OrdinalIgnoreCase)
+                                    || rse.Message.Contains("NOPERM", StringComparison.OrdinalIgnoreCase)
             => (KeylessProofContract.Outcomes.Refused, null, "redis-auth"),
         RedisConnectionException rce when rce.FailureType == ConnectionFailureType.AuthenticationFailure
             => (KeylessProofContract.Outcomes.Refused, null, "redis-auth"),
         RedisConnectionException or RedisTimeoutException => (KeylessProofContract.Outcomes.Unreachable, null, "redis-connection"),
         _ => (KeylessProofContract.Outcomes.Failed, null, "unexpected-error"),
     };
+
+    private static (string Outcome, int? Status, string Code) Worst(IEnumerable<(string Outcome, int? Status, string Code)> verdicts)
+        => verdicts.OrderByDescending(v => v.Outcome switch
+        {
+            KeylessProofContract.Outcomes.Refused => 3,
+            KeylessProofContract.Outcomes.Failed => 2,
+            KeylessProofContract.Outcomes.Unreachable => 1,
+            _ => 0,
+        }).First();
 
     private static (string Outcome, int? Status, string Code) FromStatus(int status) => status switch
     {

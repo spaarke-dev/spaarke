@@ -17,10 +17,11 @@
 //                               "proved". The openai-chat result is the ADR-028 E-2 measurement on the stamp's
 //                               kind: OpenAI account (logged as such).
 //
-// FAIL-CLOSED (task 230b): an auth refusal is a FAILURE, never a skip — the role missing on the BFF (401/403), no
-//   token, a service that refused the stamp identity, a key configured instead of the identity, a missing setting, a
-//   service error, an unparseable answer, or a BFF build without the route (404). Only a fault with no verdict —
-//   transport, timeout, throttling, 5xx, or a service the BFF could not reach — is INCONCLUSIVE (H13: Resumable).
+// FAIL-CLOSED (task 230b): an auth refusal is a FAILURE, never a skip — the role missing on the BFF (401/403, or a
+//   token without the role), no token, a service that refused the stamp identity, a key configured instead of the
+//   identity, a missing setting, a service error, an unparseable answer, a BFF error (500), or a plain-http BFF URL.
+//   Only a fault with no verdict — transport, timeout, throttling, a gateway 502/503/504, a service the BFF could not
+//   reach, or a BFF build that predates the route (404: deploy, then resume) — is INCONCLUSIVE (H13: Resumable).
 //
 // REMOVED BY TASK 230b — the four G-8 Batch 11 "sample-workload" checks (POST /api/agent/message, POST
 //   /api/ai/search/count scope=all, GET /api/workspace/layouts, GET /api/v1/field-mappings/profiles). Each is a USER
@@ -263,6 +264,14 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
             return;
         }
 
+        // A privileged token never travels over plain http.
+        if (!string.Equals(bffBaseUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            failed.Add(CheckKeylessProof);
+            diagnostics.Add($"{CheckKeylessProof}: BffApiUrl '{bffBaseUri}' is not https -- the L2 token is not sent over plain http.");
+            return;
+        }
+
         // The audience the BFF validates (AzureAd:ClientId / api://{clientId}); a token for the host name is not it.
         var scope = $"api://{appId:D}/.default";
         string bearerToken;
@@ -284,6 +293,18 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
             diagnostics.Add(
                 $"{CheckKeylessProof}: the L2 identity could not get a token for '{scope}' ({ex.GetType().Name}: " +
                 $"{ex.Message}). Check H3 created the app registration with identifier URI api://{appId:D}.");
+            return;
+        }
+
+        // A managed-identity token is cached for up to 24 h: one issued before H3's role assignment propagated carries no
+        // role, and every retry within that window would 403. Say so instead of a generic refusal.
+        if (TokenRoles(bearerToken) is { } roles && !roles.Contains(KeylessProofContract.AppRoleValue, StringComparer.Ordinal))
+        {
+            failed.Add(CheckKeylessProof);
+            diagnostics.Add(
+                $"{CheckKeylessProof}: the L2 token for '{scope}' carries no '{KeylessProofContract.AppRoleValue}' role " +
+                $"(roles: [{string.Join(", ", roles)}]). H3 assigns it; a managed-identity token issued before the assignment " +
+                "propagated stays role-less for up to 24 hours (token cache).");
             return;
         }
 
@@ -311,7 +332,8 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
                 }
                 if (response.StatusCode == HttpStatusCode.NotFound)
                 {
-                    failed.Add(CheckKeylessProof);
+                    // No verdict on the stamp: the BFF build predates the route. Redeploy (H9), then resume.
+                    inconclusive.Add(CheckKeylessProof);
                     diagnostics.Add(
                         $"{CheckKeylessProof}: '{uri}' returned HTTP 404 -- the deployed BFF build has no keyless-proof route. " +
                         "Deploy a build that contains task 230b (H9), then resume.");
@@ -362,7 +384,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         {
             entries = ParseProof(body);
         }
-        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException)
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
         {
             failed.Add(CheckKeylessProof);
             diagnostics.Add($"{CheckKeylessProof}: the BFF's answer is not the keyless-proof shape ({ex.GetType().Name}).");
@@ -409,6 +431,17 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
 
     private sealed record ProofEntry(string Outcome, string Code, int? StatusCode);
 
+    /// <summary>The BFF's strings go into run state and logs: cap them and keep a safe character set.</summary>
+    private const int MaxReportedLength = 120;
+
+    /// <summary>Severity rank for duplicate entries — the worst wins, so a duplicate can never hide a refusal.</summary>
+    private static int Rank(string outcome) => outcome switch
+    {
+        KeylessProofContract.Outcomes.Proved => 0,
+        KeylessProofContract.Outcomes.Unreachable => 1,
+        _ => 2, // refused, key-credential, not-configured, failed, and anything unknown
+    };
+
     /// <summary>Parses the BFF's keyless-proof response (<c>{"services":[{"service","outcome","statusCode","elapsedMs","code"}]}</c>).</summary>
     private static Dictionary<string, ProofEntry> ParseProof(string? body)
     {
@@ -416,12 +449,12 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         var entries = new Dictionary<string, ProofEntry>(StringComparer.Ordinal);
         foreach (var item in doc.RootElement.GetProperty("services").EnumerateArray())
         {
-            var service = item.GetProperty("service").GetString() ?? string.Empty;
-            var outcome = item.GetProperty("outcome").GetString() ?? string.Empty;
-            var code = item.TryGetProperty("code", out var c) ? c.GetString() ?? string.Empty : string.Empty;
-            int? status = item.TryGetProperty("statusCode", out var st) && st.ValueKind == JsonValueKind.Number ? st.GetInt32() : null;
-            // A duplicate entry is not trusted: the worse of the two wins.
-            if (entries.TryGetValue(service, out var earlier) && earlier.Outcome != KeylessProofContract.Outcomes.Proved)
+            var service = Sanitize(item.GetProperty("service").GetString());
+            var outcome = Sanitize(item.GetProperty("outcome").GetString());
+            var code = item.TryGetProperty("code", out var c) ? Sanitize(c.GetString()) : string.Empty;
+            int? status = item.TryGetProperty("statusCode", out var st) && st.ValueKind == JsonValueKind.Number && st.TryGetInt32(out var s)
+                ? s : null;
+            if (entries.TryGetValue(service, out var earlier) && Rank(earlier.Outcome) >= Rank(outcome))
             {
                 continue;
             }
@@ -430,10 +463,44 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         return entries;
     }
 
-    /// <summary>Gateway-transient statuses eligible for the single retry, then inconclusive.</summary>
+    private static string Sanitize(string? value)
+    {
+        var text = new string((value ?? string.Empty).Where(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or ':' or '.' or '/').ToArray());
+        return text.Length <= MaxReportedLength ? text : text[..MaxReportedLength];
+    }
+
+    /// <summary>The <c>roles</c> claim of a JWT (payload only, no validation — the BFF validates), or null when unreadable.</summary>
+    internal static IReadOnlyList<string>? TokenRoles(string jwt)
+    {
+        try
+        {
+            var parts = jwt.Split('.');
+            if (parts.Length < 2)
+            {
+                return null;
+            }
+            var payload = parts[1].Replace('-', '+').Replace('_', '/');
+            payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
+            using var doc = JsonDocument.Parse(Convert.FromBase64String(payload));
+            if (!doc.RootElement.TryGetProperty("roles", out var roles) || roles.ValueKind != JsonValueKind.Array)
+            {
+                return Array.Empty<string>();
+            }
+            return roles.EnumerateArray().Select(r => r.GetString() ?? string.Empty).ToList();
+        }
+        catch (Exception ex) when (ex is FormatException or JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Gateway-transient statuses eligible for the single retry, then inconclusive. A 500 is NOT here: from the BFF it is
+    /// an unhandled exception, which repeats on every resume — a failure.
+    /// </summary>
     internal static bool IsTransientStatus(HttpStatusCode status)
         => status is HttpStatusCode.BadGateway or HttpStatusCode.ServiceUnavailable or HttpStatusCode.GatewayTimeout
-            or HttpStatusCode.TooManyRequests or HttpStatusCode.InternalServerError or HttpStatusCode.RequestTimeout;
+            or HttpStatusCode.TooManyRequests or HttpStatusCode.RequestTimeout;
 
     /// <summary>
     /// Issues a GET against <paramref name="uri"/> and passes on HTTP 200,

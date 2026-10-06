@@ -68,6 +68,12 @@ public class KeyCredentialCensusTests
             Reason: "Connection-string fallback when no namespace is configured (local development / emulator); a stamp "
                     + "sets ServiceBus:FullyQualifiedNamespace and its namespace has local auth disabled."),
 
+        new KeySite("CacheModule.cs", 1,
+            ConfigKeys: new[] { "Redis:ConnectionString", "ConnectionStrings:Redis" },
+            StampResource: true,
+            Reason: "Redis connection string — accepted only in Development/Testing (CacheModule refuses it elsewhere, task "
+                    + "242); a stamp sets Redis:Endpoint and its Azure Managed Redis has access keys disabled."),
+
         new KeySite("WebSearchHandler.cs", 1,
             ConfigKeys: new[] { "BingSearch:ApiKey" },
             StampResource: false,
@@ -79,6 +85,12 @@ public class KeyCredentialCensusTests
     private static readonly (Regex Pattern, string Kind)[] Forms =
     {
         (new Regex(@"new\s+(?:Azure\.)?AzureKeyCredential\s*\(", RegexOptions.Compiled), "AzureKeyCredential"),
+        (new Regex(@"\b(?:AzureKeyCredential|ApiKeyCredential|AzureNamedKeyCredential|AzureSasCredential|StorageSharedKeyCredential)\s+\w+\s*=\s*new\s*\(", RegexOptions.Compiled), "target-typed key credential"),
+        // The non-Azure OpenAI SDK clients take a key string. Qualified forms only: an unqualified ChatClient is also the ACS
+        // chat SDK's type (Services/Communication), which takes a token credential.
+        (new Regex(@"new\s+(?:OpenAI\.(?:Chat\.|Embeddings\.)?(?:ChatClient|EmbeddingClient)|(?:OpenAI\.)?OpenAIClient)\s*\(", RegexOptions.Compiled), "OpenAI client (string-key overloads)"),
+        (new Regex(@"new\s+(?:BlobServiceClient|QueueServiceClient|TableServiceClient|CosmosClient)\s*\(\s*[\w.]*[Cc]onnection[Ss]tring", RegexOptions.Compiled), "connection-string client"),
+        (new Regex(@"(?:ConfigurationOptions\.Parse|ConnectionMultiplexer\.Connect(?:Async)?)\s*\(\s*[\w.]*[Cc]onnection[Ss]tring", RegexOptions.Compiled), "Redis connection string"),
         (new Regex(@"new\s+(?:System\.ClientModel\.)?ApiKeyCredential\s*\(", RegexOptions.Compiled), "ApiKeyCredential"),
         (new Regex(@"new\s+(?:Azure\.)?(?:AzureNamedKeyCredential|AzureSasCredential)\s*\(", RegexOptions.Compiled), "named key / SAS credential"),
         (new Regex(@"new\s+StorageSharedKeyCredential\s*\(", RegexOptions.Compiled), "StorageSharedKeyCredential"),
@@ -94,7 +106,6 @@ public class KeyCredentialCensusTests
     {
         "src/server/api/Sprk.Bff.Api/Services/Ai/Diagnostics/AiKeylessProbe.cs",
         "src/server/api/Sprk.Bff.Api/Infrastructure/Diagnostics/KeylessProofService.cs",
-        "src/server/api/Sprk.Bff.Api/Services/Ai/Safety/ContentSafetyAuthHandler.cs", // AiKeylessProbe references its ApiKeyConfigKey const
     };
 
     [Fact(DisplayName = "D13/T230b: every key-credential site in server code is in the census, with the expected count")]
@@ -166,9 +177,16 @@ public class KeyCredentialCensusTests
             "    // new AzureKeyCredential(key) in a comment",
             "    /// <c>Ocp-Apim-Subscription-Key</c> in documentation",
             "    return new ServiceBusClient(options.FullyQualifiedNamespace, credential);",
+            "    AzureKeyCredential c = new(key);",
+            "    var chat = new OpenAI.Chat.ChatClient(model, apiKey);",
+            "    var acs = new ChatClient(endpoint, credential);", // the ACS chat SDK — not a key site
+            "    var blob = new BlobServiceClient(options.ConnectionString);",
+            "    var o = ConfigurationOptions.Parse(redisConnectionString);",
+            "    var o2 = ConfigurationOptions.Parse(endpoint);",
+            "    var blob2 = new BlobServiceClient(endpointUri, credential);",
         });
 
-        Assert.Equal(7, sites.Count);
+        Assert.Equal(11, sites.Count);
     }
 
     // =============================================================================================

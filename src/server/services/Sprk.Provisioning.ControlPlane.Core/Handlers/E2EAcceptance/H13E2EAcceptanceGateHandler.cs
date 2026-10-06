@@ -299,16 +299,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // Task 230b: H3's output — the keyless proof's token audience (api://{bffAppRegId}).
-        var bffAppRegIdRequired = run.InterStepState.BffAppRegId;
-        if (string.IsNullOrWhiteSpace(bffAppRegIdRequired))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBffAppRegId,
-                "InterStepState.bffAppRegId is not populated — H3 (BFF app registration) produces it and must complete " +
-                "before H13. The keyless proof's token is requested for api://{bffAppRegId}.",
-                cancellationToken).ConfigureAwait(false);
-        }
-
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, buildId);
 
         // (3) Level-3 idempotency: durable no-op on duplicate.
@@ -342,7 +332,16 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
+        // Task 230b: H3's output — the keyless proof's token audience (api://{bffAppRegId}). Checked after the
+        // idempotency short-circuit, so a completed run stays a no-op.
         var bffAppRegId = run.InterStepState.BffAppRegId ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(bffAppRegId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBffAppRegId,
+                "InterStepState.bffAppRegId is not populated — H3 (BFF app registration) produces it and must complete " +
+                "before H13. The keyless proof's token is requested for api://{bffAppRegId}.",
+                cancellationToken).ConfigureAwait(false);
+        }
         var uamiClientId = run.InterStepState.MiClientId ?? string.Empty;
         // auth-v4 §10.4 (task 205d / punch row A41) — the UAMI principalId,
         // threaded through so the T2 probe can byte-compare it against the
@@ -352,7 +351,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         var aiSearchEndpoint = run.InterStepState.AiSearchEndpoint ?? string.Empty;
         var cosmosEndpoint = run.InterStepState.CosmosEndpoint ?? string.Empty;
 
-        // (4) Extended validate script (SC #5).
+        // (4) Live checks against the deployed BFF (SC #5): /healthz, /ping, CORS and the keyless proof (task 230b).
         E2EValidationOutcome validationOutcome;
         try
         {
@@ -373,8 +372,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 envelope.RunId, envelope.CustomerId);
             return await FailAsync(run, etag, FailureClass.Resumable,
                 H13Rejections.ExtendedValidationInfraFault,
-                $"Validate-DeployedEnvironment.ps1 infra fault: {ex.GetType().Name}: {ex.Message}. " +
-                "Verify pwsh + the script are on the App Service publish layout.",
+                $"The live-check runner threw: {ex.GetType().Name}: {ex.Message}. Resume once the cause is cleared.",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -527,9 +525,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         //     with correct §4C classification. Priority order:
         //       (a) Trap/invariant FAILED → QuarantineRequired (silent-fail
         //           actually manifested — CATASTROPHIC).
-        //       (b) Extended-validate FAILED → QuarantineRequired.
+        //       (a2) Stamp accepts keys (ARM, task 230b) → QuarantineRequired.
+        //       (b) Live checks FAILED (incl. the keyless proof) → QuarantineRequired.
         //       (c) Cost drift (fail-run mode) → QuarantineRequired.
-        //       (d) Trap/invariant InfraFault → Resumable (no verdict).
+        //       (d) Trap/invariant/ARM-keyless InfraFault → Resumable (no verdict).
+        //       (d2) Live checks Inconclusive → Resumable (task 230b).
         //       (e) Cost query infra fault → Resumable.
         //     Advisory-warn cost drift is NOT a failure branch — it's attached
         //     to the diagnostic + gate-state but the Ready transition still
@@ -563,7 +563,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         {
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 H13Rejections.ExtendedValidationFailed,
-                $"Extended validate script (SC #5) reported {valFail.ChecksFailed.Count} " +
+                $"Live checks against the BFF (SC #5, keyless proof — task 230b) reported {valFail.ChecksFailed.Count} " +
                 $"failing check(s): {valFail.Diagnostic}.",
                 cancellationToken).ConfigureAwait(false);
         }

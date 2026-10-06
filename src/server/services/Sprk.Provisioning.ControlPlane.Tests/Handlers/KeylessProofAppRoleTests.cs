@@ -101,4 +101,18 @@ public sealed class KeylessProofAppRoleTests
             .Should().BeTrue("an existing assignment makes the step a no-op");
         GraphAppRegistrationProvisioner.HasRoleAssignment(null, l2, ContractRoleId).Should().BeFalse();
     }
+
+    [Fact]
+    public void ForeignRoleHolders_AreEveryOtherHolderOfThisRole_Only()
+    {
+        var l2 = Guid.NewGuid();
+        var assignments = new[]
+        {
+            new AppRoleAssignment { Id = "a", PrincipalId = l2, AppRoleId = ContractRoleId },
+            new AppRoleAssignment { Id = "b", PrincipalId = Guid.NewGuid(), AppRoleId = ContractRoleId }, // a test app: removed
+            new AppRoleAssignment { Id = "c", PrincipalId = Guid.NewGuid(), AppRoleId = Guid.NewGuid() }, // another role: kept
+        };
+
+        GraphAppRegistrationProvisioner.ForeignRoleHolders(assignments, l2, ContractRoleId).Select(a => a.Id).Should().Equal("b");
+    }
 }

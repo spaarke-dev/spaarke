@@ -201,7 +201,7 @@ Options class: `AnalysisOptions` (`Configuration/AnalysisOptions.cs`)
 | `Analysis:PromptFlowKey` | -- | -- | Key Vault | Prompt Flow API key |
 | `Analysis:ExecuteFlowName` | `analysis-execute` | string | appsettings | Execute flow deployment name |
 | `Analysis:ContinueFlowName` | `analysis-continue` | string | appsettings | Continue flow deployment name |
-| `Analysis:DefaultRagModel` | `Shared` | Shared/Dedicated/CustomerOwned | appsettings | Default RAG deployment model |
+| `Analysis:DefaultRagModel` | `Shared` | Shared/Dedicated | appsettings | Default RAG deployment model. `CustomerOwned` was removed (task 230b) — any other value fails at startup |
 | `Analysis:SharedIndexName` | `spaarke-knowledge-index-v2` | string | appsettings | Shared RAG index name |
 | `Analysis:TenantFilterField` | `customerId` | string | appsettings | Tenant isolation field |
 | `Analysis:MaxKnowledgeResults` | `5` | 1-20 | appsettings | Knowledge results per query |

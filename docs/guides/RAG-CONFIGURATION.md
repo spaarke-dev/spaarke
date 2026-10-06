@@ -342,49 +342,9 @@ await deploymentService.SaveDeploymentConfigAsync(config);
 - Alphanumeric and hyphens only
 - Format: `{sanitized-tenant-id}-knowledge`
 
-### CustomerOwned Model
+### CustomerOwned Model (removed)
 
-Configure via `KnowledgeDeploymentConfig`:
-
-```csharp
-var config = new KnowledgeDeploymentConfig
-{
-    TenantId = "byok-customer",
-    Name = "BYOK Customer Index",
-    Model = RagDeploymentModel.CustomerOwned,
-    SearchEndpoint = "https://customer-search.search.windows.net",
-    IndexName = "customer-knowledge-index",
-    ApiKeySecretName = "byok-customer-search-key",  // Key Vault secret name
-    IsActive = true
-};
-
-// Validate before saving
-var validation = await deploymentService.ValidateCustomerOwnedDeploymentAsync(config);
-if (!validation.IsValid)
-{
-    throw new InvalidOperationException(validation.ErrorMessage);
-}
-
-await deploymentService.SaveDeploymentConfigAsync(config);
-```
-
-**Required Fields for CustomerOwned**:
-
-| Field | Description | Example |
-|-------|-------------|---------|
-| `SearchEndpoint` | Customer's AI Search URL | `https://customer-search.search.windows.net` |
-| `IndexName` | Customer's index name | `customer-knowledge-index` |
-| `ApiKeySecretName` | Key Vault secret name | `customer-api-key-secret` |
-
-**Key Vault Secret Setup**:
-
-```bash
-# Store customer's API key in Key Vault
-az keyvault secret set \
-  --vault-name spaarke-spekvcert \
-  --name "byok-customer-search-key" \
-  --value "<customer-api-key>"
-```
+The CustomerOwned model (an index in another subscription reached with an API key) was removed by customer-provisioning-orchestration-r1 task 230b (2026-10-06): a customer that brings its own Azure subscription/tenant gets a dedicated Model 2 stamp (D-12), whose BFF uses its own AI Search with its managed identity — no key (owner D13). `Analysis:DefaultRagModel` accepts `Shared` or `Dedicated`; any other value fails at startup.
 
 ---
 

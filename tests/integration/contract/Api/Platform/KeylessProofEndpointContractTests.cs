@@ -70,6 +70,23 @@ public sealed class KeylessProofEndpointContractTests : IClassFixture<KeylessPro
     }
 
     [Fact]
+    public async Task Prove_ATokenForAnotherAudience_Is403()
+    {
+        var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue, audience: "api://copilot-plugin")
+            .PostAsync(KeylessProofContract.Route, null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Prove_AV1AppOnlyTokenWithoutIdtyp_IsAdmitted()
+    {
+        var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue).PostAsync(KeylessProofContract.Route, null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Prove_TheL2ApplicationWithTheRole_GetsOneResultPerService_AndARefusalStaysARefusal()
     {
         var response = await _host.Caller(roles: KeylessProofContract.AppRoleValue, idtyp: "app")
@@ -118,13 +135,14 @@ public sealed class KeylessProofHost : WebApplicationFactory<Program>
         new KeylessProbeResult(KeylessProofContract.Services.ContentSafetyGroundedness, KeylessProofContract.Outcomes.Proved, 200, 8, "ok"),
     };
 
-    public HttpClient Caller(string? roles = null, string? scope = null, string? idtyp = null)
+    public HttpClient Caller(string? roles = null, string? scope = null, string? idtyp = null, string? audience = null)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "task-230b");
         if (roles is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.RolesHeader, roles);
         if (scope is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.ScopeHeader, scope);
         if (idtyp is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.IdtypHeader, idtyp);
+        if (audience is not null) client.DefaultRequestHeaders.Add(KeylessProofFakeAuthHandler.AudienceHeader, audience);
         return client;
     }
 
@@ -252,6 +270,7 @@ internal sealed class KeylessProofFakeAuthHandler : AuthenticationHandler<Authen
     public const string RolesHeader = "X-Test-Roles";
     public const string ScopeHeader = "X-Test-Scp";
     public const string IdtypHeader = "X-Test-Idtyp";
+    public const string AudienceHeader = "X-Test-Aud";
 
     public KeylessProofFakeAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options, ILoggerFactory logger, UrlEncoder encoder)
         : base(options, logger, encoder)
@@ -268,6 +287,8 @@ internal sealed class KeylessProofFakeAuthHandler : AuthenticationHandler<Authen
             new("tid", "test-tenant-id"),
             new("oid", "230b0000-0000-0000-0000-000000000001"),
             new("appid", "l2-worker-app-id"),
+            // The fixture's AzureAd:ClientId — the audience the filter pins (or the override header).
+            new("aud", Request.Headers.TryGetValue(AudienceHeader, out var aud) ? aud.ToString() : "api://test-app-id"),
         };
         if (Request.Headers.TryGetValue(RolesHeader, out var roles))
             claims.AddRange(roles.ToString().Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Select(r => new Claim("roles", r)));

@@ -5,6 +5,7 @@ using Azure.Identity;
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Spaarke.Contracts.Provisioning;
 using Sprk.Bff.Api.Infrastructure.Diagnostics;
 using Xunit;
@@ -96,6 +97,24 @@ public class KeylessProbeRunnerTests
     }
 
     [Fact]
+    public void Classify_AnSdkRetryAggregateOfTransportFaults_IsUnreachable_NotFailed()
+    {
+        // Azure.Core / System.ClientModel throw AggregateException("Retry failed after N tries") when every attempt failed.
+        var aggregate = new AggregateException("Retry failed after 4 tries.",
+            new RequestFailedException("dns"), new HttpRequestException("connection refused"));
+
+        KeylessProbeRunner.Classify(aggregate).Outcome.Should().Be(KeylessProofContract.Outcomes.Unreachable);
+    }
+
+    [Fact]
+    public void Classify_AnSdkRetryAggregateContainingARefusal_IsRefused()
+    {
+        var aggregate = new AggregateException(new RequestFailedException(503, "busy"), new RequestFailedException(403, "denied"));
+
+        KeylessProbeRunner.Classify(aggregate).Should().Be((KeylessProofContract.Outcomes.Refused, (int?)403, "http-403"));
+    }
+
+    [Fact]
     public async Task RunAsync_WhenTheProbeReturns_IsProved_WithItsStatus()
     {
         var result = await KeylessProbeRunner.RunAsync("svc", _ => Task.FromResult<int?>(200), NullLogger.Instance, CancellationToken.None);
@@ -106,15 +125,22 @@ public class KeylessProbeRunnerTests
     [Fact]
     public async Task RunAsync_WhenTheProbeOutlivesItsLimit_IsUnreachableTimeout()
     {
-        var result = await KeylessProbeRunner.RunAsync(
+        var clock = new FakeTimeProvider();
+        var neverAnswers = new TaskCompletionSource<int?>();
+
+        var run = KeylessProbeRunner.RunAsync(
             "svc",
-            async token => { await Task.Delay(Timeout.Infinite, token); return null; },
+            token => { token.Register(() => neverAnswers.TrySetCanceled(token)); return neverAnswers.Task; },
             NullLogger.Instance,
             CancellationToken.None,
-            timeout: TimeSpan.FromMilliseconds(1));
+            timeout: TimeSpan.FromSeconds(30),
+            timeProvider: clock);
+        clock.Advance(TimeSpan.FromSeconds(31));
+        var result = await run;
 
         result.Outcome.Should().Be(KeylessProofContract.Outcomes.Unreachable);
         result.Code.Should().Be("timeout");
+        result.ElapsedMs.Should().Be(31_000);
     }
 
     [Fact]

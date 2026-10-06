@@ -90,6 +90,15 @@ public sealed class EntraAppRegOptions
     /// <summary>Delay between FIC re-GET verification retry attempts.</summary>
     public TimeSpan FicExchangeRetryDelay { get; set; } = TimeSpan.FromSeconds(3);
 
+    /// <summary>
+    /// Attempts for the keyless-proof app-role assignment (task 230b). Entra answers 400 (role not yet visible) or 404
+    /// (service principal not yet replicated) right after H3 created them; both are retried.
+    /// </summary>
+    public int RoleAssignmentRetryCount { get; set; } = 6;
+
+    /// <summary>Delay between keyless-proof app-role assignment attempts (task 230b).</summary>
+    public TimeSpan RoleAssignmentRetryDelay { get; set; } = TimeSpan.FromSeconds(10);
+
     /// <summary>Timeout for a single Graph SDK call (create/patch/get). Graph is normally sub-second; generous ceiling for throttle/backoff.</summary>
     public TimeSpan GraphRequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 

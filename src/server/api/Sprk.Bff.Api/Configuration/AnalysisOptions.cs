@@ -199,7 +199,7 @@ public enum RagDeploymentModel
     Shared,
 
     /// <summary>
-    /// Dedicated index per customer in Spaarke tenant (Model 2).
+    /// Dedicated index per customer (its own index name in the stamp's AI Search).
     /// Better isolation and performance.
     /// </summary>
     Dedicated,
