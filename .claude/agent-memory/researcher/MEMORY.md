@@ -39,6 +39,7 @@
 - [Dataverse Word templates (2026-08-13)](dataverse-word-templates-storage-merge-2026-08-13.md) — documenttemplate vs template vs File column; merge encoding
 
 ## Dataverse / Power Platform / MDA
+- [navigateTo dialog chrome vs dark mode (2026-10-05)](navigateto-dialog-chrome-dark-mode-2026-10-05.md) — 5 navOptions, no hideHeader; MDA dark mode unsupported (Spaarke uses undocumented flag); sidePanes hideHeader
 - [Autonumber on existing primary-name col (2026-10-02)](dataverse-autonumber-existing-primary-name-2026-10-02.md) — text→autonumber documented; fill-if-empty community-only; seed default 1000, not in solution; no uniqueness vs manual values
 - [MDA clickable form banner (2026-09-30)](mda-clickable-form-banner-options-2026-09-30.md) — addGlobalNotification app-wide/persists; setFormNotification text-only; PCF MessageBar REC
 - [Impersonation for async/Functions (2026-09-14)](dataverse-impersonation-async-functions-2026-09-14.md) — documented for services; trust = S2S app controls access; SB SAS → forgeable caller id
