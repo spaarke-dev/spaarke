@@ -2,14 +2,14 @@
 
 > **Format (2026-10-06):** this file holds CURRENT state only and is REWRITTEN at each checkpoint — never prepend a new block on top of old ones. Standing directives + environment gotchas live in the project `CLAUDE.md` ("Standing directives & gotchas"). Session history lives in git (checkpoint commit messages) and the verbatim archive `notes/handoff-history/current-task-archive-2026-10-06.md` (do NOT load it on recovery; grep it only if you need a specific past detail). Why: see `.claude/skills/context-handoff/SKILL.md` "State, not history" and `notes/handoff-history/2026-10-06-conversion-review.md`.
 
-> **Last Updated**: 2026-10-06 (by context-handoff, before /compact + new session; checkpoint commit `2318afbb2`). Rounds 5-7 + 097 shipped except PR #1323 (in CI). Converted to state-only format 2026-10-06 from that checkpoint.
+> **Last Updated**: 2026-10-06 (by context-handoff, before /compact + new session). Rounds 5-7 + 097 all merged; round 7 #1323 merged `002ac9b39` (add-in site deploying)
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | **UAT rounds 5-7 + task 097 — all built; one PR left.** Merged: #1301 (098/099/100, BFF deployed), #1315 (101-103), #1316 (Word Email tab ON + Outlook footer shows package version), #1321 (097 archive option A + copies as protected as the source). Dev BFF deployed from master `11a8ba203` (36.14 MB — master shrank; 4/4 SHA-256; routes 401). Add-in site live from `b403c7713` (Email tab verified `canEmailFromPane:!0` in the deployed bundle). |
-| **Next Action** | 1) **PR #1323** (round 7: 104 expand-to-window, 105 post-save Copied/Opened + resizable Profile Summary via shared `ResizeHandle`) — `Router` passed; merge when `Build & Test (Debug)` passes: `gh pr merge 1323 --merge` (NEVER `--delete-branch`); the add-in site auto-deploys (client-only, no BFF deploy). 2) Owner live checks: rounds 5-7, Word Email tab (sends own doc; foreign doc → `sdap.access.deny.communication.send`), archive (Spaarke email page, archive on, secure + >4 MB attachment → separate files; secure copy in the secure container). 3) Outlook desktop pane does not open — waiting on owner: classic vs new Outlook, version/build, which buttons show (Quick Save present?), what happens on click; cache-clear steps already given (Wef + HubAppFileCache; `olk.exe --devtools`). |
+| **Task** | **UAT rounds 5-7 + task 097 — all merged.** Merged: #1301 (098/099/100, BFF deployed), #1315 (101-103), #1316 (Word Email tab ON + Outlook footer shows package version), #1321 (097 archive option A + copies as protected as the source). Dev BFF deployed from master `11a8ba203` (36.14 MB — master shrank; 4/4 SHA-256; routes 401). Add-in site live from `b403c7713` (Email tab verified `canEmailFromPane:!0` in the deployed bundle). |
+| **Next Action** | 1) Confirm the add-in site deploy for master `002ac9b39` (PR #1323, round 7: 104 expand-to-window, 105 Copied/Opened + resizable Profile Summary) succeeded: `gh run list --workflow deploy-office-addins.yml --limit 1`. 2) Owner live checks: rounds 5-7, Word Email tab (sends own doc; foreign doc → `sdap.access.deny.communication.send`), archive (Spaarke email page, archive on, secure + >4 MB attachment → separate files; secure copy in the secure container). 3) Outlook desktop pane does not open — waiting on owner: classic vs new Outlook, version/build, which buttons show (Quick Save present?), what happens on click; cache-clear steps already given (Wef + HubAppFileCache; `olk.exe --devtools`). |
 | **Waiting on others** | UAC-r2: retire the unused `POST /api/documents/{id}/share-link` + its tests (`notes/098-share-link-route-refusal.patch`); settle the cross-secure archive copy (keeps `sprk_relatedcommunication`) before switching on `DocumentPointer__StrictDerivedContainer` (097 note §11.4). Indexing owner: Find's "Matter: Matter" / "Unknown" are server fallbacks (`VisualizationService.cs:836/:1258`) — pane masks them. |
 | **Later / next re-upload** | Remove the 404 `CommandRuntime.code.script` (`outlook/manifest.json:84`, `word/manifest.json:78`) at the next package version bump. 098's composer record-link reaches users only when the Email page / Console / upload wizard / communication PCFs are rebuilt + deployed. 090 wrap-up (`/test-diet`) after UAT ends. |
 | **Out of scope here** | Owner 2026-10-06: an Outlook "submit Service Request" add-in for license-free workforce users is a SEPARATE project, aligned with the external-access SPA; nothing to record in this project. |
@@ -24,7 +24,7 @@
 | 097 | ✅ #1316 (Email tab on) + #1321 (archive option A, protected copies); BFF `11a8ba203` deployed; live checks open |
 | 098–100 (round 5) | ✅ #1301, deployed; 098 route refusal reverted (UAC-r2 tests) — record link shipped |
 | 101–103 (round 6) | ✅ #1315, add-in site deployed |
-| 104–105 (round 7) | ✅ built; **PR #1323 open** (Router passed, legacy Build & Test pending) |
+| 104–105 (round 7) | ✅ #1323 merged `002ac9b39`; add-in site auto-deploy |
 | 042 | 🔄 UAT continues (notes `042-uat-round5/6/7-*.md`); Outlook desktop issue open (owner info needed) |
 | 090 | 🔲 wrap-up with `/test-diet` after 042 |
 | Publish size | 097: +4,188 B vs master merge base (Compress-Archive Optimal, 192=192 files); 100: +15.6 KB |
