@@ -1,16 +1,15 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-10-05 (checkpoint #14, by context-handoff before /compact). Supersedes #13. Read the Quick Recovery table first.
-> **Refresh (before /compact):** `sweepmerge` is still finishing 165 in `C:\wt4i`, with uncommitted work there. Its sub-agent wrote and passed the five `ProvenByTest_` proof tests for S-24, S-18, S-78, S-64 and S-65 (5/5). `sweepmerge` is now building and running the full suites. Its completion notice arrives after the compact: review it, then push integ (Next Action step 1). Do NOT edit `C:\wt4i` while it is running.
+> **Last Updated**: 2026-10-06 (checkpoint #15). Supersedes #14. Read the Quick Recovery table first.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 4 + route-sweep INTEGRATION (`integ/uac-r2-batch4` in `C:\wt4i`), then PR, deploy and live gates; then batch 5 |
-| **Step** | The last lane merge: the agent `sweepmerge` (Agent tool; resume it with SendMessage) is merging 165 under round 65 and adding the generic ledger credit `ProvenByTest` |
-| **Status** | in-progress. No workflows are running. Every lane has been verified. The integ tip pushed is `4af3717ac`; `sweepmerge` commits locally and does not push |
-| **Next Action** | (1) When `sweepmerge` reports: review it, then `git -C C:/wt4i push origin integ/uac-r2-batch4`. (2) Merge origin/master into integ again (re-check SPE Admin's managed-identity area). (3) Run the full suites. (4) Measure publish size (fresh short-path worktrees for master and integ, Compress-Archive Optimal, equal file counts) and run the CVE check. (5) Open the PR integ → master (§6.5 blocks; known limits from each task note; deleted-route evidence; ADR-009 path C for 132; ADR-034 A4). (6) Merge it on Router green. (7) Do the dev live steps and deploy (list below). (8) Do the live gates. Then batch 5. |
+| **Task** | Batch 4 + route sweep: MERGED to master as `d254d7166` (PR #1312, squash, 2026-10-06). Now: dev deploy and live gates; then batch 5 |
+| **Step** | Dev live steps in the order listed in PR #1312 "Deploy and live steps after merge" (schema/FLS first, then the BFF) |
+| **Status** | in-progress. Integ tip `6ec6e3096` (master merged at `58fbcfe73`; .claude edits for AP-15 and bff-deploy). Suites on the merge: unit 18016/0/54, ArchTests 803, Integration 87, Spe 350/25, L2 2171/1. Publish 36.13 MB vs master 45.88 MB (QuestPDF removed by 162; like-for-like +0.78 MB). CVE clean. Owner round 66: 148's double fault accepted as a known limit |
+| **Next Action** | (1) Run the PR #1312 deploy list on dev, step by step: schema (142/158 ledger, 143 subject column, 140 grantor columns, 133 creator person) → 144 default-team migration → 165 operator marker + binding backfill (`-Bind`) → BFF deploy from a fresh worktree of master + external SPA → 150 FLS lock immediately → 166 gates 23a/23/24/25/26 + PowerBi setting → 148 backfill → 168 forms/grids (SpaarkeGridCustomizer v1.1.1 first) → clients + ribbons. (2) Notify word-add-in-r1 when 161 is live on spaarke-bff-dev; the merge notice was held by both of its sessions, so the user relays it. (3) Live gates per task note as `uac.child.user`; mark tasks ✅ as gates pass. (4) Batch 5. |
 
 **Session rules (memory):**
 - Keep the session cwd as uppercase `C:/code_files/spaarke`. A bare `cd` elsewhere resets it, so use `git -C` and absolute paths.
