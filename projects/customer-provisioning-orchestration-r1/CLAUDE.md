@@ -221,6 +221,65 @@ Per root CLAUDE.md §6 + §6.5. r1-specific escalation triggers:
 - **Follow-on (r2)**: registry-aware decommission + fleet management web app
 - **Data migration**: `spaarke-data` CLI (separate project — new customers start empty-but-functional)
 
+## Standing directives & gotchas
+
+> **Why this section exists (repo procedure change, 2026-10-06).**
+> - **What changed:** `current-task.md` now holds CURRENT state only and is rewritten at each checkpoint (`.claude/skills/context-handoff/SKILL.md` "State, not history").
+> - **Why:** here it had grown to 450 KB, because every checkpoint stacked a new block over the old ones, and task-execute reads it at Step 0 + Step 2 of every task.
+> - **What this section is:** the items below were stated in that file as standing or binding and are still in force. They moved here so they survive the rewrite and are read on every recovery.
+> - **Where the rest went:** the old file is archived verbatim at `notes/handoff-history/current-task-archive-2026-10-06.md`. Items the conversion could not classify, plus stale lines it noticed in THIS file, are in `notes/handoff-history/2026-10-06-conversion-review.md`; resolve them when convenient.
+> - **Going forward:** add a new standing directive or gotcha HERE (one dated bullet), not in `current-task.md`.
+>
+> **Also new, repo-wide:** task-execute Step 9.5 "Finding triage and round limits".
+> - F1–F4 fix-now / K1–K4 known-limit.
+> - At most 2 fix rounds, each re-verifying the fix diff only.
+> - 1 verifier pass per task (2 for auth/security/tenant-isolation).
+> - Escalate any F1 still open instead of starting round 3.
+>
+> The skill files reach this worktree on the next master merge (`work/procedure-throughput-fixes-r1`); the rules apply now.
+>
+> Items already in `.claude/constraints/provisioning.md`, root `CLAUDE.md` or project memory are NOT repeated here.
+
+**Owner directives**
+- **Build the process, not the environment** (owner verbatim 2026-08-23): "The goal is not to install a new environment as quick and easy as we can — it's to build a customer provisioning and deployment process." Never `pac admin copy` from another env as a shortcut; every gap found is fixed here.
+- **End state** (2026-08-23 / 2026-09-01): provisioning runs E2E with no human interaction. L2 has no web UI in r1 (REST API + `/provision-environment` only); a "Customer Deployment" web app is a follow-on (`notes/follow-on-customer-deployment-webapp-proposal.md`).
+- **T186 (first live E2E) MUST go through `/provision-environment`** — never direct L2 REST calls (standing since 2026-08-30).
+- **T218 = DEFINE the complete Spaarke solution package** (owner 2026-09-28; T217 folded in, T216 dropped): audit + consolidate/redesign solutions so ALL components (entities, roles, forms, MDA, Copilot agent, per-customer app regs) ship. Hard blocker for T186.
+- **All solutions ship to every customer** — no core/optional split (owner 2026-09-01).
+- **No BI in MVP** (owner 2026-09-28 §9 Q1): per-customer Power BI F-SKU later — do NOT procure; placeholder only. **M365 Copilot agent is per customer** (§9 Q2). Do not re-litigate.
+- **VNet is optional and stays off for MVP** (owner 2026-09-01).
+- **`SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` is authoritative for r1** (owner 2026-08-30). Never merge an SPE owning app with a BFF app registration.
+- **INCOMING doc §8 items belong to unified-access-control-r2** — leave alone (Secure Project→Secure Record rename + 3 Redis subject-discrimination keys) (2026-09-28).
+- **`rg-spaarke-shared-prod` (D23, 2026-10-02)** is the single home for shared PROD resources: the prod L2 control plane goes there from its first deploy (change `platform-controlplane.bicep`'s RG name then). Owner chose no lock, no tags for now (2026-10-03).
+- **Live Azure/Entra/Dataverse changes need an explicit owner OK per action** ("live; ask first"); record each one in the task POML notes.
+
+**Keep (do not delete)**
+- `Spaarke Exchange Admin` (appId `46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7`) and `Spaarke SPE Model 1 Owner` (appId `bfac7f6e-9fa0-4664-8492-c7a1dfe73d5e`); Graph Explorer's grant on the `Spaarke Model 1` registration (owner KEEP 2026-10-03).
+- Exchange group `sprk-t251-spike-scope` (Entra `c709af95-0332-4ea2-a9d4-6925b1666bad`, member testuser1@) = the test group for `Verify-Sidecar-Live.ps1 -InTenant` (owner 2026-10-04). `Enable-OrganizationCustomization` has been run (irreversible).
+- Never delete Key Vault secrets during cleanup — the `Exchange-Connect-Cert` sentinel stays (2026-10-04).
+
+**Environment gotchas**
+- `sdap-ci.yml` is not a required check and its jobs are `continue-on-error`; a gate that must block goes in `ci-tier1-blocking.yml` (Router) (2026-10-06).
+- Before declaring a per-run H13 check fixed, ask where its inputs live at runtime: the Worker publish has no `scripts/` or `infrastructure/`, and the host has no pwsh/pac (2026-10-06).
+- `string.Create(IFormatProvider, …)` does not accept `$"" + $""` concatenation — format with `ToString("F2", CultureInfo.InvariantCulture)` (2026-10-06).
+- `tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1` fails 27/27 locally under Pester 6.2 at HEAD (pre-existing; not in CI) (2026-10-06).
+- Dev Redis, its alerts and App Insights (`spe-insights-dev-67e2xz`) live in `spe-infrastructure-westus2`, NOT `rg-spaarke-dev` (2026-10-06).
+- Dev BFF deploys come only from master ≥ `c8b93b294` (2026-10-06).
+- Granting an MI on an SPE container-type registration: Graph v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{ct}/applicationPermissionGrants/{appId}` via `Connect-MgGraph -Scopes FileStorageContainerTypeReg.Manage.All`. `Set-SPOApplicationPermission` fails for an MI (2026-10-06).
+- `az ad app permission admin-consent` fails ("Consent validation failed"); consent Graph app roles with `POST /servicePrincipals/{graph}/appRoleAssignedTo` (2026-10-02).
+- `Deploy-ControlPlane.ps1` via `pwsh -File` stops at the ConfirmImpact=High prompt — run it in-process with `-Confirm:$false` (`-SkipBuild` to reuse a build) (2026-10-04).
+- To target another subscription without touching the shared az context, use a private `AZURE_CONFIG_DIR` copy and delete it afterwards (2026-10-04).
+- Never run destructive az commands as a "clean slate" (`az account clear` wiped the credential cache, 2026-08-23).
+- Before relying on a pac/az flag in a runbook, run its `--help` locally: `pac admin create` silently appends a digit to a taken domain, and `create-environment` is not the command (2026-10-06). *(verify: an older 2026-08-23 note says pac flags once EXECUTED a command; see conversion review)*
+- A prereq recipe's tokens must be resolvable at the step that runs its scope — `validate.ps1` checks documentation only (2026-10-06).
+- Check Microsoft's per-feature region table before defaulting a regional AI resource to the stamp location ("service available" ≠ "every feature available"; Content Safety defaults to westus) (2026-10-06).
+- A Bicep `@description('…')` string must not contain an apostrophe (2026-10-06).
+- Pester for `tests/scripts/*.Tests.ps1` needs `Import-Module Pester -RequiredVersion 3.4.0` (6.x rejects `-Script` / `Should Be`) (2026-10-06).
+- Edit scripts: write them with the Write tool (bash heredocs fail on quoting). In Python use `'''` when the text holds `"` before `"""` or C# raw strings, and restrict line-prefix replacements to the intended line (2026-10-06).
+- Parallel sub-agents share the git index: `git commit --only <paths>`, never `git add -A` / `git add .` (2026-08-19).
+- `scripts/check-task-status-drift.ps1` reports false "unpaired" entries for this project: its parser expects `| <marker> <id> |`, but TASK-INDEX uses `| <id> | <marker> |`. Known; not remediated (2026-09-29).
+- Azure OpenAI pin refresh due before ~2027-01-14 (T247 one-source set; `PinnedModelCatalog`) (2026-10-06).
+
 ---
 
 *Load this file first when operating in this project directory. Individual task POMLs augment with per-task knowledge under `<knowledge>`.*
