@@ -397,17 +397,17 @@ public class NoAccessListReaderTests
         distinctFilters.Should().HaveCount(3, "12 contacts need three chunks of 5; 60 organizations need three of 25");
         foreach (var filter in distinctFilters)
         {
-            TableNoAccessListReader.IdsNamed(filter, "sprk_subjectcontact").Should()
+            TableNoAccessListReader.IdsNamed(filter, "_sprk_subjectcontact_value").Should()
                 .HaveCountLessThanOrEqualTo(NoAccessListReader.MaxSubjectContactIds);
-            TableNoAccessListReader.IdsNamed(filter, "sprk_subjectorganization").Should()
+            TableNoAccessListReader.IdsNamed(filter, "_sprk_subjectorganization_value").Should()
                 .HaveCountLessThanOrEqualTo(NoAccessListReader.MaxSubjectOrganizationIds);
         }
 
-        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "sprk_subjectcontact"))
+        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "_sprk_subjectcontact_value"))
             .Should().BeEquivalentTo(contacts, o => o.WithoutStrictOrdering(), "each contact in exactly one chunk");
-        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "sprk_subjectorganization"))
+        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "_sprk_subjectorganization_value"))
             .Should().BeEquivalentTo(organizations, o => o.WithoutStrictOrdering(), "each organization in exactly one chunk");
-        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "sprk_subjectsystemuser"))
+        distinctFilters.SelectMany(f => TableNoAccessListReader.IdsNamed(f, "_sprk_subjectsystemuser_value"))
             .Should().Equal(new[] { SystemUser }, "the systemuser is asked about once");
     }
 
@@ -482,7 +482,7 @@ public class NoAccessListReaderTests
     {
         var filter = NoAccessListReader.BuildSubjectFilter(Contact, new[] { SubjectOrg });
 
-        filter.Should().Be($"(sprk_subjectcontact eq {Contact} or (sprk_subjectorganization eq {SubjectOrg}))");
+        filter.Should().Be($"(_sprk_subjectcontact_value eq {Contact} or (_sprk_subjectorganization_value eq {SubjectOrg}))");
     }
 
     // ── Task 143: the systemuser subject, exactly-one-of-THREE, and subject-kind provenance ──────
@@ -503,7 +503,7 @@ public class NoAccessListReaderTests
             new NoAccessSubjects(new[] { Contact }, new[] { SubjectOrg }, SystemUser));
 
         filter.Should().Be(
-            $"(sprk_subjectcontact eq {Contact} or (sprk_subjectorganization eq {SubjectOrg}) or sprk_subjectsystemuser eq {SystemUser})");
+            $"(_sprk_subjectcontact_value eq {Contact} or (_sprk_subjectorganization_value eq {SubjectOrg}) or _sprk_subjectsystemuser_value eq {SystemUser})");
     }
 
     [Fact]
@@ -626,7 +626,7 @@ public class NoAccessListReaderTests
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
             }
 
-            var isOrgLoop = objectFilter.Contains("sprk_objectorganization", StringComparison.Ordinal);
+            var isOrgLoop = objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal);
             return Task.FromResult<List<NoAccessEntryRow>?>(isOrgLoop ? _orgLoopRows ?? new() : _recordLoopRows ?? new());
         }
     }
@@ -687,15 +687,15 @@ public class NoAccessListReaderTests
             }
 
             if (NullWhenObjectOrganizationNamed is { } nullOrg
-                && IdsNamed(objectFilter, "sprk_objectorganization").Contains(nullOrg))
+                && IdsNamed(objectFilter, "_sprk_objectorganization_value").Contains(nullOrg))
             {
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
             }
 
-            var contacts = IdsNamed(subjectFilter, "sprk_subjectcontact");
-            var organizations = IdsNamed(subjectFilter, "sprk_subjectorganization");
-            var users = IdsNamed(subjectFilter, "sprk_subjectsystemuser");
-            var objectOrganizations = IdsNamed(objectFilter, "sprk_objectorganization");
+            var contacts = IdsNamed(subjectFilter, "_sprk_subjectcontact_value");
+            var organizations = IdsNamed(subjectFilter, "_sprk_subjectorganization_value");
+            var users = IdsNamed(subjectFilter, "_sprk_subjectsystemuser_value");
+            var objectOrganizations = IdsNamed(objectFilter, "_sprk_objectorganization_value");
             var objectRecords = IdsNamed(objectFilter, "sprk_objectrecordid");
 
             var rows = _rows.Where(r =>

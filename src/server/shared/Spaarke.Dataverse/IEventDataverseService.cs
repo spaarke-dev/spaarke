@@ -66,6 +66,9 @@ public interface IEventDataverseService
     /// its event, owned like it). <c>null</c> ONLY when the resolver answered "unchanged" (an event that is not
     /// team-owned) and the row keeps its creator. Required positionally so every caller decides.
     /// </param>
+    /// <param name="description">
+    /// Not stored: <c>sprk_eventlog</c> has no description column. Callers trace it in their own log line.
+    /// </param>
     /// <param name="createdByPersonId">
     /// The person whose change the log records (task 146 c1-r1, owner round 13 item 9) — written as
     /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/> because the create is app-only; <c>null</c> when there is

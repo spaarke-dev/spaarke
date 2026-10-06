@@ -1349,7 +1349,7 @@ public class AccessibleRecordSetServiceTests
         set.Contains(secure).Should().BeFalse("a systemuser-subject entry removes the secure record, membership term included");
         set.RightsFor(open).Should().Be(MembershipOnlyRights(),
             "a systemuser-subject entry never removes a non-secure record (Q4 scope)");
-        reader.SubjectFilters.Should().Contain(f => f.Contains($"sprk_subjectsystemuser eq {SystemUserId}"),
+        reader.SubjectFilters.Should().Contain(f => f.Contains($"_sprk_subjectsystemuser_value eq {SystemUserId}"),
             "the systemuser was checked as a subject in its own right");
     }
 
@@ -1439,7 +1439,7 @@ public class AccessibleRecordSetServiceTests
 
         set.Contains(secure).Should().BeFalse(
             "a contact bound to the user's oid represents them; its entry walls them off the secure record, as at write time");
-        reader.SubjectFilters.Should().Contain(f => f.Contains($"sprk_subjectcontact eq {bound}"));
+        reader.SubjectFilters.Should().Contain(f => f.Contains($"_sprk_subjectcontact_value eq {bound}"));
     }
 
     [Fact]
@@ -1526,11 +1526,11 @@ public class AccessibleRecordSetServiceTests
                 return Task.FromResult<List<NoAccessEntryRow>?>(null);
             }
 
-            var orgLoop = objectFilter.Contains("sprk_objectorganization", StringComparison.Ordinal);
+            var orgLoop = objectFilter.Contains("_sprk_objectorganization_value", StringComparison.Ordinal);
             var matching = _rows
-                .Where(r => (r._sprk_subjectsystemuser_value is { } u && subjectFilter.Contains($"sprk_subjectsystemuser eq {u}"))
-                            || (r._sprk_subjectcontact_value is { } c && subjectFilter.Contains($"sprk_subjectcontact eq {c}"))
-                            || (r._sprk_subjectorganization_value is { } o && subjectFilter.Contains($"sprk_subjectorganization eq {o}")))
+                .Where(r => (r._sprk_subjectsystemuser_value is { } u && subjectFilter.Contains($"_sprk_subjectsystemuser_value eq {u}"))
+                            || (r._sprk_subjectcontact_value is { } c && subjectFilter.Contains($"_sprk_subjectcontact_value eq {c}"))
+                            || (r._sprk_subjectorganization_value is { } o && subjectFilter.Contains($"_sprk_subjectorganization_value eq {o}")))
                 .Where(r => orgLoop ? r._sprk_objectorganization_value.HasValue : !r._sprk_objectorganization_value.HasValue)
                 .ToList();
             return Task.FromResult<List<NoAccessEntryRow>?>(matching);
