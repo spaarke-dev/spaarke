@@ -194,7 +194,18 @@ public sealed class AiKeylessProbe : IAiKeylessProbe
         const string service = KeylessProofContract.Services.BlobStorage;
         var endpoint = _configuration[SessionFileBlobStore.BlobEndpointConfigKey];
         if (string.IsNullOrWhiteSpace(endpoint))
-            return Task.FromResult(KeylessProbeRunner.NotConfigured(service, SessionFileBlobStore.BlobEndpointConfigKey));
+        {
+            // The session-file store is OFF by design until compose-r8 task 063 (SessionFileBlobStore: StoreDisabled) —
+            // the BFF writes no blob, so there is no call to prove. H13 accepts this for blob-storage only.
+            return Task.FromResult(new KeylessProbeResult(
+                service, KeylessProofContract.Outcomes.NotInUse, null, 0, "store-disabled:" + SessionFileBlobStore.BlobEndpointConfigKey));
+        }
+        if (endpoint.Contains("AccountKey=", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Contains("SharedAccessSignature", StringComparison.OrdinalIgnoreCase)
+            || endpoint.Contains("sig=", StringComparison.OrdinalIgnoreCase))
+        {
+            return Task.FromResult(KeylessProbeRunner.KeyCredential(service, SessionFileBlobStore.BlobEndpointConfigKey));
+        }
         Uri endpointUri;
         string containerName;
         try

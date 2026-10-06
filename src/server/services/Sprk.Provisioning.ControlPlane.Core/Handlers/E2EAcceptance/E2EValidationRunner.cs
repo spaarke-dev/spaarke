@@ -302,9 +302,10 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
         {
             failed.Add(CheckKeylessProof);
             diagnostics.Add(
-                $"{CheckKeylessProof}: the L2 token for '{scope}' carries no '{KeylessProofContract.AppRoleValue}' role " +
-                $"(roles: [{string.Join(", ", roles)}]). H3 assigns it; a managed-identity token issued before the assignment " +
-                "propagated stays role-less for up to 24 hours (token cache).");
+                $"{CheckKeylessProof}: the L2 token for '{scope}' (oid {TokenClaim(bearerToken, "oid") ?? "?"}) carries no " +
+                $"'{KeylessProofContract.AppRoleValue}' role (roles: [{string.Join(", ", roles)}]). H3 assigns it to " +
+                "ControlPlaneIdentity:PrincipalObjectId — check that is this oid; a managed-identity token issued before the " +
+                "assignment propagated stays role-less for up to 24 hours (token cache).");
             return;
         }
 
@@ -411,6 +412,10 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
                     inconclusive.Add(check);
                     diagnostics.Add($"{check}: unreachable ({entry.Code}) -- no verdict on the identity.");
                     break;
+                case KeylessProofContract.Outcomes.NotInUse when KeylessProofContract.Services.MayBeUnused.Contains(service):
+                    // Off by design on this stamp (e.g. the session-file blob store until compose-r8 task 063): nothing to prove.
+                    passed.Add(check + "-not-in-use");
+                    break;
                 default:
                     // refused, key-credential, not-configured, failed — and any outcome this L2 build does not know.
                     failed.Add(check);
@@ -471,26 +476,31 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
 
     /// <summary>The <c>roles</c> claim of a JWT (payload only, no validation — the BFF validates), or null when unreadable.</summary>
     internal static IReadOnlyList<string>? TokenRoles(string jwt)
+        => ReadPayload(jwt, root => root.TryGetProperty("roles", out var roles) && roles.ValueKind == JsonValueKind.Array
+            ? roles.EnumerateArray().Select(r => r.ValueKind == JsonValueKind.String ? r.GetString() ?? string.Empty : r.GetRawText()).ToList()
+            : (IReadOnlyList<string>)Array.Empty<string>());
+
+    /// <summary>A string claim of a JWT payload, or null.</summary>
+    private static string? TokenClaim(string jwt, string name)
+        => ReadPayload(jwt, root => root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null);
+
+    private static T? ReadPayload<T>(string jwt, Func<JsonElement, T> read)
     {
         try
         {
             var parts = jwt.Split('.');
             if (parts.Length < 2)
             {
-                return null;
+                return default;
             }
             var payload = parts[1].Replace('-', '+').Replace('_', '/');
             payload = payload.PadRight(payload.Length + (4 - payload.Length % 4) % 4, '=');
             using var doc = JsonDocument.Parse(Convert.FromBase64String(payload));
-            if (!doc.RootElement.TryGetProperty("roles", out var roles) || roles.ValueKind != JsonValueKind.Array)
-            {
-                return Array.Empty<string>();
-            }
-            return roles.EnumerateArray().Select(r => r.GetString() ?? string.Empty).ToList();
+            return read(doc.RootElement);
         }
-        catch (Exception ex) when (ex is FormatException or JsonException)
+        catch (Exception ex) when (ex is FormatException or JsonException or InvalidOperationException)
         {
-            return null;
+            return default;
         }
     }
 

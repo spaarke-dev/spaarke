@@ -142,6 +142,25 @@ public sealed class ArmStampKeylessVerifierTests
     }
 
     [Fact]
+    public async Task VerifyAsync_ASiteL2CannotRead_FailsClosed_NamingIt()
+    {
+        var arm = new FakeArm { ForbiddenPathFragment = "/sites/acme-func" };
+        arm.Resources.Add(new("Microsoft.Web/sites", "acme-func"));
+
+        (await FailedWith(arm)).Should().ContainSingle().Which.Should().Contain("acme-func").And.Contain("cannot be read");
+    }
+
+    [Theory]
+    [InlineData("https://management.azure.com:8443")]
+    [InlineData("http://management.azure.com")]
+    public async Task VerifyAsync_ANextLinkOnAnotherPortOrScheme_IsNotFollowed(string host)
+    {
+        var arm = new FakeArm { PageSize = 3, NextLinkHost = host };
+
+        (await Verify(arm)).Should().BeOfType<StampKeylessOutcome.InfraFault>();
+    }
+
+    [Fact]
     public async Task VerifyAsync_ANextLinkOutsideArm_IsNotFollowed_InfraFault()
     {
         var arm = new FakeArm { PageSize = 3, NextLinkHost = "https://evil.example" };
@@ -190,6 +209,7 @@ public sealed class ArmStampKeylessVerifierTests
         public int PageSize { get; init; } = 100;
         public HttpStatusCode Status { get; init; } = HttpStatusCode.OK;
         public string NextLinkHost { get; init; } = "https://management.azure.com";
+        public string? ForbiddenPathFragment { get; init; }
 
         public Dictionary<string, Dictionary<string, string>> SlotSettings { get; } = new()
         {
@@ -205,6 +225,8 @@ public sealed class ArmStampKeylessVerifierTests
                 return Task.FromResult(new HttpResponseMessage(Status));
 
             var path = request.RequestUri!.AbsolutePath;
+            if (ForbiddenPathFragment is not null && path.Contains(ForbiddenPathFragment, StringComparison.Ordinal))
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.Forbidden));
             var query = request.RequestUri.Query;
             var site = $"{Group}/providers/Microsoft.Web/sites/{Site}";
 

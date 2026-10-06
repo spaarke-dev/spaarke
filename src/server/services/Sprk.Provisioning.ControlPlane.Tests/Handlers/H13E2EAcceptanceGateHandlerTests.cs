@@ -721,6 +721,29 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     }
 
     [Fact]
+    public async Task AC22b_CompletedRun_MissingBffAppRegId_StaysANoOp()
+    {
+        // The BffAppRegId guard runs after the level-3 idempotency short-circuit: a completed run is never re-judged.
+        var run = BuildRun();
+        run.InterStepState.BffAppRegId = null;
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = H13E2EAcceptanceGateHandler.HandlerIdentifier,
+            IdempotencyKey = H13E2EAcceptanceGateHandler.BuildIdempotencyKey(CustomerId, BuildId),
+            StartedAt = DateTimeOffset.UtcNow,
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = RunId,
+        });
+        var repo = new FakeRepository(run, etag: "etag-22b");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        seams.Validator.CallCount.Should().Be(0);
+    }
+
+    [Fact]
     public async Task AC23_StampAcceptsKeys_FailsQuarantine_NamingTheViolations()
     {
         var repo = new FakeRepository(BuildRun(), etag: "etag-23");

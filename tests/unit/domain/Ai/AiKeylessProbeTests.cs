@@ -95,9 +95,12 @@ public class AiKeylessProbeTests
             KeylessProofContract.Services.Cosmos, KeylessProofContract.Services.BlobStorage,
             KeylessProofContract.Services.ContentSafetyPromptShield, KeylessProofContract.Services.ContentSafetyGroundedness,
         });
-        results.Should().OnlyContain(r => r.Outcome == KeylessProofContract.Outcomes.NotConfigured && r.Code.StartsWith("setting-missing:"));
+        results.Where(r => r.Service != KeylessProofContract.Services.BlobStorage)
+            .Should().OnlyContain(r => r.Outcome == KeylessProofContract.Outcomes.NotConfigured && r.Code.StartsWith("setting-missing:"));
         Outcome(results, KeylessProofContract.Services.OpenAiChat).Code.Should().Be("setting-missing:AzureOpenAI:Endpoint");
-        Outcome(results, KeylessProofContract.Services.BlobStorage).Code.Should().Be("setting-missing:SessionFileStore:BlobEndpoint");
+        // The session-file store is off by design until compose-r8 task 063 — nothing to prove, and H13 accepts it for blob only.
+        Outcome(results, KeylessProofContract.Services.BlobStorage).Should().Be(
+            (KeylessProofContract.Outcomes.NotInUse, "store-disabled:SessionFileStore:BlobEndpoint"));
         Outcome(results, KeylessProofContract.Services.Cosmos).Code.Should().Be("setting-missing:CosmosPersistence:Endpoint");
     }
 
@@ -112,6 +115,17 @@ public class AiKeylessProbeTests
 
         Outcome(results, KeylessProofContract.Services.ContentSafetyPromptShield).Outcome.Should().Be(expected);
         Outcome(results, KeylessProofContract.Services.ContentSafetyGroundedness).Outcome.Should().Be(expected);
+    }
+
+    [Fact]
+    public async Task ProbeAsync_ASecretBearingBlobEndpoint_IsAKeyCredential()
+    {
+        var results = await Probe(
+                new Dictionary<string, string?> { ["SessionFileStore:BlobEndpoint"] = "DefaultEndpointsProtocol=https;AccountName=x;AccountKey=abc==" },
+                new DocumentIntelligenceOptions())
+            .ProbeAsync(CancellationToken.None);
+
+        Outcome(results, KeylessProofContract.Services.BlobStorage).Outcome.Should().Be(KeylessProofContract.Outcomes.KeyCredential);
     }
 
     [Fact]

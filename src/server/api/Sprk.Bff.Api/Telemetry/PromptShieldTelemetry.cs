@@ -17,7 +17,8 @@ namespace Sprk.Bff.Api.Telemetry;
 ///
 /// Labels on latency histogram:
 ///   - <c>outcome</c>: <c>blocked</c> | <c>safe</c> | <c>fail_open</c>
-///   - <c>fail_open_cause</c>: <c>timeout</c> | <c>error</c> | <c>-</c> (when not fail-open)
+///   - <c>fail_open_cause</c>: <c>timeout</c> | <c>error</c> | <c>auth</c> (task 230b) | <c>-</c> (when not fail-open).
+///     A fail-open scan records ONE sample, outcome <c>fail_open</c> — never also <c>safe</c>.
 /// </summary>
 public sealed class PromptShieldTelemetry : IDisposable
 {

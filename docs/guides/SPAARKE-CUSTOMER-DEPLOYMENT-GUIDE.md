@@ -260,15 +260,20 @@ and the ACS resource (its local-auth setting is unverified on the pinned API; th
 - **The keyless proof**: H13 calls the stamp BFF's `POST /api/platform/keyless-proof` as the L2 Worker identity (token
   for `api://{BFF app id}`; H3 gives that identity the application role `Provisioning.KeylessProof`, and nothing else
   holds it). The BFF makes one real, read-only call with **its own managed identity** to Service Bus (peek), Redis (PING),
-  Azure OpenAI (chat, 16 tokens; embeddings), Document Intelligence (resource details), AI Search (document count),
+  Azure OpenAI (chat, a one-word reply; embeddings), Document Intelligence (resource details), AI Search (document count),
   Cosmos DB (container metadata), Blob (one listing page) and Content Safety (Prompt Shield + groundedness, one text
   record each) — a fraction of a cent per run — and reports per service `proved` / `refused` / `key-credential` /
-  `not-configured` / `unreachable` / `failed`, with status and timing only. Anything but `proved` fails H13
-  (QuarantineRequired); `unreachable` alone is Resumable. The `openai-chat` result is ADR-028 E-2's measurement on the
-  stamp's `kind: OpenAI` account (logged as such).
-- **ARM**: key/local auth disabled on every keyed resource of the stamp resource group (the types above), and no key
-  setting — `StampKeySettingCatalog` or a key-shaped value — on the App Service or any of its slots
-  (`h13-stamp-key-auth-enabled`).
+  `not-configured` / `unreachable` / `failed` / `not-in-use`, with status and timing only. Anything but `proved` fails
+  H13 (QuarantineRequired), except: `unreachable` is Resumable, and `not-in-use` passes for Blob only — the session-file
+  store ships with `SessionFileStore__BlobEndpoint` empty until compose-r8 task 063, so the BFF writes no blob and there is
+  nothing to prove (a stamp that sets the endpoint gets the Blob probe). The call itself: plain-http BFF URLs are refused
+  (the token is never sent), a token without the role fails with the token's `oid` named, a 404 (a BFF build that
+  predates the route) is Resumable — redeploy (H9), then resume — and a 500 fails. The `openai-chat` result is ADR-028
+  E-2's measurement on the stamp's `kind: OpenAI` account (logged as such).
+- **ARM**: key/local auth disabled on every keyed resource of the stamp resource group (the types above, plus classic
+  Redis, Event Hubs, App Configuration and Event Grid topics if one is ever added), and no key setting —
+  `StampKeySettingCatalog` or a key-shaped value — on any App Service of the group or any of its slots
+  (`h13-stamp-key-auth-enabled`; a site L2 cannot read fails too).
 A build-time census (`tests/Spaarke.ArchTests/KeyCredentialCensusTests.cs`) pins every key-credential site in server code
 and fails the build on a new one, or on one the H13 catalog or the proof does not cover.
 

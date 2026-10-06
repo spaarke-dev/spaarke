@@ -101,6 +101,9 @@ public static class KeylessProbeRunner
         RedisConnectionException rce when rce.FailureType == ConnectionFailureType.AuthenticationFailure
             => (KeylessProofContract.Outcomes.Refused, null, "redis-auth"),
         RedisConnectionException or RedisTimeoutException => (KeylessProofContract.Outcomes.Unreachable, null, "redis-connection"),
+        // Per-attempt network timeouts / socket faults an SDK folds into its retry aggregate.
+        OperationCanceledException or IOException or System.Net.Sockets.SocketException
+            => (KeylessProofContract.Outcomes.Unreachable, null, "transport"),
         _ => (KeylessProofContract.Outcomes.Failed, null, "unexpected-error"),
     };
 

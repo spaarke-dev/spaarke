@@ -27,7 +27,7 @@ public sealed class ContentSafetyAuthOutcomeTests : IDisposable
     {
         _listener.InstrumentPublished = (instrument, listener) =>
         {
-            if (instrument.Name is "ai.safety.shield_evaluations" or "ai_safety_groundedness_latency_ms")
+            if (instrument.Name is "ai.safety.shield_evaluations" or "ai_safety_groundedness_latency_ms" or "ai_safety_prompt_shield_latency_ms")
                 listener.EnableMeasurementEvents(instrument);
         };
         _listener.SetMeasurementEventCallback<long>((i, _, tags, _) => _measurements.Add((i.Name, OutcomeOf(tags))));
@@ -51,6 +51,17 @@ public sealed class ContentSafetyAuthOutcomeTests : IDisposable
         result.FailedOpen.Should().BeTrue();
         result.AuthRefused.Should().BeTrue();
         _measurements.Should().Contain(("ai.safety.shield_evaluations", AiTelemetry.ShieldOutcomeFailedOpenAuth));
+    }
+
+    [Fact]
+    public async Task PromptShield_AnAuthRefusal_IsOneFailOpenLatencySample_NotAlsoASafeScan()
+    {
+        var service = PromptShield(new StatusHandler(HttpStatusCode.Forbidden), new FixedTokenCredential(), new AiTelemetry());
+
+        await service.ScanAsync(new PromptShieldRequest("hello"));
+
+        _measurements.Where(m => m.Instrument == "ai_safety_prompt_shield_latency_ms").Select(m => m.Outcome)
+            .Should().Equal("fail_open");
     }
 
     [Fact]

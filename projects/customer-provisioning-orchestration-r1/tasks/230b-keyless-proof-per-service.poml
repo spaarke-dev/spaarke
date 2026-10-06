@@ -4,7 +4,7 @@
     <title>Keyless proof (D13): the BFF proves one managed-identity call per stamp service to H13 (401/403 fails acceptance, never a skip), L2 proves key auth is off on every resource, and a build-time guard stops key credentials coming back</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T230 part 2 (D13)</phase>
     <gate>after 230a</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New BFF endpoint (BFF §10), auth (app role, token audience), H3/H13 handler changes, ArchTest.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -99,5 +99,55 @@
     <trigger>ADR conflict (e.g. ADR-008 endpoint filters, ADR-028 MUSTs) → CLAUDE.md §6.5.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 41). Commits 8df18bead (BFF), 5b49ed7f6 (H3 + H13), 10ee22e3e (ArchTests), 52bc21fcb (docs),
+    e38a29e09 + the round-2 commit (Step 9.5 fixes).
+    - BFF: POST /api/platform/keyless-proof (Api/Platform/KeylessProofEndpoints.cs; job-submission rate limit) behind
+      KeylessProofAuthorizationFilter — app-only (no scp; idtyp absent or app), tid = AzureAd:TenantId, aud = this API
+      (the Copilot audience is refused), role Provisioning.KeylessProof; missing config refuses. KeylessProofService (Service
+      Bus peek, Redis PING) + ADR-013 facade IAiKeylessProbe → AiKeylessProbe (OpenAI chat + embeddings, Document Intelligence
+      resource details, AI Search count, Cosmos container metadata, Blob one page, Content Safety Prompt Shield + groundedness
+      through a 30 s probe client with the same ContentSafetyAuthHandler). Outcomes: proved / refused / key-credential /
+      not-configured / unreachable / failed / not-in-use; status + timing + short code only. KeylessProbeRunner (TimeProvider)
+      classifies SDK errors incl. retry AggregateException. One source-linked contract src/server/shared/Contracts/
+      KeylessProofContract.cs (route, role + fixed id, outcomes, services, MayBeUnused) shared with L2.
+    - Content Safety: 401/403 or no token → distinct fail-open (failed_open_auth / fail_open_auth, Error log,
+      PromptShieldResult.AuthRefused); still fails open for users; a fail-open scan records one fail_open latency sample.
+    - H3: app role on the per-customer BFF app reg (create + reconcile; matched by value) + appRoleAssignedTo for
+      ControlPlaneIdentity:PrincipalObjectId, idempotent; other holders of the role removed; 400/404 retried
+      (RoleAssignmentRetryCount/Delay). No new Graph permission (L2 already holds AppRoleAssignment.ReadWrite.All via H10 and
+      owns the app). Model 2 (customer-owned-model2): role defined, NOT assigned — L2 has no SP in the customer tenant (gap).
+    - H13: the four user-workflow sample checks REMOVED (agent message / search count scope=all / layouts / field mappings
+      need a signed-in user; an app-only token could never pass and their 401/403 were "skips", so they never ran).
+      E2EValidationRunner now calls the keyless proof (token api://{BffAppRegId}/.default, https only, role-less token →
+      failure naming the token oid); per-service checks; anything but proved fails (QuarantineRequired) — unreachable,
+      gateway 502/503/504, 404 (old build) → new Inconclusive (Resumable); not-in-use accepted for blob only. New
+      IStampKeylessVerifier / ArmStampKeylessVerifier: key/local auth off on every keyed resource in the RG + no key setting
+      on any App Service / slot (StampKeySettingCatalog + key-shaped values; an unreadable site fails). New rejection codes
+      h13-stamp-key-auth-enabled, h13-stamp-keyless-infra-fault, h13-extended-validation-inconclusive,
+      h13-missing-bff-app-reg-id; gate h13-stamp-keyless. openai-chat outcome logged as the ADR-028 E-2 measurement.
+    - ArchTests: KeyCredentialCensusTests (per-file key sites incl. target-typed / OpenAI-qualified / connection-string forms,
+      each with config keys; stamp keys must be in L2 StampKeySettingCatalog AND a keyless-proof probe); template ↔ ARM
+      verifier type parity; route guard ledger (AdminMechanism #5, AdminOnlyGroup, ClaimOnlyFilters, endpoint files
+      116→117); ADR-010 ceiling 158→159 (IAiKeylessProbe).
+    - KnowledgeDeploymentService: key-only CustomerOwned path removed (unreachable; D13) + RagDeploymentModel.CustomerOwned;
+      guides + scripts/Test-RagDedicatedModel.ps1 updated (sub-agent).
+    - BFF §10: publish (fresh short-path worktrees, Compress-Archive Optimal, PDBs incl.) pre-task f9303ec3e 36.14 MB / 192
+      files; task 52bc21fcb 36.15 MB / 192; origin/master cc96ea6d7 36.15 MB / 192 → +0.01 MB (later commits: source only, no
+      package). CVE: none. Placement + ADR Tensions in design §17.
+    - Step 9.5: code-review (0 Critical, 7 W, 17 S) — F1–F8, F10–F21, F23 (partly), F24 (audit log, TimeProvider) fixed;
+      F9 accepted (contract: no token = refused); F22 no in-repo config sets CustomerOwned. adr-check — V1 (design §17) fixed;
+      V2 Path A recorded (second Content Safety client); W1 Path A recorded (non-debug diagnostic route); W5/W9/W11 fixed; W10:
+      H3's assignment is the POML's design (auth sign-off = this task's owner-approved scope). Verifier pass 2 (fix diff): all
+      13 fixes confirmed; C1 (blob probe would fail every stamp: SessionFileStore endpoint empty by design until compose-r8
+      task 063) FIXED by NotInUse for MayBeUnused services only; W1 (role-less token = failure, not resumable) accepted — the
+      contract's auth rule; S1, S2, S4–S10 fixed; S3 (Graph-fake test of H3 delete/retry) accepted (project precedent: live
+      Graph collaborators untested; decisions are pure helpers with tests).
+    - Found (not fixed here): BFF host does not boot without AzureOpenAI:Endpoint + ChatModelName (chat endpoints map
+      unconditionally, IChatClient registered only when both are set) — stamps always set them; latent ADR-032 F.1 item.
+      AnalysisOptions.CustomerTenantId / KeyVaultUrl unread. No alert on failed_open_auth (only H13 catches it at provisioning).
+    - Tests: ControlPlane 2197 / 0 (1 skip); BFF full 18097 / 0 (54 skip, round 1) + round-2 targeted 115 / 0; ArchTests
+      836/836; Worker / Api / BFF build 0 warnings.
+    - Live (T186): see current-task.md "T186 live checks" (T230b line).
+  </notes>
 </task>

@@ -402,6 +402,32 @@ public sealed class E2EValidationRunnerTests
     }
 
     [Fact]
+    public async Task RunAsync_BlobNotInUseByDesign_Passes()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody((KeylessProofContract.Services.BlobStorage, KeylessProofContract.Outcomes.NotInUse, "store-disabled:SessionFileStore:BlobEndpoint")))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Success>()
+            .Which.ChecksPassed.Should().Contain(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.BlobStorage + "-not-in-use");
+    }
+
+    [Fact]
+    public async Task RunAsync_NotInUseForAServiceEveryStampUses_Fails()
+    {
+        var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)
+            ? Json(KeylessBody((KeylessProofContract.Services.OpenAiChat, KeylessProofContract.Outcomes.NotInUse, "store-disabled:x")))
+            : HappyResponder(req));
+
+        var result = await BuildRunner(handler).RunAsync(BuildRequest(), CancellationToken.None);
+
+        result.Should().BeOfType<E2EValidationOutcome.Failure>()
+            .Which.ChecksFailed.Should().Equal(E2EValidationRunner.KeylessProofCheckPrefix + KeylessProofContract.Services.OpenAiChat);
+    }
+
+    [Fact]
     public async Task RunAsync_AServiceMissingFromTheAnswer_Fails()
     {
         var handler = new FakeBffHttpMessageHandler(req => IsKeylessProof(req)

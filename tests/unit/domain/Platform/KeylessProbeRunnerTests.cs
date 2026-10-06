@@ -107,6 +107,14 @@ public class KeylessProbeRunnerTests
     }
 
     [Fact]
+    public void Classify_AnAggregateOfPerAttemptTimeoutsAndSocketFaults_IsUnreachable()
+    {
+        var aggregate = new AggregateException(new TaskCanceledException("attempt timeout"), new IOException("connection reset"));
+
+        KeylessProbeRunner.Classify(aggregate).Outcome.Should().Be(KeylessProofContract.Outcomes.Unreachable);
+    }
+
+    [Fact]
     public void Classify_AnSdkRetryAggregateContainingARefusal_IsRefused()
     {
         var aggregate = new AggregateException(new RequestFailedException(503, "busy"), new RequestFailedException(403, "denied"));

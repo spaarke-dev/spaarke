@@ -47,6 +47,12 @@ internal static class KeylessProofContract
 
         /// <summary>The service answered with another error (for example a missing deployment or index).</summary>
         public const string Failed = "failed";
+
+        /// <summary>
+        /// The BFF does not use this service on this stamp BY DESIGN (its feature is switched off), so there is no call to
+        /// prove. Accepted by H13 only for <see cref="Services.MayBeUnused"/> — any other service reporting it fails.
+        /// </summary>
+        public const string NotInUse = "not-in-use";
     }
 
     /// <summary>The service ids the proof reports — every one must be present in a response.</summary>
@@ -62,6 +68,13 @@ internal static class KeylessProofContract
         public const string BlobStorage = "blob-storage";
         public const string ContentSafetyPromptShield = "content-safety-prompt-shield";
         public const string ContentSafetyGroundedness = "content-safety-groundedness";
+
+        /// <summary>
+        /// The services a stamp may leave unused by design. <see cref="BlobStorage"/>: the session-file store ships with
+        /// <c>SessionFileStore:BlobEndpoint</c> EMPTY until compose-r8 task 063 (retention / erasure) lands — no stamp sets
+        /// it, and the BFF writes no blob then. Once a stamp sets it, the blob probe runs and must prove.
+        /// </summary>
+        public static readonly IReadOnlyList<string> MayBeUnused = new[] { BlobStorage };
 
         /// <summary>Every service, in the order the BFF reports them.</summary>
         public static readonly IReadOnlyList<string> All = new[]

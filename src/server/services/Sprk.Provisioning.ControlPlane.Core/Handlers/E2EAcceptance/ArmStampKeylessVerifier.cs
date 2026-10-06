@@ -159,7 +159,20 @@ public sealed class ArmStampKeylessVerifier : IStampKeylessVerifier
             {
                 var siteId = $"{groupId}/providers/Microsoft.Web/sites/{site}";
                 var slotScopes = new List<(string Label, string Id)> { ("production", siteId) };
-                foreach (var slot in await arm.ListAsync($"{siteId}/slots?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false))
+                IReadOnlyList<JsonElement> slots;
+                try
+                {
+                    slots = await arm.ListAsync($"{siteId}/slots?api-version={WebApiVersion}", cancellationToken).ConfigureAwait(false);
+                }
+                catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Forbidden
+                                                      && !string.Equals(site, request.AppServiceName, StringComparison.OrdinalIgnoreCase))
+                {
+                    // L2 holds Website Contributor on the BFF only (customer.bicep): another site's settings cannot be read,
+                    // so the stamp cannot be shown keyless — fail closed and name it.
+                    violations.Add($"App Service '{site}': its settings cannot be read by the L2 identity (403) — the stamp deploys one site; remove it or grant L2 access");
+                    continue;
+                }
+                foreach (var slot in slots)
                 {
                     var full = slot.GetProperty("name").GetString() ?? string.Empty; // "{site}/{slot}"
                     var slotName = full.Contains('/') ? full[(full.LastIndexOf('/') + 1)..] : full;
@@ -244,8 +257,12 @@ public sealed class ArmStampKeylessVerifier : IStampKeylessVerifier
                     items.AddRange(value.EnumerateArray());
                 }
                 next = page.TryGetProperty("nextLink", out var link) && link.ValueKind == JsonValueKind.String ? link.GetString() : null;
-                // The ARM bearer token follows nextLink — only ever to ARM itself.
-                if (next is not null && !next.StartsWith(ArmBase + "/", StringComparison.OrdinalIgnoreCase))
+                // The ARM bearer token follows nextLink — only ever to ARM itself (https, the ARM host, default port).
+                if (next is not null
+                    && !(Uri.TryCreate(next, UriKind.Absolute, out var link2)
+                         && link2.Scheme == Uri.UriSchemeHttps
+                         && string.Equals(link2.Host, "management.azure.com", StringComparison.OrdinalIgnoreCase)
+                         && link2.IsDefaultPort))
                 {
                     throw new InvalidOperationException("ARM returned a nextLink outside management.azure.com; not followed.");
                 }
