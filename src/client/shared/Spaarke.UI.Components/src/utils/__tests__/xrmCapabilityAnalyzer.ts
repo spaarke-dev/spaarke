@@ -1,6 +1,6 @@
 /**
  * xrmCapabilityAnalyzer — AST check that every `getXrm(...)` value is used only
- * for what its requested capability covers (task 081 rounds 5–6, reviews R4-2 / R5-1).
+ * for what its requested capability covers (task 081 rounds 5–7, reviews R4-2 / R5-1 / round-6 review).
  *
  * Not a test file itself: `xrmCapabilityUsage.guard.test.ts` runs it over the
  * repository's `src/`, and over synthetic fixtures that prove each tracked
@@ -21,18 +21,24 @@
  *   `const g = getXrm` alias. A `getXrm` imported from a module that is NOT
  *   scanned is recognised by its original name and a `ui-components` /
  *   `xrmContext` specifier. Any other reference to `getXrm` (passed, stored) is
- *   a blind spot.
- * - a call of a WRAPPER: a function, method or object-literal method that
- *   RETURNS such a value, found by resolved symbol at every call site
- *   (`this.m()`, `svc.m()`, `new S().m()`, imports). Each `return` is its own
- *   origin (no union across returns). A wrapper referenced other than by a
- *   call is a blind spot.
+ *   a blind spot, and so is an unrecognised `getXrm` that is destructured
+ *   (`const { getXrm } = ui`) or read off a dynamic import. A dynamic `import()`
+ *   of a module that exports `getXrm` is a blind spot unless every use of its
+ *   value provably avoids `getXrm` (`m.Other`, `{ Other }`).
+ * - a call of a WRAPPER: a function, method, object-literal method or getter
+ *   that RETURNS such a value, found by resolved symbol at every call site
+ *   (`this.m()`, `svc.m()`, `new S().m()`, imports; a getter's `x.prop` read).
+ *   An IIFE is followed to its own call. Each `return` is its own origin (no
+ *   union across returns). A wrapper referenced other than by a call, and an
+ *   ANONYMOUS returning function (default export, JSX prop, `o.f = () => …`),
+ *   are blind spots.
  * - FORWARDING: when the capability is a parameter of the enclosing function
  *   (`function f(cap) { getXrm(cap)… }`), the value is analysed ONCE PER CALL
  *   SITE of that function, with the caller's argument (or the default) bound —
  *   through chains of such functions. Uses inside the function body are checked
  *   with each caller's capability; a `return` of the value continues at that
- *   call site.
+ *   call site. A forwarding function with no call site, or an anonymous one, is
+ *   a blind spot.
  *
  * ## Followed
  * Parentheses, `!`, `as` / `<T>` / `satisfies`, `await`, the right side of `,`,
@@ -42,13 +48,15 @@
  * resolved symbol, in any file); object destructuring (renames, nesting);
  * `useState(…)` / `useState(() => …)` (element 0 and values passed to its
  * setter); `useMemo(() => …)`; returns; call ARGUMENTS into functions resolved by
- * symbol (the parameter is followed like an alias); `new X(…)` into X's
- * constructor parameter (and the `this.field` it sets).
+ * symbol (the parameter is followed like an alias, and a `return` of it continues
+ * at THAT call only); an assignment to a setter, into its parameter; `new X(…)`
+ * into X's constructor parameter (and the `this.field` it sets).
  *
  * ## Not a use (explicit allow-list)
  * A condition (`if` / `while` / `for` / `?:` test), `!x`, `typeof x`, a
  * comparison (`===`, `!==`, `==`, `!=`, `instanceof`, `in`), a type position
- * (`x is T`, `typeof x` in a type), the left side of
+ * (`x is T`, `ReturnType<typeof getXrm>`), a declaration's own name or an
+ * assignment target (a write, not a read), the left side of
  * `&&` or `,`, an expression statement, `void`, an import / export specifier, a
  * React dependency array (`[xrm]` as the last argument of a hook), the receiver
  * of `.bind` / `.call` / `.apply`, an argument to `console.*`.
@@ -83,7 +91,12 @@
  * 3. A value passed to the helper its predicate calls is treated as covered.
  * 4. A `getXrm` imported from an UNSCANNED module is matched by name and
  *    specifier (calls INTO unscanned modules are blind spots, not passes).
- * 5. Out of scope: reads of `window.Xrm` / `parent.Xrm` that never go through
+ * 5. A named wrapper that is never called: its value reaches nothing (dead code),
+ *    so there is nothing to check and nothing is reported.
+ * 6. A site whose value reaches no `Root.member` use (a presence check) is not
+ *    reported by the analyzer; the guard test pins those sites to an explicit,
+ *    justified allow-list.
+ * 7. Out of scope: reads of `window.Xrm` / `parent.Xrm` that never go through
  *    `getXrm`.
  */
 
@@ -172,7 +185,15 @@ const EMPTY_ENV: Env = new Map();
 /** One level of forwarding: the value's capability came from `fn`'s parameters, bound at `call`. */
 interface ChainLink {
   fn: ts.FunctionLikeDeclaration;
-  call: ts.CallExpression;
+  /** The call (or getter read) whose value a `return` inside `fn` becomes. */
+  call: ts.Expression;
+}
+
+/** Bound on helper/forwarding nesting (recursion guard). */
+const MAX_CHAIN = 12;
+
+function argsOf(e: ts.Expression): readonly ts.Expression[] {
+  return ts.isCallExpression(e) ? e.arguments : [];
 }
 
 interface Origin {
@@ -378,7 +399,7 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     return undefined;
   }
   function fnKey(fn: ts.FunctionLikeDeclaration): ts.Symbol | undefined {
-    if ((ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) && fn.name)
+    if ((ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn) || ts.isGetAccessorDeclaration(fn)) && fn.name)
       return dealias(checker.getSymbolAtLocation(fn.name));
     const p = fn.parent;
     if ((ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isPropertyAssignment(p)) && p.name)
@@ -410,8 +431,15 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       ts.isImportClause(p) ||
       ts.isNamespaceImport(p) ||
       ts.isExportAssignment(p) ||
+      // A type position (`ReturnType<typeof getXrm>`) is not a value use.
+      findAncestor(
+        id,
+        (n): n is ts.TypeNode => n.kind >= ts.SyntaxKind.FirstTypeNode && n.kind <= ts.SyntaxKind.LastTypeNode
+      ) ||
       ((ts.isFunctionDeclaration(p) ||
         ts.isMethodDeclaration(p) ||
+        ts.isGetAccessorDeclaration(p) ||
+        ts.isSetAccessorDeclaration(p) ||
         ts.isVariableDeclaration(p) ||
         ts.isPropertyDeclaration(p) ||
         ts.isPropertyAssignment(p) ||
@@ -429,24 +457,71 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       return { skip: true };
     return {};
   }
-  function usesOfFunction(fn: ts.FunctionLikeDeclaration): { calls: ts.CallExpression[]; escapes: ts.Node[] } {
-    const calls: ts.CallExpression[] = [];
+  /** `(() => …)()` / `(function () { … })()`: the call that invokes `fn` in place. */
+  function iifeCall(fn: ts.FunctionLikeDeclaration): ts.CallExpression | undefined {
+    if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) return undefined;
+    let cur: ts.Node = fn;
+    let p: ts.Node = fn.parent;
+    while (ts.isParenthesizedExpression(p)) {
+      cur = p;
+      p = p.parent;
+    }
+    return ts.isCallExpression(p) && p.expression === cur ? p : undefined;
+  }
+  /**
+   * Where `fn`'s return value goes: its call sites (an IIFE's own call; a getter's
+   * `x.prop` reads), references that are neither (escapes), or `anonymous` when `fn`
+   * has no name the analyzer can find references to.
+   */
+  function usesOfFunction(fn: ts.FunctionLikeDeclaration): {
+    calls: ts.Expression[];
+    escapes: ts.Node[];
+    anonymous: boolean;
+  } {
+    const calls: ts.Expression[] = [];
     const escapes: ts.Node[] = [];
+    const iife = iifeCall(fn);
+    if (iife) return { calls: [iife], escapes, anonymous: false };
     const key = fnKey(fn);
+    if (!key) return { calls, escapes, anonymous: true };
     let ids = referencesOf(key);
-    if (ts.isMethodDeclaration(fn) || ts.isPropertyAssignment(fn.parent) || ts.isPropertyDeclaration(fn.parent)) {
+    if (
+      ts.isMethodDeclaration(fn) ||
+      ts.isGetAccessorDeclaration(fn) ||
+      ts.isPropertyAssignment(fn.parent) ||
+      ts.isPropertyDeclaration(fn.parent)
+    ) {
       // `svc.get` / `new S().get` can resolve to a TRANSIENT property symbol (a widened or
       // instantiated type's member): match those through their declarations.
       const name = fnName(fn);
       for (const [s, l] of refIndex)
-        if (s !== key && s.name === name && functionOfSymbol(s) === fn) ids = ids.concat(l);
+        if (
+          s !== key &&
+          s.name === name &&
+          (functionOfSymbol(s) === fn || s.declarations?.includes(fn as unknown as ts.Declaration))
+        )
+          ids = ids.concat(l);
     }
     for (const id of ids) {
+      if (ts.isGetAccessorDeclaration(fn)) {
+        // A getter's read `x.prop` is its call.
+        const p = id.parent;
+        if (ts.isPropertyAccessExpression(p) && p.name === id) {
+          const pp = p.parent;
+          const isWrite =
+            ts.isBinaryExpression(pp) &&
+            pp.left === p &&
+            pp.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+            pp.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+          if (!isWrite) calls.push(p);
+          continue;
+        }
+      }
       const c = classifyRef(id);
       if (c.call) calls.push(c.call);
       else if (!c.skip) escapes.push(id);
     }
-    return { calls, escapes };
+    return { calls, escapes, anonymous: false };
   }
 
   // ---- getXrm identification (by resolved symbol)
@@ -769,6 +844,24 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     if (seen.has(key)) return;
     seen.add(key);
 
+    // A declaration's own name (`let x;`) or an assignment target (`x = …`) is not a read.
+    {
+      const p = node.parent;
+      if (
+        ((ts.isVariableDeclaration(p) ||
+          ts.isParameter(p) ||
+          ts.isBindingElement(p) ||
+          ts.isPropertyDeclaration(p) ||
+          ts.isPropertyAssignment(p)) &&
+          p.name === node) ||
+        (ts.isBinaryExpression(p) &&
+          p.left === node &&
+          p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+          p.operatorToken.kind <= ts.SyntaxKind.LastAssignment)
+      )
+        return;
+    }
+
     let cur: ts.Node = node;
     let parent: ts.Node = cur.parent;
     // Ascend through value-preserving wrappers.
@@ -896,6 +989,13 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       }
       if (ts.isPropertyAccessExpression(left)) {
         const sym = dealias(checker.getSymbolAtLocation(left.name));
+        // A setter: the value is its parameter (typically stored in a backing field).
+        const setter = sym?.declarations?.find(ts.isSetAccessorDeclaration);
+        if (setter) {
+          if (setter.parameters[0]) bindPattern(setter.parameters[0].name, o);
+          else blind(o, parent, 'setter without a parameter');
+          return;
+        }
         if (sym?.declarations?.length) {
           propagateMember(sym, left.name, o);
           return;
@@ -945,13 +1045,10 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
         blind(o, fn, `returned from a callback passed to ${hook ?? 'a call'}`);
         return;
       }
-      if (o.chain.length) {
-        // Forwarding: continue at the call site that bound this function's capability.
-        if (fn === o.chain[0].fn) {
-          propagate(o.chain[0].call, fork(o, { chain: o.chain.slice(1) }));
-          return;
-        }
-        blind(o, parent, 'returned from a nested function inside a forwarding function');
+      // The value entered this function through a parameter bound at ONE call (a helper
+      // argument, or a forwarded capability): the return continues at that call only.
+      if (o.chain.length && fn === o.chain[0].fn) {
+        propagate(o.chain[0].call, fork(o, { chain: o.chain.slice(1) }));
         return;
       }
       followReturn(fn as ts.FunctionLikeDeclaration, o);
@@ -996,7 +1093,13 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
         return;
       }
       if (fn && fn.parameters[idx] && !fn.parameters[idx].dotDotDotToken) {
-        bindPattern(fn.parameters[idx].name, o);
+        if (o.chain.length >= MAX_CHAIN) {
+          blind(o, parent, 'helper nesting too deep (recursion?)');
+          return;
+        }
+        // Tie a `return` of this parameter to THIS call (an identity helper must not
+        // send every caller's value to every call).
+        bindPattern(fn.parameters[idx].name, fork(o, { chain: [{ fn, call: parent }, ...o.chain] }));
         return;
       }
       if (o.kind === 'root' && o.root === 'WebApi') {
@@ -1142,10 +1245,15 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
   /** A fixed-capability value returned from `fn`: each return is followed at every call site of `fn`. */
   const followedReturns = new Set<string>();
   function followReturn(fn: ts.FunctionLikeDeclaration, o: Origin) {
-    const k = `${fn.getSourceFile().fileName}:${fn.pos}:${o.site.file}:${o.site.line}:${o.cov.text}:${o.kind}:${o.root ?? ''}`;
+    const chainKey = o.chain.map(l => `${l.call.pos}`).join(',');
+    const k = `${fn.getSourceFile().fileName}:${fn.pos}:${o.site.file}:${o.site.line}:${o.cov.text}:${o.kind}:${o.root ?? ''}:${chainKey}`;
     if (followedReturns.has(k)) return;
     followedReturns.add(k);
-    const { calls, escapes } = usesOfFunction(fn);
+    const { calls, escapes, anonymous } = usesOfFunction(fn);
+    if (anonymous) {
+      blind(o, fn, 'returned from an anonymous function (its calls cannot be found)');
+      return;
+    }
     for (const e of escapes) blind(o, e, `wrapper ${fnName(fn)} referenced other than by a call`);
     for (const c of calls) propagate(c, fork(o));
   }
@@ -1174,7 +1282,8 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     env: Env,
     chain: ChainLink[],
     requested: string,
-    depth: number
+    depth: number,
+    topDef?: XrmSite
   ) {
     const cov = resolveCoverage(expr, env);
     if (cov.forwardParams.size) {
@@ -1191,23 +1300,29 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
       }
       const [fn] = fns;
       def.notes.push(`forward: ${fnName(fn)} — checked once per call site`);
-      const { calls, escapes } = usesOfFunction(fn);
+      const { calls, escapes, anonymous } = usesOfFunction(fn);
+      if (anonymous) {
+        blind({ site: def }, fn, 'capability forwarded from an anonymous function (its calls cannot be found)');
+        return;
+      }
       for (const e of escapes)
         blind({ site: def }, e, `forwarding function ${fnName(fn)} referenced other than by a call`);
-      if (!calls.length) def.notes.push('no call site found');
+      if (!calls.length) blind({ site: def }, fn, `forwarding function ${fnName(fn)} has no call site`);
       for (const c of calls) {
         const env2: Env = new Map(env);
+        const args = argsOf(c);
         fn.parameters.forEach((prm, i) => {
           const s2 = ts.isIdentifier(prm.name) ? checker.getSymbolAtLocation(prm.name) : undefined;
-          if (s2) env2.set(s2, { expr: c.arguments[i] ?? prm.initializer });
+          if (s2) env2.set(s2, { expr: args[i] ?? prm.initializer });
         });
         seed(
           call,
           expr,
           env2,
           [...chain, { fn, call: c }],
-          `${fnName(fn)}(${c.arguments.map(a => a.getText()).join(', ')})`,
-          depth + 1
+          `${fnName(fn)}(${args.map(a => a.getText()).join(', ')})`,
+          depth + 1,
+          topDef ?? def
         );
       }
       return;
@@ -1215,17 +1330,130 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     const site = newSite(chain.length ? chain[chain.length - 1].call : call, cov, requested);
     if (cov.unknown) blind({ site }, call, cov.unknownReason ?? 'capability not statically resolvable');
     propagate(call, { id: nextId++, kind: 'xrm', cov, site, chain });
+    // A forwarding definition's row lists what its call sites reached (they are separate rows).
+    if (topDef) for (const u of site.uses) if (!topDef.uses.includes(u)) topDef.uses.push(u);
   }
 
   // ---- seed: every reference to getXrm (by resolved symbol)
   const seededCalls = new Set<ts.CallExpression>();
   const getXrmRefs = new Set<ts.Identifier>(getXrmNamed);
   for (const [sym, ids] of refIndex) if (isGetXrmSymbol(sym)) ids.forEach(id => getXrmRefs.add(id));
+  function pseudoBlind(at: ts.Node, reason: string) {
+    const pseudo: XrmSite = {
+      file: disp(at.getSourceFile().fileName),
+      line: lineOf(at),
+      requested: '(reference)',
+      coverage: ['UNKNOWN'],
+      uses: [],
+      notes: [],
+    };
+    sites.push(pseudo);
+    blind({ site: pseudo }, at, reason);
+  }
+  /** `import('…')` (through `await` / parentheses), or an identifier / parameter holding one's module value. */
+  function isDynamicImportValue(e: ts.Expression): boolean {
+    const x = skipT(e);
+    if (ts.isCallExpression(x) && x.expression.kind === ts.SyntaxKind.ImportKeyword) return true;
+    if (!ts.isIdentifier(x)) return false;
+    const d = checker.getSymbolAtLocation(x)?.declarations?.[0];
+    if (d && ts.isVariableDeclaration(d) && d.initializer) return isDynamicImportValue(d.initializer);
+    if (d && ts.isParameter(d)) {
+      // `import(…).then(m => …)`: the callback's parameter is the module.
+      const cb = d.parent;
+      const call = cb.parent;
+      return (
+        ts.isCallExpression(call) &&
+        call.arguments[0] === cb &&
+        ts.isPropertyAccessExpression(call.expression) &&
+        call.expression.name.text === 'then' &&
+        isDynamicImportValue(call.expression.expression)
+      );
+    }
+    return false;
+  }
+  /** Why an UNRECOGNISED identifier named `getXrm` is a blind spot (undefined: an unrelated `getXrm`, e.g. a method). */
+  function unrecognisedGetXrm(id: ts.Identifier): string | undefined {
+    const p = id.parent;
+    if (ts.isBindingElement(p)) return 'getXrm destructured from an object (not followed)';
+    if (ts.isPropertyAccessExpression(p) && p.name === id && isDynamicImportValue(p.expression))
+      return 'getXrm read from a dynamic import (not followed)';
+    return undefined;
+  }
+
+  // Dynamic `import()` of a module that exports getXrm: every way its value is used must
+  // provably avoid getXrm (`m.Other`, `{ Other }`), else it is a blind spot.
+  for (const sf of sources) {
+    const visit = (n: ts.Node) => {
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword) checkDynamicImport(n);
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+  }
+  function checkDynamicImport(call: ts.CallExpression) {
+    const arg = call.arguments[0];
+    if (!arg || !ts.isStringLiteralLike(arg)) {
+      pseudoBlind(call, 'dynamic import with a non-literal specifier');
+      return;
+    }
+    const spec = arg.text;
+    const target = resolveModule(spec, call.getSourceFile().fileName);
+    if (target) {
+      const modSym = checker.getSymbolAtLocation(program.getSourceFile(target)!);
+      const exportsGetXrm = !!modSym && checker.getExportsOfModule(modSym).some(e => e.name === 'getXrm');
+      if (!exportsGetXrm) return;
+    } else if (!/ui-components|xrmContext/.test(spec)) return;
+    const unsafe = (why: string) => pseudoBlind(call, `dynamic import of '${spec}' (exports getXrm): ${why}`);
+    const bindingSafe = (name: ts.BindingName): boolean => {
+      if (ts.isIdentifier(name)) {
+        const sym = checker.getSymbolAtLocation(name);
+        return referencesOf(sym, name).every(ref => {
+          const p = ref.parent;
+          return ts.isPropertyAccessExpression(p) && p.expression === ref && p.name.text !== 'getXrm';
+        });
+      }
+      if (ts.isObjectBindingPattern(name))
+        return name.elements.every(el => {
+          if (el.dotDotDotToken) return false;
+          const prop = (el.propertyName ?? el.name) as ts.Node;
+          return ts.isIdentifier(prop) && prop.text !== 'getXrm';
+        });
+      return false;
+    };
+    let cur: ts.Node = call;
+    let p: ts.Node = call.parent;
+    while (TRANSPARENT.has(p.kind)) {
+      cur = p;
+      p = p.parent;
+    }
+    if (ts.isPropertyAccessExpression(p) && p.expression === cur) {
+      if (p.name.text === 'then' && ts.isCallExpression(p.parent) && p.parent.expression === p) {
+        const cb = p.parent.arguments[0];
+        if (cb && (ts.isArrowFunction(cb) || ts.isFunctionExpression(cb)) && cb.parameters[0]) {
+          if (!bindingSafe(cb.parameters[0].name)) unsafe('the module value reaches getXrm or is not followed');
+          return;
+        }
+        if (cb) unsafe('then() callback not followed');
+        return;
+      }
+      if (p.name.text === 'getXrm') unsafe('getXrm read from it');
+      return;
+    }
+    if (ts.isVariableDeclaration(p) && p.initializer === cur) {
+      if (!bindingSafe(p.name)) unsafe('the module value reaches getXrm or is not followed');
+      return;
+    }
+    unsafe('the module value is not followed');
+  }
+
   for (const id of getXrmRefs) {
     const sym = symbolOf(id);
     const p = id.parent;
     const isNs = ts.isPropertyAccessExpression(p) && p.name === id && isNsGetXrm(p);
-    if (!isGetXrmSymbol(sym) && !isNs) continue;
+    if (!isGetXrmSymbol(sym) && !isNs) {
+      const why = unrecognisedGetXrm(id);
+      if (why) pseudoBlind(id, why);
+      continue;
+    }
     const c = classifyRef(id);
     if (c.call) {
       if (seededCalls.has(c.call)) continue;
@@ -1237,16 +1465,7 @@ export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOp
     if (c.skip) continue;
     if (ts.isVariableDeclaration(p) && p.initializer === id) continue; // `const g = getXrm` (followed by symbol)
     if (ts.isPropertyAccessExpression(p) && p.name === id && ts.isVariableDeclaration(p.parent)) continue; // `const g = ui.getXrm`
-    const pseudo: XrmSite = {
-      file: disp(id.getSourceFile().fileName),
-      line: lineOf(id),
-      requested: '(reference)',
-      coverage: ['UNKNOWN'],
-      uses: [],
-      notes: [],
-    };
-    sites.push(pseudo);
-    blind({ site: pseudo }, id, 'getXrm referenced other than by a call');
+    pseudoBlind(id, 'getXrm referenced other than by a call');
   }
 
   for (const s of sites) s.uses.sort();

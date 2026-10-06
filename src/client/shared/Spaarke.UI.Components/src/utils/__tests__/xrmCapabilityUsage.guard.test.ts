@@ -35,6 +35,22 @@ describe('getXrm capability guard — repository', () => {
   it('no blind spot (every value is followed to its uses)', () => {
     expect(result.blindSpots.map(b => `${b.file}:${b.line} ${b.reason} (from ${b.site})`)).toEqual([]);
   });
+
+  // A site whose value reaches NO `Root.member` use is either a presence check or a
+  // value the analyzer lost. Each one is listed here with its reason; a new one fails
+  // until it is checked and added (round 7). Forwarding definitions are not in this
+  // list: their row carries the uses their call-site rows reached.
+  const NO_USE_ALLOW_LIST: Record<string, string> = {
+    'solutions/NavigatorPane/src/NavigatorBody.tsx':
+      'presence check: `const xrm = getXrm(); if (!xrm)` renders the no-Xrm empty state; no member is read',
+  };
+  it('every site with no reached use is explicitly allow-listed', () => {
+    const noUse = result.sites
+      .filter(s => s.uses.length === 0 && s.requested !== '(reference)')
+      .map(s => s.file)
+      .sort();
+    expect(noUse).toEqual(Object.keys(NO_USE_ALLOW_LIST).sort());
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -308,6 +324,139 @@ describe('getXrm capability guard — round 6 shapes fire (R5-1)', () => {
     });
     expect(r.violations).toEqual([]);
     expect(r.sites.flatMap(s => s.notes)).toContain('|| predicate — union of the disjuncts');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 7 (review of round 6): more shapes that used to pass SILENTLY.
+// ---------------------------------------------------------------------------
+
+const R7_VIOLATIONS: Array<[string, Record<string, string>, string]> = [
+  [
+    'IIFE (arrow)',
+    { 'a.ts': IMPORT + "(() => getXrm('navigation'))()!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'IIFE (function expression)',
+    { 'a.ts': IMPORT + "(function () {\n  return getXrm('navigation');\n})()!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'IIFE forwarding its parameter',
+    { 'a.ts': IMPORT + "((cap: any) => getXrm(cap))('navigation')!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'get accessor wrapper (x.prop read is its call)',
+    {
+      'a.ts':
+        IMPORT +
+        "class G {\n  get x() {\n    return getXrm('navigation');\n  }\n}\nnew G().x!.Navigation.openForm({});",
+    },
+    'Navigation.openForm',
+  ],
+  [
+    'setter with a backing field',
+    {
+      'a.ts':
+        IMPORT +
+        "class C {\n  private _x: any;\n  set x(v: any) {\n    this._x = v;\n  }\n  go() {\n    this._x.Navigation.openForm({});\n  }\n}\nconst c = new C();\nc.x = getXrm('navigation');",
+    },
+    'Navigation.openForm',
+  ],
+];
+
+const R7_BLIND_SPOTS: Array<[string, Record<string, string>, RegExp]> = [
+  [
+    'export default anonymous function',
+    { 'a.ts': IMPORT + "export default function () {\n  return getXrm('navigation');\n}" },
+    /anonymous function/,
+  ],
+  [
+    'arrow in a JSX prop',
+    { 'a.tsx': IMPORT + "const C: any = null;\nexport const el = <C get={() => getXrm('navigation')} />;" },
+    /anonymous function/,
+  ],
+  [
+    'o.get = () => getXrm(..)',
+    { 'a.ts': IMPORT + "const o: any = {};\no.get = () => getXrm('navigation');" },
+    /anonymous function/,
+  ],
+  [
+    'forwarding function with no call site',
+    { 'a.ts': IMPORT + 'export function f(cap: any) {\n  return getXrm(cap);\n}' },
+    /has no call site/,
+  ],
+  [
+    "import('…').then(({ getXrm }) => …)",
+    {
+      'a.ts': "import('@spaarke/ui-components').then(({ getXrm }) => getXrm('navigation')!.Navigation.openForm({}));",
+    },
+    /getXrm destructured|dynamic import/,
+  ],
+  [
+    'const m = await import(…); m.getXrm(..)',
+    {
+      'a.ts':
+        "export async function a() {\n  const m = await import('@spaarke/ui-components');\n  m.getXrm('navigation')!.Navigation.openForm({});\n}",
+    },
+    /dynamic import/,
+  ],
+  [
+    'const { getXrm } = ui',
+    {
+      'a.ts':
+        "import * as ui from '@spaarke/ui-components';\nconst { getXrm } = ui;\ngetXrm('navigation')!.Navigation.openForm({});",
+    },
+    /getXrm destructured/,
+  ],
+];
+
+describe('getXrm capability guard — round 7 shapes fire', () => {
+  it.each(R7_VIOLATIONS)('%s', (_name, files, use) => {
+    expect(run(files).violations.map(v => v.use)).toContain(use);
+  });
+
+  it.each(R7_BLIND_SPOTS)('%s → blind spot', (_name, files, reason) => {
+    expect(
+      run(files)
+        .blindSpots.map(b => b.reason)
+        .some(x => reason.test(x))
+    ).toBe(true);
+  });
+
+  it('assignment: exactly one violation and no blind spot (no noise from the declaration / target)', () => {
+    const r = run({ 'a.ts': IMPORT + 'let z: any;\nz = getXrm();\nz.Page.data;' });
+    expect(r.violations.map(v => v.use)).toEqual(['Page.data']);
+    expect(r.blindSpots).toEqual([]);
+  });
+
+  it('identity helper: each call gets only its own argument (no cross-call violations)', () => {
+    const r = run({
+      'a.ts':
+        IMPORT +
+        "function id(x: any) {\n  return x;\n}\nid(getXrm('openForm'))!.Navigation.openForm({});\nid(getXrm('navigation'))!.Navigation.navigateTo({});",
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.blindSpots).toEqual([]);
+  });
+
+  it('identity helper still fires on its own wrong use', () => {
+    const r = run({
+      'a.ts': IMPORT + "function id(x: any) {\n  return x;\n}\nid(getXrm('navigation'))!.Navigation.openForm({});",
+    });
+    expect(r.violations.map(v => v.use)).toEqual(['Navigation.openForm']);
+  });
+
+  it('quiet: a type query, a declared-then-assigned variable, a dynamic import that never reaches getXrm', () => {
+    const r = run({
+      'a.ts':
+        IMPORT +
+        "type T = ReturnType<typeof getXrm>;\nexport const t: T | undefined = undefined;\nlet x: any;\nx = getXrm('navigation');\nx.Navigation.navigateTo({});\nimport('@spaarke/ui-components').then(m => m.Other);",
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.blindSpots).toEqual([]);
   });
 });
 
