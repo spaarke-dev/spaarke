@@ -10,7 +10,7 @@
  * A value ORIGINATES at a call of `getXrm` (any import alias of it, or the
  * definition in `xrmContext.ts`) or at a call of a WRAPPER — any function or
  * method, in this file or another scanned file, that returns such a value
- * (`getXrmForPicker`, `getXrmWithWebApiAndUtility`, `resolveXrm`,
+ * (`getXrmForPicker`, `getXrmWithWebApiAnd`, `resolveXrm`,
  * `this.getXrm()`, a local `getXrm = (cap) => shared(cap)` …). A wrapper that
  * forwards one of its parameters as the capability takes the capability from
  * each of its call sites.
@@ -51,11 +51,23 @@
  *
  * ## Blind spots (reported, never silently passed)
  * The value escaping into anything not followed above: an object / array
- * literal, a JSX prop, a `new` expression, a call whose callee cannot be
- * resolved to a function declaration in a scanned file (e.g. a method on some
- * other object, a function from a non-scanned package), a non-literal bracket
- * access, a capability that is not a literal / list / predicate / forwarded
- * parameter. Each is listed in the result's `blindSpots`.
+ * literal, a JSX prop, a `new` expression whose class is not found, a call
+ * whose callee cannot be resolved to a function declaration in a scanned file
+ * (e.g. a method on some other object, a function from a non-scanned package),
+ * a non-literal bracket access, a capability that is not a literal / list /
+ * predicate / forwarded parameter. Each is listed in the result's `blindSpots`.
+ *
+ * ## Not detected (assumptions, not reported)
+ * - Cross-file resolution is by imported NAME inside the imported module or
+ *   package directory (no type checker across files); if one package exports
+ *   several functions with that name, the first exported one is used.
+ * - `?:` / `??` / `||` alternatives and predicates combined with `||` are
+ *   credited with the UNION of their members; that the code calls only the
+ *   member its branch guaranteed is not checked.
+ * - `WebApi` is assumed atomic (above).
+ * - Members outside the roots above (`Xrm.Device`, `Xrm.Panel`, …), `this.x`
+ *   read outside its class, and module variables read from another file are
+ *   not followed (no `export const x = getXrm(…)` exists in `src/`).
  */
 
 import * as fs from 'fs';

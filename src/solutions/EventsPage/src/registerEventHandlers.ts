@@ -19,13 +19,13 @@
  */
 
 import { registerCommandHandler, cleanGuid, getXrm } from '@spaarke/ui-components';
+import { EVENT_ENTITY_NAME } from './config';
 
 // Best-effort feedback: the nearest frame that has the member (task 081 round 5).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const notificationXrm = (): any => getXrm((x: any) => typeof x.App?.addGlobalNotification === 'function');
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const alertXrm = (): any => getXrm((x: any) => typeof x.Navigation?.openAlertDialog === 'function');
-import { EVENT_ENTITY_NAME } from './config';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Event status values (match `sprk_event_ribbon_commands.js` global option set)
