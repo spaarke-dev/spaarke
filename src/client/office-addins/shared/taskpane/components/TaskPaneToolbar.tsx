@@ -22,6 +22,8 @@ import {
   WeatherMoonRegular,
   WeatherSunnyRegular,
   ColorRegular,
+  ArrowMaximizeRegular,
+  ArrowMinimizeRegular,
 } from '@fluentui/react-icons';
 import { getAvailableTabs, type NavigationTab, type TabCapabilities } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
@@ -91,6 +93,14 @@ export interface TaskPaneToolbarProps {
   onSettings?: () => void;
   themePreference?: ThemePreference;
   onThemeChange?: (preference: ThemePreference) => void;
+  /**
+   * Task 103: expand/collapse the pane. Supplied only when the host supports runtime pane resizing
+   * (TaskPaneApi 1.1, NFR-10) - when absent, no button is rendered.
+   */
+  onToggleExpand?: () => void;
+  isExpanded?: boolean;
+  /** True while an expand request is stepping down; the button is disabled so presses do not stack. */
+  isResizing?: boolean;
 }
 
 function getThemeIcon(preference: ThemePreference): React.ReactElement {
@@ -125,6 +135,9 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
   onSettings,
   themePreference = 'auto',
   onThemeChange,
+  onToggleExpand,
+  isExpanded = false,
+  isResizing = false,
 }) => {
   const styles = useStyles();
   const tabs = getAvailableTabs(hostType, capabilities);
@@ -161,6 +174,21 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
 
       {/* push the overflow to the right even when tabs are hidden */}
       {(!showTabs || !isAuthenticated || tabs.length === 0) && <div className={styles.tabs} />}
+
+      {onToggleExpand && (
+        <div className={styles.overflow}>
+          <Tooltip content={isExpanded ? 'Collapse pane' : 'Expand pane'} relationship="label">
+            <Button
+              appearance="subtle"
+              icon={isExpanded ? <ArrowMinimizeRegular /> : <ArrowMaximizeRegular />}
+              aria-label={isExpanded ? 'Collapse pane' : 'Expand pane'}
+              aria-pressed={isExpanded}
+              disabled={isResizing}
+              onClick={onToggleExpand}
+            />
+          </Tooltip>
+        </div>
+      )}
 
       {hasOverflow && (
         <div className={styles.overflow}>

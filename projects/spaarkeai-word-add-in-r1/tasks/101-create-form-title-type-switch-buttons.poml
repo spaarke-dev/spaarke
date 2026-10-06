@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 6 (1-3) — the "+ New" create form: a "Create New Record" title above the type pills, switching the pill switches the form's type, Cancel (left) exits, Create (right)</title>
+    <phase>6 UAT round 6 (2026-10-06)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx` (`CreateRecordForm.tsx`, `RelatedToPicker.tsx`) and their tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only layout/flow change, fully decided by the owner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT6-W1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 102 and 103. Disjoint: 101 owns `CreateRecordForm.tsx`, `RelatedToPicker.tsx`, `useCreateRecordFormData.ts` and their tests; it MUST NOT edit `FindView.tsx`, `FindResultsList.tsx`, `TaskPaneShell.tsx`, `TaskPaneToolbar.tsx`, `taskPaneWidthService.ts`, `App.tsx`, `webpack.config.js` or `ci-gated-suites.txt` (report new suites to the main session instead). Client-only.</parallel-reason>
+    <deps>100</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 6 (2026-10-06), items 1-3. Record: `notes/042-uat-round6-2026-10-06.md`.</prompt>
+
+  <role>SPAARKE frontend developer on the Office add-in (React 19, Fluent UI v9).</role>
+
+  <goal>The create form reads as its own small form: a title, the type pills that choose what is created, the type's fields, and Cancel / Create in the standard positions.</goal>
+
+  <context>
+    <background>
+      - **Owner (round 6)**: (1) in "+ New" mode, clicking another type pill switches the create form to that type
+        (Matter → Project shows the Project fields); the user leaves the form with **Cancel**; (2) a header
+        **"Create New Record"** above the type pills while the form is open; (3) **Create** on the right, **Cancel** on
+        the left — like the other forms (e.g. the Save tab's Cancel left / Save right).
+      - **Today** (tasks 099/100): "+ New" shows only the pills + `CreateRecordForm` (per-type fields; required
+        markers; Assigned To prefill via `useCreateRecordFormData`). Read `notes/099-save-tab-round5.md` and
+        `notes/100-create-record-fields.md` first.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 1">Switching the pill while the form is open keeps the form open and shows the new type's fields. Values that exist on both types (Name, Description, Assigned To) carry over; type-only values (Matter Type, Practice Area, Project Type) do not. The type's required fields and reference lists follow the new type.</constraint>
+    <constraint source="owner items 1, 3">The only way out of the form, other than a successful create, is Cancel. Cancel restores the view the user had before "+ New" (task 099 behaviour).</constraint>
+    <constraint source="owner item 2">A heading "Create New Record" sits above the type pills only while the create form is open (semantic heading, not just bold text).</constraint>
+    <constraint source="owner item 3">Button row: Cancel left-aligned (secondary), Create right-aligned (primary), matching the Save tab's footer pattern.</constraint>
+    <constraint source="NFR-10 / ADR-021">Same in both hosts; Fluent v9 tokens; fits at 320 px; focus stays sensible when the type switches (it stays on the pill).</constraint>
+    <constraint source="ADR-038">Update the tests that pin the form; new suites are REPORTED to the main session for `ci-gated-suites.txt`.</constraint>
+    <constraint source="scope">No BFF change; no field added or removed.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">With the form open on Matter, clicking Project shows the Project fields with Name/Description/Assigned To carried over and no Matter Type / Practice Area; Create follows Project's required fields.</criterion>
+    <criterion testable="true">"Create New Record" heading is present only while the form is open.</criterion>
+    <criterion testable="true">Cancel is left, Create is right; Cancel restores the pre-"+ New" view; a successful create behaves as in task 099/100.</criterion>
+    <criterion testable="true">Gates: jest (all suites) green; lint 0; typecheck 0 production.</criterion>
+    <criterion testable="true">Live (after deploy): as above. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read the round-6 note, the 099/100 notes, `CreateRecordForm.tsx`, `RelatedToPicker.tsx`.</step>
+    <step>Title, type switch, button row; tests.</step>
+    <step>Gates; `notes/101-create-form-round6.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>`CreateRecordForm` and the picker's create mode exist (tasks 099/100).</existing>
+    <extension>Yes — layout and state changes in the existing form; nothing new.</extension>
+    <cost-of-doing-nothing>Owner UAT round 6 items 1-3: the type cannot be changed mid-form and the buttons are not where the other forms put them.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Create form round 6">
+      <steps>
+        <step>"+ New" → "Create New Record" above the pills; Matter fields; click Project → Project fields, Name kept.</step>
+        <step>Cancel (left) returns to the search view; Create (right) creates.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/CreateRecordForm.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/101-create-form-round6.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round6-2026-10-06.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/099-save-tab-round5.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/100-create-record-fields.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/101-create-form-round6.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+</task>
