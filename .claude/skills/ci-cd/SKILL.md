@@ -153,7 +153,6 @@ None of these is a required check. Full per-workflow detail: [`docs/procedures/c
 | `nightly-health.yml` | Flake hunt, bundle-size drift, vuln + Trivy scans, integration suite, coverage observation | Daily 06:00 UTC, manual |
 | `client-tests.yml` | Nightly jest baseline across client packages | Nightly 07:00 UTC, manual |
 | `report-workflow-health.yml` | Weekly per-workflow success-rate report | Weekly, manual |
-| `redis-key-rotation.yml` | Redis access-key rotation per environment | Quarterly (staggered), manual |
 
 ---
 

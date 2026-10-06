@@ -7,11 +7,18 @@
 // they are queryable via `az monitor metrics alert list` and
 // `az monitor scheduled-query list`.
 //
-// Four alerts (mirroring docs §8 Alert Definitions FR-17 source of truth + FR-11 rotation):
+// Three alerts (mirroring docs §8 Alert Definitions FR-17 source of truth):
 //   1. Hit-rate < 80% over 15 min     (scheduledQueryRule, App Insights)
-//   2. P95 latency > 100 ms over 5 min (scheduledQueryRule, App Insights)
-//   3. Memory > 80% of SKU over 15 min (metricAlert, Redis platform metric)
-//   4. RedisKeyRotation success absent >100 days (scheduledQueryRule, App Insights) — FR-11
+//   2. Redis call latency > 100 ms over 5 min (scheduledQueryRule, App Insights) — the AVERAGE of the
+//      cache.redis_call_duration_ms histogram: App Insights stores it pre-aggregated (sum/count/min/max),
+//      so a true P95 is not available there. (It queried cache.redis_p95_ms, which nothing emits, until
+//      2026-10-05 — the alert could never fire.)
+//   3. Memory > 80% of SKU over 15 min (metricAlert, Azure Managed Redis platform metric)
+//   (A fourth, missed-key-rotation alert was removed 2026-10-05 with the Redis key-rotation tooling, T242b:
+//    Azure Managed Redis has access keys disabled, so there is nothing to rotate.)
+//
+// Alert 3 targets `Microsoft.Cache/redisEnterprise` (Azure Managed Redis — ADR-009 as amended by T242:
+// every Spaarke Redis is Managed Redis). It targeted the retired `Microsoft.Cache/Redis` type until T242b.
 //
 // Module shape mirrors `infrastructure/bicep/modules/redis.bicep`:
 //   @description params, defaults via `resourceGroup().location`,
@@ -23,7 +30,7 @@
 // PARAMETERS
 // =====================================================
 
-@description('Redis cache resource name (target for memory alert). Convention: `spaarke-bff-redis-{env}`.')
+@description('Azure Managed Redis cluster name (`Microsoft.Cache/redisEnterprise`, target for the memory alert). Convention: `spaarke-bff-redis-{env}`.')
 param redisCacheName string
 
 @description('Application Insights resource name (target for hit-rate + P95 KQL alerts). Convention: `spe-insights-{env}-67e2xz` (dev) / TBD other envs.')
@@ -35,8 +42,8 @@ param actionGroupResourceId string
 @description('Location for the metric alerts. Metric alerts are global by convention; scheduled-query rules respect RG location.')
 param location string = resourceGroup().location
 
-@description('Environment tag (dev | staging | prod) — flows into alert tags + display names for KQL filtering.')
-@allowed(['dev', 'staging', 'prod'])
+@description('Environment tag (dev | demo | staging | prod) — flows into alert tags + display names for KQL filtering. Must accept every value Deploy-RedisCache.ps1 -DeployAlerts passes.')
+@allowed(['dev', 'demo', 'staging', 'prod'])
 param environment string = 'dev'
 
 @description('Severity for the 3 cache alerts (0-4). Default 2 = Warning (Sev 2) per docs §8 convention.')
@@ -54,10 +61,6 @@ param p95LatencyMsThreshold int = 100
 @maxValue(100)
 param memoryPercentThreshold int = 80
 
-@description('Missed-rotation alert threshold in days. Fires if no RedisKeyRotation success custom event for any env in this window. Default 100 per FR-11 (90-day rotation cadence + 10-day grace).')
-@minValue(1)
-param missedRotationDays int = 100
-
 @description('Tags propagated to all alert resources.')
 param tags object = {
   environment: environment
@@ -73,7 +76,8 @@ var alertNamePrefix = 'redis-cache'
 
 // Resource IDs — derived from name params via `resourceId()` to keep the
 // module callable from any RG context (mirrors the redis.bicep output pattern).
-var redisCacheResourceId = resourceId('Microsoft.Cache/Redis', redisCacheName)
+var redisCacheResourceId = resourceId('Microsoft.Cache/redisEnterprise', redisCacheName)
+
 var appInsightsResourceId = resourceId('Microsoft.Insights/components', appInsightsName)
 
 // KQL — hit rate below threshold (mirrors docs §8 Alert 1 KQL, threshold parameterized).
@@ -94,26 +98,14 @@ hits
 | where avg_hit_rate < ${HIT_RATE_THRESHOLD}
 '''
 
-// KQL — P95 latency above threshold (mirrors docs §8 Alert 2 KQL).
+// KQL — average Redis call latency above threshold, per operation (docs §8 Alert 2). The BFF records the
+// histogram cache.redis_call_duration_ms (Infrastructure/Cache/MetricsDistributedCache.cs, tags op + tier).
 var p95LatencyKql = '''
 customMetrics
-| where name == "cache.redis_p95_ms"
-| extend resource = tostring(customDimensions.resource)
-| summarize avg_p95_ms = avg(valueSum / valueCount) by bin(timestamp, 1m), resource
-| summarize windowed_p95 = avg(avg_p95_ms) by bin(timestamp, 5m), resource
-| where windowed_p95 > ${P95_THRESHOLD_MS}
-'''
-
-// KQL — RedisKeyRotation success absent >N days per env (FR-11).
-// Fires when any env's last_success is older than the threshold, OR when an env has never recorded success (isnull).
-// NOTE: detection of envs that have NEVER recorded success requires the env tuple to appear in the row set;
-// since `customEvents` only yields rows for recorded events, "never recorded" is only detectable when at least one
-// stale row exists for that env. This matches FR-11 intent: detect rotation regression, not bootstrap-state absence.
-var missedRotationKql = '''
-customEvents
-| where name == 'RedisKeyRotation' and customDimensions.outcome == 'success'
-| summarize last_success = max(timestamp) by tostring(customDimensions.environment)
-| where last_success < ago(${MISSED_ROTATION_DAYS}d) or isnull(last_success)
+| where name == "cache.redis_call_duration_ms"
+| extend op = tostring(customDimensions.op)
+| summarize avg_ms = sum(valueSum) / sum(valueCount) by bin(timestamp, 5m), op
+| where avg_ms > ${P95_THRESHOLD_MS}
 '''
 
 // =====================================================
@@ -165,7 +157,7 @@ resource p95LatencyAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-prev
   location: location
   tags: tags
   properties: {
-    description: 'Cache P95 latency above ${p95LatencyMsThreshold}ms over 5 min — likely network issue or SKU undersize. Source: cache.redis_p95_ms custom metric (FR-16 of R1).'
+    description: 'Average Redis call latency above ${p95LatencyMsThreshold}ms over 5 min for an operation — likely network issue or SKU undersize. Source: cache.redis_call_duration_ms histogram (average; a true P95 is not available from customMetrics).'
     severity: alertSeverity
     enabled: true
     evaluationFrequency: 'PT1M'
@@ -205,7 +197,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
   location: 'global'
   tags: tags
   properties: {
-    description: 'Redis used memory above ${memoryPercentThreshold}% of SKU over 15 min — scale to next SKU. Source: Azure Monitor platform metric Microsoft.Cache/Redis/usedmemorypercentage.'
+    description: 'Redis used memory above ${memoryPercentThreshold}% of SKU over 15 min — scale to next SKU. Source: Azure Monitor platform metric Microsoft.Cache/redisEnterprise/usedmemorypercentage.'
     severity: alertSeverity
     enabled: true
     scopes: [
@@ -213,7 +205,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
     ]
     evaluationFrequency: 'PT5M'
     windowSize: 'PT15M'
-    targetResourceType: 'Microsoft.Cache/Redis'
+    targetResourceType: 'Microsoft.Cache/redisEnterprise'
     criteria: {
       'odata.type': 'Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria'
       allOf: [
@@ -221,7 +213,7 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
           name: 'MemoryUsageCriteria'
           criterionType: 'StaticThresholdCriterion'
           metricName: 'usedmemorypercentage'
-          metricNamespace: 'Microsoft.Cache/Redis'
+          metricNamespace: 'Microsoft.Cache/redisEnterprise'
           operator: 'GreaterThan'
           threshold: memoryPercentThreshold
           timeAggregation: 'Average'
@@ -238,54 +230,9 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 }
 
 // =====================================================
-// ALERT 4 — RedisKeyRotation success absent >100 days (scheduled-query rule on App Insights) — FR-11
-// =====================================================
-
-resource missedRotationAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = {
-  name: '${alertNamePrefix}-rotation-missed-${environment}'
-  location: location
-  tags: tags
-  properties: {
-    description: 'No RedisKeyRotation success custom event recorded in App Insights for >${missedRotationDays} days for one or more envs — automation likely silently failing (workflow disabled, SP expired, script broken). Investigate the Theme B rotation workflow. FR-11 of spaarke-redis-cache-remediation-r2.'
-    severity: alertSeverity
-    enabled: true
-    evaluationFrequency: 'P1D'
-    windowSize: 'P1D'
-    scopes: [
-      appInsightsResourceId
-    ]
-    criteria: {
-      allOf: [
-        {
-          query: replace(missedRotationKql, '\${MISSED_ROTATION_DAYS}', string(missedRotationDays))
-          timeAggregation: 'Count'
-          operator: 'GreaterThan'
-          threshold: 0
-          failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
-          }
-        }
-      ]
-    }
-    actions: {
-      actionGroups: [
-        actionGroupResourceId
-      ]
-    }
-    // Azure constraint: stateful (autoMitigate=true) scheduled-query rules cannot
-    // run at frequency >12h. Since this alert evaluates daily (P1D) and we want
-    // it to stay fired until manually resolved (a missed rotation is a sustained
-    // condition, not a transient blip), autoMitigate must be false here.
-    autoMitigate: false
-  }
-}
-
-// =====================================================
 // OUTPUTS
 // =====================================================
 
 output hitRateAlertId string = hitRateAlert.id
 output p95LatencyAlertId string = p95LatencyAlert.id
 output memoryAlertId string = memoryAlert.id
-output missedRotationAlertId string = missedRotationAlert.id

@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** |
 | Date | 2025-09-27 |
-| Updated | 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`); 2026-10-04 (§2/§3 amended: Azure Managed Redis, Microsoft Entra only — owner D12/D13, `customer-provisioning-orchestration-r1` task 242) |
+| Updated | 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`); 2026-10-04 (§2/§3 amended: Azure Managed Redis, Microsoft Entra only — owner D12/D13, `customer-provisioning-orchestration-r1` task 242); 2026-10-05 (latency alert = average BFF-observed call latency per operation — owner, task 242b) |
 | Authors | Spaarke Engineering |
 
 ## Context
@@ -208,7 +208,7 @@ customMetrics
 **Alerts (3 minimum) MUST be Bicep-deployed:**
 
 - Hit_rate <80% / 15min → "cache key/version drift; investigate"
-- P95 >100ms / 5min → "network issue or SKU undersize"
+- Average BFF-observed cache call latency per operation (`cache.redis_call_duration_ms`) >100ms / 5min → "network issue, SKU undersize or client-side delay" *(amended 2026-10-05, owner, task 242b — was "P95 >100ms": App Insights stores the histogram pre-aggregated, so a true P95 is not available there, and the previous alert queried a metric nothing emits, so it never fired. Compare with the `redis` dependency durations to tell server time from client time.)*
 - `usedmemorypercentage` >80 / 15min → "scale to next SKU"
 
 Markdown-only alert documentation (`docs/guides/redis-cache-azure-setup.md` §8) is NOT sufficient — alerts must be deployed via `infrastructure/bicep/alerts.bicep` and verified firing in a test condition. Markdown-only fails the operational MUST.

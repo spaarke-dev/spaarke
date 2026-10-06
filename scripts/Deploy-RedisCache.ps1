@@ -149,6 +149,13 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+
+# Write-Error throws under ErrorActionPreference=Stop, so a following `exit N` never ran and every failure
+# exited 1. Report and exit with the documented code instead.
+function Exit-WithError([string]$Message, [int]$Code) {
+    Write-Host "ERROR: $Message" -ForegroundColor Red
+    exit $Code
+}
 # Every az call names the subscription when one was given (never `az account set`).
 $subArgs = if ($SubscriptionId) { @('--subscription', $SubscriptionId) } else { @() }
 $repoRoot = Split-Path -Parent $PSScriptRoot
@@ -194,8 +201,7 @@ if ($DeployAlerts -and -not $AppInsightsName) {
 }
 
 if (-not (Test-Path $bicepParam)) {
-    Write-Error "Bicep param file not found: $bicepParam"
-    exit 3
+    Exit-WithError "Bicep param file not found: $bicepParam" 3
 }
 
 # ---------------------------------------------------------------------------
@@ -219,17 +225,29 @@ Write-Host "  Redis          : $redisName (Azure Managed Redis, Entra only)"
 Write-Host "  Mode           : $modeLabel"
 Write-Host ""
 
+# The template deploy is skipped when the cache exists, so an identity added to the .bicepparam later is
+# never applied by this script. Both verification paths compare the live access-policy assignments with
+# that list, so the gap fails loudly; the fix is the direct `az deployment group create` documented in the
+# .bicepparam and docs/guides/redis-cache-azure-setup.md.
+function Get-ExpectedPrincipalIds {
+    $text = Get-Content -Raw -Path $bicepParam
+    $block = [regex]::Match($text, 'param\s+accessPolicyPrincipalIds\s*=\s*\[(?<list>[^\]]*)\]')
+    if (-not $block.Success) { return @() }
+    return @([regex]::Matches($block.Groups['list'].Value, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}') | ForEach-Object { $_.Value })
+}
+
 # ---------------------------------------------------------------------------
 # Verify-only path (NFR-06)
 # ---------------------------------------------------------------------------
 if ($VerifyOnly) {
     Write-Host "Verify-only mode: invoking RedisValidationTests.ps1..."
     if (-not (Test-Path $validationScript)) {
-        Write-Error "Validation harness not found: $validationScript"
-        exit 4
+        Exit-WithError "Validation harness not found: $validationScript" 4
     }
     $verifyArgs = @{ RedisName = $redisName; ResourceGroup = $ResourceGroup }
     if ($SubscriptionId) { $verifyArgs.SubscriptionId = $SubscriptionId }
+    $expectedPrincipals = Get-ExpectedPrincipalIds
+    if ($expectedPrincipals.Count -gt 0) { $verifyArgs.ExpectedPrincipalIds = $expectedPrincipals }
     & $validationScript @verifyArgs
     exit $LASTEXITCODE
 }
@@ -255,8 +273,7 @@ if ($existing -eq 'Succeeded') {
             --parameters $bicepParam `
             --query "properties.provisioningState" -o tsv
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Bicep deploy failed (exit $LASTEXITCODE)"
-            exit $LASTEXITCODE
+            Exit-WithError "Bicep deploy failed (exit $LASTEXITCODE)" $LASTEXITCODE
         }
     }
 }
@@ -273,8 +290,7 @@ if ($CutoverBffSettings) {
     if ($PSCmdlet.ShouldProcess("$bffAppName App Settings", "Set Redis__Endpoint (managed identity)")) {
         $hostName = az resource show @subArgs --resource-group $ResourceGroup --name $redisName --resource-type Microsoft.Cache/redisEnterprise --query "properties.hostName" -o tsv
         if ($LASTEXITCODE -ne 0 -or -not $hostName) {
-            Write-Error "Could not read the host name of '$redisName' (Microsoft.Cache/redisEnterprise) in '$ResourceGroup'."
-            exit 5
+            Exit-WithError "Could not read the host name of '$redisName' (Microsoft.Cache/redisEnterprise) in '$ResourceGroup'." 5
         }
         # BFF App Service typically lives in rg-spaarke-{env}, not the Redis RG.
         $bffRg = "rg-spaarke-$Environment"
@@ -288,8 +304,7 @@ if ($CutoverBffSettings) {
                 "Redis__AllowInMemoryFallback=false" `
             --output none
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "BFF App Settings cutover failed (exit $LASTEXITCODE)"
-            exit $LASTEXITCODE
+            Exit-WithError "BFF App Settings cutover failed (exit $LASTEXITCODE)" $LASTEXITCODE
         }
         Write-Host "  Set Redis__Endpoint=${hostName}:10000 on '$bffAppName' (ConnectionStrings__Redis, if any, left in place — see -RemoveBffConnectionString)."
     }
@@ -302,8 +317,11 @@ if ($RemoveBffConnectionString) {
     $bffRg = "rg-spaarke-$Environment"
     $endpointSetting = az webapp config appsettings list @subArgs --resource-group $bffRg --name $bffAppName --query "[?name=='Redis__Endpoint'].value | [0]" -o tsv
     if ($LASTEXITCODE -ne 0 -or -not $endpointSetting) {
-        Write-Error "'$bffAppName' has no Redis__Endpoint: removing the connection string would leave it without Redis. Run -CutoverBffSettings first."
-        exit 8
+        Exit-WithError "'$bffAppName' has no Redis__Endpoint: removing the connection string would leave it without Redis. Run -CutoverBffSettings first." 8
+    }
+    $thisCacheHost = az resource show @subArgs --resource-group $ResourceGroup --name $redisName --resource-type 'Microsoft.Cache/redisEnterprise' --query 'properties.hostName' -o tsv 2>$null
+    if ($LASTEXITCODE -ne 0 -or -not $thisCacheHost -or $endpointSetting -ne "${thisCacheHost}:10000") {
+        Exit-WithError "'$bffAppName' Redis__Endpoint is '$endpointSetting', not this cache ('${thisCacheHost}:10000'): refusing to remove its connection string." 8
     }
     if ($PSCmdlet.ShouldProcess("$bffAppName App Settings", "Remove ConnectionStrings__Redis and Redis__ConnectionString")) {
         az webapp config appsettings delete @subArgs `
@@ -312,8 +330,7 @@ if ($RemoveBffConnectionString) {
             --setting-names ConnectionStrings__Redis Redis__ConnectionString `
             --output none
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Removing the Redis connection-string settings failed (exit $LASTEXITCODE)"
-            exit $LASTEXITCODE
+            Exit-WithError "Removing the Redis connection-string settings failed (exit $LASTEXITCODE)" $LASTEXITCODE
         }
         Write-Host "  Removed ConnectionStrings__Redis / Redis__ConnectionString from '$bffAppName' (it keeps Redis__Endpoint=$endpointSetting; the Key Vault secret is untouched)."
     }
@@ -324,12 +341,10 @@ if ($RemoveBffConnectionString) {
 # ---------------------------------------------------------------------------
 if ($DeployAlerts) {
     if (-not $ActionGroupResourceId) {
-        Write-Error "-DeployAlerts requires -ActionGroupResourceId (full Azure resource ID of the on-call action group)."
-        exit 6
+        Exit-WithError "-DeployAlerts requires -ActionGroupResourceId (full Azure resource ID of the on-call action group)." 6
     }
     if (-not (Test-Path $alertsBicep)) {
-        Write-Error "Alerts Bicep template not found: $alertsBicep"
-        exit 7
+        Exit-WithError "Alerts Bicep template not found: $alertsBicep" 7
     }
 
     Write-Host ""
@@ -353,8 +368,7 @@ if ($DeployAlerts) {
             --parameters $alertParams `
             --no-pretty-print
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Alert deploy what-if failed (exit $LASTEXITCODE)"
-            exit $LASTEXITCODE
+            Exit-WithError "Alert deploy what-if failed (exit $LASTEXITCODE)" $LASTEXITCODE
         }
     } elseif ($PSCmdlet.ShouldProcess("alerts in $ResourceGroup targeting $redisName + $AppInsightsName", "Deploy 3 Redis cache alerts via alerts.bicep")) {
         az deployment group create @subArgs `
@@ -363,8 +377,7 @@ if ($DeployAlerts) {
             --parameters $alertParams `
             --query "properties.provisioningState" -o tsv
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "Alert deploy failed (exit $LASTEXITCODE)"
-            exit $LASTEXITCODE
+            Exit-WithError "Alert deploy failed (exit $LASTEXITCODE)" $LASTEXITCODE
         }
         Write-Host "  Alerts deployed. Verify with: az monitor metrics alert list -g $ResourceGroup"
     }
@@ -376,6 +389,8 @@ if ($DeployAlerts) {
 if (-not $WhatIfPreference -and (Test-Path $validationScript)) {
     Write-Host "Post-deploy verification..."
     $validationArgs = @{ RedisName = $redisName; ResourceGroup = $ResourceGroup }
+    $expectedPrincipals = Get-ExpectedPrincipalIds
+    if ($expectedPrincipals.Count -gt 0) { $validationArgs.ExpectedPrincipalIds = $expectedPrincipals }
     if ($SubscriptionId) { $validationArgs.SubscriptionId = $SubscriptionId }
     if ($CutoverBffSettings -or $RemoveBffConnectionString) {
         # The BFF settings were just changed: confirm Redis__Endpoint names this cache and no connection string remains
@@ -386,8 +401,7 @@ if (-not $WhatIfPreference -and (Test-Path $validationScript)) {
     }
     & $validationScript @validationArgs
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "Post-deploy verification failed (exit $LASTEXITCODE)"
-        exit $LASTEXITCODE
+        Exit-WithError "Post-deploy verification failed (exit $LASTEXITCODE)" $LASTEXITCODE
     }
 }
 

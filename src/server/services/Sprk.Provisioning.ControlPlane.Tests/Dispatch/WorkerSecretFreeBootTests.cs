@@ -130,7 +130,7 @@ public sealed class WorkerSecretFreeBootTests
 /// composition root with the EXACT app-setting shape
 /// modules/controlplane-worker-app-service.bicep emits when
 /// <c>requireSecretFreeIdentity=true</c>: NO <c>EnvVarValues__ClientSecret</c> /
-/// <c>SolutionImportOptions__ClientSecret</c> / <c>CustomerRunGuard__ClientSecret</c>
+/// <c>SolutionImportOptions__ClientSecret</c>
 /// KV-refs; FR-39 chain settings present instead. Everything else mirrors
 /// <see cref="WorkerTestFactory"/> (HandlerRegistrationCompletenessTests).
 /// </summary>
@@ -225,8 +225,16 @@ public abstract class StartGatedWorkerTestFactory : WebApplicationFactory<Worker
     protected override IHost CreateHost(IHostBuilder builder)
     {
         var host = builder.Build();
-        var start = host.StartAsync();   // subscribed to ApplicationStarted by the time this returns
-        _gate.Open();
+        Task start;
+        try
+        {
+            start = host.StartAsync();   // subscribed to ApplicationStarted by the time this returns
+        }
+        finally
+        {
+            // Open even if StartAsync throws synchronously, so the entry point's thread is never left waiting.
+            _gate.Open();
+        }
         start.GetAwaiter().GetResult();
         return host;
     }

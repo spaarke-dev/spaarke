@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: Data/Caching
-> **Last Updated**: 2026-10-04 (Azure Managed Redis, Entra only — owner D12/D13, task 242); 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`)
+> **Last Updated**: 2026-10-05 (latency alert = average BFF-observed call latency per operation — owner, task 242b review); 2026-10-04 (Azure Managed Redis, Entra only — owner D12/D13, task 242); 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`)
 
 ---
 
@@ -54,7 +54,7 @@ Use **Redis as distributed cache**. Per-request cache for within-request de-dupe
 - **MUST** register `IConnectionMultiplexer` symmetrically (real or `NullConnectionMultiplexer` based on config; never asymmetric `if (flag) { register }`). See ADR-032.
 - **MUST** capture Redis dependency calls in Application Insights via the OTel pipeline. Wire `builder.Services.AddOpenTelemetry().UseAzureMonitor()` in `Program.cs` (replaces the classic `AddApplicationInsightsTelemetry()` which does NOT auto-instrument StackExchange.Redis). Add `tracing.AddRedisInstrumentation()` in `TelemetryModule.cs`. Wire `RedisCacheOptions.ConnectionMultiplexerFactory` in `CacheModule.cs` to return the DI-registered `IConnectionMultiplexer` so cache + telemetry share one multiplexer instance — otherwise the instrumented multiplexer is idle and zero Redis dep spans reach App Insights (R7-S7 closure 2026-06-26).
 - **MUST** emit custom cache metrics from the `IDistributedCache` layer (decorator pattern). The `MetricsDistributedCache` decorator wraps the inner cache and emits `cache.hits`, `cache.misses` (counters), `cache.redis_call_duration_ms` (histogram) on the `Sprk.Bff.Api.Cache` Meter. Emission MUST NOT be duplicated at the `TenantCache` wrapper layer (double-counting). The decorator catches both tenant-scoped wrapper calls AND the system-cache exception path (`CommunicationAccountService`, MSAL token cache, membership refresh) that injects `IDistributedCache` directly — both go through the same Meter exactly once. R7-S7 sub-gap #2 closure.
-- **MUST** define a minimum of 3 alerts in `infrastructure/bicep/alerts.bicep` (NOT just markdown): (a) hit_rate <80% / 15min, (b) P95 >100ms / 5min, (c) memory >80% of SKU. Alerts in the operational runbook only (no Bicep deploy) are insufficient — they don't page on-call.
+- **MUST** define a minimum of 3 alerts in `infrastructure/bicep/alerts.bicep` (NOT just markdown): (a) hit_rate <80% / 15min, (b) **average BFF-observed cache call latency per operation** (`cache.redis_call_duration_ms`) >100ms / 5min, (c) memory >80% of SKU. *(Amended 2026-10-05, owner, task 242b: was "P95 >100ms". The histogram reaches App Insights pre-aggregated (sum/count/min/max), so a true P95 of BFF-observed latency cannot be computed there; the former rule's query read a metric nothing emits and never fired.)* Alerts in the operational runbook only (no Bicep deploy) are insufficient — they don't page on-call.
 - **MUST** access the distributed cache through the `ITenantCache` wrapper from `Sprk.Bff.Api`. Direct `IDistributedCache.GetAsync/SetAsync/RemoveAsync` calls in `Sprk.Bff.Api/` are prohibited except for sites enumerated in `SystemCacheKeys.cs`.
 
 ### ❌ MUST NOT (operational)

@@ -115,6 +115,13 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# The resource-group and app-name defaults are dev's. For any other environment they must be passed
+# explicitly, or a "-Environment demo" deploy would silently land on spaarke-bff-dev (T242b review W8).
+if ($Environment -ne 'dev' -and -not ($PSBoundParameters.ContainsKey('ResourceGroupName') -and $PSBoundParameters.ContainsKey('AppServiceName'))) {
+    Write-Host "ERROR: -Environment $Environment requires explicit -ResourceGroupName and -AppServiceName (the defaults are dev's: rg-spaarke-dev / spaarke-bff-dev)." -ForegroundColor Red
+    exit 2
+}
+
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 $ApiProject = "$RepoRoot\src\server\api\Sprk.Bff.Api"

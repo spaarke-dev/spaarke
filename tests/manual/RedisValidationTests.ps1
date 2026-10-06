@@ -59,6 +59,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $script:FailureCount = 0
+if ([bool]$BffAppName -ne [bool]$BffResourceGroup) {
+    Write-Host "ERROR: pass -BffAppName and -BffResourceGroup together." -ForegroundColor Red
+    exit 2
+}
 $apiVersion = '2025-07-01'
 # `pwsh -File ... -ExpectedPrincipalIds a,b` passes one string: accept comma-separated values either way.
 $ExpectedPrincipalIds = @($ExpectedPrincipalIds | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } | Where-Object { $_ })
@@ -67,21 +71,27 @@ function Pass([string]$Message) { Write-Host "  [OK]   $Message" -ForegroundColo
 function Fail([string]$Message) { Write-Host "  [FAIL] $Message" -ForegroundColor Red; $script:FailureCount++ }
 
 function Get-ArmJson([string]$Path) {
-    $json = az rest --method get --url "https://management.azure.com$Path`?api-version=$apiVersion" 2>$null
-    if ($LASTEXITCODE -ne 0 -or -not $json) { return $null }
-    return ($json | ConvertFrom-Json)
+    $out = az rest --method get --url "https://management.azure.com$Path`?api-version=$apiVersion" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        # Show why (403, expired login, 404) instead of reporting every error as "not found".
+        $reason = ($out | Out-String).Trim()
+        if ($reason -notmatch 'ResourceNotFound|NotFound') { Write-Host "  [--]   az rest: $reason" -ForegroundColor DarkYellow }
+        return $null
+    }
+    if (-not $out) { return $null }
+    return ($out | Out-String | ConvertFrom-Json)
 }
 
 Write-Host "Azure Managed Redis validation - $RedisName ($ResourceGroup)" -ForegroundColor Cyan
 
-$subscriptionId = if ($SubscriptionId) { $SubscriptionId } else { az account show --query id -o tsv }
-$clusterPath = "/subscriptions/$subscriptionId/resourceGroups/$ResourceGroup/providers/Microsoft.Cache/redisEnterprise/$RedisName"
+$subId = if ($SubscriptionId) { $SubscriptionId } else { az account show --query id -o tsv }
+$clusterPath = "/subscriptions/$subId/resourceGroups/$ResourceGroup/providers/Microsoft.Cache/redisEnterprise/$RedisName"
 
 # 1. Cluster
 Write-Host "[1] Cluster" -ForegroundColor Yellow
 $cluster = Get-ArmJson $clusterPath
 if (-not $cluster) {
-    Fail "No Microsoft.Cache/redisEnterprise '$RedisName' in '$ResourceGroup' (subscription $subscriptionId)."
+    Fail "No Microsoft.Cache/redisEnterprise '$RedisName' in '$ResourceGroup' (subscription $subId)."
 } else {
     if ($cluster.properties.provisioningState -eq 'Succeeded') { Pass 'provisioningState Succeeded' } else { Fail "provisioningState $($cluster.properties.provisioningState)" }
     if ($cluster.properties.resourceState -eq 'Running') { Pass 'resourceState Running' } else { Fail "resourceState $($cluster.properties.resourceState)" }
@@ -119,7 +129,7 @@ if ($objectIds.Count -eq 0) {
 if ($BffAppName) {
     Write-Host "[4] $BffAppName Redis__Endpoint" -ForegroundColor Yellow
     $expected = "$($cluster.properties.hostName):10000"
-    $settings = az webapp config appsettings list --subscription $subscriptionId --resource-group $BffResourceGroup --name $BffAppName -o json 2>$null | ConvertFrom-Json
+    $settings = az webapp config appsettings list --subscription $subId --resource-group $BffResourceGroup --name $BffAppName -o json 2>$null | ConvertFrom-Json
     $actual = ($settings | Where-Object { $_.name -eq 'Redis__Endpoint' }).value
     if ($actual -eq $expected) { Pass "Redis__Endpoint = $expected" } else { Fail "Redis__Endpoint = '$actual' (expected '$expected')" }
     if ($RequireNoBffConnectionString) {

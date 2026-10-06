@@ -34,7 +34,6 @@
 |----------|-----|---------|
 | `deploy-bff-api.yml` | `deploy-staging` | Deploy API build artifact to staging slot |
 | `deploy-promote.yml` | `deploy-staging` | Direct-target deploy to the Staging App Service (no dev/prod chaining — see D-12) |
-| `redis-key-rotation.yml` | `rotate-staging` | Quarterly Redis access-key rotation for staging |
 
 > `deploy-infrastructure.yml` no longer uses any GitHub Environment *(retired by task 249, 2026-10-02)*: it is
 > now "Validate Bicep Infrastructure" — lint + compile only, no Azure login, no deploy. Customer stamps are

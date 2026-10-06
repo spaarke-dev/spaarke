@@ -1,4 +1,4 @@
-﻿// -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
 // CustomerRunGuardModule.cs
 //
 // L2 CONTROL-PLANE I5 concurrency-guard DI composition (task 059, Wave C5).
@@ -53,12 +53,14 @@ public static class CustomerRunGuardModule
             {
                 o.TargetDataverseUrl = registryAdminUrl;
             }
-            else if (!string.IsNullOrWhiteSpace(registryAdminUrl)
+            else if (o.Enabled
+                && !string.IsNullOrWhiteSpace(registryAdminUrl)
                 && Uri.TryCreate(o.TargetDataverseUrl, UriKind.Absolute, out var guardUri)
                 && Uri.TryCreate(registryAdminUrl, UriKind.Absolute, out var registryUri)
                 && !string.Equals(guardUri.Host, registryUri.Host, StringComparison.OrdinalIgnoreCase))
             {
-                // A relative/invalid TargetDataverseUrl is left to Validate(), which names it.
+                // Only an enabled guard writes rows, so the kill-switch (Enabled=false) skips this check like
+                // the rest of Validate(). A relative/invalid TargetDataverseUrl is left to Validate(), which names it.
                 throw new InvalidOperationException(
                     $"Configuration mismatch — '{CustomerRunGuardOptions.SectionName}:TargetDataverseUrl' host " +
                     $"'{guardUri.Host}' does not match '{CustomerRunGuardOptions.RegistryAdminEnvironmentUrlKey}' host " +
@@ -74,6 +76,10 @@ public static class CustomerRunGuardModule
 
             o.Validate();
         });
+
+        // Run the PostConfigure + Validate() above at host start, not at the first resolve (on the Api that
+        // would be the first POST /api/runs) — the fail-fast this module's summary promises.
+        services.AddOptions<CustomerRunGuardOptions>().ValidateOnStart();
 
         // Named HttpClient — the store owns per-request Timeout + auth header
         // application, but IHttpClientFactory manages the connection pool.

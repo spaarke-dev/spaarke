@@ -7,6 +7,36 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-05 — Redis key-rotation tooling removed (T242b, owner)
+
+`customer-provisioning-orchestration-r1` T242b.
+
+- **`.claude/skills/ci-cd/SKILL.md`**: the `redis-key-rotation.yml` row is removed. The workflow,
+  `scripts/Rotate-RedisKey.ps1` and the missed-rotation alert are deleted: every Spaarke Redis is Azure Managed
+  Redis with access keys disabled (ADR-009 as amended by T242), so there is nothing to rotate; the tooling
+  wrote a Redis key to Key Vault, which ADR-009 forbids; and every scheduled run had failed since 2026-07-01.
+
+---
+###### 2026-10-05 — ADR-009: the latency alert is the average BFF-observed call latency (T242b, owner §6.5 Path B)
+
+`customer-provisioning-orchestration-r1` T242b Step 9.5 review.
+
+- **`.claude/adr/ADR-009-redis-caching.md`** (+ full `docs/adr/ADR-009-caching-redis-first.md`): operational alert (b) was
+  "P95 >100ms / 5min". It is now "average BFF-observed cache call latency per operation
+  (`cache.redis_call_duration_ms`) >100ms / 5min". The histogram reaches App Insights pre-aggregated
+  (sum/count/min/max), so a true P95 cannot be computed there, and the old alert queried `cache.redis_p95_ms`, which
+  nothing emits, so it never fired. `infrastructure/bicep/alerts.bicep` implements the new rule.
+
+---
+###### 2026-10-05 — Redis key rotation: dev retired, quarterly schedule removed (T242b)
+
+`customer-provisioning-orchestration-r1` T242b (owner decision 2026-10-05).
+
+- **`.claude/skills/ci-cd/SKILL.md`**: the `redis-key-rotation.yml` row now reads "manual only". The workflow's
+  quarterly crons were removed because every scheduled run had failed (no staging/prod cache, service principal
+  or secrets exist), and dev has no key since the dev cache became Azure Managed Redis, Entra only.
+
+---
 ###### 2026-10-04 — PCF deploy procedures verify the REAL build result; `pcf-scripts` exits 0 on a failed build
 
 **What was wrong.** `pcf-scripts build` (and so `npm run build:prod` in every PCF) **exits 0 when the webpack

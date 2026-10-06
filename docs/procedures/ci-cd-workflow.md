@@ -110,8 +110,8 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 │                          SCHEDULED                                    │
 │  nightly-health.yml (daily, 06:00 UTC)                                │
 │  client-tests.yml (nightly, 07:00 UTC)                                │
+│  pcf-build-prod-nightly.yml (daily, 08:00 UTC)                        │
 │  adr-audit.yml / report-workflow-health.yml (weekly, Mon 09:00 UTC)   │
-│  redis-key-rotation.yml (quarterly, staggered per environment)        │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -139,7 +139,6 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `adr-audit.yml` | Weekly (Mon 09:00 UTC), dispatch | ~5 min | No (advisory; tracking issue) |
 | `nightly-health.yml` | Daily (06:00 UTC), dispatch | per-job timeouts 20-60 min | No (advisory; rolling tracking issue) |
 | `client-tests.yml` | Nightly (07:00 UTC), dispatch | n/a | No (advisory baseline over 40 client packages) |
-| `redis-key-rotation.yml` | 3 staggered quarterly crons (dev/staging/prod), dispatch | n/a | N/A (operational key rotation) |
 | `report-workflow-health.yml` | Weekly (Mon 09:00 UTC), dispatch | n/a | No (advisory; tracking issue) |
 | `sdap-ci.yml` (legacy) | Push to `master` / PR (`paths-ignore`: docs/**, **.md, `.claude/**`, …) | n/a | No — superseded by `CI / Router`; pending deletion |
 | `sdap-ci-docs-only.yml` (legacy) | PR touching only `sdap-ci.yml`'s ignored paths | n/a | No — paired no-op fallback for `sdap-ci.yml` |
@@ -169,7 +168,6 @@ This guide explains the full CI/CD workflow for Spaarke development. The pipelin
 | `provisioning-prereqs-validate.yml` | provisioning-prereqs-validate | PR/push/merge_group; advisory | Validates `prereqs.yaml` + `intake.schema.json` shape and parser parity with the `/provision-environment` skill |
 | `publish-dataverse-solutions-manifest.yml` | Publish Dataverse Solutions Manifest | Manual publish (release-time) | Locates the 8 canonical pre-built managed-solution ZIPs, uploads them, and publishes the manifest H6 reads |
 | `publish-provisioning-arm-artifacts.yml` | Publish Provisioning ARM Artifacts | Auto publish (push, bicep paths) | Compiles `customer.bicep` to ARM JSON and publishes it for H2a (`model1-shared` retired by task 225a) |
-| `redis-key-rotation.yml` | Redis Key Rotation | Scheduled (quarterly) / manual | Rotates the Redis access key per environment with safe-window rollback |
 | `report-workflow-health.yml` | report-workflow-health | Scheduled / advisory | Weekly rolling 7-day per-workflow success-rate report (tracking issue) |
 | `sdap-ci-docs-only.yml` | SDAP CI - Docs-Only Fallback | Legacy, PR-scoped | No-op success check pairing with `sdap-ci.yml`'s `paths-ignore` gap |
 | `sdap-ci.yml` | SDAP CI | Legacy, no longer required | Original monolithic pipeline (security scan, build/test, eval gate, client/code quality, tenant isolation, integration readiness, Compose fidelity + client gates); superseded by `CI / Router`, pending deletion |
@@ -193,7 +191,7 @@ Hooks complete in under 10 seconds. If a hook fails, the commit is blocked until
 git commit --no-verify -m "fix(api): emergency hotfix — skipping hooks, will fix lint in follow-up"
 ```
 
-See [Testing and Code Quality Procedures](testing-and-code-quality.md#husky--lint-staged-pre-commit-hooks) for detailed Husky documentation.
+See [Testing and Code Quality Procedures](testing-and-code-quality.md#pre-commit-hooks-husky--lint-staged) for detailed Husky documentation.
 
 ### Before Committing
 
@@ -676,7 +674,9 @@ Five workflows run on a `schedule:` trigger. There is no longer a single "nightl
 | `client-tests.yml` | Nightly, 07:00 UTC | jest baseline across 40 client packages (pass/fail/install-failed table) | No — job summary + `client-test-baseline` artifact |
 | `adr-audit.yml` | Weekly, Monday 09:00 UTC | Full ADR NetArchTest compliance | No — tracking issue (see [above](#weekly-adr-audit)) |
 | `report-workflow-health.yml` | Weekly, Monday 09:00 UTC | Rolling 7-day per-workflow success rate across every `.github/workflows/*.yml` | No — tracking issue |
-| `redis-key-rotation.yml` | 3 staggered quarterly crons (1st/8th/15th of Jan/Apr/Jul/Oct, 06:00 UTC) | Redis access-key rotation per environment (dev → staging → prod, 7-day soak each) | N/A — operational; has automatic rollback on health-check failure |
+| `pcf-build-prod-nightly.yml` | Daily, 08:00 UTC | `npm run build:prod` for every PCF control, judged by the build output (pcf-scripts exits 0 on a failed build) | No — advisory; job summary + artifact |
+
+`redis-key-rotation.yml` was removed on 2026-10-05 (task 242b): every Spaarke Redis is Azure Managed Redis with access keys disabled, so there is no key to rotate, and every scheduled run had failed.
 
 ### `nightly-health.yml`
 
@@ -703,12 +703,6 @@ Discovers every `package.json` with a real `test` script (filters out the npm-in
 ### `report-workflow-health.yml`
 
 Iterates every file in `.github/workflows/*.yml`, queries `gh run list --workflow=<file> --created=">7 days ago"`, computes a per-workflow success rate, and appends a weekly snapshot to a single rolling "CI Health Report" issue.
-
-### `redis-key-rotation.yml`
-
-Three jobs (`rotate-dev`/`rotate-staging`/`rotate-prod`), each gated by `if:` matching its own cron expression or a dispatch `environment` input, authenticate via a per-environment OIDC-bound GitHub Environment and run `scripts/Rotate-RedisKey.ps1 -Environment {env} -Force` (Secondary regen → Key Vault upsert → BFF restart → `/healthz` poll → Primary regen, with automatic rollback on a failed health check). Each job posts an Application Insights KQL verification query to the run summary.
-
-**Manual dispatch**: `gh workflow run redis-key-rotation.yml -f environment=dev`
 
 ---
 
@@ -1067,12 +1061,6 @@ stages until task 249, 2026-10-02 retired them.)*
 |---|---|
 | `build-provisioning-sidecar.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `SIDECAR_ACR_LOGIN_SERVER` |
 | `publish-provisioning-arm-artifacts.yml`, `publish-dataverse-solutions-manifest.yml` | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` (OIDC); repo variable `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
-
-### Redis Key Rotation (`redis-key-rotation.yml`)
-
-| Secret | Purpose |
-|--------|---------|
-| `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` | Per-environment (dev/staging/prod), bound via GitHub Environments |
 
 ### Nightly Health — Graph App-Role Parity (currently unconfigured)
 

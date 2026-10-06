@@ -22,9 +22,9 @@ The Spaarke BFF API follows ADR-009 (Redis-First Caching) as its primary caching
 
 | Component | Path | Responsibility |
 |-----------|------|---------------|
-| CacheModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs` | DI registration: **fail-fast** Redis connection with `AbortOnConnectFail=true` in deployed envs; env-guarded in-memory `AllowFallback` for local dev only; **symmetric Null-Object `IConnectionMultiplexer`** registration when Redis disabled (ADR-032); throws at startup if `Redis:Enabled=false` in non-Development environment unless `AllowFallback=true` |
+| CacheModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs` | DI registration: **fail-fast** Redis connection with `AbortOnConnectFail=true` in deployed envs; env-guarded in-memory fallback (`Redis:AllowInMemoryFallback`) for Development and Testing only; **symmetric Null-Object `IConnectionMultiplexer`** registration when Redis disabled (ADR-032); throws at startup if `Redis:Enabled=false` outside Development/Testing — with or without the fallback flag |
 | ITenantCache | `src/server/shared/Spaarke.Core/Cache/ITenantCache.cs` | **Mandatory wrapper** over `IDistributedCache`; injects `tenant:{tenantId}:` prefix; central seam for metrics, key validation, and future multi-Redis routing (NFR-12). **All Sprk.Bff.Api cache call sites MUST use this wrapper** (FR-06 atomic migration) |
-| RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Configuration: `Enabled`, `Endpoint` (Azure Managed Redis host:10000 — the BFF authenticates with its managed identity over RESP3; required in deployed envs, task 242), `ConnectionString` (Development/Testing only), `InstanceName=spaarke:`, `AllowFallback` (env-guarded; `true` only valid in Development) |
+| RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Configuration: `Enabled`, `Endpoint` (Azure Managed Redis host:10000 — the BFF authenticates with its managed identity over RESP3; required in deployed envs, task 242), `ConnectionString` (Development/Testing only), `InstanceName=spaarke:`, `AllowInMemoryFallback` (env-guarded; honoured only in Development and Testing) |
 | DistributedCacheExtensions | `src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs` | GetOrCreateAsync with versioned keys, standard key builder, TTL constants. **Now invoked via ITenantCache, not directly** |
 | RequestCache | `src/server/shared/Spaarke.Core/Cache/RequestCache.cs` | Scoped per-request in-memory cache to collapse duplicate loads within a single HTTP request |
 | GraphTokenCache | `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` | Caches OBO Graph tokens by SHA256 hash of user token; 55-min TTL; tenant-scoped via `ITenantCache` |
@@ -185,9 +185,9 @@ The BFF API is designed to run as multiple App Service instances behind a load b
 
 ### Local development (in-memory mode)
 
-- When `Redis:Enabled=false` AND `Redis:AllowFallback=true` AND `ASPNETCORE_ENVIRONMENT=Development`, `CacheModule` registers `AddDistributedMemoryCache()` for `IDistributedCache` AND a **Null-Object `IConnectionMultiplexer`** (per ADR-032) so consumers depending on the multiplexer interface don't crash.
+- When `Redis:Enabled=false` AND `Redis:AllowInMemoryFallback=true` AND `ASPNETCORE_ENVIRONMENT` is `Development` or `Testing` (the latter for CI test hosts), `CacheModule` registers `AddDistributedMemoryCache()` for `IDistributedCache` AND a **Null-Object `IConnectionMultiplexer`** (per ADR-032) so consumers depending on the multiplexer interface don't crash.
 - **Known limitation (Q-B)**: In-memory mode is **single-instance only**. The Null-Object's `Subscribe(...)` is a no-op — Pub/Sub messages are never delivered. Running multiple local instances against in-memory cache will produce stale views; the operational guide [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) documents this limitation.
-- This mode is **forbidden** in deployed environments. `CacheModule` throws at startup if `Redis:Enabled=false` AND `ASPNETCORE_ENVIRONMENT != "Development"` AND `AllowFallback != true` (and even with `AllowFallback=true`, non-Development envs log a CRITICAL warning).
+- This mode is **forbidden** in deployed environments. `CacheModule` throws at startup if `Redis:Enabled=false` in any environment other than Development or Testing — `AllowInMemoryFallback=true` does not change that (CacheModule branch c).
 
 ## Cache Instance Registry
 
@@ -199,8 +199,8 @@ non-production rows below are shared development infrastructure, not a customer-
 
 | Environment | Redis instance | Resource group | SKU |
 |-------------|---------------|----------------|-----|
-| dev | `spaarke-bff-redis-dev` | `spe-infrastructure-westus2` | Azure Cache for Redis Basic C0 (access key) today → Azure Managed Redis Balanced_B0 non-HA, Entra only (task 242b; `redis-dev.bicepparam`) |
-| demo | `spaarke-bff-redis-demo` (task 242b) | `rg-spaarke-demo` | Azure Managed Redis Balanced_B0 non-HA, Entra only |
+| dev | `spaarke-bff-redis-dev` | `spe-infrastructure-westus2` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-dev.bicepparam`; access policy: the dev BFF's and the L2 Worker's managed identities). Cut over 2026-10-05 (task 242b): the BFF and Worker reach it through `Redis__Endpoint`; the old Basic C0 cache of the same name is being retired |
+| demo | `spaarke-bff-redis-demo` | `rg-spaarke-demo` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-demo.bicepparam`; access policy: the demo BFF's managed identity) |
 | staging | `spaarke-bff-redis-staging` (not deployed) | — | Azure Managed Redis Balanced_B0, HA (`redis-staging.bicepparam`) |
 | customer (prod, both models) | `sprk-{customerId}-{env}-redis`, one per customer, in the customer's own subscription | the customer's own resource group | **Azure Managed Redis Balanced_B0, high availability, Entra only** (owner D12; size up only on a measured memory metric — no scale-down) |
 
