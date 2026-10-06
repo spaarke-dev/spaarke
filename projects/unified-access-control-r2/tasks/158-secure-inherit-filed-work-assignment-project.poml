@@ -4,7 +4,7 @@
     <title>A work assignment or project filed under a SECURE matter or project is itself secure (owner round 6, 2026-10-02): secured on create, on re-file and when its parent becomes secure; owned by the named team; its parent's sharees can see it</title>
     <phase>Session 27 — UAC defect remediation (owner round 6)</phase>
     <gate>startable after 146, 148, 149 and 155 merge</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Secure isolation (C10, CRITICAL). The task decides whether a core record is secure, who owns it, and who can read it.</rigor-reason>
     <model-tier>opus</model-tier>

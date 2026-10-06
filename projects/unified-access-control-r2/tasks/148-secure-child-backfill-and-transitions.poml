@@ -4,7 +4,7 @@
     <title>C10 part 2 (transitions + backfill) — re-own EXISTING children when a record becomes secure (provisioning) and when it stops being secure (unsecure), for projects, matters and work assignments, plus a one-time backfill of every existing secure record's children: one engine, idempotent, resumable, reported, manual live gate</title>
     <phase>Register-driven (authored 2026-09-30, session 27; defect C10 half 2, owner round 2 item 6 "backfill and transitions")</phase>
     <gate>after 144 (named team, generalized provisioning/unsecure, root migration applied in dev), 145 (child privileges), 146 (owner rule for children) and 149 (sharee mirror + reconcile) are merged.</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Irreversible-in-effect live ownership changes on the secure-isolation boundary; modifies the provisioning and unsecure endpoints (tags bff-api, auth, security); adds a scheduled job.</rigor-reason>
     <model-tier>opus</model-tier>

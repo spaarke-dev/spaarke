@@ -4,7 +4,7 @@
     <title>Keep a child's core-ancestor stamp equal to its intermediate's root: re-stamp the children whenever the intermediate is re-filed (owner round 4 item 5 = option b), and let the upload resolver use the fresh stamp, failing closed on any mismatch</title>
     <phase>Session 27 — UAC defect remediation (owner round 4, 2026-10-01)</phase>
     <gate>startable after 155 is merged (it replaces 155's held branch)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Changes which project, matter or work assignment a child record counts as being under. That decides both its access (the stamp feeds access derivation) and where its file bytes are stored (task 155). An isolation surface.</rigor-reason>
     <model-tier>opus</model-tier>

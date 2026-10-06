@@ -39,6 +39,26 @@ Run against spaarke-bff-dev at master `891cfd9a3`, then `c339d6920` (hotfix #131
   - 162: (h), (i), (j) and (l).
 - **Not yet inventoried:** 163 to 169.
 
+## Update (later 2026-10-06): fixes deployed and re-runs
+
+- **#1320 deployed:** No Access enforce checks the table Write privilege. Live check: admin gets 404 `entry_not_found` (reaches the handler); testuser1 gets 403.
+- **#1322 deployed:** the record owner's own share is revoked as the owner.
+- **G7 re-runs:**
+  - G148-2: PASS (`sweepComplete:true`).
+  - 133 (e): PASS for the platform half.
+  - 158-b round 58 via `/enforce`: PASS (the share is removed at once).
+- **Tasks completed:** 133, 148, 156, 158. Task 167 is also complete (no live gate).
+- **New defect D-G6-3 (G6):** the field-mapping push returns 500 for every profile.
+  - The source `$select` names lookups by logical name.
+  - Lookup writes were never `@odata.bind`.
+  - Fix in progress (`fix/uac-r2-field-mapping-push-lookups`).
+- **3 more empty SPE containers to delete** (G7):
+  - `b!FpQN0FPDuUuKn-aoY7I67xG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+  - `b!QVo-0vBMH0qWO1U5nZGwPRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+  - `b!UoL_Ekv0hE6Ak89yNAKEcBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+- **BFF restart:** spaarke-bff-dev restarted on its own at about 20:00Z (brief 503; no deployment or settings change in the activity log).
+
+
 The per-group records follow, verbatim.
 
 
@@ -833,3 +853,119 @@ No provisioning was run, no container was created, and no container permission w
 1. **U403-1 (a)**: workforce OBO byte paths (uploads + reads) are dead on secure containers. Provisioning creates role-less containers by design (broker-only §1), but those paths were never converted to app-only. Fails closed. Files and lines are listed above; the primary ones are `OBOEndpoints.cs:169, :410`. Owner direction needed on reads and Office edit.
 2. **U403-2 (f)**: the blanket 403 → "api identity lacks required container-type permission" copy (`GraphErrorTranslator.cs:133`, `ProblemDetailsHelper.cs:111`) misattributes a membership denial to the app's registration.
 3. Observation: BU-container access depends on **hand-granted** per-user SPE roles (Ralph owner, Eyal writer, testuser1 writer on b!vzGD…). Nothing in code grants them, so a new user in a BU gets the same 403 on BU uploads and previews. The same root cause applies, latent outside dev.
+
+---
+
+# G7
+
+## G7 results: live-gate re-runs after #1319 / #1320 / #1322 (dev, 2026-10-06)
+
+Agent: G7 re-run. BFF spaarke-bff-dev: Kudu OneDeploy active deployment 2a47653d, completed **19:47:25Z** (one minute after #1322
+b977fc7a6 was committed at 19:46Z; the main session reports the BFF at master b977fc7a6). Evidence: `gates/g7/` (scripts `g7*.py`, logs `g7*.log`).
+Identities as in COMMON.md: admin = ralph.schroeder (1d02f31c); T1 = testuser1 8d7bad7a (BU1, non-admin, own token);
+N = uac.child d6f8f439-40bf-f111-a05b-3833c5e9614d (BU1, non-admin, impersonated reads only). BU1 default team = cf15f587-baa0-f111-aaac-000d3a99d1d7.
+
+### 1. G148-2: creator-driven unsecure (re-run for D1 / #1322)
+
+Script `g7/g7a.py`, log `g7/g7a.log`, ids `g7/ids_a.json`. Fresh throwaway matter created **as T1** (direct Web API, owner = T1) with 6 children
+created as T1: document via `sprk_Matter`, document via `sprk_relatedmatter`, event, to-do regarding the first document (grandchild), communication, memo.
+- M = `479fb16c-bfc1-f111-a05c-3833c5e9614d` "UAC gate G7 148-2 2026-10-06 matter"; doc1 `acaee26c-bfc1-f111-a05c-0022482913fc`, doc2 `aeaee26c-…-0022482913fc`,
+  event `b0aee26c-…-0022482913fc`, to-do `499fb16c-bfc1-f111-a05c-3833c5e9614d`, communication `b2aee26c-…-0022482913fc`, memo `4c9fb16c-…-3833c5e9614d`.
+- Baseline 19:52:19Z: root owned by user T1, not secure, no POA rows; every child owned by T1, no POA; N (same BU) holds full rights on every child.
+- **Provision as T1** 19:52:24Z → **200**: `children {Completed, reowned 6, remaining 0}`, `sharedToCreatorSystemUserId` T1, own container
+  `b!FpQN0FPDuUuKn-aoY7I67xG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`, files NoFile ×2. Read-back: root Secure Record Owners, issecure true, root POA T1 **262167**;
+  all 6 children Secure-team-owned with T1 at mask 23; N: RetrievePrincipalAccess none on every child and the root, GET-as-N on root → 403.
+- **Unsecure as T1** 19:52:58Z → **200**: `newOwnerSystemUserId` T1, **`sharesRevoked: 1`, `sweepComplete: true`**, `children {Completed, reowned 6, remaining 0}`,
+  `relatedSecureRecords: []`.
+- Read-back 19:53:10Z:
+  - root: **`sprk_issecure` false**, owned by user T1, container kept. Root POA: the single row is **T1 mask 0** (the creator's 262167 share revoked; Dataverse
+    keeps a revoked POA row at mask 0, as with every other revoke in G3/G4). No POA row with a mask > 0 is left. T1 keeps full rights as owner.
+  - all 6 children: owned by the **BU1 default team** cf15f587; child POA T1 mask 0 (mirrors revoked); N has BU-level rights again (ordinary BU1 rows).
+- App Insights (`g7/ai_unsecure.txt`): `[UNSECURE] Caller 8d7bad7a… may remove the secure designation of matter 479fb16c… (Creator, F3)` 19:52:57Z →
+  `[SECURE-CHILD-RECONCILE] … unsecuring=True mayRelease=True status=Completed changed=6 … mirrorRevoked=6 mirrorIncomplete=0` 19:53:08.00Z →
+  `[UNSECURE] matter 479fb16c… un-secured: owner=8d7bad7a…, sharesRevoked=1, sweepComplete=True. TraceId=0HNP3SAPBU0KA:0000001D` 19:53:08.51Z.
+  Dependencies 19:53:04–19:53:08Z: **7 × `POST /api/data/v9.2/RevokeAccess` → 204** (6 child mirrors, then the root's owner share at 19:53:08.09Z, the one that was
+  400 0x80040223 in G3). Since the 19:47:25Z deploy, every RevokeAccess dependency (8, incl. gate 3's) is 204, and **0** traces/exceptions/dependencies mention
+  `0x80040223` or "Only owner can revoke".
+- **Result: PASS.** D1 (G3) is fixed live: 200, `sweepComplete: true`, `sharesRevoked: 1`, the creator's share on the root revoked (mask 0, no mask > 0 left),
+  children re-owned to the BU1 default team with their mirrors revoked, `sprk_issecure` false.
+  Wording note: "no POA row left" holds as "no POA row with any access left". Dataverse keeps the revoked row at mask 0 (same as every revoke in G3/G4).
+
+### 2. 133 (e): share-first proof undo on a creator-owned record
+
+Method (G4's procedure): a scratch copy of G4's `t133.ps1` → `g7/t133.ps1`. Differences from G4's copy:
+(1) the revoke follows the #1322 rule the endpoint now applies: when the revokee IS the record's owning user, RevokeAccess is sent with
+`MSCRMCallerID: <owner>`; otherwise app-only (as the endpoint does); (2) probe name "UAC gate 133e G7 2026-10-06 HHmmss". The rest of the call sequence is G4's
+(itself byte-for-byte the repo script's). repoRoot C:\wtG (CreatorAccessRights is unchanged by #1322). Output `g7/t133e.out`, 19:57:16–19:57:22Z.
+- Probe P = `98502c21-c0c1-f111-a05c-0022482913fc` (admin-created, owner T1, issecure true, no container). CreatorAccessRights = R,W,Append,AppendTo,Share.
+- pre-call: owner user T1, **no POA rows**.
+- (a) GrantAccess to the current owner: ACCEPTED → POA T1 262167.
+- (b) owner PATCH → Secure Record Owners (read back): POA T1 still 262167.
+- (e) compensating move back → owner user T1 (read back); RevokeAccess of T1's share **sent as the owner → accepted (204)**; after restore: owner T1, issecure True,
+  **POA T1 mask 0** → equals the pre-call state (no access-bearing row). In G4 the same step, sent app-only, was 400 0x80040223 with mask 262167 left.
+- **Result: PASS** for the platform half: the call the fixed `RestoreCreatorShareAsync` now issues is accepted and restores the pre-call share state.
+- **`sharesRestored: true` in the endpoint's response: NOT LIVE-REACHABLE (by design, not skipped).** The endpoint's restore runs only on failure paths
+  (share-first not proven; owner move NotMoved/refused; compensation after a share proof fails), and production code has no fault switch (the task-133 script's own
+  header says so; owner round 13 item 2 accepted the replay as the method). I looked for a real trigger that needs no config change. The only assign-cascading children
+  of a root are `sharepointdocument`/`sharepointdocumentlocation` (+ `team`), and a document location is refused in the pre-check BEFORE any write (G4 133(j):
+  500 `cascade_children_unreadable`, nothing changed). So no live state reaches the restore. Changing the Secure Record Owner role to force a refused move is out of scope.
+  Coverage for the endpoint half: #1322's endpoint tests (NotMoved and compensation undo on a creator-owned record → mask 0, `sharesRestored: true`; 9 tests fail with the
+  endpoint change reverted). Gate 1 above also proves the SAME owner-aware `RevokeAccessAsync(…, recordOwner)` overload live through the BFF's own app identity
+  (its impersonated revoke of the owner's share returned 204). The replay here impersonates from the admin identity; the BFF does it from its application user.
+
+### 3. 158-b round 58 via the ENFORCE route (re-run for D-G5-2 / #1320)
+
+Scripts `g7/g7c_setup.py`, `g7c_r58.py`, `g7c_entry_cleanup.py`; log `g7/g7c.log`; ids `g7/ids_c.json`.
+- Throwaway matter M = `7a97dbad-bfc1-f111-a05c-3833c5e9614d` "UAC gate G7 158-b r58 2026-10-06 matter" (admin create 19:54:05Z); admin provision → **200**,
+  own container `b!QVo-0vBMH0qWO1U5nZGwPRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`, shared to the admin (creator) 262167.
+- Work assignment W = `489fecb0-bfc1-f111-a05c-0022482913fc` filed under M out of band (Web API, `sprk_RegardingMatter`) 19:54:18Z. `secure-root-inheritance` secured it at
+  19:55:05Z (51 s): issecure true, Secure Record Owners, own container `b!UoL_Ekv0hE6Ak89yNAKEcBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`; POA admin 262167; N none.
+- Direct share: admin Web API `GrantAccess` W → N ReadAccess 19:55:46Z → 204. N: RetrievePrincipalAccess ReadAccess, GET-as-N 200 (POA N mask 1). N has nothing on M.
+- No Access entry E = `08032feb-bfc1-f111-a05c-0022482913fc` (admin create 19:55:48Z → 201): `sprk_SubjectSystemUser` = N, `sprk_ObjectRecordType` = sprk_matter
+  (recordtype_ref e8547bb4), `sprk_objectrecordid` = M.
+- **`POST /api/v1/external-access/no-access/enforce {entryId: E}` as admin 19:55:48Z → 200** (3.9 s): `outcome "evaluated"`, `subjectKind systemuser`,
+  **`removed: [{systemUserId N, recordType sprk_workassignment, recordId W, previousAccessRightsMask 1}]`**, notEnforceable [], notEnforced [], failures [],
+  coveredUsers 1, coveredRecords 2, complete true.
+- **Read-back 19:55:53Z, 5 s after, before any job tick (the next `no-access-share-reconciliation` run was 20:00): POA N mask 0; RetrievePrincipalAccess none;
+  GET-as-N → 403.** W still issecure true, Secure Record Owners. Admin's shares on W and M unchanged.
+- App Insights: `[DELEGATION] Caller holds prvWritesprk_noaccessentry: True` → `[DELEGATION] ALLOWED on /api/v1/external-access/no-access/enforce for
+  sprk_noaccessentries(08032feb…)` 19:55:48.26Z → `[NO-ACCESS-ENFORCE] Entry 08032feb… (SystemUser): 1 user(s) x 1 secure record(s); removed 1, not enforceable 0,
+  not enforced 0, failures 0` 19:55:51.8Z. Request `POST …/no-access/enforce` 200. G5's 403 `delegation_write_required` / `[DELEGATION-RPA-UNAVAILABLE]` is gone.
+- Entry deactivated 19:56:07Z (PATCH statecode 1 / statuscode 2 → read back 1/2). Extra check: enforce on the inactive entry → **409
+  `sdap.access.no_access.entry_inactive`**, W's POA unchanged (N still 0). Entry deleted 19:56:10Z → 204, read-back 404.
+- **Result: PASS.** D-G5-2 is fixed live: the on-save enforce route removes the walled user's direct share on the secure WA immediately.
+
+---
+
+### Records created + cleanup
+All deleted as admin at 19:56:10Z (entry) and 19:59:10–19:59:20Z (`g7/g7_cleanup.log`). Every DELETE 204 and read-back **404, 12 of 12**:
+- Gate 1: matter `479fb16c-bfc1-f111-a05c-3833c5e9614d` + doc1 `acaee26c-bfc1-f111-a05c-0022482913fc`, doc2 `aeaee26c-bfc1-f111-a05c-0022482913fc`, event
+  `b0aee26c-bfc1-f111-a05c-0022482913fc`, to-do `499fb16c-bfc1-f111-a05c-3833c5e9614d`, communication `b2aee26c-bfc1-f111-a05c-0022482913fc`, memo `4c9fb16c-bfc1-f111-a05c-3833c5e9614d`.
+- Gate 2: probe project `98502c21-c0c1-f111-a05c-0022482913fc` (deleted while secure; no container).
+- Gate 3: matter `7a97dbad-bfc1-f111-a05c-3833c5e9614d`, WA `489fecb0-bfc1-f111-a05c-0022482913fc`, its inherited ledger row `sprk_assignedaccess`
+  `ff144cd9-bfc1-f111-a05c-3833c5e9614d` (deleted first so no orphan row is left; see G5 O-2), No Access entry `08032feb-bfc1-f111-a05c-0022482913fc`.
+- No `sharepointdocumentlocation` or other ledger rows referenced any of the roots. 65a3fab2 untouched; no app setting changed; no Entra / Key Vault access.
+
+**SPE containers created (NOT deleted, per the rules; empty, no file written):**
+- Gate 1 matter 479fb16c: `b!FpQN0FPDuUuKn-aoY7I67xG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+- Gate 3 matter 7a97dbad: `b!QVo-0vBMH0qWO1U5nZGwPRG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+- Gate 3 WA 489fecb0 (by secure-root-inheritance): `b!UoL_Ekv0hE6Ak89yNAKEcBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
+
+### Defects found
+None new. D1 (G3/G4, 0x80040223) and D-G5-2 (enforce 403) are confirmed fixed live.
+
+### For the owner
+1. 133 (e): the endpoint's `sharesRestored: true` cannot be observed live without fault injection (failure-only path; no config-free trigger exists on dev).
+   The evidence is the platform replay (pass), #1322's endpoint tests, and gate 1's live proof of the same impersonated-revoke code. Accept, or name a fault method.
+2. Three more orphan SPE containers (above) join the pending orphan-container decision.
+3. Environment note, not caused by this agent: at about 20:00Z, after every G7 gate had finished (last BFF call 19:56:08Z), the BFF returned **503** for a short time.
+   It then came back (healthz 200 at about 20:01Z) with job history reset (`lastRunStartedOn` null on every job), so the app restarted. The active deployment is still
+   2a47653d (19:47:25Z), and the activity log shows no restart or settings write in the last 40 min (only a `publishxml` read by ralph.schroeder at 19:51:31Z).
+   I made no app-setting change and no restart. This is worth knowing because a restart re-arms the job schedules.
+
+### Summary
+| Gate | Result |
+|---|---|
+| 1. G148-2 creator unsecure | **PASS**: 200, sweepComplete true, sharesRevoked 1, root share mask 0, 6 children → BU1 default team, issecure false; 7 RevokeAccess 204, no 0x80040223 |
+| 2. 133 (e) undo on creator-owned record | **PASS** (platform replay with the fixed owner-impersonated revoke: mask 0 = pre-call). Endpoint `sharesRestored:true` not live-reachable; covered by #1322 tests + gate 1 |
+| 3. 158-b round 58 via /no-access/enforce | **PASS**: 200, removed [N on WA, mask 1], read back mask 0 / 403 in 5 s before any job tick; inactive-entry enforce 409; entry deactivated + deleted |
