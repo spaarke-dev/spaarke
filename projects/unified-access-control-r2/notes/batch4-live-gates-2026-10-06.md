@@ -85,6 +85,21 @@ Run against spaarke-bff-dev at master `891cfd9a3`, then `c339d6920` (hotfix #131
 - `b!tEidDpRRbU2whrkDMjCtzBG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN`
 
 
+## Update: #1327 and #1328 deployed (master cc72302e5); G8 PASS
+
+- **D-G6-1, D-G6-2, D-G6-3 and F-G6-1 are fixed live.**
+  - Playbook lists match Dataverse (35/25).
+  - A created playbook is owned by its creator.
+  - An unresolvable container id returns 404.
+  - Gate 12 (Matter to Invoice) passes, and so do the Event, Report Card and Work Assignment profiles.
+  - 166 (e), positive and negative, passes.
+- **Minor (f), pre-existing:**
+  - Playbook sharing info shows a revoked team as Read: mask 0 is mapped to Read, so only the display is wrong.
+  - Every shared team shows as "Unknown Team": the team-name lookup is missing `v9.2/` and gets a 500.
+  - A failed push child reports a raw 403 message that doesn't name the missing right.
+- **Deleting a record doesn't revoke its Assigned-To contact grants.** The grant rows survive with an empty record lookup, because the lookup only clears its link. G6 left 2 ledger rows and 2 active grants this way; they're now deleted. Owner decision pending: should the reconciliation job deactivate grants whose record is gone?
+
+
 The per-group records follow, verbatim.
 
 
@@ -1220,3 +1235,112 @@ All 8 mapped source columns on sprk_matter have IsSecured = false.
 4. O-G6-1 to O-G6-3: data / other-lane items (catalog drift, Insights schema/index drift, notification Condition node).
 5. Two more SPE containers (b!7zUY…, b!tEid…) await the orphan-container decision.
 6. 169: the Invoice main form has a To Do subgrid, so the auto-detect probe can run in the owner session.
+
+---
+
+# G8
+
+## G8 results — post-deploy dev live checks for #1327 and #1328 (2026-10-06)
+
+Agent: G8. Environment: spaarkedev1 / spaarke-bff-dev at master cc72302e5 (#1327 + #1328). Code read from origin/master @ cc72302e5 (read-only `git show`).
+Identities: admin = ralph.schroeder (1d02f31c); tu1 = testuser1 (8d7bad7a, BU1, non-admin).
+Helpers: scratchpad\gates\g8\ (g8lib.py = copy of g6lib with its own log/state, ai.py, tA1/tA2/tA3, setupB, bsnap, tB3, tB12, cleanup). Raw log g8\g8log.txt; state g8\g8state.json.
+
+### A. #1327 (playbooks / SPE admin)
+
+#### A1 create → owner → PUT / share / unshare — PASS (two pre-existing display findings, F-G8-1/F-G8-2)
+- 21:29:27Z admin `POST /api/ai/playbooks/` {name "UAC gate 1327 A1 2026-10-06 (G8)", actionIds [58c91c65…]} → **201**, id **PB 2892cbff-ccc1-f111-a05c-3833c5e9614d**, `ownerId` 1d02f31c.
+  Dataverse row: **_ownerid_value = 1d02f31c (admin)**; _createdby = 8793f4b0 (the BFF app user, expected: the create is app-only with an owner bind). D-G6-2 fixed.
+- admin `PUT` (description changed) → **200**; row sprk_description updated, modifiedon 21:29:27Z. The owner check passed.
+- tu1 `PUT` → **403** "You do not have permission to modify this playbook"; tu1 `/share` {teamIds:[BU1 team], accessRights:1} → **403** (same body); tu1 `/unshare` → **403**. Row unchanged (modifiedon / description identical).
+- admin `/share` BU1 team Read → **200** success; POA row: principal team cf15f587, mask 1.
+- admin `/unshare` BU1 team → **200** success; POA row mask now **0** (revoked in Dataverse).
+- **F-G8-1 (f), pre-existing:** after the unshare, both the unshare response and `GET /{id}/sharing` still list the team with `accessRights: 1` (Read) and `sharingLevel 1`. `GetSharedTeamsAsync` maps a POA row with mask 0 to Read (`share.AccessRightsMask == 0 ? 1 : …`, documented as pre-060 behaviour). Dataverse access is revoked; only the display is wrong (the owner sees a revoked share as still shared). `UserHasSharedAccessAsync` would read it as Read too, but it has no callers.
+- **F-G8-2 (f), pre-existing:** every team is named "Unknown Team". App Insights: `GET https://spaarkedev1.crm.dynamics.com/api/data/teams(cf15f587…)` → **500**. The URL lacks `v9.2/` (`GetTeamNameAsync` uses a relative `teams(...)` path that drops the version segment). Admin reads the same team name fine ("Spaarke Business Unit 1").
+- Deleted PB (Dataverse DELETE 204, read-back 404) at 21:32:24Z.
+
+#### A2 lists — PASS
+Dataverse direct (admin, with `$count=true`), 21:31:14Z: admin-owned = **35** (34 + PB; active 34), public (`sprk_ispublic eq true`) = **25**.
+- `GET /api/ai/playbooks/` → 200 `totalCount 35`, page 1, pageSize 20, 20 items, hasNextPage true.
+- `?page=2&pageSize=20` → 200 `totalCount 35`, **15 items** (the remainder), hasNextPage false. `?page=3` → 0 items.
+- Pages 1+2: overlap 0, union 35 = **exactly the Dataverse owned set** (no missing, no extra; PB included).
+- `?pageSize=100` → 35 items, the same set.
+- `/public?pageSize=100` → `totalCount 25`, 25 items = exactly the Dataverse public set. `/public` default → totalCount 25, 20 items.
+- `/api/ai/chat/playbooks` → 200, **35**; `/api/agent/playbooks` → 200, **35** (non-empty).
+- tu1 controls: `/api/ai/playbooks/` → totalCount 0 (tu1 owns 0 in Dataverse), PB absent; `/public` → 25; chat → 25; agent → 25.
+- After PB was deleted: admin list totalCount **34**.
+
+#### A3 SPE admin per-container GET — PASS
+admin, `?configId=c3a25b9a…`, 21:32Z. Reference `b!AAAA…(64)` → **404** `spe.admin.deny.container_out_of_scope` "Container '…' was not found." Each case below compared to it field by field (traceId removed, the id in `detail` replaced by a placeholder):
+- invented `b!doesnotexistG8…` → **404**, same body.
+- truncated `b!DcvTfUkibESq` → **404**, same body.
+- real id with one character changed (`b!8qdU…vfhG…`) → **404**, same body.
+- `b!MVasATu_GE6Lqs6JOGaeghG_EVjnHABFpxLm1FYg2Ah7gIBcg3lNSbiHX5dqt_eN` (65a3fab2's container, not visible to the BFF) → **404**, same body.
+- orphan `b!HBRbo…` → **404**, same body.
+- Real bound containers: `b!vzGD…` "Spaarke Dev Container 2" → **200**; G5 secure `b!8qdU…vehG…` → **200**.
+- tu1 control, invented id → 403 (no Spaarke administrator permission).
+- F-G6-1 is fixed: no 503 `scope_unverifiable` any more.
+
+### B. #1328 (field-mapping push)
+
+#### Fixtures (admin, 21:37:16–22Z; all named "UAC gate 1328 G8 2026-10-06 …" / "UAC gate G8 …")
+G6's matter ac6486f1 and its invoices had been deleted (G6 cleanup), so a throwaway set was seeded:
+- Contacts ATT1 80707517-cec1-f111-a05c-0022482913fc, ATT2 c27e2f13-cec1-f111-a05a-7c1e520a989f, PAR1 596f4e18-cec1-f111-a05c-3833c5e9614d, PAR2 c47e2f13-cec1-f111-a05a-7c1e520a989f, EXT 82707517-cec1-f111-a05c-0022482913fc, INT c77e2f13-cec1-f111-a05a-7c1e520a989f; organizations LF1 3a172819-cec1-f111-a05a-7c1e520a989f, LF2 676f4e18-cec1-f111-a05c-3833c5e9614d.
+- **M1 6d6f4e18-cec1-f111-a05c-3833c5e9614d** (owner BU1 team; tu1 full rights) with all 8 Assigned lookups set (attorney1/2, paralegal1/2, external, internal → the contacts; lawfirm1/2 → the organizations).
+- **MN 42172819-cec1-f111-a05a-7c1e520a989f** (admin; tu1 None), attorney1 = ATT1.
+- Invoices under M1: **INV_W 84707517-…0022482913fc** (BU1 team; tu1 Write), **INV_R 86707517-…0022482913fc** (admin + GrantAccess Read to tu1; RPA ReadAccess only), **INV_N 88707517-…0022482913fc** (admin; tu1 None). Under MN: **INV_X 876f4e18-cec1-f111-a05c-3833c5e9614d**.
+- Under M1: event **EV1 8a707517-cec1-f111-a05c-0022482913fc**, report card **RC1 8c707517-cec1-f111-a05c-0022482913fc**, work assignment **WA1 956f4e18-cec1-f111-a05c-3833c5e9614d** (all admin-owned).
+- Harness correction (not a product defect): the contacts/organizations were first created root-BU/admin-owned, so tu1 had no AppendTo on them. tu1's first push on M1 (21:38:03Z) → 200 with both readable invoices **failed 403** (Dataverse refused the `@odata.bind` as tu1 — correct under "the caller's rights decide"; nothing written). The 8 contacts/orgs were then assigned to the BU1 team (tu1 RPA: contacts full, orgs Read+AppendTo) and the gate re-run.
+
+#### B3 = 166 (e) — tu1, mixed-access children — PASS
+- tu1 push MN → sprk_invoice → **404** "Source Record Not Found" / "Source record not found."; a random matter → **404**, byte-identical (traceId removed); MN → sprk_event → the same 404. App Insights: `[FIELD-MAPPING-PUSH] Denied: caller holds None on sprk_matters(42172819…); Read required. Answered 404 — nothing read or written.` INV_X and every other child: modifiedon/versionnumber unchanged.
+- 21:38:59Z tu1 push M1 → sprk_invoice → **200** `totalRecords 2, updatedCount 1, failedCount 1` (INV_N not visible to tu1, so not counted or named):
+  - INV_W: written (modifiedon 21:38:57Z), its four lookups = the matter's contacts.
+  - INV_R: error "Response status code does not indicate success: 403 (Forbidden)." (App Insights: impersonated PATCH 403); unchanged.
+  - INV_N, INV_X: unchanged.
+  - fieldResults: 4 × Mapped (only for the written record).
+
+#### B1 = gate 12 (Matter → Invoice) — PASS
+- 21:39:26Z admin push M1 → sprk_invoice → **200** `success true, totalRecords 3, updatedCount 3, failedCount 0`, fieldResults 12 × Mapped (4 per invoice).
+- Read-back: INV_W, INV_R and INV_N each have `sprk_assignedtoattorney1/2 = ATT1/ATT2` and `sprk_assignedtoparalegal1/2 = PAR1/PAR2` (= M1's values, each lookup on its own column). INV_X (under MN) unchanged.
+- App Insights for the 8 push requests (21:37:55–21:39:37Z): **no 400** from Dataverse anywhere. The only Dataverse ≥400 answers are the expected RPA 403/404 on MN/random and tu1's PATCH 403 on INV_R. D-G6-3 fixed.
+
+#### B2 — the other active Matter → X profiles — PASS
+- → sprk_event (Matter to Event, 8 rules) → **200** 1/1 updated, 8 × Mapped. EV1: all 8 lookups = M1's (lawfirm1/2 → the two sprk_organizations).
+- → sprk_reportcard (8 rules, incl. lawfirm1 → `sprk_assignedtolawfirm1`) → **200** 1/1, 8 × Mapped. RC1: all 8 bound (both law-firm lookups → sprk_organizations).
+- → sprk_workassignment (1 rule) → **200** 1/1, Mapped. WA1.attorney1 = ATT1.
+  - **Assigned-To access fired inline**: 21:39:36.67Z `[ASSIGNED-ACCESS] Inline sprk_workassignment 956f4e18…: 1 assigned subject(s), 2 write(s), 0 failure(s).` Ledger row 01287a68-cec1-f111-a05c-0022482913fc (key `sprk_workassignment:956f4e18…:sprk_assignedattorney1:contact:80707517…`, created 21:39:36Z, state 100000000) and contact grant sprk_externalrecordaccess ff277a68-cec1-f111-a05c-0022482913fc (ATT1).
+  - Restamp: `CoreAncestorRestamper.AfterWriteAsync` ran. The Assigned columns are not filing/ancestor columns, so it had nothing to restamp (no-op by design).
+- The scheduled Assigned-To job (21:40Z) also materialized the seeded matters: M1 → 8 ledger rows + 8 grants (6 contact, 2 organization), MN → 1. Expected; handled in cleanup.
+- Two inactive profiles (Matter/Project → Event cascade UAT, statecode 1) were not pushed.
+
+#### B4 = gate 19 (FLS source column) — NOT RUN (no profile maps one)
+- Every source field of every active rule (the 8 sprk_matter Assigned lookups) has IsSecured = false. Also checked the inactive profiles' text sources (sprk_mattername/number, sprk_projectname/number): not secured.
+- sprk_matter's only secured columns are `sprk_createdbyperson` and `sprk_issecure`; no rule maps either. The FLS-null behaviour is proven by tests only. I added no rule (it would change live configuration).
+
+### Records created + cleanup — all deleted 21:43:33Z (37/37: DELETE 204, read-back 404); name sweeps over 8 tables find 0
+- Playbook PB 2892cbff-ccc1-f111-a05c-3833c5e9614d (deleted 21:32:24Z; its BU1-team POA row went with it).
+- Matters M1 6d6f4e18-cec1-f111-a05c-3833c5e9614d, MN 42172819-cec1-f111-a05a-7c1e520a989f.
+- Invoices INV_W 84707517-, INV_R 86707517-, INV_N 88707517- (all -cec1-f111-a05c-0022482913fc), INV_X 876f4e18-cec1-f111-a05c-3833c5e9614d.
+- Event EV1 8a707517-, report card RC1 8c707517- (-cec1-f111-a05c-0022482913fc); work assignment WA1 956f4e18-cec1-f111-a05c-3833c5e9614d.
+- 6 contacts and 2 sprk_organizations (ids in Fixtures).
+- Assigned-To side effects (written by the BFF because of my records): 10 sprk_assignedaccess ledger rows and 10 sprk_externalrecordaccess grants (WA1 inline 1, job M1 8, MN 1).
+  - Cleanup used the product path first: I cleared the Assigned lookups on M1/MN/WA1, then admin `POST /api/v1/external-access/assigned-access/sync`. Each → 200 `complete: true`, every entry `Revoked / access-removed`, all 10 grants inactive (statecode 1).
+  - Then the 10 ledger rows and 10 grant rows were deleted. All 10 grant rows created since 21:37Z were mine; no ledger rows are left for the three roots.
+- Changed and restored: nothing pre-existing was modified. App settings were not touched, the app was not restarted, and no Entra / Key Vault access was made.
+
+### Defects (classified)
+- **None new in #1327 / #1328.** D-G6-1, D-G6-2, D-G6-3 and F-G6-1 are fixed live.
+- **F-G8-1 (f), pre-existing — playbook sharing info shows a revoked team share as Read.** After `/unshare` the POA row has mask 0, but `/unshare` and `GET /{id}/sharing` still list the team with accessRights 1 / sharingLevel 1. Cause: `PlaybookSharingService.GetSharedTeamsAsync` maps mask 0 to Read. Dataverse access is revoked; only the display is wrong. Fix direction: skip rows whose mask is 0.
+- **F-G8-2 (f), pre-existing — every shared team is named "Unknown Team".** `GetTeamNameAsync` requests `…/api/data/teams(id)` (no `v9.2/`), and Dataverse answers 500 each time (4 seen in App Insights 21:29:40–48Z).
+- **O-G8-1 (f)** — a push child that fails returns the raw HttpClient message "Response status code does not indicate success: 403 (Forbidden)." The user is not told which right is missing (e.g. Write on the child, or AppendTo on a referenced contact). Cosmetic.
+
+### For the owner
+1. #1327 and #1328 pass on dev. G6's 166 (e)-positive and gate 12 now pass (B3, B1).
+2. F-G8-1 / F-G8-2: two small, pre-existing display bugs in the playbook sharing panel.
+3. Gate 19 (FLS) is still proven by tests only: no active profile maps a secured column (sprk_matter's secured columns are sprk_createdbyperson and sprk_issecure).
+4. **G6 left Assigned-To rows behind (not mine; not touched):**
+   - ledger rows 5902398e-c0c1-f111-a05c-3833c5e9614d and 05a91c88-c0c1-f111-a05c-3833c5e9614d (keys name G6's deleted matters ac6486f1 / 848b15f0);
+   - ACTIVE contact grants sprk_externalrecordaccess 5702398e-c0c1-f111-a05c-3833c5e9614d and 00a91c88-c0c1-f111-a05c-3833c5e9614d for contact 43c4e819 (John James Murphy), with their record lookup now empty.
+   - The job materialized G6's matters at 20:00Z, and the matters were deleted at 20:10Z without a revoke.
+   - Deleting a root does not revoke its Assigned-To grants. Whether a grant whose record is gone gives any access is not verified here. Owner: clean up, and decide whether deleting a root should revoke them.
