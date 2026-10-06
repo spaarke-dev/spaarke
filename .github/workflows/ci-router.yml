@@ -47,7 +47,7 @@ name: CI
 
 on:
   pull_request:
-    branches: [master]
+    branches: [master, scratch/081-r8-base]  # SCRATCH ONLY (081 round 8 proof): never merged
   push:
     branches: [master]
   merge_group:
