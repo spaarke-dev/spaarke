@@ -1,15 +1,15 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-10-06 ~16:20 UTC (checkpoint #16, by context-handoff before /compact). Supersedes #15. Read Quick Recovery first.
+> **Last Updated**: 2026-10-06 ~17:30 UTC (checkpoint #17). Supersedes #16. Read Quick Recovery first.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 4 + route sweep: merged to master (`d254d7166`, PR #1312) and **DEPLOYED TO DEV** (all 3 phases done). Now: follow-up PR #1314, then the live gates (161 first), then batch 5 |
-| **Step** | PR #1314 open on branch `fix/uac-r2-deploy-script-fixes` (worktree `C:\wtF`), CI running. Task 161 live gate run (results in the 161 note on #1314); waiting for the owner's OK to mark 161 ✅ |
+| **Task** | Batch 4 + route sweep: merged (`d254d7166`, #1312) and DEPLOYED TO DEV. Follow-up #1314 merged (`891cfd9a3`) and BFF redeployed to dev. 161 ✅. Now: remaining live gates, then batch 5 |
+| **Step** | #1314 re-check passed as testuser1: template render 200; email-as-documents archive 200 (created doc `0a909e4e-a6c1-f111-a05a-7c1e520a989f`; second call `alreadyArchived:true`, no duplicate). New pre-existing defect filed: #1317 (insert-template returns raw XSLT for Dynamics-editor templates; email-r5 origin, not UAC scope) |
 | **Status** | in-progress |
-| **Next Action** | (1) `gh pr checks 1314`. On Router green: `gh pr merge 1314 --squash`. Then redeploy the BFF to dev from a fresh worktree of master: `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, with `pac.cmd`/pwsh from a short path. Then re-check, as testuser1: template render on a readable matter (expect 200) and Save to SharePoint on communication `8ebf88cd-9fc1-f111-a05c-0022482913fc` (expect 200). The scratchpad script `gate161.py` has `call()`/`tok()` helpers; the testuser1 token comes from `AZURE_CONFIG_DIR=C:/tmp/az-uac-child az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`. (2) The owner was asked whether to mark **161 ✅ now**: everything 161 changed passes, and the two failures are pre-existing bugs fixed in #1314. If yes: set POML 161 status completed + TASK-INDEX ✅ (work branch), then give the owner the word-add-in-r1 note. Peer messages to word-add-in-r1 are always held, so the owner relays them. (3) The remaining live gates per task note, run as testuser1@spaarke.com (the non-admin child-BU user; `uac.child.user` has no known password). Mark tasks ✅ as gates pass. (4) Batch 5. |
+| **Next Action** | (1) Delete branch `fix/uac-r2-deploy-script-fixes` once its legacy `Build & Test (Debug)` check finishes (`gh pr checks 1314 \| grep -c pending` = 0), then `git worktree remove C:/wtF`. (2) Remaining live gates per task note, as testuser1@spaarke.com (token: `AZURE_CONFIG_DIR=C:/tmp/az-uac-child az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`; helpers in scratchpad `gate161.py`/`recheck1314.py`). Mark tasks ✅ as gates pass; 150's UI tests are by hand with the owner. (3) Batch 5 (round 59 order: 154, 113/114/105/101, 064, 153/067, 099, 036, 090); owner decisions needed for 114 licence proxy and 036 ADR-034 amendment. Terminology: say "save the email as documents" (archive route), not "Save to SharePoint" (owner, 2026-10-06). |
 
 ### This session (2026-10-06), done
 - **PR #1312 merged** (`d254d7166`, squash; Router + Tier 1 green; legacy SDAP CI also green afterwards).
