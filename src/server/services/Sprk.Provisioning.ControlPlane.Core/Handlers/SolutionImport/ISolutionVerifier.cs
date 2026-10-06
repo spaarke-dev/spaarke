@@ -4,13 +4,13 @@
 // L2 abstraction over the post-import solution verification. Called by H6
 // AFTER <see cref="ISolutionImporter"/> reports Success to build the Cosmos
 // interStepState.ImportedSolutions manifest (POML acceptance criterion 6)
-// AND independently confirm the 8 authoritative solutions are installed.
+// AND independently confirm the 9 authoritative solutions are installed.
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   ≥2 implementations exist from day 1:
 //     - Production: <see cref="PacCliSolutionVerifier"/> — shells out to
 //       `pac solution list --environment {envUrl}` and parses the tabular
-//       output for the 8 solution unique-names + installed versions +
+//       output for the 9 solution unique-names + installed versions +
 //       solutionIds.
 //     - Test: stubs injected per unit test that return canned catalogs.
 //   Interface earns its keep — no NIH.
@@ -32,7 +32,7 @@ using System.Collections.Immutable;
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
-/// Verifies the 8 authoritative solutions are installed on a target Dataverse
+/// Verifies the 9 authoritative solutions are installed on a target Dataverse
 /// env after <see cref="ISolutionImporter"/> reports Success. Returns per-
 /// solution installed version + solutionId used by H6 to build the Cosmos
 /// interStepState.ImportedSolutions manifest.
@@ -63,21 +63,24 @@ public interface ISolutionVerifier
 /// <param name="TargetDataverseUrl">Target env URL — must match the URL the importer just imported to.</param>
 /// <param name="TenantId">Entra tenant id (§4D I1).</param>
 /// <param name="ClientId">BFF Entra app registration id.</param>
-/// <param name="ExpectedCatalog">The 8 authoritative solutions the verifier must confirm are installed.</param>
+/// <param name="ExpectedCatalog">The 9 authoritative solutions the verifier must confirm are installed.</param>
 /// <param name="ClientSecret">
 /// Resolved BFF app-reg client secret. NEVER logged. Added by task 141 (Wave
 /// G-4) for <see cref="DataverseWebApiSolutionVerifier"/> — unlike the retired
 /// PacCliSolutionVerifier (which reused the importer's already-created pac
 /// auth profile), the stateless Web API verifier acquires its OWN bearer
-/// token via <c>Azure.Identity.ClientSecretCredential</c> and therefore needs
-/// this value independently.
+/// token and therefore needs this value independently. A44.5 (task 205i):
+/// MAY be <c>null</c>/empty on secret-free environments — the verifier then
+/// resolves its credential from the FR-39 ordered chain
+/// (<see cref="Credentials.WorkerDataverseCredentialFactory"/>, MI-FIC
+/// first). Empty is the SIGNAL (auth-v4 §9.1); never pass a sentinel value.
 /// </param>
 public sealed record SolutionVerificationRequest(
     string TargetDataverseUrl,
     string TenantId,
     string ClientId,
     ImmutableArray<CanonicalSolutionEntry> ExpectedCatalog,
-    string ClientSecret);
+    string? ClientSecret);
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionVerifier.VerifyAsync"/>.

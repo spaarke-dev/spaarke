@@ -1,7 +1,7 @@
 import type * as React from 'react';
 import type { SendEmailPane } from '@spaarke/ui-components/send-email-pane';
 import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import type { ContactOption } from '../components/views/CreateTodoView';
 import {
   buildDocumentRecordLink,

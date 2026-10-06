@@ -21,6 +21,7 @@
  * @see projects/visual-host-create-button-r1/notes/field-manifests/invoice.md
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateInvoiceFormState } from './formTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { AssociationResult } from '../AssociateToStep/types';
@@ -144,13 +145,15 @@ export class InvoiceService {
     private readonly _getCurrentUserIdOverride?: () => string | null
   ) {
     this._tenantId = tenantId ?? '';
-    this._dataService = dataService;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): every CHILD create / re-file this service makes (and the file step's
+    // documents) goes through the BFF (G5) — the server decides the owner; nothing is created as the user.
+    this._dataService = withBffChildWrites(dataService, authenticatedFetch, bffBaseUrl);
     this._authenticatedFetch = authenticatedFetch;
     this._bffBaseUrl = bffBaseUrl;
     // EntityCreationService expects IWebApiWithCreate which has createRecord returning { id: string }.
     const webApiAdapter = {
       createRecord: async (entityName: string, data: Record<string, unknown>) => {
-        const id = await dataService.createRecord(entityName, data);
+        const id = await this._dataService.createRecord(entityName, data);
         return { id };
       },
       retrieveRecord: (entityName: string, id: string, options?: string) =>
@@ -158,7 +161,7 @@ export class InvoiceService {
       retrieveMultipleRecords: (entityName: string, options?: string) =>
         dataService.retrieveMultipleRecords(entityName, options),
       updateRecord: async (entityName: string, id: string, data: Record<string, unknown>) => {
-        await dataService.updateRecord(entityName, id, data);
+        await this._dataService.updateRecord(entityName, id, data);
         return { id };
       },
       deleteRecord: async (entityName: string, id: string) => {

@@ -10,7 +10,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { SaveFlow } from '../SaveFlow';
-import { clearMatterTypesCache } from '../../services/matterTypeLookupService';
+import { clearReferenceListCache } from '../../services/referenceListService';
 
 const MATTER_TYPES_CACHE_KEY = 'spaarke.officeAddin.matterTypes.v1';
 
@@ -31,6 +31,10 @@ const WAIT = { timeout: 10000 };
 // ResizeObserver (Fluent v9 Dropdown/MessageBar reflow) is polyfilled globally in jest.setup.js
 // (task 071) — removed the per-file copy that used to live here.
 
+const PRACTICE_AREAS_RESPONSE = {
+  results: [{ id: 'B41377DB-690E-F111-8342-7C1E520AA4DF', name: 'Appellate', code: 'APPL' }],
+};
+
 const MATTER_TYPES_RESPONSE = {
   results: [
     { id: '11AED095-30DA-F011-8406-7CED8D1DC988', name: 'Litigation', code: 'LITG' },
@@ -48,11 +52,22 @@ beforeEach(() => {
   mockFetch.mockReset();
   // Full isolation for the matter-types cache (owner decision 2026-09-13) between tests — each test
   // that cares seeds exactly the cache state it needs.
-  clearMatterTypesCache();
+  clearReferenceListCache('matter-types');
+  clearReferenceListCache('practice-areas');
+  clearReferenceListCache('project-types');
   mockFetch.mockImplementation(async (url: string) => {
     const u = String(url);
     if (u.includes('/api/office/search/matter-types')) {
       return json(true, 200, MATTER_TYPES_RESPONSE);
+    }
+    if (u.includes('/api/office/search/practice-areas')) {
+      return json(true, 200, PRACTICE_AREAS_RESPONSE);
+    }
+    if (u.includes('/api/office/search/project-types')) {
+      return json(true, 200, { results: [] });
+    }
+    if (u.includes('/api/office/quickcreate/defaults')) {
+      return json(true, 200, { assignedTo: null });
     }
     if (u.includes('/api/office/quickcreate/matter')) {
       return json(true, 201, { id: 'new-matter-1', logicalName: 'sprk_matter', name: 'Acme Litigation' });
@@ -81,7 +96,7 @@ function renderPane() {
   );
 }
 
-async function quickCreateCall(entityType: 'matter' | 'project') {
+async function quickCreateCall(entityType: 'matter' | 'project' | 'invoice') {
   await waitFor(
     () =>
       expect(mockFetch.mock.calls.some(([u]) => String(u).includes(`/api/office/quickcreate/${entityType}`))).toBe(
@@ -91,6 +106,16 @@ async function quickCreateCall(entityType: 'matter' | 'project') {
   );
   const [, init] = mockFetch.mock.calls.find(([u]) => String(u).includes(`/api/office/quickcreate/${entityType}`))!;
   return JSON.parse(String((init as RequestInit).body)) as Record<string, unknown>;
+}
+
+/** Task 100: a Matter needs a Matter Type AND a Practice Area before Create is enabled. */
+async function chooseRequiredMatterFields() {
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled(), WAIT);
+  await userEvent.click(screen.getByRole('combobox', { name: 'Matter Type' }));
+  await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }, WAIT));
+  await waitFor(() => expect(screen.getByRole('combobox', { name: 'Practice Area' })).toBeEnabled(), WAIT);
+  await userEvent.click(screen.getByRole('combobox', { name: 'Practice Area' }));
+  await userEvent.click(await screen.findByRole('option', { name: 'Appellate' }, WAIT));
 }
 
 describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () => {
@@ -103,13 +128,16 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
       await userEvent.click(await screen.findByRole('button', { name: 'New' }, WAIT));
       await userEvent.type(screen.getByLabelText('New Matter name'), 'Acme Litigation');
 
-      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled(), WAIT);
-      await userEvent.click(screen.getByRole('combobox', { name: 'Matter Type' }));
-      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }, WAIT));
+      await chooseRequiredMatterFields();
       await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
       const body = await quickCreateCall('matter');
-      expect(body).toEqual({ name: 'Acme Litigation', matterTypeId: '11aed095-30da-f011-8406-7ced8d1dc988' });
+      // Task 100: Practice Area is required too; both ids canonical (ADR-044); no prefill → no assignee sent.
+      expect(body).toEqual({
+        name: 'Acme Litigation',
+        matterTypeId: '11aed095-30da-f011-8406-7ced8d1dc988',
+        practiceAreaId: 'b41377db-690e-f111-8342-7c1e520aa4df',
+      });
       expect(Object.keys(body).some(k => /number/i.test(k))).toBe(false);
     },
     TEST_TIMEOUT_MS
@@ -132,6 +160,46 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
   );
 
   it(
+    'Invoice (task 100): description and the PREFILLED Assigned To (from /quickcreate/defaults) are sent, canonical',
+    async () => {
+      mockFetch.mockImplementation(async (url: string) => {
+        const u = String(url);
+        if (u.includes('/api/office/quickcreate/defaults')) {
+          return json(true, 200, {
+            assignedTo: {
+              id: 'EEEEEEEE-1000-4000-8000-000000000100',
+              name: 'Ralph Schroeder',
+              email: 'ralph@spaarke.test',
+            },
+          });
+        }
+        if (u.includes('/api/office/search/')) return json(true, 200, { results: [] });
+        if (u.includes('/api/office/quickcreate/invoice')) {
+          return json(true, 201, { id: 'new-invoice-1', logicalName: 'sprk_invoice', name: 'INV-0100' });
+        }
+        return json(true, 200, {});
+      });
+      renderPane();
+
+      await userEvent.click(screen.getByRole('radio', { name: 'Invoice' }));
+      await userEvent.click(screen.getByRole('button', { name: 'New' }));
+      await userEvent.type(screen.getByLabelText('New Invoice name'), 'INV-0100');
+      await userEvent.type(screen.getByLabelText('Description'), 'Outside counsel, September');
+      // The prefill arrives from the server's own default (never guessed from the signed-in email).
+      await screen.findByText('Ralph Schroeder (ralph@spaarke.test)', undefined, WAIT);
+      await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+      const body = await quickCreateCall('invoice');
+      expect(body).toEqual({
+        name: 'INV-0100',
+        description: 'Outside counsel, September',
+        assignedToContactId: 'eeeeeeee-1000-4000-8000-000000000100',
+      });
+    },
+    TEST_TIMEOUT_MS
+  );
+
+  it(
     'Matter: a "not found" quick-create warning clears the matter-types cache (owner decision 2026-09-13)',
     async () => {
       // Seed the cache directly (deterministic regardless of other tests) and prove the picker is
@@ -148,6 +216,9 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
         if (u.includes('/api/office/search/matter-types')) {
           throw new Error('must be served from the cache, not fetched');
         }
+        if (u.includes('/api/office/search/practice-areas')) {
+          return json(true, 200, PRACTICE_AREAS_RESPONSE);
+        }
         if (u.includes('/api/office/quickcreate/matter')) {
           return json(true, 201, {
             id: 'new-matter-2',
@@ -163,9 +234,7 @@ describe('SaveFlow — Matter quick-create sends matterTypeId (task 038)', () =>
 
       await userEvent.click(await screen.findByRole('button', { name: 'New' }, WAIT));
       await userEvent.type(screen.getByLabelText('New Matter name'), 'Acme Litigation');
-      await waitFor(() => expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeEnabled(), WAIT);
-      await userEvent.click(screen.getByRole('combobox', { name: 'Matter Type' }));
-      await userEvent.click(await screen.findByRole('option', { name: 'Litigation' }, WAIT));
+      await chooseRequiredMatterFields();
       await userEvent.click(screen.getByRole('button', { name: 'Create' }));
 
       await quickCreateCall('matter');

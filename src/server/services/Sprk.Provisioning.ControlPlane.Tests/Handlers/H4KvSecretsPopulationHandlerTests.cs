@@ -39,10 +39,14 @@
 // Plus defensive negative branches (parameter guards + control-flow):
 //   AC-17 Missing tenantId (§4D I1) → Resumable + kvsecrets-missing-tenant-id.
 //   AC-18 Missing subscriptionId → Resumable + kvsecrets-missing-subscription-id.
-//   AC-19 Missing keyVaultName → Resumable + kvsecrets-missing-kv-name.
-//   AC-20 Missing resourceGroupName → Resumable + kvsecrets-missing-resource-group.
-//   AC-21 Missing appServiceName → Resumable + kvsecrets-missing-app-service-name.
-//   AC-22 Missing userAssignedIdentityResourceId → Resumable + kvsecrets-missing-uami-resource-id.
+//   AC-19 Missing InterStepState.KeyVaultName → Resumable + kvsecrets-missing-kv-name.
+//   AC-20 Missing InterStepState.ResourceGroupName → Resumable + kvsecrets-missing-resource-group.
+//   AC-21 Missing InterStepState.AppServiceName → Resumable + kvsecrets-missing-app-service-name.
+//   AC-22 Missing InterStepState.MiResourceId → Resumable + kvsecrets-missing-uami-resource-id.
+//         (AC-19..22: task 245a / G25 — these are H2a outputs, read from InterStepState,
+//         never from run parameters; a same-named run parameter is ignored. The H2a
+//         staging slot flows to T1/T5 with a "staging" fallback when blank; the KV
+//         resource id is always derived — the keyVaultResourceId override is gone.)
 //   AC-23 Missing secretsVer → Resumable + kvsecrets-missing-secrets-version.
 //   AC-24 HandlerId mismatch → throws InvalidOperationException.
 //   AC-25 Idempotency-key format determinism.
@@ -75,7 +79,9 @@ public sealed class H4KvSecretsPopulationHandlerTests
     private const string ResourceGroupName = "rg-spaarke-acme-prod";
     private const string AppServiceName = "sprk-acme-prod-api";
     private const string StagingSlotName = "staging";
+    // Task 245b: secretsVer is the manifest's content version (KvSecretManifestReadResult.Success.ContentVersion).
     private const string SecretsVer = "manifest-hash-abc123";
+    private const string L2PrincipalObjectId = "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f";
     private const string UamiResourceId = "/subscriptions/sub-cus-acme-prod/resourceGroups/rg-spaarke-acme-prod/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-acme-prod-uami";
 
     // ---------- AC-1 fresh populate happy path (all seams green) ----------
@@ -423,7 +429,7 @@ public sealed class H4KvSecretsPopulationHandlerTests
 
         ((HandlerResult.Success)result).IdempotencyKey.Should().Be(expectedKey);
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
-        manifest.CallCount.Should().Be(0);
+        manifest.CallCount.Should().Be(1, "task 245b: the manifest's content version IS the key's secretsVer — read, nothing written");
         writer.CallCount.Should().Be(0);
         patcher.CallCount.Should().Be(0);
         probe.CallCount.Should().Be(0);
@@ -458,16 +464,6 @@ public sealed class H4KvSecretsPopulationHandlerTests
                 KvSecretsPopulationRejectionCodes.MissingTenantId)]
     [InlineData(H4KvSecretsPopulationHandler.SubscriptionIdParameterKey,
                 KvSecretsPopulationRejectionCodes.MissingSubscriptionId)]
-    [InlineData(H4KvSecretsPopulationHandler.KeyVaultNameParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingKeyVaultName)]
-    [InlineData(H4KvSecretsPopulationHandler.ResourceGroupNameParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingResourceGroupName)]
-    [InlineData(H4KvSecretsPopulationHandler.AppServiceNameParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingAppServiceName)]
-    [InlineData(H4KvSecretsPopulationHandler.UamiResourceIdParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingUamiResourceId)]
-    [InlineData(H4KvSecretsPopulationHandler.SecretsVersionParameterKey,
-                KvSecretsPopulationRejectionCodes.MissingSecretsVersion)]
     public async Task AC17to23_MissingRequiredParameter_FailsResumable_NoWriterCall(
         string parameterKey, string expectedRejectionCode)
     {
@@ -485,6 +481,135 @@ public sealed class H4KvSecretsPopulationHandlerTests
         failure.RejectionCode.Should().Be(expectedRejectionCode);
         writer.CallCount.Should().Be(0);
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    // AC-19..AC-22 (task 245a, G25): the customer vault name, resource group, App Service
+    // name and UAMI resource id are H2a's outputs on InterStepState. A missing value keeps
+    // the SAME rejection code it had when it was (wrongly) read from run parameters.
+    [Theory]
+    [InlineData(nameof(InterStepState.KeyVaultName),
+                KvSecretsPopulationRejectionCodes.MissingKeyVaultName)]
+    [InlineData(nameof(InterStepState.ResourceGroupName),
+                KvSecretsPopulationRejectionCodes.MissingResourceGroupName)]
+    [InlineData(nameof(InterStepState.AppServiceName),
+                KvSecretsPopulationRejectionCodes.MissingAppServiceName)]
+    [InlineData(nameof(InterStepState.MiResourceId),
+                KvSecretsPopulationRejectionCodes.MissingUamiResourceId)]
+    public async Task AC19to22_MissingH2aInterStepStateValue_FailsResumable_NoWriterCall(
+        string interStepStateProperty, string expectedRejectionCode)
+    {
+        var run = BuildRun();
+        ClearInterStepStateValue(run.InterStepState, interStepStateProperty);
+        var repo = new FakeRepository(run, etag: "etag-guard-iss");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(expectedRejectionCode);
+        failure.Diagnostic.Should().Contain("H2a");
+        writer.CallCount.Should().Be(0);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task AC19to22_LegacyRunParametersAreIgnored_InterStepStateIsTheOnlySource()
+    {
+        // A run parameter can never stand in for an H2a output: with the InterStepState
+        // value absent, the same-named NonSecret key does not satisfy the guard.
+        var run = BuildRun();
+        run.InterStepState.KeyVaultName = null;
+        run.Parameters.NonSecret["keyVaultName"] = KeyVaultName;
+        var repo = new FakeRepository(run, etag: "etag-legacy-param");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.MissingKeyVaultName);
+        writer.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task H2aOutputs_FlowToTheT1PatchT1ProbeAndT5Grant()
+    {
+        const string customSlot = "blue";
+        var run = BuildRun();
+        run.InterStepState.AppServiceStagingSlotName = customSlot;
+        var repo = new FakeRepository(run, etag: "etag-h2a-outputs");
+        var patcher = FakeIdentityPatcher.Success();
+        var probe = FakeArmProbe.Match();
+        var granter = FakeSlotGranter.NoSystemAssigned();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), patcher, probe, granter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        patcher.LastInput!.ResourceGroupName.Should().Be(ResourceGroupName);
+        patcher.LastInput.AppServiceName.Should().Be(AppServiceName);
+        patcher.LastInput.StagingSlotName.Should().Be(customSlot);
+        patcher.LastInput.UserAssignedIdentityResourceId.Should().Be(UamiResourceId);
+        probe.LastInput!.StagingSlotName.Should().Be(customSlot);
+        probe.LastInput.ExpectedUserAssignedIdentityResourceId.Should().Be(UamiResourceId);
+        granter.LastInput!.StagingSlotName.Should().Be(customSlot);
+        granter.LastInput.AppServiceName.Should().Be(AppServiceName);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task H2aStagingSlotBlank_FallsBackToDefaultStagingSlot(string? slot)
+    {
+        var run = BuildRun();
+        run.InterStepState.AppServiceStagingSlotName = slot;
+        var repo = new FakeRepository(run, etag: "etag-slot-default");
+        var patcher = FakeIdentityPatcher.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), patcher, FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        patcher.LastInput!.StagingSlotName.Should().Be("staging",
+            "the app-service.bicep default slot name applies when H2a reports none");
+    }
+
+    [Fact]
+    public async Task T5GrantScope_IsDerivedFromSubscriptionAndH2aOutputs()
+    {
+        // Task 245a: the former keyVaultResourceId run-parameter override is gone — the T5 grant
+        // scope is always BuildKvResourceId(subscriptionId, InterStepState.ResourceGroupName,
+        // InterStepState.KeyVaultName).
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-kv-rid");
+        var granter = FakeSlotGranter.NoSystemAssigned();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(), granter);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        granter.LastInput!.VaultResourceId.Should().Be(
+            H4KvSecretsPopulationHandler.BuildKvResourceId(SubscriptionId, ResourceGroupName, KeyVaultName));
+    }
+
+    private static void ClearInterStepStateValue(InterStepState state, string property)
+    {
+        switch (property)
+        {
+            case nameof(InterStepState.KeyVaultName): state.KeyVaultName = null; break;
+            case nameof(InterStepState.ResourceGroupName): state.ResourceGroupName = null; break;
+            case nameof(InterStepState.AppServiceName): state.AppServiceName = null; break;
+            case nameof(InterStepState.MiResourceId): state.MiResourceId = null; break;
+            default: throw new ArgumentOutOfRangeException(nameof(property), property, "Not an H4-read H2a output.");
+        }
     }
 
     // ---------- AC-24 handler-id mismatch ----------
@@ -577,6 +702,66 @@ public sealed class H4KvSecretsPopulationHandlerTests
         H4KvSecretsPopulationHandler.IsCleartextSecretPattern("guid-like").Should().BeFalse();
     }
 
+    // ---------- AC-28b leak guard vs real H2a outputs (task 245a) ----------
+    // customer.bicep names for an 8-character customerId in the longest environment ('staging'):
+    // the host names alone are 40+ characters of the token alphabet, which tripped the guard before.
+
+    [Theory]
+    [InlineData("https://spaarke-abcdefgh-staging-cosmos.documents.azure.com:443/")]
+    [InlineData("https://sprk-abcdefgh-staging-openai.openai.azure.com/")]
+    [InlineData("https://sprk-abcdefgh-staging-search.search.windows.net")]
+    [InlineData("https://sprk-abcdefgh-staging-kv.vault.azure.net/")]
+    [InlineData("spaarke-abcdefgh-staging-sbus.servicebus.windows.net")]
+    [InlineData("/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-spaarke-abcdefgh-staging/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-spaarke-abcdefgh-staging")]
+    public void AC28b_IsCleartextSecretPattern_RealH2aOutputs_DoNotTrip(string value)
+        => H4KvSecretsPopulationHandler.IsCleartextSecretPattern(value).Should().BeFalse();
+
+    [Theory]
+    [InlineData("https://sprk-acme-prod-search.search.windows.net/?api-key=Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
+    [InlineData("https://sprk-acme-prod-kv.vault.azure.net/Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789")]
+    [InlineData("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIn0")]
+    public void AC28c_IsCleartextSecretPattern_SecretInsideAUriOrDotted_StillTrips(string value)
+        => H4KvSecretsPopulationHandler.IsCleartextSecretPattern(value).Should().BeTrue(
+            "only a lowercase DNS host is exempt — a URI's path / query and dotted tokens are still scanned");
+
+    [Fact]
+    public async Task AC28d_RealShapedH2aOutputs_OnARun_DoNotQuarantine()
+    {
+        var run = BuildRun();
+        run.InterStepState.CosmosEndpoint = "https://spaarke-abcdefgh-staging-cosmos.documents.azure.com:443/";
+        run.InterStepState.OpenAiEndpoint = "https://sprk-abcdefgh-staging-openai.openai.azure.com/";
+        run.InterStepState.AiSearchEndpoint = "https://sprk-abcdefgh-staging-search.search.windows.net";
+        run.InterStepState.KeyVaultUri = "https://sprk-abcdefgh-staging-kv.vault.azure.net/";
+        run.InterStepState.ServiceBusFullyQualifiedNamespace = "spaarke-abcdefgh-staging-sbus.servicebus.windows.net";
+        var repo = new FakeRepository(run, etag: "etag-28d");
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+    }
+
+    [Fact]
+    public async Task AC28e_LeakInAnInterStepStatePropertyAddedLater_IsStillCaught()
+    {
+        // The guard enumerates every string property; it used to check a hand-kept list of eleven
+        // that predated the seven H2a outputs task 245a added.
+        var run = BuildRun();
+        run.InterStepState.KeyVaultUri = "https://sprk-acme-prod-kv.vault.azure.net/?sig=Nx8Q~aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";
+        var repo = new FakeRepository(run, etag: "etag-28e");
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.CleartextSecretLeak);
+        failure.Diagnostic.Should().Contain(nameof(InterStepState.KeyVaultUri));
+    }
+
     // ---------- AC-29 KvResourceId builder ----------
 
     [Fact]
@@ -586,6 +771,339 @@ public sealed class H4KvSecretsPopulationHandlerTests
             SubscriptionId, ResourceGroupName, KeyVaultName);
         rid.Should().Be(
             $"/subscriptions/{SubscriptionId}/resourceGroups/{ResourceGroupName}/providers/Microsoft.KeyVault/vaults/{KeyVaultName}");
+    }
+
+    // =========================================================================
+    // T226 — from-topology-constants (SPE-ContainerTypeId) projection
+    // =========================================================================
+
+    // The value reaches the run from operator-maintained spaarke-constants.yaml (via the
+    // /provision-environment intake) — surrounding whitespace would otherwise be written
+    // into the vault as part of the id.
+    [Theory]
+    [InlineData("ct-guid")]
+    [InlineData("  ct-guid\n")]
+    public void BuildTopologyConstantValues_MapsContainerTypeIdRunParameterToCanonicalName(string raw)
+    {
+        var values = H4KvSecretsPopulationHandler.BuildIntakeValues(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["containerTypeId"] = raw });
+
+        values.Should().ContainSingle()
+            .Which.Should().Be(new KeyValuePair<string, string>("SPE-ContainerTypeId", "ct-guid"));
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void BuildTopologyConstantValues_MissingOrBlankParameter_IsLeftOut(string? raw)
+    {
+        var parameters = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (raw is not null)
+        {
+            parameters["containerTypeId"] = raw;
+        }
+
+        H4KvSecretsPopulationHandler.BuildIntakeValues(parameters).Should().BeEmpty(
+            "an absent value must surface as a resolver failure against the canonical name, never a blank secret");
+    }
+
+    [Fact]
+    public async Task HandleAsync_RunWithContainerTypeId_PassesItToTheWriterAsTopologyConstant()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret["containerTypeId"] = "ct-guid";
+        var repo = new FakeRepository(run, etag: "etag-t226-topology");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.IntakeValues.Should().Contain("SPE-ContainerTypeId", "ct-guid");
+    }
+
+    [Fact]
+    public async Task HandleAsync_PassesTheIntakeTenantIdToTheWriter_ForTheTenantIdSecret()
+    {
+        // Task 245a: TenantId is value_source from-intake-parameter — the run's own tenantId,
+        // with no RunParameters.Secrets reference (nothing ever supplied one).
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-245a-tenant");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.IntakeValues.Should().Contain("TenantId", TenantId);
+    }
+
+    [Fact]
+    public async Task HandleAsync_SkipsEntriesWrittenByH3_TheyNeverReachTheWriter()
+    {
+        // Task 245a: H3 runs after H4 and commits BFF-API-ClientId / BFF-API-Audience itself.
+        // H4 waiting for them was the deadlock; H4 must leave them alone.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-245a-h3");
+        var writer = FakeWriter.AllWrote();
+        var entries = BuildCanonicalEntries()
+            .Append(new KvSecretEntry("BFF-API-ClientId", KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg))
+            .Append(new KvSecretEntry("BFF-API-Audience", KvSecretOperation.Upsert, KvSecretValueSource.WrittenByEntraAppReg))
+            .ToList();
+        var handler = BuildHandler(repo, FakeManifest.Success(entries), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.Entries.Select(e => e.CanonicalName)
+            .Should().NotContain(new[] { "BFF-API-ClientId", "BFF-API-Audience" });
+        writer.LastRequest.Entries.Should().HaveCount(entries.Count - 2);
+    }
+
+    // =========================================================================
+    // Row A38a (task 205a, 2026-08-25) — secret-free omit via the task-126
+    // FR-39 OmitCanonicalNames seam + positive migration marker
+    // =========================================================================
+
+    // T226: ServiceBus-ConnectionString + AiSearch--AdminKey were removed from the catalog
+    // for every stamp, leaving BFF-API-ClientSecret; task 225b (G21) added Dataverse-ClientSecret —
+    // the BINDING rule: neither credential secret is ever created in a secret-free environment.
+    private static readonly string[] A38aOmitTargets =
+    {
+        "BFF-API-ClientSecret",
+        "Dataverse-ClientSecret",
+    };
+
+    [Fact]
+    public async Task A38a1_SecretFreeTrue_UnionsBothCredentialSecretsIntoExistingOmitSeam()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a1");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            options: ValidOptions(requireSecretFreeIdentity: true));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        // The omit flows through the SAME KvSecretWriteRequest.OmitCanonicalNames
+        // seam task 126 landed — no parallel mechanism.
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEquivalentTo(A38aOmitTargets,
+            "task 225b: both credential secrets are omitted (never a sentinel) on secret-free environments");
+    }
+
+    [Fact]
+    public async Task A38a2_DefaultOptions_AreSecretFree_OmitBothCredentialSecrets()
+    {
+        // The production default (nothing set — the L2 principal lives in ControlPlaneIdentityOptions since
+        // task 249): task 225b / G21 made RequireSecretFreeIdentity default to true.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a2");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            options: new KvSecretsPopulationOptions());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEquivalentTo(A38aOmitTargets,
+            "every new stamp runs MI-FIC by default — H4 never creates either credential secret");
+    }
+
+    [Fact]
+    public async Task A38a3_OperatorFicOmitParameter_StillWorks_AndUnionsWithSecretFreeTargets()
+    {
+        // Existing FR-39 operator path (task 126): ficOmitSecretNames run
+        // parameter. A38a UNIONS into it — both sources coexist.
+        var run = BuildRun();
+        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.FicOmitSecretNamesParameterKey] =
+            "Some-Operator-Chosen-Secret, Another-One";
+        var repo = new FakeRepository(run, etag: "etag-a38a3");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            options: ValidOptions(requireSecretFreeIdentity: true));
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        writer.LastRequest!.OmitCanonicalNames.Should().Contain("Some-Operator-Chosen-Secret");
+        writer.LastRequest.OmitCanonicalNames.Should().Contain("Another-One");
+        writer.LastRequest.OmitCanonicalNames.Should().Contain(A38aOmitTargets);
+        writer.LastRequest.OmitCanonicalNames.Should().HaveCount(4,
+            "2 operator-chosen names + the 2 A38a targets (BFF-API-ClientSecret + Dataverse-ClientSecret, task 225b)");
+    }
+
+    [Fact]
+    public async Task A38a4_Q3PathARollback_TargetsNotOmitted_MarkerNotApplied()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a4");
+        var writer = FakeWriter.AllWrote();
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()), writer,
+            FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(),
+            markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: true, secretFreeIdentityRollback: true));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
+            "Q3 Path A rollback re-includes both A38a targets (regression path)");
+        marker.CallCount.Should().Be(0,
+            "a rolled-back environment is not secret-free — the positive marker MUST NOT be applied");
+    }
+
+    [Fact]
+    public async Task A38a5_SecretFreeTrue_MarkerAppliedOnceWithVaultAndTenant()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a5");
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: true));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(1);
+        marker.LastRequest!.KeyVaultName.Should().Be(KeyVaultName);
+        marker.LastRequest.TenantId.Should().Be(TenantId);
+        marker.LastRequest.SubscriptionId.Should().Be(SubscriptionId);
+        marker.LastRequest.ResourceGroupName.Should().Be(ResourceGroupName);
+    }
+
+    [Fact]
+    public async Task A38a6_SecretFreeFalse_MarkerNotApplied_OmitSetStaysEmpty()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a6");
+        var marker = FakeMarkerApplier.Success();
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            writer, FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: false));
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        marker.CallCount.Should().Be(0);
+        writer.LastRequest!.OmitCanonicalNames.Should().BeEmpty(
+            "the explicit legacy client-secret path (RequireSecretFreeIdentity=false) omits nothing");
+    }
+
+    [Fact]
+    public async Task A38a7_MarkerFailure_FailsResumable_WithMarkerRejectionCode()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a7");
+        var marker = FakeMarkerApplier.Failure(
+            "A38a marker: no sprk_dataverseenvironment registry row found for tenantId");
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: true));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "marker application is idempotent — operator fixes cause + resumes (FAIL-LOUD, never silent)");
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed);
+        failure.Diagnostic.Should().Contain("registry row");
+    }
+
+    [Fact]
+    public async Task A38a8_Idempotency_SecondInvocation_NoSecondMarkerApply()
+    {
+        // Run-level idempotency: a matching CompletedPhase short-circuits the
+        // ENTIRE handler (including marker application) — the "2nd invocation
+        // is a no-op" contract at handler level. Applier-level idempotency
+        // (tag check-then-apply) is covered by
+        // ArmSecretFreeMarkerApplier.IsVaultTagAlreadyApplied tests.
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H4",
+            IdempotencyKey = H4KvSecretsPopulationHandler.BuildIdempotencyKey(CustomerId, SecretsVer),
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = "prior-run",
+        });
+        var repo = new FakeRepository(run, etag: "etag-a38a8");
+        var marker = FakeMarkerApplier.Success();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: true));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(0, "Level-3 idempotency short-circuits before any external work");
+    }
+
+    [Fact]
+    public async Task A38a8b_MarkerAlreadyApplied_SecondRunOutcome_StillSuccess()
+    {
+        // Applier reports the tag was already present (idempotent re-apply on
+        // a resumed run) — the handler treats Applied(true) as Success.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-a38a8b");
+        var marker = FakeMarkerApplier.AlreadyApplied();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+            FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+            FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+            options: ValidOptions(requireSecretFreeIdentity: true));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        marker.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task A38a9_Model2FanOut_ThreeCustomerVaults_MarkerAppliedOncePerVault_Uniform()
+    {
+        // Model 2 fan-out: the per-customer DISPATCH iteration invokes H4
+        // once per customer vault — there is deliberately no N-vault loop
+        // inside a single run. Simulate the fan-out as three H4 invocations
+        // sharing one marker applier and assert once-per-vault uniformity
+        // (the property the §5.3 fleet-consistency detector guards).
+        var marker = FakeMarkerApplier.Success();
+        var customers = new[] { ("acme", "kv-acme-v1"), ("globex", "kv-globex-v1"), ("initech", "kv-initech-v1") };
+
+        foreach (var (customerId, vaultName) in customers)
+        {
+            var run = BuildRun();
+            run.CustomerId = customerId;
+            run.InterStepState.KeyVaultName = vaultName;
+            var repo = new FakeRepository(run, etag: $"etag-a38a9-{customerId}");
+            var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries()),
+                FakeWriter.AllWrote(), FakeIdentityPatcher.Success(), FakeArmProbe.Match(),
+                FakeSlotGranter.NoSystemAssigned(), markerApplier: marker,
+                options: ValidOptions(requireSecretFreeIdentity: true));
+
+            var envelope = new HandlerEnvelope
+            {
+                HandlerId = H4KvSecretsPopulationHandler.HandlerIdentifier,
+                RunId = RunId,
+                CustomerId = customerId,
+                ParametersJson = "{}",
+                EnqueuedAt = DateTimeOffset.UtcNow,
+            };
+
+            var result = await handler.HandleAsync(envelope, CancellationToken.None);
+            result.Should().BeOfType<HandlerResult.Success>();
+        }
+
+        marker.CallCount.Should().Be(3, "one application per customer vault — no vault skipped, none doubled");
+        marker.AppliedVaults.Should().BeEquivalentTo(new[] { "kv-acme-v1", "kv-globex-v1", "kv-initech-v1" },
+            "all N per-customer vaults receive the marker uniformly (remediation plan §5.3)");
     }
 
     // ---------- AC-30 T1 patcher throws (infrastructure fault) ----------
@@ -651,6 +1169,133 @@ public sealed class H4KvSecretsPopulationHandlerTests
         failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.RunDeletedDuringPopulation);
     }
 
+    // ---------- HANDLER-09 operator KV RBAC bootstrap (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    // ---------- Task 245b: computed secretsVer + L2-owned configuration ----------
+
+    [Fact]
+    public async Task ChangedManifestVersion_IsNotAnIdempotentNoOp()
+    {
+        var run = BuildRun();
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = H4KvSecretsPopulationHandler.HandlerIdentifier,
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-9),
+            IdempotencyKey = H4KvSecretsPopulationHandler.BuildIdempotencyKey(CustomerId, SecretsVer),
+            JobId = RunId,
+        });
+        var repo = new FakeRepository(run, etag: "etag-245b-a");
+        var writer = FakeWriter.AllWrote();
+        var handler = BuildHandler(repo, FakeManifest.Success(BuildCanonicalEntries(), contentVersion: "edited-manifest"),
+            writer, FakeIdentityPatcher.Success(), FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>().Which.IdempotencyKey
+            .Should().Be(H4KvSecretsPopulationHandler.BuildIdempotencyKey(CustomerId, "edited-manifest"));
+        writer.CallCount.Should().Be(1, "an edited manifest is re-applied, not skipped");
+    }
+
+    [Fact]
+    public async Task KvRbacBootstrap_GrantsTheConfiguredL2Principal_NeverTheStampUami()
+    {
+        var run = BuildRun();
+        run.InterStepState.MiObjectId = "0f0e0d0c-0b0a-0908-0706-050403020100";   // the stamp's BFF UAMI
+        var repo = new FakeRepository(run, etag: "etag-245b-b");
+        var writer = FakeWriter.AllWrote();
+        var bootstrapper = new StubOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: true));
+        var handler = new H4KvSecretsPopulationHandler(
+            repo, FakeManifest.Success(BuildCanonicalEntries()), writer, FakeIdentityPatcher.Success(),
+            FakeArmProbe.Match(), FakeSlotGranter.NoSystemAssigned(), FakeMarkerApplier.Success(), bootstrapper,
+            Options.Create(new KvSecretsPopulationOptions()),
+            Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId }),
+            NullLogger<H4KvSecretsPopulationHandler>.Instance);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        bootstrapper.LastRequest!.PrincipalObjectId.Should().Be(L2PrincipalObjectId);
+        bootstrapper.LastRequest.PrincipalObjectId.Should().NotBe(run.InterStepState.MiObjectId);
+        bootstrapper.LastRequest.RoleDefinitionId.Should().Be(KvBuiltInRoleIds.SecretsOfficer);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public void IdentityOptions_Validate_RejectsMissingL2Principal(string principal)
+    {
+        var options = new ControlPlaneIdentityOptions { PrincipalObjectId = principal };
+
+        var act = () => options.Validate();
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ControlPlaneIdentity:PrincipalObjectId*");
+    }
+
+    [Fact]
+    public void IdentityOptions_Validate_AcceptsAPrincipalGuid()
+    {
+        var options = new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId };
+
+        options.Invoking(o => o.Validate()).Should().NotThrow();
+    }
+
+    private sealed class StubOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
+    {
+        private readonly OperatorKvRbacBootstrapOutcome _outcome;
+        public int CallCount { get; private set; }
+        public OperatorKvRbacBootstrapRequest? LastRequest { get; private set; }
+        public StubOperatorKvRbacBootstrapper(OperatorKvRbacBootstrapOutcome outcome) => _outcome = outcome;
+        public Task<OperatorKvRbacBootstrapOutcome> EnsureGrantedAsync(
+            OperatorKvRbacBootstrapRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_outcome);
+        }
+    }
+
+    [Fact]
+    public async Task Handler09_OperatorKvRbacBootstrap_Failure_FailsResumable_NoWriterCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h09");
+        var manifest = FakeManifest.Success(Array.Empty<KvSecretEntry>());
+        var writer = FakeWriter.AllWrote();
+        var patcher = FakeIdentityPatcher.Success();
+        var probe = FakeArmProbe.Match();
+        var granter = FakeSlotGranter.NoSystemAssigned();
+        var failingBootstrapper = new StubOperatorKvRbacBootstrapper(
+            new OperatorKvRbacBootstrapOutcome.Failure("Insufficient permission — could not PUT role assignment."));
+
+        var handler = new H4KvSecretsPopulationHandler(
+            repo, manifest, writer, patcher, probe, granter,
+            FakeMarkerApplier.Success(),
+            failingBootstrapper,
+            Options.Create(ValidOptions()),
+            Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId }),
+            NullLogger<H4KvSecretsPopulationHandler>.Instance);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed);
+        failure.Diagnostic.Should().Contain("Insufficient permission");
+        writer.CallCount.Should().Be(0, "writer MUST NOT fire when bootstrap fails");
+        failingBootstrapper.CallCount.Should().Be(1);
+        failingBootstrapper.LastRequest!.RoleDefinitionId.Should().Be(KvBuiltInRoleIds.SecretsOfficer);
+        failingBootstrapper.LastRequest.KeyVaultName.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Handler09_KvBuiltInRoleIds_SecretsOfficer_MatchesF15bVerbatim()
+    {
+        // F15b verbatim: role definition id b86a8fe4-44ce-4948-aee5-eccb2c155cd7
+        KvBuiltInRoleIds.SecretsOfficer.Should().Be("b86a8fe4-44ce-4948-aee5-eccb2c155cd7");
+    }
+
     // ---------- helpers ----------
 
     private static H4KvSecretsPopulationHandler BuildHandler(
@@ -659,13 +1304,40 @@ public sealed class H4KvSecretsPopulationHandlerTests
         IKvSecretsWriter writer,
         IAppServiceIdentityPatcher patcher,
         IArmKeyVaultRefProbe probe,
-        ISlotIdentityRoleGranter granter)
+        ISlotIdentityRoleGranter granter,
+        FakeMarkerApplier? markerApplier = null,
+        KvSecretsPopulationOptions? options = null)
     {
+        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl
+        // Wave 2.5): default to a Success-returning IOperatorKvRbacBootstrapper
+        // stub so existing tests are unaffected by the scaffold-to-live
+        // transition. Non-HANDLER-09 tests exercise the OTHER seams; the
+        // bootstrap step is a no-op success gate. The live-Azure path is
+        // proven by ArmOperatorKvRbacBootstrapperTests.cs (fake-transport
+        // ArmClient) and by the H4 HANDLER-09 tests here that inject
+        // an explicit StubOperatorKvRbacBootstrapper.
         return new H4KvSecretsPopulationHandler(
             repo, manifest, writer, patcher, probe, granter,
-            Options.Create(new KvSecretsPopulationOptions()),
+            markerApplier ?? FakeMarkerApplier.Success(),
+            new StubOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: false)),
+            Options.Create(options ?? ValidOptions()),
+            Options.Create(new ControlPlaneIdentityOptions { PrincipalObjectId = L2PrincipalObjectId }),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
     }
+
+    /// <summary>
+    /// Options in the shape Worker startup guarantees (KvSecretsPopulationOptions.Validate() runs under
+    /// ValidateOnStart, task 245b) — the handler relies on it and does not re-validate.
+    /// <paramref name="requireSecretFreeIdentity"/> defaults to the LEGACY client-secret path (false),
+    /// set explicitly: the production default became true in task 225b (G21), and the tests that build
+    /// on this helper exercise the write path for every canonical entry; the A38a tests opt in.
+    /// </summary>
+    private static KvSecretsPopulationOptions ValidOptions(
+        bool requireSecretFreeIdentity = false, bool secretFreeIdentityRollback = false) => new()
+    {
+        RequireSecretFreeIdentity = requireSecretFreeIdentity,
+        SecretFreeIdentityRollback = secretFreeIdentityRollback,
+    };
 
     private static HandlerEnvelope BuildEnvelope() => new()
     {
@@ -685,17 +1357,19 @@ public sealed class H4KvSecretsPopulationHandlerTests
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };
+        // Intake values (run parameters).
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H4KvSecretsPopulationHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.KeyVaultNameParameterKey] = KeyVaultName;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.ResourceGroupNameParameterKey] = ResourceGroupName;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.AppServiceNameParameterKey] = AppServiceName;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.UamiResourceIdParameterKey] = UamiResourceId;
-        run.Parameters.NonSecret[H4KvSecretsPopulationHandler.SecretsVersionParameterKey] = SecretsVer;
+        // H2a outputs (task 245a, G25) — InterStepState, never run parameters.
+        run.InterStepState.KeyVaultName = KeyVaultName;
+        run.InterStepState.ResourceGroupName = ResourceGroupName;
+        run.InterStepState.AppServiceName = AppServiceName;
+        run.InterStepState.AppServiceStagingSlotName = StagingSlotName;
+        run.InterStepState.MiResourceId = UamiResourceId;
         if (provisionedOn is not null)
         {
             run.Parameters.NonSecret[H4KvSecretsPopulationHandler.ProvisionedOnParameterKey] = provisionedOn;
@@ -750,8 +1424,8 @@ public sealed class H4KvSecretsPopulationHandlerTests
         private readonly KvSecretManifestReadResult _result;
         public int CallCount { get; private set; }
         private FakeManifest(KvSecretManifestReadResult result) => _result = result;
-        public static FakeManifest Success(IReadOnlyList<KvSecretEntry> entries)
-            => new(new KvSecretManifestReadResult.Success(entries));
+        public static FakeManifest Success(IReadOnlyList<KvSecretEntry> entries, string contentVersion = SecretsVer)
+            => new(new KvSecretManifestReadResult.Success(entries, contentVersion));
         public static FakeManifest Failure(string diagnostic)
             => new(new KvSecretManifestReadResult.Failure(diagnostic));
         public Task<KvSecretManifestReadResult> ReadAsync(CancellationToken ct)
@@ -902,6 +1576,35 @@ public sealed class H4KvSecretsPopulationHandlerTests
             CallCount++;
             LastInput = input;
             return Task.FromResult(_result);
+        }
+    }
+
+    /// <summary>Row A38a — stub ISecretFreeMarkerApplier recording every application (vault list for fan-out uniformity assertions).</summary>
+    private sealed class FakeMarkerApplier : ISecretFreeMarkerApplier
+    {
+        private readonly SecretFreeMarkerApplyOutcome _outcome;
+        public int CallCount { get; private set; }
+        public SecretFreeMarkerApplyRequest? LastRequest { get; private set; }
+        public List<string> AppliedVaults { get; } = new();
+
+        private FakeMarkerApplier(SecretFreeMarkerApplyOutcome outcome) => _outcome = outcome;
+
+        public static FakeMarkerApplier Success()
+            => new(new SecretFreeMarkerApplyOutcome.Applied(VaultTagWasAlreadyPresent: false));
+
+        public static FakeMarkerApplier AlreadyApplied()
+            => new(new SecretFreeMarkerApplyOutcome.Applied(VaultTagWasAlreadyPresent: true));
+
+        public static FakeMarkerApplier Failure(string diagnostic)
+            => new(new SecretFreeMarkerApplyOutcome.Failure(diagnostic));
+
+        public Task<SecretFreeMarkerApplyOutcome> ApplyAsync(
+            SecretFreeMarkerApplyRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            AppliedVaults.Add(request.KeyVaultName);
+            return Task.FromResult(_outcome);
         }
     }
 }

@@ -4,7 +4,7 @@
     <title>Add Cosmos DB provisioning module invocation to customer.bicep prep (Wave C2 refactor basis)</title>
     <phase>B Gap Automation Script Hardening</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies existing Bicep file; new module invocation; azure-deployment tag. Per root CLAUDE.md §8, Bicep + azure-deployment work with explicit constraints = STANDARD. Loads .claude/constraints/azure-deployment.md.</rigor-reason>
     <model-tier>sonnet</model-tier>

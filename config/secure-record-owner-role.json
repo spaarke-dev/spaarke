@@ -84,6 +84,142 @@
       "reason": "Write-path invariant I-6, owner G5 (round 3b): unified-access-control-r2 task 130's InvoiceReviewService.CreateInvoiceRecordAsync (Services/Finance/InvoiceReviewService.cs:604) creates a confirmed invoice OWNED BY THE MATTER'S TEAM (RecordOwnershipResolver, record-first), which for a secure matter is the Secure Record owner team. Owner amendment Q12 (2026-10-01): sprk_invoice is a child of a secure matter or project and belongs in this set.",
       "evidence": "spaarkedev1, 2026-10-02, 3 of 3 polls (03:52:35Z, 03:53:00Z, 03:53:25Z; unified-access-control-r2 task 145 gate G1 step 1, HTTP 403, code 0x80040299): a sprk_invoice create with ownerid = the named team 'Secure Record Owners' (6eabc7f9-13be-f111-a05b-0022482913fc, the role's sole holder after the task 144 cutover) was refused, verbatim: 'Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=8, MetadataCachePrivilegesCount=7264, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Invoice privilege (Id=315f05b2-7417-43fa-8b47-8d0722bfbaf2) on OTC=10732 for entity 'sprk_invoice' (LocalizedName='Invoice'). context.Caller=1d02f31c-1872-f011-b4cb-7c1e52671ad0. Consider adding missed privilege to one of the principal (user/team) roles.' privilegeCount=8 matches the role's 8 Read privileges, so the reading was current.",
       "addedBy": "unified-access-control-r2 task 145"
+    },
+    {
+      "logicalName": "sprk_analysis",
+      "privilegeName": "prvReadsprk_analysis",
+      "kind": "child",
+      "reason": "Task 146: AnalysisEndpoints (create/fork/promote), AnalysisResultPersistence, AppOnlyAnalysisService and DataverseObservationMirror own an analysis of a secure document or record by the named Secure team (CreateAnalysisAsync seam).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:21Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_analysis privilege (Id=2a83258f-91c9-4566-b3ee-83cfcad4feb2) on OTC=10795 for entity 'sprk_analysis' (LocalizedName='Analysis'). context.Caller=1d02'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_analysisoutput",
+      "privilegeName": "prvReadsprk_analysisoutput",
+      "kind": "child",
+      "reason": "Task 146: AI outputs are content of their analysis and are owned like it (CreateAnalysisOutputAsync seam).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:22Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_analysisoutput privilege (Id=17d29b02-8cb9-4e77-9c90-b0fa77b88229) on OTC=10632 for entity 'sprk_analysisoutput' (LocalizedName='Analysis Output').'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_communicationthread",
+      "privilegeName": "prvReadsprk_CommunicationThread",
+      "kind": "child",
+      "reason": "Task 146 / owner S6: a record thread regarding a secure root is owned by the named Secure team (ThreadResolver).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:23Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_CommunicationThread privilege (Id=eabda19b-74a6-4e9f-a690-fa9b6e551b92) on OTC=10907 for entity 'sprk_communicationthread' (LocalizedName='Communica'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_communicationattachment",
+      "privilegeName": "prvReadsprk_CommunicationAttachment",
+      "kind": "child",
+      "reason": "Task 146: attachment rows of a secure communication (CommunicationService, IncomingCommunicationProcessor, MessageAttachmentMaterializer).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:23Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_CommunicationAttachment privilege (Id=1f0f2efc-5dab-434b-889d-e34c84593165) on OTC=10884 for entity 'sprk_communicationattachment' (LocalizedName='C'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_communicationparticipant",
+      "privilegeName": "prvReadsprk_CommunicationParticipant",
+      "kind": "child",
+      "reason": "Task 146: participant index rows name the people on a secure communication (CommunicationParticipantIndexer).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:24Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_CommunicationParticipant privilege (Id=028fdee0-97d0-40e6-82b4-5d8cb88674f1) on OTC=10964 for entity 'sprk_communicationparticipant' (LocalizedName='. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_emailreviewlog",
+      "privilegeName": "prvReadsprk_EmailReviewLog",
+      "kind": "child",
+      "reason": "Task 146: AI review and audit rows carry a secure communication's suggestions (CommunicationEnrichmentService, CommunicationProposalApplyService, CommunicationCreateTaskApplyService).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:25Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_EmailReviewLog privilege (Id=9a9066a5-650c-49f4-a5c6-311ab1882635) on OTC=10971 for entity 'sprk_emailreviewlog' (LocalizedName='Email Review Log').'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_spendsignal",
+      "privilegeName": "prvReadsprk_SpendSignal",
+      "kind": "child",
+      "reason": "Task 146: spend signals of a secure matter (SignalEvaluationService).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:25Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_SpendSignal privilege (Id=7451f64e-2b5f-4c13-a037-47b8fdb02b35) on OTC=10828 for entity 'sprk_spendsignal' (LocalizedName='Spend Signal'). context.C'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_spendsnapshot",
+      "privilegeName": "prvReadsprk_SpendSnapshot",
+      "kind": "child",
+      "reason": "Task 146: spend snapshots of a secure matter or project (SpendSnapshotService).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:26Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_SpendSnapshot privilege (Id=6541a556-58e2-40bc-b458-9326824f389d) on OTC=10837 for entity 'sprk_spendsnapshot' (LocalizedName='Spend Snapshot'). con'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_fileversion",
+      "privilegeName": "prvReadsprk_FileVersion",
+      "kind": "child",
+      "reason": "Task 146: file versions are content of their document (DocumentCheckoutService).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:27Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_FileVersion privilege (Id=74e01ad3-ed5a-441b-9cfa-74a381631f84) on OTC=10794 for entity 'sprk_fileversion' (LocalizedName='File Version'). context.C'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_emailartifact",
+      "privilegeName": "prvReadsprk_EmailArtifact",
+      "kind": "child",
+      "reason": "Task 146: Office email artifacts are owned like their document (UploadFinalizationWorker).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:27Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_EmailArtifact privilege (Id=a3a6a921-b859-442f-847c-e40eb1ec72a7) on OTC=10520 for entity 'sprk_emailartifact' (LocalizedName='Email Artifact'). con'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_attachmentartifact",
+      "privilegeName": "prvReadsprk_AttachmentArtifact",
+      "kind": "child",
+      "reason": "Task 146: Office attachment artifacts are owned like their document (UploadFinalizationWorker).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:28Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_AttachmentArtifact privilege (Id=a08f56fd-e0cf-463d-93f1-1413223abb7d) on OTC=10638 for entity 'sprk_attachmentartifact' (LocalizedName='Attachment'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_eventlog",
+      "privilegeName": "prvReadsprk_EventLog",
+      "kind": "child",
+      "reason": "Task 146: event log rows are content of their event (EventEndpoints).",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:29Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_EventLog privilege (Id=5298941e-8a95-4173-8560-94734e056443) on OTC=10706 for entity 'sprk_eventlog' (LocalizedName='Event Log'). context.Caller=1d0'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_agreement",
+      "privilegeName": "prvReadsprk_Agreement",
+      "kind": "child",
+      "reason": "Task 146: a generic re-file (DataverseUpdateHandler / UpdateRecordActionCore) of an agreement under a secure root reassigns it to the named Secure team.",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:29Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Agreement privilege (Id=f8b403be-6fc8-4bc9-b506-be52d01eace2) on OTC=10702 for entity 'sprk_agreement' (LocalizedName='Agreement'). context.Caller=1'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_billingevent",
+      "privilegeName": "prvReadsprk_BillingEvent",
+      "kind": "child",
+      "reason": "Task 146: a generic re-file (DataverseUpdateHandler / UpdateRecordActionCore) of a billing event under a secure root reassigns it to the named Secure team.",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:30Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_BillingEvent privilege (Id=cde3e1b3-7411-47f0-9f36-316611e482cd) on OTC=10833 for entity 'sprk_billingevent' (LocalizedName='Billing Event'). contex'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_budget",
+      "privilegeName": "prvReadsprk_Budget",
+      "kind": "child",
+      "reason": "Task 146: a generic re-file (DataverseUpdateHandler / UpdateRecordActionCore) of a budget under a secure root reassigns it to the named Secure team.",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:30Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_Budget privilege (Id=8cf76905-35f2-4441-b3a2-1e3312ad9b6b) on OTC=10704 for entity 'sprk_budget' (LocalizedName='Budget'). context.Caller=1d02f31c-1'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_kpiassessment",
+      "privilegeName": "prvReadsprk_KPIAssessment",
+      "kind": "child",
+      "reason": "Task 146: a generic re-file (DataverseUpdateHandler / UpdateRecordActionCore) of a KPI assessment under a secure root reassigns it to the named Secure team.",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:31Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_KPIAssessment privilege (Id=e8380160-7464-4096-b35d-06cee2341356) on OTC=10681 for entity 'sprk_kpiassessment' (LocalizedName='KPI Assessment'). con'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
+    },
+    {
+      "logicalName": "sprk_reportcard",
+      "privilegeName": "prvReadsprk_ReportCard",
+      "kind": "child",
+      "reason": "Task 146: a generic re-file (DataverseUpdateHandler / UpdateRecordActionCore) of a report card under a secure root reassigns it to the named Secure team.",
+      "evidence": "unified-access-control-r2 task 146, manual gate G146-1 negative control (spaarkedev1, 2026-10-03T16:41:32Z): a probe create owned by the Secure Record Owners team, before this privilege was added, was refused with HTTP 403: '0x80040299 Read Privilege Check For Owner failed with exception: Principal team (Id=6eabc7f9-13be-f111-a05b-0022482913fc, type=9, teamType=0, privilegeCount=9, MetadataCachePrivilegesCount=7304, businessUnitId=d9ec0b6f-80a0-f111-aaac-000d3a99d1d7), is missing prvReadsprk_ReportCard privilege (Id=2a9a818c-f493-49b8-a459-3ecc3bab5f8c) on OTC=10705 for entity 'sprk_reportcard' (LocalizedName='Report Card'). context.Call'. Record: projects/unified-access-control-r2/notes/batch4-live-gates-2026-10-03.md.",
+      "addedBy": "unified-access-control-r2 task 146"
     }
   ]
 }

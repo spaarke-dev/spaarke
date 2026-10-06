@@ -122,6 +122,15 @@ export interface DocumentProfileSectionProps {
    * gray "Saved" button back into an enabled "Save" (task 094). Not called when the request is refused or fails.
    */
   onProfileGenerated?: () => void;
+  /**
+   * Task 099 (owner UAT round 5, item 6): `'refresh'` is the post-save view — the section's one action is a
+   * **Refresh** button (accessible name "Refresh") that re-reads the saved document's profile (and calls
+   * {@link onRefresh} so the host can re-read the document's name and the record it is filed to). There is no
+   * Generate Profile there. Default `'generate'` is the pre-save behaviour, unchanged.
+   */
+  mode?: 'generate' | 'refresh';
+  /** Task 099: called when Refresh is pressed, after this section starts its own profile re-read. */
+  onRefresh?: () => void;
 }
 
 /** Splits the comma-separated `sprk_filekeywords` value into individual chip labels. */
@@ -136,6 +145,8 @@ export function DocumentProfileSection({
   documentId,
   refreshSignal,
   onProfileGenerated,
+  mode = 'generate',
+  onRefresh,
 }: DocumentProfileSectionProps): React.ReactElement {
   const styles = useStyles();
   const { outcome, generateProfile, isGenerating, generateError, refetch } = useDocumentProfile(documentId);
@@ -180,19 +191,35 @@ export function DocumentProfileSection({
       </div>
       <div className={styles.card}>{renderBody()}</div>
       <div className={styles.actions}>
-        <Button
-          appearance="secondary"
-          size="small"
-          icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
-          disabled={isDisabled}
-          onClick={() => {
-            void generateProfile().then(accepted => {
-              if (accepted) onProfileGenerated?.();
-            });
-          }}
-        >
-          {isGenerating ? 'Generating…' : 'Generate Profile'}
-        </Button>
+        {mode === 'refresh' ? (
+          <Button
+            appearance="secondary"
+            size="small"
+            icon={outcome.kind === 'loading' ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+            // disabledFocusable: the button keeps focus while the re-read runs (ADR-021 focus management).
+            disabledFocusable={!documentId || outcome.kind === 'loading'}
+            onClick={() => {
+              refetch();
+              onRefresh?.();
+            }}
+          >
+            Refresh
+          </Button>
+        ) : (
+          <Button
+            appearance="secondary"
+            size="small"
+            icon={isGenerating ? <Spinner size="tiny" /> : <ArrowClockwiseRegular />}
+            disabled={isDisabled}
+            onClick={() => {
+              void generateProfile().then(accepted => {
+                if (accepted) onProfileGenerated?.();
+              });
+            }}
+          >
+            {isGenerating ? 'Generating…' : 'Generate Profile'}
+          </Button>
+        )}
         {!documentId && (
           <Text size={200} className={styles.disabledReason}>
             This document is not yet in Spaarke. Save it first to generate a profile.

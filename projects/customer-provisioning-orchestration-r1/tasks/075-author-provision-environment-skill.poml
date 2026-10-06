@@ -4,7 +4,7 @@
     <title>Author /provision-environment operator skill (L3) per §4.3a — 15-tool matrix + prereqs + intake + gate + execute loop + handoff report</title>
     <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New file creation without BFF touch — a skill directive, not code. Per project CLAUDE.md rigor defaults + root CLAUDE.md §8 STANDARD row. Note: Sub-Agent Write Boundary forces parallel-safe:false.</rigor-reason>
     <model-tier>opus</model-tier>

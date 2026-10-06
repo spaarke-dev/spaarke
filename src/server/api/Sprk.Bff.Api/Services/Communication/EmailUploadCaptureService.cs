@@ -46,17 +46,23 @@ public sealed class EmailUploadCaptureService
     private readonly ICommunicationDataverseService _communicationService;
     private readonly IncomingAssociationResolver _associationResolver;
     private readonly ICommunicationEnrichmentService _enrichmentService;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly ILogger<EmailUploadCaptureService> _logger;
 
     public EmailUploadCaptureService(
         ICommunicationDataverseService communicationService,
         IncomingAssociationResolver associationResolver,
         ICommunicationEnrichmentService enrichmentService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<EmailUploadCaptureService> logger)
     {
         _communicationService = communicationService;
         _associationResolver = associationResolver;
         _enrichmentService = enrichmentService;
+        // unified-access-control-r2 task 146 (the word-add-in-r1 note 080 §6.6 hand-off): the captured communication
+        // is owned by the records the association files it to (the named Secure team for a secure one) from its first
+        // write; an unfiled capture keeps its creator (E1).
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger;
     }
 
@@ -78,11 +84,85 @@ public sealed class EmailUploadCaptureService
             var envelope = BuildEnvelope(email);
             var context = BuildContext(request.TargetEntity);
 
+            // ── Association EVALUATED BEFORE the create (task 146): rung 0 (ExplicitReferenceRung) treats the
+            //    add-in save-pane selection as the authoritative regarding (CallerSuppliedRegarding). The decision's
+            //    records — and the FR-26 core-ancestor stamps derived from them — decide the OWNER, so a capture filed to
+            //    a secure record is the named Secure team's from its first write.
+            //
+            //    r1 (verifier item 4): a failed evaluation or stamp derivation means the records — and so whether one is
+            //    secure — cannot be determined. It used to capture the email UNFILED and creator-owned; now the capture is
+            //    SKIPPED, this best-effort writer's refusal shape (the save proceeds as an archive, whose own owner the
+            //    Office save already resolved). ──
+            AssociationDecision decision;
+            Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext ownershipContext;
+            try
+            {
+                decision = await _associationResolver.EvaluateAsync(envelope, context, ct);
+                ownershipContext = await _associationResolver.OwnershipContextForNewRecordAsync(decision, ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Upload email capture SKIPPED for message {MessageId}: its records could not be determined, so it is "
+                    + "not captured unfiled ({Code}, task 146).",
+                    request.Email?.InternetMessageId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined);
+                return null;
+            }
+
+            // Task 146 c1-r1 (owner round 13 item 9): the Office user who saved the email asked for the capture the
+            // application creates.
+            var owner = await _ownership.ResolveOwnerAsync(
+                ownershipContext with { RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userId) },
+                ct);
+            if (owner.IsRefused)
+            {
+                // Best-effort writer (NFR-04): a refusal is a SKIPPED capture — nothing is written, the save proceeds
+                // as an archive (whose own owner the Office save already resolved).
+                _logger.LogWarning(
+                    "Upload email capture SKIPPED for message {MessageId}: no owner — {Reason} ({Code}) (task 146).",
+                    email.InternetMessageId, owner.Reason, owner.RefusalCode);
+                return null;
+            }
+
+            // Task 146 r2 (verifier item 9): a capture OWNED from its filing is created WITH that filing — written
+            // separately and non-fatally, a failure left a secure team's email filed under nothing, which nobody can
+            // see. A failure to build the filing skips the capture (this writer's refusal shape).
+            Dictionary<string, object>? filingFields = null;
+            if (owner.IsOwned)
+            {
+                try
+                {
+                    filingFields = await _associationResolver.BuildNewRecordFieldsAsync(decision, ct);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Upload email capture SKIPPED for message {MessageId}: its filing could not be built, so it is not "
+                        + "captured owned by its records' team and filed under nothing ({Code}, task 146).",
+                        email.InternetMessageId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined);
+                    return null;
+                }
+            }
+
             // Message-level dedup (FR-C1 / NFR-02): the race-proof create keys on the UNIQUE
             // sprk_internetmessageid alternate key. A same-email save (already captured from a mailbox, or
             // saved by another user) reconciles to the canonical row (WasDuplicate=true) instead of inserting
             // a duplicate — the SINGLE dedup authority. A null/blank internet-message-id creates unguarded.
             var communication = BuildCommunicationEntity(email, envelope);
+            foreach (var (field, value) in filingFields ?? new Dictionary<string, object>())
+            {
+                communication[field] = value;
+            }
+
+            if (owner.IsOwned)
+            {
+                communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
+            }
+
+            owner.StampCreatorOn(communication); // task 146 c1-r1 — the person who saved it
+
             var (communicationId, wasDuplicate) = await _communicationService
                 .CreateCommunicationRaceProofAsync(communication, email.InternetMessageId, ct);
 
@@ -98,18 +178,21 @@ public sealed class EmailUploadCaptureService
                 return communicationId;
             }
 
-            // ── Association: rung 0 (ExplicitReferenceRung) treats the add-in save-pane selection as the
-            //    authoritative regarding (CallerSuppliedRegarding). Non-fatal — the record already exists. ──
-            try
+            // ── Association: apply the decision evaluated above to the row just created with its owner — only when it
+            //    kept its creator (E1); one owned from its filing was created with it. Non-fatal — the record exists. ──
+            if (filingFields is null)
             {
-                await _associationResolver.ResolveAsync(communicationId, envelope, context, ct);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(
-                    ex,
-                    "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
-                    communicationId);
+                try
+                {
+                    await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(
+                        ex,
+                        "Upload-capture association failed (non-fatal) | CommunicationId: {CommunicationId}",
+                        communicationId);
+                }
             }
 
             // ── Triage/enrichment: the SAME entry point the inbound + outbound paths invoke, so upload capture

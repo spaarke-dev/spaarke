@@ -109,10 +109,12 @@ resource kvRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 F16.5 recovery — when `az webapp update --set` returns Bad Request:
 
 ```bash
-sub="cd95fcec-6b89-49ea-8339-c2b579b12587"
-rg="rg-spaarke-shared-prod"
-app="sprksharedprod-api"
-uamiId="/subscriptions/$sub/resourceGroups/rg-spaarke-shared-uami/providers/Microsoft.ManagedIdentity/userAssignedIdentities/sprk-shared-uami"
+# A customer stamp's names (ADR-027: its own subscription). The original F16.5 incident (2026-08-22)
+# ran against the retired shared tier — sprksharedprod-api in rg-spaarke-shared-prod.
+sub="{stampSubscriptionId}"
+rg="rg-spaarke-{customerId}-{env}"
+app="sprk-{customerId}-{env}-api"                     # customer.bicep bffApi appServiceName
+uamiId="/subscriptions/$sub/resourceGroups/$rg/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi-spaarke-{customerId}-{env}"   # customer.bicep uami
 
 # WORKS
 az rest --method patch \

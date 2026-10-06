@@ -47,6 +47,7 @@ Hosted in `Sprk.Bff.Api` (Zone B endpoint placement, per §3.5 facade boundary).
 - Bearer token (Entra ID JWT) per ADR-028 (Spaarke Auth v2)
 - Handler reads `tid` (tenant) + `oid` (user) claims; missing claims → 401 ProblemDetails
 - The Assistant MUST propagate the originating user's token via OBO. Service-principal / app-only tokens are NOT accepted (the underlying RAG layer applies AIPU2-027 privilege-group filtering off `CallerPrincipal`)
+- **Subject authorization (unified-access-control-r2 task 163, 2026-10-03/04 — binding on the BFF side).** Before any path runs, the route asks Dataverse AS THE CALLER for **Read** on the subject record (matter / project / invoice). Denied, absent and unverifiable subjects get the same uniform 404 (`reasonCode = sdap.access.deny.record_unavailable`), before the SSE stream opens. When a playbook may run (`forceMode` is not `"rag"`), the route also asks whether the caller holds **Write** on the subject; the playbook the router or the classifier picks then runs only if it cannot write to the subject, or that Write is held (owner round 16 item 1 — the same subject rule as `POST /api/insights/ask`; e.g. `matter-health-single` persists to `sprk_matter.sprk_performancesummary`). A refused run is the uniform 404 before the stream opens, or an `error` frame with `errorCode = insights.subject.write_required` after it opened (§3.5.6).
 
 ### 2.3 Rate limit
 
@@ -207,6 +208,8 @@ data: [DONE]
 
 The connection is NOT abruptly closed — the `[DONE]` sentinel still flushes for clean client-side handling. Errors that arise BEFORE the stream body opens (kill-switch / auth / validation) return standard `application/problem+json` per §5 (no SSE body emitted).
 
+A playbook run refused after the stream opened because it writes to the subject and the caller's Write on it was not established (§2.2) is the frame `{"type":"error","error":{"errorCode":"insights.subject.write_required","detail":"<fixed text, no record id>"}}`. Nothing ran.
+
 #### 3.5.7 Kill-switch interaction
 
 The kill-switch matrix in §7 applies to the streaming endpoint identically. When a kill-switch returns 503, the response is `application/problem+json` (NOT a `text/event-stream` body), regardless of the `Accept` header. The `FeatureDisabledException` is raised before any SSE body bytes are written.
@@ -358,6 +361,7 @@ All errors return `application/problem+json` with:
 | 400 | `forceMode.invalid` | `forceMode` is set but not `"playbook"` or `"rag"` |
 | 400 | `conversationContext.invalid` | `conversationContext.previousTurnSummary` > 2000 chars |
 | 401 | (no errorCode — auth filter response) | Missing/invalid bearer token, missing `tid` claim, missing `oid` claim |
+| 404 | (`reasonCode = sdap.access.deny.record_unavailable`) | The caller cannot Read the subject, the subject does not exist, the check could not be made — or the picked playbook writes to the subject and the caller's Write on it was not established (§2.2). Identical bodies apart from `correlationId` |
 | 429 | (rate-limit middleware default) | `ai-context` policy exceeded |
 | 503 | `ai.insights.disabled` | Analysis kill-switch OFF — playbook path unavailable |
 | 503 | `ai.rag.disabled` | RAG kill-switch OFF — RAG path unavailable |
@@ -371,6 +375,7 @@ All errors return `application/problem+json` with:
 |---|---|
 | 400 | Surface error to user as "I couldn't understand that request" — don't retry |
 | 401 | Re-authenticate; if persists, surface "Your session expired" |
+| 404 | Surface "That record isn't available to you" — don't retry; for a reader, `forceMode: "rag"` still answers from the record's indexed documents |
 | 429 | Honor `Retry-After`; surface "Slow down a moment" |
 | 503 with `ai.*.disabled` errorCode | Surface "Insights is temporarily disabled for your tenant" — log for ops; do NOT retry |
 | 503 with `ai.assistant-default-playbook.unconfigured` | Surface generic error; log critical; pinged ops |

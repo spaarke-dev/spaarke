@@ -207,7 +207,6 @@ Dataverse Webhook → BFF API → Service Bus → EmailToDocumentJobHandler
 ```
 /api/communications/send                  Send communication
 /api/communications/send-bulk             Bulk send
-/api/communications/{id}/status           Delivery status
 /api/communications/incoming-webhook      Inbound webhook (unauthenticated)
 ```
 

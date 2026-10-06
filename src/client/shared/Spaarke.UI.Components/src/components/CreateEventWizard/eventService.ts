@@ -8,6 +8,7 @@
  * @see IDataService — high-level data access abstraction (no IWebApi dependency)
  */
 
+import { withBffChildWrites } from '../../utils/adapters/bffChildWriteAdapter';
 import type { ICreateEventFormState } from './formTypes';
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
@@ -408,7 +409,12 @@ export class EventService {
     }
 
     try {
-      const id = await this._dataService.createRecord('sprk_event', entity);
+      // UAC-r2 task 147 r1 (owner round 28 item 1): the child create goes through the BFF (G5) — the server decides the
+      // owner (the Secure Record Owners team under a secure record); a refusal surfaces the server's message.
+      const id = await withBffChildWrites(this._dataService, this._authenticatedFetch, this._bffBaseUrl).createRecord(
+        'sprk_event',
+        entity
+      );
       return {
         eventId: id,
         eventName: formValues.eventName.trim(),

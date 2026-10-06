@@ -10,6 +10,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
@@ -66,6 +67,9 @@ public class ProjectClosureCascadeTests
         "_sprk_contact_value", "_sprk_organization_value", "_sprk_project_value",
         "_sprk_matter_value", "_sprk_workassignment_value", "_sprk_invoice_value",
         "_sprk_grantedby_value", "_sprk_recordtype_value",
+        // Task 140's issuer columns (the contact lookup and its text provenance), kept in step with
+        // RecordShareExpiryTests' copy of the same live set so a closure path that ever selects them is not a false 400.
+        "_sprk_grantedbycontact_value", "sprk_grantedbycontactid",
         "createdon", "modifiedon", "ownerid"
     };
 
@@ -245,22 +249,101 @@ public class ProjectClosureCascadeTests
         return context;
     }
 
+    /// <summary>
+    /// Drives the REAL handler. Task 166: the container is no longer a request field — the handler DERIVES it from
+    /// the project through the real <see cref="RecordContainerResolver"/>. By default the project is NOT secure, so
+    /// the container step is skipped (the pre-166 "no containerId" behaviour these grant-sweep tests assume); pass
+    /// <paramref name="resolver"/> to make it a secure project with its own container.
+    /// </summary>
     private static Task<IResult> CloseProject(
         Mock<DataverseWebApiClient> client,
         ITenantCache? cache = null,
         Guid? projectId = null,
-        string? containerId = null,
-        Mock<SpeContainerMembershipService>? spe = null) =>
+        Mock<SpeContainerMembershipService>? spe = null,
+        ExternalParticipationService? participations = null,
+        RecordContainerResolver? resolver = null) =>
         ProjectClosureEndpoint.Handle(
-            new CloseProjectRequest(projectId ?? ProjectId, containerId),
+            new CloseProjectRequest(projectId ?? ProjectId),
             client.Object,
             spe?.Object ?? new SpeContainerMembershipService(
                 Mock.Of<IGraphClientFactory>(),
                 NullLogger<SpeContainerMembershipService>.Instance),
-            cache ?? Mock.Of<ITenantCache>(),
+            // Task 137: the closure invalidates through the ONE routine, run here for real over this test's cache and
+            // the request's tid, so the RemoveAsync verifications below still read what the production code removed.
+            participations ?? GrantPolicyTestDoubles.RealInvalidationOver(cache ?? Mock.Of<ITenantCache>(), AuthenticatedContext()),
+            resolver ?? TestRecordContainerResolver.ForNonSecureRecord("sprk_project", projectId ?? ProjectId),
             AuthenticatedContext(),
             NullLogger<Program>.Instance,
             CancellationToken.None);
+
+    /// <summary>The secure project's OWN container — the only one task 166 lets a closure touch.</summary>
+    private const string OwnContainer = "b!secure-project-own-container";
+
+    private const string ContactEmail = "external.counsel@clientfirm.com";
+    private const string OtherContactEmail = "second.counsel@clientfirm.com";
+    private const string MemberEmail = "org.member@clientfirm.com";
+    private static readonly Guid MemberContactId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    /// <summary>
+    /// Arranges the two identity reads the grantee-scoped container step makes (task 166, amendment e): each
+    /// contact's email, and each revoked organization's active members.
+    /// </summary>
+    private static void ArrangeGranteeIdentities(Mock<DataverseWebApiClient> client)
+    {
+        var emails = new Dictionary<Guid, string>
+        {
+            [ContactId] = ContactEmail,
+            [OtherContactId] = OtherContactEmail,
+            [MemberContactId] = MemberEmail,
+        };
+
+        client.Setup(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(
+                "contacts", It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, Guid id, string _, CancellationToken _) =>
+                new RevokeExternalAccessEndpoint.ContactEmailRow
+                {
+                    emailaddress1 = emails.TryGetValue(id, out var email) ? email : null
+                });
+
+        client.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(
+                ExternalOrganizationMembership.EntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ExternalOrganizationMembership.ContactOrganizationRow>
+            {
+                new() { ContactId = MemberContactId }
+            });
+    }
+
+    /// <summary>The membership seam: answers RemoveMembershipsAsync per email from <paramref name="answer"/> and
+    /// records every (container, emails) it was called with.</summary>
+    private static Mock<SpeContainerMembershipService> SpeAnswering(
+        Func<string, SpeContainerMembershipResult> answer,
+        List<(string ContainerId, IReadOnlyCollection<string> Emails)> calls)
+    {
+        var spe = new Mock<SpeContainerMembershipService>(
+            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+        spe.Setup(s => s.RemoveMembershipsAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string containerId, IReadOnlyCollection<string> emails, CancellationToken _) =>
+            {
+                calls.Add((containerId, emails.ToList()));
+                var results = new Dictionary<string, SpeContainerMembershipResult>(StringComparer.OrdinalIgnoreCase);
+                foreach (var email in emails)
+                {
+                    results[email] = answer(email);
+                }
+
+                return (IReadOnlyDictionary<string, SpeContainerMembershipResult>)results;
+            });
+        return spe;
+    }
+
+    private static readonly SpeContainerMembershipResult Removed = new(true, "permission-1", null);
+
+    private static SpeContainerMembershipResult NotFound(string email) =>
+        new(false, null, $"{SpeContainerMembershipService.NoPermissionFoundError} for user '{email}' in container.");
+
+    private static readonly SpeContainerMembershipResult GraphError = new(false, null, "Graph API error (503)");
 
     private static CloseProjectResponse OkBody(IResult result) =>
         result.Should().BeOfType<Ok<CloseProjectResponse>>(
@@ -484,21 +567,19 @@ public class ProjectClosureCascadeTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // ✅ ENABLED BY TASK 017 — the test task 016 could not write.
+    // The container step — task 017's guard, re-based by task 166 (S-39 + amendment e).
     //
-    // Task 016 built the `container_not_cleared` guard but could not exercise it:
-    // `SpeContainerMembershipService.ListExternalMembersAsync` caught ServiceException AND Exception and
-    // returned `[]`, so `RemoveAllExternalMembersAsync` could not fail and an unreachable Graph was
-    // indistinguishable from an empty container. Task 017 made both failure modes observable (listing
-    // propagates; per-member failures return in `SpeBulkRemovalResult.Failed`), so the guard is reachable
-    // and these two tests now pin it.
+    // Task 016 built the `container_not_cleared` guard; task 017 made it reachable. Task 166 changed WHICH
+    // container and WHO is removed: the container is DERIVED from the project (a secure project's own
+    // container, never a client-supplied id, never the shared business-unit container), and only the
+    // grantees this closure revoked are removed — through the same email-keyed RemoveMembershipsAsync the
+    // single-grant revoke uses — instead of every permission carrying a user identity (internal users too).
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// SPE container membership IS access: an external user still on the container can still reach the
-    /// project's files even with every Dataverse grant deactivated. So a failure to clear the container
-    /// must not be reported as a closed project — and must not throw away the fact that the grants
-    /// themselves WERE revoked, which is the most useful thing to tell the operator.
+    /// SPE container membership IS access: a grantee still on the container can still reach the project's files
+    /// even with every Dataverse grant deactivated. A failure to clear them must not read as a closed project — and
+    /// must not throw away the fact that the grants WERE revoked.
     /// </summary>
     [Fact]
     public async Task CloseProject_WhenTheContainerCannotBeCleared_ReportsIncompleteWithTheRevokedCount()
@@ -507,14 +588,16 @@ public class ProjectClosureCascadeTests
         table.SeedContactGrant(ContactId, ProjectId);
         table.SeedOrganizationGrant(OrganizationId, ProjectId);
         var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
 
-        // Listing the container's members fails, so nothing could be removed.
         var spe = new Mock<SpeContainerMembershipService>(
             Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
-        spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+        spe.Setup(s => s.RemoveMembershipsAsync(
+                It.IsAny<string>(), It.IsAny<IReadOnlyCollection<string>>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Graph unreachable"));
 
-        var result = await CloseProject(client, spe: spe, containerId: "container-abc-123");
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
 
         var problem = Problem(result);
         problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
@@ -526,62 +609,195 @@ public class ProjectClosureCascadeTests
     }
 
     /// <summary>
-    /// A PARTIAL container clear is the subtler case, and the one that used to be invisible: the call
-    /// completes and returns a number, so the old <c>int</c> contract looked like success. Anyone left on
-    /// the container still has file access, so closure is incomplete.
+    /// A PARTIAL clear: one revoked grantee's permission could not be removed, so they keep file access and the
+    /// project is not closed.
     /// </summary>
     [Fact]
-    public async Task CloseProject_WhenSomeContainerMembersRemain_ReportsIncomplete()
+    public async Task CloseProject_WhenARevokedGranteeRemainsOnTheContainer_ReportsIncomplete()
     {
         var table = new FakeGrantTable();
         table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(OtherContactId, ProjectId);
         var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
 
-        var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
-        spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpeBulkRemovalResult(Removed: 3, Failed: 2));
+        var calls = new List<(string, IReadOnlyCollection<string>)>();
+        var spe = SpeAnswering(email => email == OtherContactEmail ? GraphError : Removed, calls);
 
-        var result = await CloseProject(client, spe: spe, containerId: "container-abc-123");
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
 
         Problem(result).ProblemDetails.Extensions["reasonCode"].Should()
             .Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason,
-                "two external members retain file access — the project is not closed");
+                "one revoked grantee retains file access — the project is not closed");
     }
 
     /// <summary>
-    /// The complementary positive: a fully cleared container closes cleanly and reports the count.
+    /// The complementary positive, and the F8 core: a SECURE project's revoked grantees are removed from the
+    /// project's OWN container — exactly once, with exactly their emails (contact grants AND every active member of
+    /// an organization grant) — and the closure reports 200 with the removed count. A grantee with no permission on a
+    /// fully read container is the healthy broker-only answer, not a failure.
     /// </summary>
     [Fact]
-    public async Task CloseProject_WhenTheContainerIsFullyCleared_Returns200WithTheRemovedCount()
+    public async Task CloseProject_SecureProject_RemovesExactlyTheRevokedGranteesFromItsOwnContainer()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        table.SeedContactGrant(OtherContactId, ProjectId);
+        table.SeedOrganizationGrant(OrganizationId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(email => email == OtherContactEmail ? NotFound(email) : Removed, calls);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
+
+        OkBody(result).SpeContainerMembersRemoved.Should().Be(2,
+            "two revoked grantees held a permission and lost it; the third held none");
+        calls.Should().ContainSingle("ONE paged read and sweep of the container, not one per grantee");
+        calls[0].ContainerId.Should().Be(OwnContainer, "the server-derived container — the project's own");
+        calls[0].Emails.Should().BeEquivalentTo(new[] { ContactEmail, OtherContactEmail, MemberEmail },
+            "exactly the revoked grantees: both contacts and the revoked organization's active member — never "
+            + "every permission with a user identity, which would strip the project's INTERNAL users too");
+    }
+
+    /// <summary>
+    /// F8 (S-39): the client's <c>containerId</c> is GONE from the contract. A request body that still carries one —
+    /// another record's container — deserializes (unknown members are skipped) and is IGNORED: the only container the
+    /// sweep ever sees is the one the server derived from the authorized project.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_AClientSuppliedContainerIdIsIgnored_TheDerivedContainerIsTheOnlyOneTouched()
+    {
+        const string victimContainer = "b!some-other-matters-container";
+        var request = System.Text.Json.JsonSerializer.Deserialize<CloseProjectRequest>(
+            $"{{\"projectId\":\"{ProjectId}\",\"containerId\":\"{victimContainer}\"}}",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        request.Should().NotBeNull();
+        request!.ProjectId.Should().Be(ProjectId);
+
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        await ProjectClosureEndpoint.Handle(
+            request, client.Object, spe.Object,
+            GrantPolicyTestDoubles.RealInvalidationOver(Mock.Of<ITenantCache>(), AuthenticatedContext()),
+            TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer),
+            AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+
+        calls.Select(c => c.ContainerId).Should().Equal(OwnContainer);
+        calls.Select(c => c.ContainerId).Should().NotContain(victimContainer);
+    }
+
+    /// <summary>
+    /// A NON-secure project's derived container is the SHARED business-unit container. Clearing grantees from it
+    /// could strip access other records rely on, so the container step is SKIPPED — never called with the shared
+    /// container — and the closure still reports 200 (the grants were revoked).
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_NonSecureProject_NeverTouchesTheSharedBusinessUnitContainer()
     {
         var table = new FakeGrantTable();
         table.SeedContactGrant(ContactId, ProjectId);
         var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
 
-        var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
-        spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new SpeBulkRemovalResult(Removed: 4, Failed: 0));
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
 
-        var result = await CloseProject(client, spe: spe, containerId: "container-abc-123");
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForNonSecureRecord("sprk_project", ProjectId));
 
-        OkBody(result).SpeContainerMembersRemoved.Should().Be(4);
+        OkBody(result).AccessRecordsRevoked.Should().Be(1);
+        calls.Should().BeEmpty("a non-secure project's container is the shared business-unit container");
     }
 
     /// <summary>
-    /// Cache invalidation runs even when a container id is supplied and the SPE step does nothing —
-    /// that step only ever removes access, so it must not be skipped or reordered behind the SPE call.
+    /// Task 166 r1 (verifier item 8): a NON-secure project filed under a SECURE matter. The resolver's CONTENT answer
+    /// for it is the matter's own container (task 155), and task 166 swept that — removing the revoked grantees from
+    /// the MATTER's container, where a grant on the matter may still entitle them. The closure now cleans only a
+    /// container the project ITSELF owns, so here it touches none and still revokes every grant.
     /// </summary>
     [Fact]
-    public async Task CloseProject_WithAContainerId_StillInvalidatesContactCaches()
+    public async Task CloseProject_ANonSecureProjectUnderASecureMatter_NeverTouchesTheMattersContainer()
     {
         var table = new FakeGrantTable();
         table.SeedContactGrant(ContactId, ProjectId);
         var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var result = await CloseProject(client, spe: spe,
+            resolver: TestRecordContainerResolver.ForNonSecureRecordUnderSecureMatter(
+                "sprk_project", ProjectId, Guid.Parse("66666666-1660-4000-8000-000000000001")));
+
+        OkBody(result).AccessRecordsRevoked.Should().Be(1);
+        calls.Should().BeEmpty("the secure matter's container belongs to the matter, not to this project");
+        table.ActiveRows.Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// "We could not tell which container" is not "nothing to clean": a SECURE project with no container
+    /// (the resolver's FailClosed refusal) and a resolver fault both report container_not_cleared — and the grant
+    /// deactivation still ran.
+    /// </summary>
+    [Theory]
+    [InlineData("secure-without-container")]
+    [InlineData("resolver-problem")]
+    [InlineData("resolver-fault")]
+    [InlineData("secure-flag-absent")] // task 166 r1: an unreadable flag is never read as "not secure"
+    public async Task CloseProject_WhenTheContainerCannotBeDetermined_ReportsIncompleteAndStillRevokes(string shape)
+    {
+        var resolver = shape switch
+        {
+            "secure-without-container" => TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, ownContainerId: null),
+            "secure-flag-absent" => TestRecordContainerResolver.ForRecordWithNoSecureFlag("sprk_project", ProjectId),
+            "resolver-problem" => TestRecordContainerResolver.Throwing(new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                "container_ownership_indeterminate", "Indeterminate", "test", 409)),
+            _ => TestRecordContainerResolver.Throwing(new TimeoutException("metadata timed out")),
+        };
+
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
+
+        var calls = new List<(string ContainerId, IReadOnlyCollection<string> Emails)>();
+        var spe = SpeAnswering(_ => Removed, calls);
+
+        var result = await CloseProject(client, spe: spe, resolver: resolver);
+
+        var problem = Problem(result);
+        problem.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        problem.ProblemDetails.Extensions["reasonCode"].Should().Be(ProjectClosureEndpoint.ClosureContainerNotClearedReason);
+        calls.Should().BeEmpty("no container was established, so none may be swept");
+        table.ActiveRows.Should().BeEmpty("the Dataverse grant deactivation still ran");
+    }
+
+    /// <summary>
+    /// Cache invalidation runs even when the container step runs — that step only ever removes access, so it must
+    /// not be skipped or reordered behind the SPE call.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_WithAContainerStep_StillInvalidatesContactCaches()
+    {
+        var table = new FakeGrantTable();
+        table.SeedContactGrant(ContactId, ProjectId);
+        var client = table.BuildMock();
+        ArrangeGranteeIdentities(client);
         var cache = new Mock<ITenantCache>();
 
-        await CloseProject(client, cache.Object, containerId: "container-abc-123");
+        await CloseProject(client, cache.Object, spe: SpeAnswering(_ => Removed, new()),
+            resolver: TestRecordContainerResolver.ForSecureRecord("sprk_project", ProjectId, OwnContainer));
 
         cache.Verify(
             c => c.RemoveAsync(
@@ -697,6 +913,37 @@ public class ProjectClosureCascadeTests
         var body = OkBody(result);
         body.AccessRecordsRevoked.Should().Be(2);
         body.AffectedContactIds.Should().ContainSingle().Which.Should().Be(ContactId);
+    }
+
+    /// <summary>
+    /// Task 137 (C5): closing a project with an ORGANIZATION grant clears every ACTIVE member's cached grant set —
+    /// members used to wait out the 60-second TTL because an organization grant names no contact. 205 members, past
+    /// the revoke path's 200-member bound, are paged to completion.
+    /// </summary>
+    [Fact]
+    public async Task CloseProject_WithAnOrganizationGrant_InvalidatesEveryActiveMember()
+    {
+        var organizationId = Guid.Parse("0a0a0a0a-0000-0000-0000-0000000000f1");
+        var table = new FakeGrantTable();
+        table.SeedOrganizationGrant(organizationId, ProjectId);
+        var client = table.BuildMock();
+        var cache = new Mock<ITenantCache>();
+        var members = Enumerable.Range(1, 205).Select(i => Guid.Parse($"dddddddd-0000-0000-0000-{i:D12}")).ToArray();
+        var participations = GrantPolicyTestDoubles.RealInvalidationOver(cache.Object, AuthenticatedContext());
+        participations.PageSize = 100;
+        participations.Members[organizationId] = members;
+
+        await CloseProject(client, participations: participations);
+
+        foreach (var member in members)
+        {
+            cache.Verify(
+                c => c.RemoveAsync(
+                    TenantId, ExternalParticipationService.ExternalAccessResource,
+                    member.ToString(), ExternalParticipationService.CacheVersion,
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()),
+                Times.Once);
+        }
     }
 
     /// <summary>

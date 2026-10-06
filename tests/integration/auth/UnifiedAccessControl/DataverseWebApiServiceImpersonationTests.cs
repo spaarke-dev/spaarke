@@ -124,6 +124,50 @@ public class DataverseWebApiServiceImpersonationTests
         handler.Requests.Should().OnlyContain(r => !r.Headers.ContainsKey("MSCRMCallerID"));
     }
 
+    // ── unified-access-control-r2 task 159 (#1098): the trimmed GET /api/v1/events ──────────────────────────────
+
+    /// <summary>The caller-scoped event query runs AS the caller: exactly one MSCRMCallerID, and it still counts.</summary>
+    [Fact]
+    public async Task QueryEventsAsCallerAsync_SendsExactlyOneMscrmCallerIdHeader_AndCountsTheTrimmedSet()
+    {
+        var handler = new RecordingHandler(_ => Json("{\"value\":[],\"@odata.count\":0}"));
+        var sut = new OfflineService(handler);
+
+        await sut.QueryEventsAsCallerAsync(CallerSystemUserId, mine: new EventOwnershipScope(CallerSystemUserId, null, null));
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Values("MSCRMCallerID").Should().ContainSingle().Which.Should().Be(CallerSystemUserId.ToString());
+        sent.Headers.Keys.Should().NotContain("CallerObjectId");
+        Uri.UnescapeDataString(sent.Target!.ToString()).Should().Contain("$count=true");
+    }
+
+    /// <summary>The background (TodoGenerationService) event query stays app-only: no header names a user.</summary>
+    [Fact]
+    public async Task QueryEventsAsync_AppOnly_SendsNoImpersonationHeader()
+    {
+        var handler = new RecordingHandler(_ => Json("{\"value\":[],\"@odata.count\":0}"));
+        var sut = new OfflineService(handler);
+
+        await sut.QueryEventsAsync(top: 100);
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Headers.Keys.Should().NotContain("MSCRMCallerID").And.NotContain("CallerObjectId");
+    }
+
+    /// <summary>An empty caller is refused before the URL is built or anything is sent — never an app-only list.</summary>
+    [Fact]
+    public async Task QueryEventsAsCallerAsync_WithEmptyCallerId_ThrowsAndSendsNothing()
+    {
+        var handler = new RecordingHandler(_ => Json("{\"value\":[],\"@odata.count\":0}"));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.QueryEventsAsCallerAsync(Guid.Empty);
+
+        (await act.Should().ThrowAsync<ArgumentException>().WithMessage("*fail closed*"))
+            .Which.ParamName.Should().Be("callerSystemUserId");
+        handler.Requests.Should().BeEmpty();
+    }
+
     private static HttpResponseMessage PatchOrEntitySetName(HttpRequestMessage request) =>
         request.Method == HttpMethod.Patch
             ? new HttpResponseMessage(HttpStatusCode.NoContent)
@@ -143,6 +187,8 @@ public class DataverseWebApiServiceImpersonationTests
             ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
         }).Build(),
         NullLogger<DataverseWebApiService>.Instance,
+        new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+            NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance),
         confidentialClients: null,
         credential: new StaticTokenCredential());
 

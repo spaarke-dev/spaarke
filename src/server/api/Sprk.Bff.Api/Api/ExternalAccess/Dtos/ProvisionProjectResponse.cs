@@ -41,14 +41,50 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// carries the id instead (ADR-003).
 /// </param>
 /// <param name="SharedToCreatorSystemUserId">
-/// The creating user the record was explicitly shared to (task 061). Because the owner team has no members, this share
-/// is what makes the record reachable at all — a successful response always carries it.
+/// The creating user the record was explicitly shared to (task 061) — on Make Secure, the caller (task 150). Because the
+/// owner team has no members, this share is what makes the record reachable at all — a successful response always carries
+/// it.
 /// </param>
 /// <param name="AdditionalPrincipalsShared">
-/// How many of the request's optional <c>SharePrincipalIds</c> were also shared to (best-effort).
+/// How many of the request's optional <c>SharePrincipalIds</c> were also shared to (best-effort). On Make Secure
+/// (<c>transition: "make-secure"</c>, which names no colleagues) it counts the record's creator when they were shared to
+/// alongside the caller (task 150, round 33 item 1).
 /// </param>
 /// <param name="RecordType">The provisioned record's type token: <c>project</c> | <c>matter</c> | <c>workassignment</c>.</param>
 /// <param name="RecordId">The provisioned record's id.</param>
+/// <param name="Resumed">
+/// True when this call FINISHED an earlier run that stopped after the owner move (task 133): the record was already
+/// owned by the owner team with no container recorded. <c>SharedToCreatorSystemUserId</c> is then the person who created
+/// the record — its <c>createdby</c> user, or for an app-created record the BFF-recorded <c>sprk_createdbyperson</c>
+/// (owner round 7 item 2) — not necessarily the caller. On Make Secure (<c>transition: "make-secure"</c>, task 150 round
+/// 40) it is the caller, as on the forward path, and the record's creator is counted in
+/// <c>AdditionalPrincipalsShared</c> (or named in <c>SkippedPrincipals</c>). Additive to the JSON contract.
+/// </param>
+/// <param name="SkippedPrincipals">
+/// Task 143 (owner N6): named colleagues who were NOT shared to, each with a reason — on the record's No Access list
+/// (<c>sdap.provision.principal_no_access</c>), or that list could not be checked
+/// (<c>sdap.provision.principal_no_access_unverifiable</c>), or (task 150, round 33 item 5: never silent) the share itself
+/// failed (<c>sdap.provision.principal_share_failed</c>). On Make Secure the record's creator is reported here the same
+/// way. The other colleagues are still shared. Empty when none was skipped. Additive to the JSON contract.
+/// </param>
+/// <param name="Children">
+/// Task 148: what this call did to the record's EXISTING related records (documents, events, to-dos, communications, memos
+/// and the rest) — re-owned into the Secure Record owner team and shared with exactly the record's sharees. A successful
+/// response always carries a complete pass; an incomplete one is the <c>sdap.provision.children_incomplete</c> error.
+/// Additive to the JSON contract.
+/// </param>
+/// <param name="ChildrenOnly">
+/// Task 148: <c>true</c> when the record was ALREADY provisioned and this call only completed its related records (an earlier
+/// call's child pass had not finished). Nothing about the record itself changed and no share was written to it, so
+/// <c>SharedToCreatorSystemUserId</c> is <see cref="Guid.Empty"/> — its creator's share was proven by the earlier call. Absent
+/// work, such a call still answers 409 <c>already_provisioned</c>. Additive to the JSON contract.
+/// </param>
+/// <param name="FiledRecords">
+/// Task 158 (owner round 6): the work assignments and projects FILED UNDER this matter or project, each made secure itself
+/// (its own named-team owner, container and creator share) and given this record's sharees. A successful response always
+/// carries a complete pass; one that is not complete is the <c>sdap.provision.children_incomplete</c> error. Null for a
+/// work assignment (nothing is filed under one for this rule). Additive to the JSON contract.
+/// </param>
 public record ProvisionProjectResponse(
     Guid BusinessUnitId,
     string BusinessUnitName,
@@ -58,4 +94,20 @@ public record ProvisionProjectResponse(
     Guid SharedToCreatorSystemUserId,
     int AdditionalPrincipalsShared,
     string RecordType,
-    Guid RecordId);
+    Guid RecordId,
+    bool Resumed = false,
+    IReadOnlyList<ProvisionSkippedPrincipal>? SkippedPrincipals = null,
+    SecureChildPassSummary? Children = null,
+    bool ChildrenOnly = false,
+    SecureFiledRecordsSummary? FiledRecords = null)
+{
+    /// <summary>
+    /// Round 26 item 3 (wired at the batch-4 integration): what moving the record's existing files into its own container
+    /// did — counts, plus what a move stated (a source edited after its move, a truncated history, a source kept for
+    /// other records). Null for a call that did not reach the files.
+    /// </summary>
+    public MakeSecureFilesSummary? Files { get; init; }
+}
+
+/// <summary>A named colleague provisioning did not share to, and why (task 143). The message names no entry or reason text.</summary>
+public record ProvisionSkippedPrincipal(Guid SystemUserId, string ReasonCode, string Message);

@@ -13,8 +13,10 @@
 //     5 DELEGATED oauth2PermissionGrant scopes H3's own consent verifier checks,
 //     NOT the 14 application-only app-roles H10 already owns).
 //   - NEW Model 1 fields (SharedBffAppRegistrationId/Audience/KeyVaultName) —
-//     the shared multitenant BFF app-reg already exists; H3's Model 1 branch
-//     is a no-op for creation and instead verifies + references it.
+//     RETIRED 2026-09-29 (task 222 per D-13). The shared-app-reg branch was
+//     deleted from H3EntraAppRegHandler; H3 now provisions ONE app-reg per
+//     customer, UNCONDITIONALLY, in both models. See H3EntraAppRegHandler.cs
+//     TASK 222 REWRITE for the D-13 mechanism.
 //   - NEW Model 2 FIC fields (auth-v4 §3.1 recipe) — federated identity
 //     credential trusting the shared BFF UAMI, per spec.md FR-39 / design.md
 //     §4.1 H3 row v3.5 split.
@@ -39,11 +41,12 @@ public sealed class EntraAppRegOptions
     public int ExpectedDelegatedScopeCount { get; set; } = EntraAppRegPermissionCatalog.All.Count;
 
     /// <summary>
-    /// Sign-in audience for a NEWLY CREATED Model 2 (dedicated) app-reg.
-    /// Defaults to <c>AzureADMultipleOrgs</c> — matches
+    /// Sign-in audience for a newly created per-customer BFF app-reg (both
+    /// tenancy models post-task-222 per D-13). Defaults to
+    /// <c>AzureADMultipleOrgs</c> — matches
     /// scripts/Register-EntraAppRegistrations.ps1's existing constant (no
     /// behavior change from the pre-task-130 script default); operators can
-    /// override per spec.md FR-06 v3 Model 2 consent semantics.
+    /// override per spec.md FR-06 v3 consent semantics.
     /// </summary>
     public string RequiredSignInAudience { get; set; } = "AzureADMultipleOrgs";
 
@@ -53,20 +56,7 @@ public sealed class EntraAppRegOptions
     /// <summary>Redirect URI path appended to the production API domain for a newly created app-reg's <c>web.redirectUris</c>.</summary>
     public string RedirectUriPath { get; set; } = "/.auth/login/aad/callback";
 
-    // ---- Model 1 (shared multitenant BFF app-reg) ----
-
-    /// <summary>
-    /// The shared multitenant BFF app-registration's Entra <c>appId</c> (client
-    /// id). Model 1's H3 branch is a NO-OP for app-reg creation — this is the
-    /// pre-existing value H3 references instead of provisioning a new object
-    /// (spec.md FR-39 + design.md §4.1 H3 row v3.5 split).
-    /// </summary>
-    public string? SharedBffAppRegistrationId { get; set; }
-
-    /// <summary>Key Vault name where the shared app-reg's ClientSecret/ClientId/Audience already live (Model 1 KV-reference target — H3 does NOT write to this shared vault; it only references pre-existing entries).</summary>
-    public string? SharedPlatformKeyVaultName { get; set; }
-
-    // ---- Model 2 FIC (auth-v4 §3.1 recipe, spec.md FR-39) ----
+    // ---- FIC (auth-v4 §3.1 recipe, spec.md FR-39; both models post-task-222 per D-13) ----
 
     /// <summary>
     /// Federated identity credential audience. FIXED per auth-v4's §3.1

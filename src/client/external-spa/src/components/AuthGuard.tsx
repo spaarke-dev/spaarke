@@ -50,6 +50,15 @@ export const AuthGuard: React.FC<AuthGuardProps> = ({ children, teamsHost = fals
     return <>{children}</>;
   }
 
+  return <MsalAccountGate>{children}</MsalAccountGate>;
+};
+
+/**
+ * The MSAL account gate itself — split out of AuthGuard by unified-access-control-r2 task 140 so that its hooks are
+ * never called after AuthGuard's early returns (react-hooks/rules-of-hooks; behaviour unchanged: the mock and Teams
+ * paths render children without MSAL, every other path runs exactly the gate below).
+ */
+const MsalAccountGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { instance, inProgress } = useMsal();
   const isAuthenticated = useIsAuthenticated();
   const navigate = useNavigate();

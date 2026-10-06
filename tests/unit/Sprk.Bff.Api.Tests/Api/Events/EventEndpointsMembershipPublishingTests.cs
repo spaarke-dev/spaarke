@@ -5,9 +5,10 @@
 //   - owner S1: the create is app-only, so Created By is the BFF application user and cannot say who the event is FOR.
 //     The acting user's LINKED contact (task 141, PersonIdentity.ContactId) is written to sprk_assignedto — never an
 //     email match; no link → blank.
-//   - ADR-034 A3: it publishes the owner MembershipChangedEvent describing the row's REAL owner, read back from the
-//     row (the create sets none) — an application-user owner (today's case) publishes nothing, exactly as
-//     MembershipReconciliationJob records no junction row for it.
+//   - ADR-034 A3: it publishes the owner MembershipChangedEvent describing the row's REAL owner. Since task 146
+//     (merged after 152) the create WRITES that owner — the team IRecordOwnershipResolver names — so the handler
+//     already holds it and publishes it without reading the row back; an application-user owner cannot arise on
+//     this path any more (the create refuses rather than leave the row app-owned).
 // Every test below executes the production handler with boundary fakes and observes what reached Dataverse and the
 // publisher.
 
@@ -24,6 +25,7 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Tests.Services.Ai.Membership.Events;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 using ApiCreateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.CreateEventRequest;
 using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
@@ -64,81 +66,26 @@ public class EventEndpointsMembershipPublishingTests
         site.Created!.AssignedToContactId.Should().BeNull("no link → blank; never an email/UPN/name match (C7)");
     }
 
-    // Task 097 round 6 (review F6): this test used to assert "still creates" — an app-only create for a caller who is no
-    // Dataverse user. The CallerResolution contract now applies: an oid that maps to no systemuser is 403, nothing written.
     [Fact]
-    public async Task CreateEvent_CallerNotResolvedToASystemUser_Is403_AndNothingIsCreated()
+    public async Task CreateEvent_CallerNotResolvedToASystemUser_LeavesAssignedToBlank_AndStillCreates()
     {
         var site = new Site(linkedContact: ActingUsersContactId, callerResolved: false);
 
         var result = await site.RunAsync();
 
-        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
-        site.Created.Should().BeNull();
-        site.Identity.Verify(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task CreateEvent_CallerWithNoOid_Is401_AndNothingIsCreated()
-    {
-        var site = new Site(linkedContact: ActingUsersContactId);
-
-        var result = await site.RunAsync(withOid: false);
-
-        StatusOf(result).Should().Be(StatusCodes.Status401Unauthorized);
-        site.Created.Should().BeNull();
-    }
-
-    // ── Task 097 round 6 (review F1, registry I-6): the owner is the I-6 owner's team, never the app user ─────────
-
-    [Fact]
-    public async Task CreateEvent_NoParent_IsOwnedByTheTeamTheI6OwnerResolvesFromTheActingUser()
-    {
-        var site = new Site(linkedContact: ActingUsersContactId);
-
-        var result = await site.RunAsync();
-
         StatusOf(result).Should().Be(StatusCodes.Status201Created);
-        site.Created!.OwnerTeamId.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
-        var asked = site.Ownership.Requests.Should().ContainSingle().Subject;
-        asked.HasTarget.Should().BeFalse();
-        asked.CallerSystemUserId.Should().Be(ActingSystemUserId, "no parent → the acting user's business unit (record-first fallback)");
-        DataverseWebApiService.BuildCreateEventPayload(site.Created)
-            .Should().ContainKey("ownerid@odata.bind")
-            .WhoseValue.Should().Be($"/teams({Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId:D})");
-    }
-
-    [Fact]
-    public async Task CreateEvent_WithAParent_AsksTheI6OwnerRecordFirst()
-    {
-        var matterId = Guid.Parse("97097097-0006-4000-8000-000000000001");
-        var site = new Site(linkedContact: ActingUsersContactId);
-
-        await site.RunAsync(new ApiCreateEventRequest("Hearing prep", RegardingRecordId: matterId,
-            RegardingRecordType: Spaarke.Dataverse.RegardingRecordType.Matter));
-
-        var asked = site.Ownership.Requests.Should().ContainSingle().Subject;
-        asked.TargetEntityLogicalName.Should().Be("sprk_matter");
-        asked.TargetRecordId.Should().Be(matterId);
-    }
-
-    [Fact]
-    public async Task CreateEvent_OwnerTeamUnresolved_IsRefused_NeverAppOwned()
-    {
-        var site = new Site(linkedContact: ActingUsersContactId);
-        site.Ownership.TeamId = null;
-
-        var result = await site.RunAsync();
-
-        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
-        site.Created.Should().BeNull("an app-owned event lands in the ROOT business unit, unreachable by its creator");
+        site.Created!.AssignedToContactId.Should().BeNull();
+        site.Identity.Verify(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public void CreateEventPayload_WithAnAssignee_BindsSprkAssignedToTheContact()
     {
         var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest { Name = "Hearing", AssignedToContactId = ActingUsersContactId });
+            new DataverseCreateEventRequest
+            {
+                Name = "Hearing", AssignedToContactId = ActingUsersContactId, OwningTeamId = OwnerEventTestKit.TeamId,
+            });
 
         payload.Should().ContainKey("sprk_AssignedTo@odata.bind")
             .WhoseValue.Should().Be($"/contacts({ActingUsersContactId:D})");
@@ -150,73 +97,111 @@ public class EventEndpointsMembershipPublishingTests
     public void CreateEventPayload_WithNoAssignee_WritesNoAssignedToBind(bool emptyGuid)
     {
         var payload = DataverseWebApiService.BuildCreateEventPayload(
-            new DataverseCreateEventRequest { Name = "Hearing", AssignedToContactId = emptyGuid ? Guid.Empty : null });
+            new DataverseCreateEventRequest
+            {
+                Name = "Hearing", AssignedToContactId = emptyGuid ? Guid.Empty : null, OwningTeamId = OwnerEventTestKit.TeamId,
+            });
 
         payload.Keys.Should().NotContain(k => k.StartsWith("sprk_AssignedTo", StringComparison.OrdinalIgnoreCase));
     }
 
-    [Fact]
-    public async Task CreateEvent_WhenTheAuditLogWriteFails_StillReturns201_NotA500ThatInvitesADuplicate()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void CreateEventPayload_WithNoOwner_Refuses_NoPayloadIsBuilt(bool emptyGuid)
     {
-        // Task 097 review F1: before the fix POST /events wrote the event and THEN returned 500 (the audit payload named
-        // a sprk_description column sprk_eventlog does not have); a client retry created a second event.
-        var site = new Site(linkedContact: ActingUsersContactId, auditLogThrows: true);
+        // Task 146: the app-only create never leaves the row app-owned — no owner, no payload, nothing sent.
+        var build = () => DataverseWebApiService.BuildCreateEventPayload(
+            new DataverseCreateEventRequest { Name = "Hearing", OwningTeamId = emptyGuid ? Guid.Empty : null });
 
-        var result = await site.RunAsync();
-
-        StatusOf(result).Should().Be(StatusCodes.Status201Created);
-        site.EventService.Verify(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+        build.Should().Throw<InvalidOperationException>().WithMessage("*OwningTeamId*");
     }
-    // ── ADR-034 A3: the owner event names the row's REAL owner — since round 6 the I-6 team the create wrote ─────
-    // Task 097 round 7 (R2): the create sets ownerid to the team RecordOwnershipResolver returned, so the event is
-    // published with that team as the known owner (the POST /api/v1/documents shape) and the row is NOT read back.
-    // The former "row owned by the BFF application user publishes nothing" and "human-owned row" cases described an
-    // app-only create that set no owner; that create no longer exists (an unresolved team now refuses — see
-    // CreateEvent_OwnerTeamUnresolved_IsRefused_NeverAppOwned).
 
     [Fact]
-    public async Task CreateEvent_PublishesTheI6Team_AsTheKnownOwner_WithoutReadingTheRowBack()
+    public void CreateEventPayload_BindsTheResolvedTeamAsOwner()
+    {
+        var payload = DataverseWebApiService.BuildCreateEventPayload(
+            new DataverseCreateEventRequest { Name = "Hearing", OwningTeamId = OwnerEventTestKit.TeamId });
+
+        payload.Should().ContainKey("ownerid@odata.bind").WhoseValue.Should().Be($"/teams({OwnerEventTestKit.TeamId})");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void CreateEventPayload_BindsThePersonWhoAsked_OnlyWhenThereIsOne(bool hasPerson)
+    {
+        // Task 146 c1-r1 (owner round 13 item 9): the app-only create records the person; a writer for nobody records nobody.
+        var person = Guid.Parse("c1c1c1c1-0000-4000-8000-0000000000e1");
+        var payload = DataverseWebApiService.BuildCreateEventPayload(
+            new DataverseCreateEventRequest
+            {
+                Name = "Hearing", OwningTeamId = OwnerEventTestKit.TeamId, CreatedByPersonId = hasPerson ? person : null,
+            });
+
+        if (hasPerson)
+            payload.Should().ContainKey("sprk_CreatedByPerson@odata.bind").WhoseValue.Should().Be($"/systemusers({person:D})");
+        else
+            payload.Keys.Should().NotContain(k => k.StartsWith("sprk_CreatedByPerson", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ── ADR-034 A3: the owner event names the row's REAL owner — the team the create wrote (task 146) ─────────
+
+    [Fact]
+    public async Task CreateEvent_PublishesTheResolvedTeamItWrote_WithoutReadingTheRowBack()
     {
         var site = new Site(linkedContact: ActingUsersContactId);
 
         var result = await site.RunAsync();
 
         StatusOf(result).Should().Be(StatusCodes.Status201Created);
+        site.Created!.OwningTeamId.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId,
+            "task 146: the app-only create is owned by the team the resolver named");
         var evt = site.Publisher.Published.Should().ContainSingle().Subject;
         evt.EntityLogicalName.Should().Be("sprk_event");
         evt.EntityRecordId.Should().Be(EventId, "the event is for the row this create wrote");
         evt.PersonIdType.Should().Be(PersonIdentityType.Team);
-        evt.PersonId.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId,
-            "the team the create wrote as ownerid — the key MembershipReconciliationJob builds for this row");
-        evt.PersonId.Should().NotBe(OwnerEventTestKit.CallerOid, "never the caller's AAD oid");
+        evt.PersonId.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId,
+            "the owner the create wrote — not a read-back, and never the caller");
         evt.SourceField.Should().Be("ownerid");
         evt.MutationType.Should().Be(MembershipMutationType.Added);
         evt.CorrelationId.Should().Be(Site.TraceId);
-        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
-            Times.Never, "the owner is known — it is what the create wrote");
+        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_event", EventId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the create path already holds the owner it wrote");
     }
 
     [Fact]
-    public async Task CreateEvent_TheOwnerPublishedIsTheOwnerWritten()
+    public async Task CreateEvent_PublishedOwnerIsNeverTheCallersOid()
     {
-        var site = new Site(linkedContact: ActingUsersContactId);
-        var team = Guid.Parse("97097097-0007-4000-8000-0000000000a2");
-        site.Ownership.TeamId = team;
+        var site = new Site(linkedContact: ActingUsersContactId, callerOid: OwnerEventTestKit.CallerOid);
 
         await site.RunAsync();
 
-        site.Created!.OwnerTeamId.Should().Be(team);
-        site.Publisher.Published.Should().ContainSingle().Which.PersonId.Should().Be(team);
+        var evt = site.Publisher.Published.Should().ContainSingle().Subject;
+        evt.PersonId.Should().NotBe(OwnerEventTestKit.CallerOid);
+        evt.PersonIdType.Should().Be(PersonIdentityType.Team);
     }
+
+    [Fact]
+    public async Task CreateEvent_OwnerRefused_CreatesNothing_PublishesNothing()
+    {
+        var site = new Site(linkedContact: ActingUsersContactId);
+        site.Ownership.TeamId = null;
+
+        var result = await site.RunAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status409Conflict);
+        site.Created.Should().BeNull("a refusal writes nothing");
+        site.Publisher.Published.Should().BeEmpty();
+    }
+
     [Fact]
     public async Task CreateEvent_PublisherThrows_TheCreateStillSucceeds()
     {
         var throwing = new Mock<IMembershipEventPublisher>();
         throwing.Setup(p => p.PublishAsync(It.IsAny<MembershipChangedEvent>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("transport"));
-        var site = new Site(linkedContact: ActingUsersContactId,
-            publisher: throwing.Object);
+        var site = new Site(linkedContact: ActingUsersContactId, publisher: throwing.Object);
 
         var result = await site.RunAsync();
 
@@ -243,25 +228,24 @@ public class EventEndpointsMembershipPublishingTests
 
         private readonly IMembershipEventPublisher _publisher;
         private readonly bool _callerResolved;
+        private readonly Guid? _callerOid;
 
-        public Site(Guid? linkedContact, EntityReference? rowOwner = null, bool callerResolved = true,
-            IMembershipEventPublisher? publisher = null, bool auditLogThrows = false)
+        public Site(Guid? linkedContact, bool callerResolved = true,
+            IMembershipEventPublisher? publisher = null, Guid? callerOid = null)
         {
             _callerResolved = callerResolved;
             _publisher = publisher ?? Publisher;
+            _callerOid = callerOid;
 
             EventService.Setup(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()))
                 .Callback<DataverseCreateEventRequest, CancellationToken>((r, _) => Created = r)
                 .ReturnsAsync((EventId, DateTime.UtcNow));
-            // Task 097 review F1: the audit row is pinned to the Created action (it was It.IsAny), and can be made to fail.
-            var audit = EventService.Setup(s => s.CreateEventLogAsync(EventId, Spaarke.Dataverse.EventLogAction.Created, "Event created via API", It.IsAny<CancellationToken>()));
-            if (auditLogThrows)
-                audit.ThrowsAsync(new HttpRequestException("400: Invalid property 'sprk_description'"));
-            else
-                audit.ReturnsAsync(Guid.NewGuid());
+            EventService.Setup(s => s.CreateEventLogAsync(
+                    EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Guid.NewGuid());
 
-            // Round 7 (R2): the row's owner is the I-6 team the create wrote (never the application user any more).
-            Dataverse = OwnerEventTestKit.Dataverse(rowOwner ?? new EntityReference("team", Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId));
+            // A row owner the create did NOT write: were the handler to read it back, it would publish this user.
+            Dataverse = OwnerEventTestKit.Dataverse(new EntityReference("systemuser", OwnerEventTestKit.HumanUserId));
 
             CallerResolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(_callerResolved
@@ -276,27 +260,39 @@ public class EventEndpointsMembershipPublishingTests
         public Mock<ICallerSystemUserResolver> CallerResolver { get; } = new(MockBehavior.Strict);
         public Mock<IIdentityNormalizationService> Identity { get; } = new(MockBehavior.Strict);
         public RecordingMembershipEventPublisher Publisher { get; } = new();
+        public RecordOwnershipResolverDouble Ownership { get; } = new();
         public DataverseCreateEventRequest? Created { get; private set; }
 
-        /// <summary>Task 097 round 6 (I-6): the owner-team resolver; set <c>TeamId</c> to null to make it refuse.</summary>
-        public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
-
-        public Task<IResult> RunAsync(ApiCreateEventRequest? request = null, bool withOid = true) => EventEndpoints.CreateEventAsync(
-            request ?? new ApiCreateEventRequest("Hearing prep"),
+        // Task 159 added the regarding resolvers to the handler. These tests create an event with NO regarding, so
+        // neither is reached: the strict record-type mock and the resolver over the strict Dataverse mock would fail
+        // the test if either were.
+        public Task<IResult> RunAsync() => EventEndpoints.CreateEventAsync(
+            new ApiCreateEventRequest("Hearing prep"),
             EventService.Object,
             _publisher,
+            Ownership,
             Dataverse.Object,
             CallerResolver.Object,
             Identity.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
-            Ownership,
-            new DefaultHttpContext
-            {
-                TraceIdentifier = TraceId,
-                User = new ClaimsPrincipal(new ClaimsIdentity(
-                    withOid ? new[] { new Claim("oid", OwnerEventTestKit.CallerOid.ToString("D")) } : Array.Empty<Claim>(), "Test")),
-            },
+            new Mock<ICommunicationDataverseService>(MockBehavior.Strict).Object,
+            new Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver(
+                Dataverse.Object,
+                (_, _) => throw new InvalidOperationException("no regarding: the column probe must not be reached"),
+                NullLogger<Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver>.Instance),
+            HttpContextFor(_callerOid),
             NullLogger<Program>.Instance,
             CancellationToken.None);
+
+        private static DefaultHttpContext HttpContextFor(Guid? oid)
+        {
+            var context = new DefaultHttpContext { TraceIdentifier = TraceId };
+            if (oid is { } value)
+            {
+                context.User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[] { new Claim("oid", value.ToString("D")) }, "test"));
+            }
+
+            return context;
+        }
     }
 }

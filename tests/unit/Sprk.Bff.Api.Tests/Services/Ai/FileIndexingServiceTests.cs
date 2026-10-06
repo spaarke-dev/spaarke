@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Moq;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -30,23 +31,30 @@ public class FileIndexingServiceTests
         _loggerMock = new Mock<ILogger<FileIndexingService>>();
     }
 
-    private FileIndexingService CreateService()
+    /// <summary>The business-unit container the default request's pointer names (task 166 r1 pointer check).</summary>
+    private const string TestDriveId = "test-drive-id";
+
+    /// <summary>A real sprk_document id: the app-only path verifies the pointer of the row it names (task 166 r1).</summary>
+    private static readonly string TestDocumentId = Guid.Parse("0d0d0d0d-0000-4000-8000-000000000166").ToString("D");
+
+    private FileIndexingService CreateService(RecordContainerResolver? containerResolver = null)
     {
         return new FileIndexingService(
             _speFileOperationsMock.Object,
             _textExtractorMock.Object,
             _chunkingServiceMock.Object,
             _ragServiceMock.Object,
-            _loggerMock.Object);
+            _loggerMock.Object,
+            containerResolver ?? TestRecordContainerResolver.ForBusinessUnitContainers(TestDriveId));
     }
 
     private static FileIndexRequest CreateFileIndexRequest() => new()
     {
-        DriveId = "test-drive-id",
+        DriveId = TestDriveId,
         ItemId = "test-item-id",
         FileName = "test-document.pdf",
         TenantId = "test-tenant-id",
-        DocumentId = "test-doc-id"
+        DocumentId = TestDocumentId
     };
 
     private static ContentIndexRequest CreateContentIndexRequest() => new()
@@ -59,6 +67,56 @@ public class FileIndexingServiceTests
     };
 
     #region IndexFileAppOnlyAsync Tests
+
+    // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the app-only download follows the named
+    // sprk_document row's pointer, so the pointer's container is verified first and an unverifiable one refused.
+
+    [Fact]
+    public async Task IndexFileAppOnlyAsync_PointerIntoAContainerTheDocumentMayNotUse_RefusesWithoutDownloading()
+    {
+        var service = CreateService(TestRecordContainerResolver.ForBusinessUnitContainers("b!some-other-bu-container"));
+        var request = CreateFileIndexRequest();
+
+        var result = await service.IndexFileAppOnlyAsync(request);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Document storage could not be verified");
+        _speFileOperationsMock.Verify(
+            x => x.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IndexFileAppOnlyAsync_DocumentIdThatIsNotADocument_RefusesWithoutDownloading()
+    {
+        var service = CreateService();
+        var request = CreateFileIndexRequest() with { DocumentId = "not-a-document-id" };
+
+        var result = await service.IndexFileAppOnlyAsync(request);
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Be("Document storage could not be verified");
+        _speFileOperationsMock.Verify(
+            x => x.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task IndexFileAppOnlyAsync_NoDocumentId_FollowsNoRowAndIsNotChecked()
+    {
+        // An orphan file the BFF itself uploaded, or the API-key service route: the pointer was built by the server,
+        // not read off a row. Even a resolver that accepts NO container must not stop it.
+        var service = CreateService(TestRecordContainerResolver.ForBusinessUnitContainers());
+        var request = CreateFileIndexRequest() with { DocumentId = null };
+
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(request.DriveId, request.ItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream?)null);
+
+        var result = await service.IndexFileAppOnlyAsync(request);
+
+        result.ErrorMessage.Should().Contain("not found");
+        _speFileOperationsMock.Verify(
+            x => x.DownloadFileAsync(request.DriveId, request.ItemId, It.IsAny<CancellationToken>()), Times.Once);
+    }
 
     [Fact]
     public async Task IndexFileAppOnlyAsync_ValidFile_IndexesSuccessfully()

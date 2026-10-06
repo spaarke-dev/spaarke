@@ -31,7 +31,7 @@
 # (jest, not webpack) answers (do the tests pass). The two also discover
 # different package sets: client-tests.yml matches EVERY client package with
 # a real `test` script (40, repo-wide); this workflow matches only
-# `src/client/pcf/*` packages with a `build:prod` script (18 at the time of
+# `src/client/pcf/*` packages with a `build:prod` script (19 at the time of
 # writing). Folding this in would require either a second discover job
 # inside client-tests.yml (no sharing benefit — the matrix, install step, and
 # summary table all still need to be separate) or diluting that file's
@@ -43,7 +43,7 @@
 # nightly-health.yml runs at 06:00 UTC and client-tests.yml at 07:00 UTC
 # (one hour after nightly-health, by client-tests.yml's own design, so the
 # two do not contend for runners). This workflow runs at 08:00 UTC — one
-# hour after client-tests.yml — for the same reason: 18 PCF legs each doing
+# hour after client-tests.yml — for the same reason: 19 PCF legs each doing
 # their own `npm install` is exactly the kind of runner contention
 # client-tests.yml's header already flags, and stacking it on top of either
 # existing nightly job would reintroduce that contention instead of avoiding
@@ -82,10 +82,10 @@
 #
 # WHY DISCOVERY, NOT A HAND-WRITTEN LIST
 # -----------------------------------------
-# A fixed list of 18 PCF names would drift the moment someone adds or
+# A fixed list of 19 PCF names would drift the moment someone adds or
 # removes a control — silently narrowing coverage exactly the way "no
 # workflow builds any PCF" narrowed it to zero. Job 1 scans
-# `src/client/pcf/*/package.json` (git-tracked files only) for a real
+# `src/client/pcf/<name>/package.json` (git-tracked files, exactly one folder level deep, matching scripts/Build-AllClientComponents.ps1 Step 4) for a real
 # `build:prod` script instead.
 # ============================================================================
 
@@ -139,6 +139,8 @@ jobs:
           set -euo pipefail
           filter='${{ inputs.pcf_filter }}'
           rows=()
+          bad=0
+          err_file="$(mktemp)"
 
           while IFS= read -r pkgjson; do
             dir="$(dirname "$pkgjson")"
@@ -154,7 +156,7 @@ jobs:
             # below is safe and cheap because this job runs on a fresh
             # checkout, before any `npm install` — there is no node_modules
             # under src/client/pcf/*/ yet.
-            row="$(node -e "
+            if ! row="$(node -e "
               const fs = require('fs');
               const path = require('path');
               try {
@@ -213,13 +215,25 @@ jobs:
                 }
 
                 process.stdout.write(JSON.stringify({ pcf: '$dir', shared: needsShared, extra: extra.join(' ') }));
-              } catch (e) { }
-            " 2>/dev/null || true)"
+              } catch (e) { console.error(e.message); process.exit(3); }
+            " 2>"$err_file")"; then
+              # A malformed package.json must never be a silent drop: report it and
+              # fail this job after the loop (no dollar signs/backticks above: the
+              # node script is inside a bash double-quoted string).
+              echo "::error file=$pkgjson::Could not evaluate $pkgjson: $(head -c 300 "$err_file")"
+              bad=1
+              continue
+            fi
 
             if [ -z "$row" ]; then continue; fi
             if [ -n "$filter" ] && [[ "$dir" != *"$filter"* ]]; then continue; fi
             rows+=("$row")
-          done < <(git ls-files 'src/client/pcf/*/package.json')
+          done < <(git ls-files 'src/client/pcf/*/package.json' | { grep -E '^src/client/pcf/[^/]+/package\.json$' || true; })
+
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::At least one src/client/pcf package.json could not be evaluated (see the errors above). Failing the discover job rather than silently narrowing the PCF set."
+            exit 1
+          fi
 
           if [ ${#rows[@]} -eq 0 ]; then
             echo "::error::No PCF with a build:prod script was found under src/client/pcf. That is almost certainly a discovery bug, not an empty repo — failing loudly rather than reporting a vacuous green."

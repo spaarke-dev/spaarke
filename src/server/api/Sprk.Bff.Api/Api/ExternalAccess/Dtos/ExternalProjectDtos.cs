@@ -250,9 +250,10 @@ public sealed class ExternalDocumentVersionDto
     public string CreatedAt { get; init; } = "";
 
     /// <summary>
-    /// Always null today: <c>VersionInfoDto</c> does not carry <c>lastModifiedBy</c>. Kept in the
-    /// contract because the client already types it optional; fabricating an author would be worse
-    /// than omitting one.
+    /// Always null on the external surface: an external participant is not shown who wrote a version (internal authors
+    /// are a disclosure decision of their own). Kept in the contract because the client already types it optional;
+    /// fabricating an author would be worse than omitting one. (<c>VersionInfoDto</c> carries the author since
+    /// unified-access-control-r2 task 166 f1-v2 for the internal history route only.)
     /// </summary>
     [JsonPropertyName("createdByName")]
     public string? CreatedByName { get; init; }

@@ -47,6 +47,9 @@ public class TodoGenerationServiceTests
     // Rules 1 & 3 actually CREATE to-dos (default is dry-run: query but create nothing).
     private readonly IOptions<TodoGenerationOptions> _eventSourcedEnabledOptions;
 
+    /// <summary>Task 146: the ownership resolver every create asks (one team for every question).</summary>
+    private Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public TodoGenerationServiceTests()
     {
         _dataverseMock = new Mock<IDataverseService>(MockBehavior.Loose);
@@ -116,6 +119,10 @@ public class TodoGenerationServiceTests
         // Inject a TodoRegardingBuilder via the internal test seam so creation paths
         // with regarding parents can run without ExecuteAsync's lazy initialization.
         svc.SetRegardingBuilderForTest(new TodoRegardingBuilder(_commServiceMock.Object, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), _builderLoggerMock.Object));
+
+        // Task 146: every generated to-do asks the ownership resolver; these tests pin the payload SHAPE, so the
+        // resolver answers with one team at its module boundary (ownership rules: SecureChildOwnershipTests).
+        svc.SetOwnershipResolverForTest(Ownership);
 
         return svc;
     }
@@ -260,10 +267,10 @@ public class TodoGenerationServiceTests
         var overdueEvent = BuildEvent(name: "Contract Review", dueDate: DateTime.UtcNow.Date.AddDays(-3));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         SetupIdempotencyQueryEvaluating(new Entity("sprk_todo")
@@ -321,12 +328,12 @@ public class TodoGenerationServiceTests
 
         // Rule 1: overdue events query returns the event
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
 
         // Rule 3: deadline proximity — empty
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         // Idempotency check: existing todo found → skip
@@ -621,11 +628,11 @@ public class TodoGenerationServiceTests
         var service = CreateService();
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Dataverse connection failed"));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         SetupIdempotencyQueryEmpty();
@@ -643,11 +650,11 @@ public class TodoGenerationServiceTests
         var event2 = BuildEvent(id: Guid.NewGuid(), name: "Event Two", dueDate: DateTime.UtcNow.Date.AddDays(-2));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { event1, event2 }, 2));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         SetupIdempotencyQueryEmpty();
@@ -678,11 +685,11 @@ public class TodoGenerationServiceTests
         var expectedTitle = $"Overdue: {overdueEvent.Name}";
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         SetupIdempotencyQueryEmpty();
@@ -721,14 +728,15 @@ public class TodoGenerationServiceTests
         // Review F5: the exclusion is IN the query. This fake behaves like Dataverse — it applies the filter's
         // ExcludeStatusCodes to the stored row — so a query without the exclusion would return the Completed event.
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
-            .ReturnsAsync((EventQueryFilter f, CancellationToken _) =>
-                (f.ExcludeStatusCodes ?? Array.Empty<int>()).Contains(completedEvent.StatusCode)
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((int? _, Guid? _, Guid? _, int? _, int? _, DateTime? _, DateTime? _, int _, int _, Guid? _,
+                    IReadOnlyCollection<int>? exclude, CancellationToken _) =>
+                (exclude ?? Array.Empty<int>()).Contains(completedEvent.StatusCode)
                     ? (Array.Empty<EventEntity>(), 0)
                     : (new[] { completedEvent }, 1));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         SetupIdempotencyQueryEmpty();
@@ -739,8 +747,10 @@ public class TodoGenerationServiceTests
             d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _eventsMock.Verify(d => d.QueryEventsAsync(
-                It.Is<EventQueryFilter>(f => f.ExcludeStatusCodes != null
-                    && f.ExcludeStatusCodes.Contains(EventStatusCode.Completed) && f.ExcludeStatusCodes.Contains(EventStatusCode.Cancelled)),
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
+                It.Is<IReadOnlyCollection<int>?>(x => x != null
+                    && x.Contains(EventStatusCode.Completed) && x.Contains(EventStatusCode.Cancelled)),
                 It.IsAny<CancellationToken>()),
             Times.Exactly(2), "both Rule 1 and Rule 3 exclude Completed and Cancelled in the query");
     }
@@ -757,10 +767,10 @@ public class TodoGenerationServiceTests
         var overdueEvent = BuildEvent(name: "Overdue Filing", dueDate: DateTime.UtcNow.Date.AddDays(-4));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
         SetupIdempotencyQueryEmpty();
 
@@ -769,7 +779,10 @@ public class TodoGenerationServiceTests
 
         // Assert — dry-run: events WERE queried (via the event service), but NOTHING created.
         _eventsMock.Verify(
-            d => d.QueryEventsAsync(It.IsAny<EventQueryFilter>(), It.IsAny<CancellationToken>()),
+            d => d.QueryEventsAsync(
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(),
+                It.IsAny<CancellationToken>()),
             Times.AtLeastOnce);
         _dataverseMock.Verify(
             d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
@@ -787,10 +800,10 @@ public class TodoGenerationServiceTests
         var upcomingEvent = BuildEvent(name: "Upcoming Y", dueDate: DateTime.UtcNow.Date.AddDays(5));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { overdueEvent }, 1));
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { upcomingEvent }, 1));
         SetupIdempotencyQueryEmpty();
         _dataverseMock
@@ -802,11 +815,17 @@ public class TodoGenerationServiceTests
 
         // Assert — the composite QueryEventsAsync is NEVER used for events (the bug).
         _dataverseMock.Verify(
-            d => d.QueryEventsAsync(It.IsAny<EventQueryFilter>(), It.IsAny<CancellationToken>()),
+            d => d.QueryEventsAsync(
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(),
+                It.IsAny<CancellationToken>()),
             Times.Never);
         // The event service WAS the source for both rules, and both produced a To Do.
         _eventsMock.Verify(
-            d => d.QueryEventsAsync(It.IsAny<EventQueryFilter>(), It.IsAny<CancellationToken>()),
+            d => d.QueryEventsAsync(
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(),
+                It.IsAny<CancellationToken>()),
             Times.Exactly(2));
         _dataverseMock.Verify(
             d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
@@ -828,11 +847,11 @@ public class TodoGenerationServiceTests
         var expectedTitle = $"Deadline: {upcomingEvent.Name} (due {dueDateStr})";
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom == null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d == null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
 
         _eventsMock
-            .Setup(d => d.QueryEventsAsync(It.Is<EventQueryFilter>(f => f.DueDateFrom != null && f.DueDateTo != null), It.IsAny<CancellationToken>()))
+            .Setup(d => d.QueryEventsAsync(It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.Is<DateTime?>(d => d != null), It.Is<DateTime?>(d => d != null), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((new[] { upcomingEvent }, 1));
 
         SetupIdempotencyQueryEmpty();

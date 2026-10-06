@@ -2,7 +2,8 @@
 // Task 031 (2026-06-21): Resolves a systemuserid into the six identity-type
 // components defined by design.md Part 1 § Identity normalization contract.
 // Each path is independent (failing one does NOT fail others). Results cached
-// in Redis (IDistributedCache) with a 10-minute TTL per ADR-009.
+// in Redis (ITenantCache) with a 2-minute TTL per ADR-009 (10 min until task 132; an identity built over a
+// FAILED sub-read is never cached — task 132 / defect C12).
 //
 // Sub-queries executed in parallel via Task.WhenAll:
 //   1. systemuser row     → BusinessUnitId, PrimaryEmail, the user's Entra oid, sprk_primarycontact
@@ -33,28 +34,44 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// <summary>
 /// Resolves a Dataverse <c>systemuserid</c> into a normalized
 /// <see cref="PersonIdentity"/> by querying the six identity-type paths in
-/// parallel and merging the results. Cached in Redis (<see cref="IDistributedCache"/>)
-/// with a 10-minute TTL per ADR-009. Failure on a single identity-type path
+/// parallel and merging the results. Cached in Redis (<see cref="ITenantCache"/>)
+/// with a 2-minute TTL per ADR-009 (task 132). Failure on a single identity-type path
 /// produces a <c>null</c> / empty value for that field without failing the
-/// other paths (per FR-1A.5 contract).
+/// other paths (per FR-1A.5 contract). Since task 132 a failed path is also RECORDED
+/// (<see cref="PersonIdentity.Faults"/>), and an identity with any failed path is returned but never cached.
 /// </summary>
 public sealed class IdentityNormalizationService : IIdentityNormalizationService
 {
     /// <summary>
     /// Cache resource label (per ITenantCache contract). The on-wire key becomes
-    /// <c>tenant:{tenantId}:membership-identity:{systemUserId:D}:v1</c>
+    /// <c>tenant:{tenantId}:membership-identity:{systemUserId:D}:v{CacheVersion}</c>
     /// (with the configured <c>InstanceName</c> prepended by StackExchangeRedisCache).
     /// </summary>
     /// <remarks>
-    /// Phase 2 invalidation channel (FR-2P2.8) — a future per-user invalidation can
-    /// target this resource label without affecting other Redis namespaces.
+    /// Per-user invalidation targets this resource label across every tenant segment:
+    /// <see cref="IMembershipCacheInvalidator.InvalidateUserAccessAsync"/> (task 132, the BFF team/BU write paths).
     /// </remarks>
     internal const string CacheResource = "membership-identity";
 
-    /// <summary>Cache schema version per ADR-009.</summary>
-    private const int CacheVersion = 1;
+    /// <summary>
+    /// Cache schema version per ADR-009. Bumped 1 → 2 by unified-access-control-r2 task 132 (defect C12): entries
+    /// written by the pre-fix code may be FAULT-derived (a failed sub-read cached as "no teams" / "no contact"), and
+    /// the version is what keeps any of them from being served after the deploy.
+    /// </summary>
+    internal const int CacheVersion = 2;
 
-    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(10);
+    /// <summary>
+    /// 2 minutes (was 10) — task 132, owner rounds 3 R3/R4 ("access changes must take effect in minutes", ≤ 5): the
+    /// bound on a business-unit or team change made OUTSIDE the BFF, which the BFF cannot observe. BFF writes evict the
+    /// entry (<see cref="IMembershipCacheInvalidator.InvalidateUserAccessAsync"/>).
+    /// </summary>
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
+
+    /// <summary>
+    /// The cache id of one user's identity — the reader's ONLY id builder, also used by the per-user eviction pattern
+    /// (task 132), so a removal addresses exactly the key a read wrote.
+    /// </summary>
+    internal static string CacheId(Guid systemUserId) => systemUserId.ToString("D");
 
     private readonly IDataverseService _dataverse;
     private readonly ITenantCache _cache;
@@ -111,7 +128,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
         // ── Cache lookup ────────────────────────────────────────────────────
         var tenantId = GetTenantId();
-        var cacheId = systemUserId.ToString("D");
+        var cacheId = CacheId(systemUserId);
         var cached = await TryGetFromCacheAsync(tenantId, cacheId, ct).ConfigureAwait(false);
         if (cached is not null)
         {
@@ -126,6 +143,11 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             "IdentityNormalizationService cache MISS for systemUserId={SystemUserId} — resolving",
             systemUserId);
 
+        // Task 132 (C12): every sub-read reports whether it was COMPLETED, not just its fail-soft value. A read that
+        // succeeded and found nothing is an answer; a read that threw or timed out is a fault. The merged identity is
+        // returned either way (the request fails soft exactly as before) but is cached ONLY when nothing faulted.
+        var faults = IdentityReadFaults.None;
+
         // ── Parallel-fetch the three independent root paths ────────────────
         // SystemUser row provides: BusinessUnitId, PrimaryEmail, AADObjectId
         // (the AADObjectId then drives the contact cross-ref below).
@@ -135,8 +157,17 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
         await Task.WhenAll(systemUserTask, teamsTask).ConfigureAwait(false);
 
-        var systemUserData = await systemUserTask.ConfigureAwait(false);
-        var teamIds = await teamsTask.ConfigureAwait(false);
+        var (systemUserData, systemUserFaulted) = await systemUserTask.ConfigureAwait(false);
+        var (teamIds, teamsFaulted) = await teamsTask.ConfigureAwait(false);
+        if (systemUserFaulted)
+        {
+            faults |= IdentityReadFaults.SystemUser;
+        }
+
+        if (teamsFaulted)
+        {
+            faults |= IdentityReadFaults.Teams;
+        }
 
         // ── Contact resolution ──────────────────────────────────────────────
         // PRIMARY (Spaarke model): the user's own sprk_primarycontact lookup → contact.
@@ -149,21 +180,35 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         Guid? contactId = systemUserData.PrimaryContactId;
         if (contactId is null && systemUserData.AzureAdObjectId is { } aadOid)
         {
-            contactId = await TryResolveContactIdByBindingAsync(aadOid, ct).ConfigureAwait(false);
+            var (boundContact, bindingFaulted) = await TryResolveContactIdByBindingAsync(aadOid, ct).ConfigureAwait(false);
+            contactId = boundContact;
+            if (bindingFaulted)
+            {
+                faults |= IdentityReadFaults.ContactBinding;
+            }
         }
 
         // ── Account via contact.parentcustomerid ───────────────────────────
         Guid? accountId = null;
         if (contactId is { } cid)
         {
-            accountId = await TryResolveAccountIdAsync(cid, ct).ConfigureAwait(false);
+            var (account, accountFaulted) = await TryResolveAccountIdAsync(cid, ct).ConfigureAwait(false);
+            accountId = account;
+            if (accountFaulted)
+            {
+                faults |= IdentityReadFaults.Account;
+            }
         }
 
         // ── Organizations (delegated to task 032's resolver(s)) ────────────
-        var organizationIds = await ResolveOrganizationIdsAsync(
+        var (organizationIds, organizationsFaulted) = await ResolveOrganizationIdsAsync(
             systemUserId,
             contactId,
             ct).ConfigureAwait(false);
+        if (organizationsFaulted)
+        {
+            faults |= IdentityReadFaults.Organizations;
+        }
 
         var identity = new PersonIdentity(
             SystemUserId: systemUserId,
@@ -172,28 +217,44 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             TeamIds: teamIds,
             BusinessUnitId: systemUserData.BusinessUnitId,
             AccountId: accountId,
-            OrganizationIds: organizationIds);
+            OrganizationIds: organizationIds)
+        {
+            Faults = faults,
+        };
 
-        await TrySetCacheAsync(tenantId, cacheId, identity, ct).ConfigureAwait(false);
+        if (faults == IdentityReadFaults.None)
+        {
+            await TrySetCacheAsync(tenantId, cacheId, identity, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // Task 132 (C12): returned to this request (fail soft, as before) and NOT cached — caching it stored
+            // "no teams" / "no contact" for the whole TTL after one transient read failure.
+            _logger.LogWarning(
+                "IdentityNormalizationService: identity for systemUserId={SystemUserId} was resolved over FAULTED " +
+                "sub-read(s) {Faults}; returned to this request only and NOT cached (task 132)",
+                systemUserId, faults);
+        }
 
         sw.Stop();
         _logger.LogInformation(
             "IdentityNormalizationService resolved systemUserId={SystemUserId} " +
             "in {ElapsedMs}ms (contactId={ContactId}, teams={TeamCount}, " +
-            "bu={BusinessUnitId}, account={AccountId}, orgs={OrgCount})",
+            "bu={BusinessUnitId}, account={AccountId}, orgs={OrgCount}, faults={Faults})",
             systemUserId,
             sw.ElapsedMilliseconds,
             contactId,
             teamIds.Count,
             systemUserData.BusinessUnitId,
             accountId,
-            organizationIds.Count);
+            organizationIds.Count,
+            faults);
 
         return identity;
     }
 
     // ── Path 1: systemuser row ─────────────────────────────────────────────
-    private async Task<SystemUserData> TryResolveSystemUserAsync(
+    private async Task<(SystemUserData Data, bool Faulted)> TryResolveSystemUserAsync(
         Guid systemUserId,
         CancellationToken ct)
     {
@@ -224,10 +285,12 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             var aadOid = GetGuidLike(entity, "azureactivedirectoryobjectid");
             var primaryContactId = GetEntityReferenceId(entity, "sprk_primarycontact");
 
-            return new SystemUserData(email, businessUnitId, aadOid, primaryContactId);
+            return (new SystemUserData(email, businessUnitId, aadOid, primaryContactId), false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Task 132: only the CALLER's cancellation propagates. An HttpClient timeout (TaskCanceledException with
+            // the caller's token NOT cancelled) is a fault, below — the canonical rule of path 2.
             throw;
         }
         catch (Exception ex)
@@ -235,9 +298,9 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             _logger.LogWarning(
                 ex,
                 "IdentityNormalizationService failed to resolve systemuser row for " +
-                "systemUserId={SystemUserId}; BU/email/AAD-oid will be null",
+                "systemUserId={SystemUserId}; BU/email/AAD-oid will be null (faulted, not cached)",
                 systemUserId);
-            return SystemUserData.Empty;
+            return (SystemUserData.Empty, true);
         }
     }
 
@@ -252,11 +315,13 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         try
         {
             // Same tenant + key as ResolveAsync, so a link written during this request is seen by the next
-            // ResolveAsync in the same request instead of after the 10-minute TTL (task 141, cache constraint).
-            await _cache.RemoveAsync(GetTenantId(), CacheResource, systemUserId.ToString("D"), CacheVersion, ct: ct)
+            // ResolveAsync in the same request instead of after the TTL (task 141, cache constraint). The
+            // tenant-agnostic eviction a WRITER needs (no request, or another tenant) is
+            // IMembershipCacheInvalidator.InvalidateUserAccessAsync (task 132).
+            await _cache.RemoveAsync(GetTenantId(), CacheResource, CacheId(systemUserId), CacheVersion, ct: ct)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -281,7 +346,10 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     // so this reader and the binder give the same answer to the same data (verifier finding 6: an active plus an
     // inactive contact on one oid used to resolve to the active one here while the binder denied and flagged).
     // The binding is WRITTEN only by ContactIdentityBinder.
-    private async Task<Guid?> TryResolveContactIdByBindingAsync(
+    //
+    // Task 132 (C12): the second value is true only for a read that could not be completed. An ambiguous or inactive
+    // binding is a successful read whose ANSWER is "no contact" (cacheable); a thrown read is a fault (never cached).
+    private async Task<(Guid? ContactId, bool Faulted)> TryResolveContactIdByBindingAsync(
         Guid aadObjectId,
         CancellationToken ct)
     {
@@ -295,18 +363,18 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 ContactBindingDecision.BoundContactLookup(results.Entities));
             if (decision is null)
             {
-                return null;
+                return (null, false);
             }
 
             if (decision.Action == BindingAction.ResolveByOid && decision.ContactId is { } contactId)
             {
-                return contactId;
+                return (contactId, false);
             }
 
             _logger.LogWarning(
                 "IdentityNormalizationService: {DenyCode} for oid {AadObjectId}; no contact derived (fail closed)",
                 decision.DenyCode, aadObjectId);
-            return null;
+            return (null, false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -317,14 +385,14 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             _logger.LogWarning(
                 ex,
                 "IdentityNormalizationService failed to read the contact bound to oid={AadObjectId}; ContactId will "
-                + "be null (fail closed)",
+                + "be null (fail closed; faulted, not cached)",
                 aadObjectId);
-            return null;
+            return (null, true);
         }
     }
 
     // ── Path 3: teammembership → teamIds[] ─────────────────────────────────
-    private async Task<IReadOnlyList<Guid>> TryResolveTeamsAsync(
+    private async Task<(IReadOnlyList<Guid> TeamIds, bool Faulted)> TryResolveTeamsAsync(
         Guid systemUserId,
         CancellationToken ct)
     {
@@ -348,7 +416,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
             if (results.Entities.Count == 0)
             {
-                return Array.Empty<Guid>();
+                return (Array.Empty<Guid>(), false);
             }
 
             var ids = new HashSet<Guid>();
@@ -360,25 +428,27 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 }
             }
 
-            return ids.Count == 0 ? Array.Empty<Guid>() : ids.ToArray();
+            return (ids.Count == 0 ? Array.Empty<Guid>() : ids.ToArray(), false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
+            // Task 132 (C12): a team-read fault hides every team-owned record for this request (fail closed, as
+            // before) — and is never cached, so it no longer hides them for the whole TTL.
             _logger.LogWarning(
                 ex,
                 "IdentityNormalizationService failed to resolve teammembership for " +
-                "systemUserId={SystemUserId}; TeamIds will be empty",
+                "systemUserId={SystemUserId}; TeamIds will be empty (faulted, not cached)",
                 systemUserId);
-            return Array.Empty<Guid>();
+            return (Array.Empty<Guid>(), true);
         }
     }
 
     // ── Path 4: contact → parentcustomerid → accountid (only if Account) ───
-    private async Task<Guid?> TryResolveAccountIdAsync(
+    private async Task<(Guid? AccountId, bool Faulted)> TryResolveAccountIdAsync(
         Guid contactId,
         CancellationToken ct)
     {
@@ -393,16 +463,16 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             if (!entity.Contains("parentcustomerid") ||
                 entity["parentcustomerid"] is not EntityReference parentRef)
             {
-                return null;
+                return (null, false);
             }
 
             // parentcustomerid is polymorphic (contact OR account). We only
             // care about Account; ignore Contact-typed parents per design.
-            return string.Equals(parentRef.LogicalName, "account", StringComparison.OrdinalIgnoreCase)
+            return (string.Equals(parentRef.LogicalName, "account", StringComparison.OrdinalIgnoreCase)
                 ? parentRef.Id == Guid.Empty ? null : parentRef.Id
-                : null;
+                : null, false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -411,14 +481,16 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             _logger.LogWarning(
                 ex,
                 "IdentityNormalizationService failed to resolve parentcustomerid → account for " +
-                "contactId={ContactId}; AccountId will be null",
+                "contactId={ContactId}; AccountId will be null (faulted, not cached)",
                 contactId);
-            return null;
+            return (null, true);
         }
     }
 
     // ── Path 5: organizations via task 032's resolver(s) ───────────────────
-    private async Task<IReadOnlyList<Guid>> ResolveOrganizationIdsAsync(
+    // Task 132 (C12): a resolver that throws is a fault (the identity is not cached); the other resolvers' results
+    // are still merged for this request, as before.
+    private async Task<(IReadOnlyList<Guid> OrganizationIds, bool Faulted)> ResolveOrganizationIdsAsync(
         Guid systemUserId,
         Guid? contactId,
         CancellationToken ct)
@@ -426,9 +498,10 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         var resolvers = _organizationResolvers.ToList();
         if (resolvers.Count == 0)
         {
-            return Array.Empty<Guid>();
+            return (Array.Empty<Guid>(), false);
         }
 
+        var faulted = false;
         var merged = new HashSet<Guid>();
         foreach (var resolver in resolvers)
         {
@@ -451,23 +524,24 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                     }
                 }
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
+                faulted = true;
                 _logger.LogWarning(
                     ex,
                     "IdentityNormalizationService: organization resolver {ResolverType} " +
                     "threw for systemUserId={SystemUserId}; skipping this resolver, " +
-                    "other resolvers' results still merged",
+                    "other resolvers' results still merged (faulted, not cached)",
                     resolver.GetType().FullName,
                     systemUserId);
             }
         }
 
-        return merged.Count == 0 ? Array.Empty<Guid>() : merged.ToArray();
+        return (merged.Count == 0 ? Array.Empty<Guid>() : merged.ToArray(), faulted);
     }
 
     // ── Cache helpers ──────────────────────────────────────────────────────
@@ -485,7 +559,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 CacheVersion,
                 ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }
@@ -518,7 +592,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 CacheTtl,
                 ct: ct).ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
         }

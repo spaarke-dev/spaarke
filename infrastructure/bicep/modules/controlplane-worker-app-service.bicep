@@ -8,9 +8,10 @@
 //   the background-processing host (C1.1 session-serialized dispatcher +
 //   state-reconciler + crash-recovery + the 20-handler fleet, task 100/102)
 //   -- on the SAME App Service Plan as .Api ($0 marginal Azure cost per
-//   DS-3 Option 2). Also emits the DS-1b Exchange ApplicationAccessPolicy
-//   sidecar as a Microsoft.Web/sites/sitecontainers child resource, moving
-//   the Exchange-admin-capable container off the internet-facing .Api site.
+//   DS-3 Option 2). Also emits the H14a Exchange sidecar (RBAC for
+//   Applications since task 251) as a Microsoft.Web/sites/sitecontainers
+//   child resource, moving the Exchange-admin-capable container off the
+//   internet-facing .Api site.
 //
 // SPEC / DESIGN REFERENCES (customer-provisioning-orchestration-r1)
 //   - DS-3 Section 3 Option 2 (owner-locked): .Worker is a NEW slotless App
@@ -23,11 +24,17 @@
 //   - design.md Section 4.2a: main site(s) are stock DOTNETCORE|10.0
 //     code-based deploys -- zero custom container image on the main site;
 //     the EXO sidecar (H14a only) is the one designed exception.
-//   - DS-1b Section 3: sitecontainer message contract -- localhost:8091,
-//     POST /apply-policy with X-Sidecar-Auth per-boot shared secret from
-//     platform KV; sidecar fetches the Exchange cert from KV at call time
-//     via the SAME UAMI (App Service MSI endpoint reachable from
-//     sitecontainers -- shared network namespace).
+//   - DS-1b Section 3 (task 251): sitecontainer message contract --
+//     localhost:8091, POST /apply-mailbox-access + /read-mailbox-access with
+//     X-Sidecar-Auth (per-boot shared secret, platform KV) and
+//     X-Exchange-Access-Token (the Worker signs in as 'Spaarke Exchange Admin'
+//     through its UAMI's federated credential; the sidecar holds NO
+//     credential and reads no Key Vault -- owner D24).
+//   - SITECONTAINER SETTINGS CONTRACT (task 251, G30): a sitecontainer
+//     environmentVariables value is the NAME of an app setting on this site,
+//     never a literal -- App Service resolves it at start and passes an empty
+//     string when the setting does not exist. Literals here are why the first
+//     sidecar (2026-10-03) started with every variable empty.
 //   - ADR-028: UAMI-only identity; DefaultAzureCredential; NEVER
 //     SystemAssigned.
 //
@@ -52,12 +59,8 @@
 //     handler, not a Bicep concern.
 //   - keyVaultReferenceIdentity PATCH: applied post-deploy by the H4
 //     handler on the Worker site (parity with .Api's T1/T5 handling).
-//   - The real ACR image for the Exchange sidecar: task 114 built the
-//     Dockerfile/image; task 115 wires the CI build+push to the platform
-//     ACR. Until task 115 lands, `acrImageTag` defaults to a documented
-//     public placeholder (see param description + the POML's own
-//     escalation-trigger guidance) so this module's shape can be authored
-//     and validated independently of the CI pipeline landing first.
+//   - The Exchange sidecar image: built by .github/workflows/build-provisioning-sidecar.yml
+//     into the platform ACR; `acrImageTag` selects it (dev bicepparam pins the ACR tag).
 //
 // DS-5 C5.1 FOLLOW-ON FIX (task 110, applied here)
 //   DS-5's C5.1 finding scoped ONLY modules/controlplane-app-service.bicep
@@ -105,9 +108,6 @@ param cosmosRunsContainerName string
 @description('Key Vault name (for @Microsoft.KeyVault references in appSettings + sitecontainer environmentVariables).')
 param keyVaultName string
 
-@description('Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3).')
-param keyVaultUri string
-
 @description('Name of the fleet-scoped Service Bus namespace (task 108 / DS-5 C5.4) used to construct the fully-qualified-namespace app-setting the code reads (DS-5 C5.1 key-rename fix, applied here by task 110 -- MI-only send/receive, no connection string per ServiceBusModule.cs:53). SAME value passed to the .Api module.')
 param serviceBusNamespaceName string
 
@@ -120,11 +120,10 @@ param adminDataverseEnvironmentUrl string
 @description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer\'s target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
-@description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer\'s sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a\'s Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash.')
-param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
 
-@description('Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name "Redis-ConnectionString" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module\'s platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName / azureOpenAiEndpointSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments.')
-param redisConnectionStringSecretName string = 'Redis-ConnectionString'
+@description('Endpoint (host:port) of the per-environment Azure Managed Redis (spaarke-bff-redis-{env}, modules/redis.bicep output `redisEndpoint`), emitted as Redis__Endpoint. Consumed by DispatchModule (Level-2 dispatch-idempotency IDistributedCache, task 105 / DS-2 §4-L2): with Redis__Endpoint set the Worker authenticates with its user-assigned identity (ManagedIdentity__ClientId) over RESP3 -- the cache has access keys disabled (task 242, owner D12/D13), so there is no connection string and no Key Vault secret. The Worker UAMI must hold an access-policy assignment on the cache (parameters/redis-{env}.bicepparam). Required: outside Development/Testing the Worker refuses to start without it (NFR-05 fail-fast; we do not set ASPNETCORE_ENVIRONMENT=Development to bypass it -- the gate prevents silent same-instance-only duplicate suppression in multi-instance environments). Not a secret.')
+@minLength(1)
+param redisEndpoint string
 
 @description('HTTPS URI of the provisioning-artifacts blob CONTAINER (e.g. https://{account}.blob.core.windows.net/provisioning-artifacts) -- output of modules/controlplane-artifacts-storage.bicep (G-8 Batch 2, audit defect #5). Threaded into the three handler option sections that each REQUIRE it at boot per NFR-05 (G-8 audit defect #7): BicepInfraDeployOptions (H2a), BffDeployOptions (H9), SolutionImportOptions (H6) -- Program.cs binds each via GetSection(nameof(...Options)), so the app-setting keys below carry the literal "...Options" section names. All three Validate() throw on empty, so this param is REQUIRED (no default) -- platform-controlplane.bicep MUST pass the artifacts-storage module\'s container URI output here (wiring owned by G-8 Batch 2). The Worker\'s UAMI reads blobs via DefaultAzureCredential (Storage Blob Data Reader grant -- audit defect #3); no account key or SAS in config.')
 param artifactsStorageContainerUri string
@@ -132,30 +131,77 @@ param artifactsStorageContainerUri string
 @description('App Insights connection string (from monitoring.bicep outputs). Same App Insights workspace as .Api -- distinct cloud_RoleName distinguishes the two hosts (DS-3 Section 3 observability note).')
 param appInsightsConnectionString string
 
-@description('Container image reference for the DS-1b Exchange ApplicationAccessPolicy sidecar (task 114 built the Dockerfile; task 115 wires CI build+push to the platform ACR). Defaults to a public placeholder per this task POML escalation-trigger guidance -- REPLACE with the real ACR tag (e.g. {acrLoginServer}/sprk-provisioning-sidecar:{tag}) once task 115 lands; do not leave the placeholder in a live deploy.')
+@description('Container image of the Exchange sidecar (H14a apply + H13 T4 read, RBAC for Applications -- task 251), e.g. {acrLoginServer}/provisioning-sidecar:{tag}, built by .github/workflows/build-provisioning-sidecar.yml or az acr build. The default is a public placeholder that serves none of the sidecar routes -- never deploy it.')
 param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
 
 @description('ACR authentication mode for the sitecontainer pull. Anonymous is correct ONLY for the public MCR placeholder default above. Switch to UserAssigned (with userManagedIdentityClientId = uamiClientId) once acrImageTag points at the platform ACR (task 115) -- the UAMI needs AcrPull RBAC on that registry, granted alongside task 110 and task 111 other RBAC grants.')
 param sidecarAuthType string = 'Anonymous'
 
-@description('Name of the KV secret holding the per-boot shared secret the Worker site injects into the sidecar as SIDECAR_SHARED_SECRET (DS-1b Section 3 main-to-sidecar auth leg).')
+@description('Name of the platform KV secret holding the per-boot shared secret between the Worker and the Exchange sidecar (DS-1b Section 3). The Worker reads it from Key Vault (IntegrationWiring__SidecarSharedSecret*); the sidecar receives it through the ExchangeSidecar__SharedSecret Key Vault reference app setting.')
 param sidecarSharedSecretKvSecretName string = 'Sidecar-Shared-Secret'
 
-@description('Name of the KV secret holding the Exchange Online connect certificate (PFX) the sidecar fetches at call time via the App Service MSI endpoint. This is the SECRET NAME passed as EXCHANGE_CERT_SECRET_NAME -- not the certificate value itself (DS-1b Section 3 sidecar-to-Exchange auth leg).')
-param exchangeCertKvSecretName string = 'Exchange-Connect-Cert'
+@description('Client id of the \'Spaarke Exchange Admin\' app registration (task 251, owner D24). The Worker signs in as it through the federated identity credential that trusts this module\'s UAMI and hands the Exchange Online token to the sidecar per request -- no certificate, no secret. Emitted as IntegrationWiring__ExchangeAdminAppId. Empty: the Worker and sidecar start, and H14a / H13 T4 report "ExchangeAdminAppId is not configured" on first use.')
+param exchangeAdminAppId string = ''
 
-@description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding.')
-param exchangeConnectAppId string = ''
-
-@description('Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Consumed only when customerRunGuardEnabled=true; validated at Worker boot via CustomerRunGuardOptions.Validate (customer-provisioning-orchestration-r1 task 203b, punch list row A27 / r1-gap-analysis c5-6).')
+@description('Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Diagnostics only since the guard authenticates as the UAMI (not validated, not used for token issuance — CustomerRunGuardOptions; task 242b restored REG-02). Task 203b, punch list row A27 / r1-gap-analysis c5-6.')
 param customerRunGuardTenantId string = ''
 
 
-@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once customerRunGuardTenantId is supplied and the bound UAMI is a Dataverse Application User on the admin env (it authenticates as the UAMI since 2026-08-27; no client secret is involved). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
+@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the bound UAMI is a Dataverse Application User on the admin env (customerRunGuardTenantId is diagnostics-only) (it authenticates as the UAMI since 2026-08-27; no client secret is involved). MUST equal the Api module\'s value (the Api acquires, the Worker releases). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
 param customerRunGuardEnabled bool = false
+
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master\'s pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves the legacy shape byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)')
+param requireSecretFreeIdentity bool = false
+
+// ============================================================================
+// A44.5 -- BFF-app-reg credential app settings (exactly ONE of these two sets
+// is appended to the base appSettings below via concat + ternary):
+//   - legacy (requireSecretFreeIdentity=false): the two KV-refs exactly as
+//     tasks 142 / 204a wired them.
+//   - secret-free (requireSecretFreeIdentity=true): FR-39 ordered-credential
+//     chain settings consumed by WorkerCredentialSelectionOptions
+//     (Sprk.Provisioning.ControlPlane.Core/Handlers/Credentials/**, task
+//     205i) -- MI-FIC via the SAME UAMI this module binds.
+// ============================================================================
+var legacyClientSecretAppSettings = [
+  {
+    name: 'EnvVarValues__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+  {
+    name: 'SolutionImportOptions__ClientSecret'
+    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
+  }
+]
+
+var secretFreeCredentialAppSettings = [
+  { name: 'EnvVarValues__Credentials__Order__0', value: 'ManagedIdentityFederated' }
+  { name: 'EnvVarValues__Credentials__RequireSecretFreeIdentity', value: 'true' }
+  { name: 'SolutionImportOptions__Credentials__Order__0', value: 'ManagedIdentityFederated' }
+  { name: 'SolutionImportOptions__Credentials__RequireSecretFreeIdentity', value: 'true' }
+]
+
+@description('Object id of the L2 control plane\'s own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp\'s BFF UAMI instead), and the principal H2a sends as customer.bicep\'s controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId.')
+param controlPlanePrincipalId string
+
+
+// Task 245b. Deliberately `array`, not a user-defined type: a `type` makes
+// Bicep emit languageVersion 2.0 (symbolic-name resources) for this module AND
+// for platform-controlplane.bicep, which imports it -- a template-wide change to
+// a live-what-if-verified deployment for a shape check that
+// SpeContainerOptions.Validate() already does more strictly at Worker startup.
+@description('SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run\'s intake containerTypeId; ownerAppId = the owning app registration\'s client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker\'s UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0\'s SpeOwnerCredential probe, H8 (container creation) and H13\'s T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice.')
+param speContainerTypeOwners array = []
 
 @description('Tags for the resource.')
 param tags object = {}
+
+// Task 245b: flatten speContainerTypeOwners into indexed app settings (the .NET
+// configuration binder's list syntax: SpeContainerOptions__ContainerTypeOwners__0__ContainerTypeId ...).
+var speContainerTypeOwnerSettings = flatten(map(range(0, length(speContainerTypeOwners)), i => [
+  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__ContainerTypeId', value: speContainerTypeOwners[i].containerTypeId }
+  { name: 'SpeContainerOptions__ContainerTypeOwners__${i}__OwnerAppId', value: speContainerTypeOwners[i].ownerAppId }
+]))
 
 // ============================================================================
 // APP SERVICE (WORKER -- slotless per DS-3 Section 3; UAMI-only per ADR-028)
@@ -183,7 +229,7 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       healthCheckPath: '/healthz'
-      appSettings: [
+      appSettings: concat([
         // ---------------------------------------------------------------
         // NOTE: no AzureAd__* settings here -- the Worker has NO auth
         // surface (task 100 Program.cs: only anonymous /healthz + /ping).
@@ -233,17 +279,17 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // writer collaborator authenticates to each customer's Dataverse
         // env using the SAME shared multitenant BFF app-reg credential H6
         // uses for solution import (the MI-Dataverse App User from H10 does
-        // not exist yet at H7's point in the DAG). REQUIRED --
-        // EnvVarValuesOptions.Validate() fails fast at boot (NFR-05) if
-        // this is missing; sourced from the platform KV's canonical
-        // never-delete BFF-API-ClientSecret secret (task 126 real-value
-        // population; same secret the .Api site resolves as
-        // AzureAd__ClientSecret / Graph__ClientSecret).
+        // not exist yet at H7's point in the DAG). Sourced from the platform
+        // KV's canonical BFF-API-ClientSecret secret (task 126 real-value
+        // population).
+        //
+        // A44.5 (task 205i; restored by task 245b): the EnvVarValues__ClientSecret
+        // KV-ref is NOT emitted here unconditionally -- it lives in
+        // legacyClientSecretAppSettings (appended via the concat + ternary at
+        // the bottom of this array) and is OMITTED when
+        // requireSecretFreeIdentity=true, where the FR-39 chain settings take
+        // its place and EnvVarValuesOptions.Validate() accepts the empty slot.
         // ---------------------------------------------------------------
-        {
-          name: 'EnvVarValues__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // Task 204a (Wave G-8 Class-B follow-on to task 142): SolutionImport
@@ -264,47 +310,27 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // .Validate() only asserts ProvisioningArtifactsContainerUri +
         // SolutionArtifactManifestBlobName -- H6's ClientSecret is a runtime
         // Resumable failure per §4C rollback classification (H6SolutionImportHandler
-        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret). We
-        // still wire it here so H6 succeeds on the happy path without
-        // per-customer operator intervention (parity with H7 lifecycle).
+        // step 7 emits SolutionImportRejectionCodes.MissingClientSecret).
+        //
+        // A44.5 (task 205i; restored by task 245b): the
+        // SolutionImportOptions__ClientSecret KV-ref lives in
+        // legacyClientSecretAppSettings -- OMITTED when
+        // requireSecretFreeIdentity=true (H6 then selects MI-FIC via the
+        // FR-39 chain).
         // ---------------------------------------------------------------
-        {
-          name: 'SolutionImportOptions__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
-
-        // ---------------------------------------------------------------
-        // Task 153 (Wave G-5): RuntimeReferences -- H12c's shared-platform
-        // Azure OpenAI endpoint for Model1Shared customers. Sourced from the
-        // SAME canonical "AzureOpenAI-Endpoint" KV secret the .Api site
-        // already resolves (AzureOpenAI__Endpoint / DocumentIntelligence__
-        // OpenAiEndpoint) -- single source of truth for this environment's
-        // shared platform OpenAI resource, not a duplicate. CONDITIONALLY
-        // required (Model1Shared branch only) -- RuntimeReferencesOptions.
-        // Validate() does NOT fail-fast at boot on this being unset (unlike
-        // EnvVarValues__ClientSecret above); a missing value fails the
-        // affected Model1Shared run Resumable, not the whole Worker boot.
-        // ---------------------------------------------------------------
-        {
-          name: 'RuntimeReferences__SharedPlatformOpenAiEndpoint'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${azureOpenAiEndpointSecretName})'
-        }
 
         // ---------------------------------------------------------------
         // G-8 Batch 3 (audit defect #6): Level-2 dispatch-idempotency Redis
-        // (DispatchModule.cs:154-199, task 105 / DS-2 §4-L2). The code reads
-        // GetConnectionString("Redis") FIRST, then Redis:ConnectionString --
-        // ConnectionStrings__Redis is used here for exact parity with the
-        // BFF cutover shape (Deploy-RedisCache.ps1 -CutoverBffSettings).
-        // Without this setting the Worker THROWS at composition time under
-        // the App Service default ASPNETCORE_ENVIRONMENT=Production
-        // (deliberate NFR-05 fail-fast; we provide a REAL connection string
-        // rather than bypass the gate with an environment override -- see
-        // the redisConnectionStringSecretName param description).
+        // (DispatchModule, task 105 / DS-2 §4-L2). Task 242b: Azure Managed
+        // Redis, Microsoft Entra only -- the endpoint is a plain setting and
+        // the Worker signs in with its UAMI (ManagedIdentity__ClientId below);
+        // the former ConnectionStrings__Redis Key Vault reference is gone.
+        // Without Redis__Endpoint the Worker THROWS at composition time under
+        // ASPNETCORE_ENVIRONMENT=Production (deliberate NFR-05 fail-fast).
         // ---------------------------------------------------------------
         {
-          name: 'ConnectionStrings__Redis'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${redisConnectionStringSecretName})'
+          name: 'Redis__Endpoint'
+          value: redisEndpoint
         }
 
         // ---------------------------------------------------------------
@@ -378,18 +404,54 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // ---------------------------------------------------------------
         { name: 'APPLICATIONINSIGHTS_CONNECTION_STRING', value: appInsightsConnectionString }
         { name: 'ApplicationInsightsAgent_EXTENSION_VERSION', value: '~3' }
-      ]
+
+        // ---------------------------------------------------------------
+        // Task 245b (G25): L2-owned run inputs, validated at Worker startup.
+        // ControlPlaneIdentity__PrincipalObjectId (task 249 — one setting shared
+        // by two handlers): H4's KV RBAC bootstrap grants THIS principal (L2's
+        // own identity) Secrets Officer on each customer vault, and H2a sends it
+        // as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps
+        // (Website Contributor on the stamp BFF). SPE owning-app credentials
+        // are appended below (speContainerTypeOwnerSettings). Task 225b (D18)
+        // removed the vendor-key platform vault setting (no Spaarke-shared
+        // vendor key remains in the customer catalog).
+        //
+        // Task 225b (G21): every new stamp is secret-free — H4 omits
+        // BFF-API-ClientSecret and Dataverse-ClientSecret (BINDING
+        // credential-lifecycle rule; no sentinel). Stated explicitly so the
+        // deployed Worker never depends on the code default.
+        // ---------------------------------------------------------------
+        { name: 'ControlPlaneIdentity__PrincipalObjectId', value: controlPlanePrincipalId }
+        { name: 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', value: 'true' }
+
+        // ---------------------------------------------------------------
+        // Task 251 (G30): H14a's Exchange sidecar. The Worker reads the shared
+        // secret from Key Vault (all three settings, else H14a fails loudly at
+        // first call) and signs in to Exchange as 'Spaarke Exchange Admin'.
+        // ExchangeSidecar__SharedSecret exists only so the sitecontainer can
+        // name it (see the sitecontainer below).
+        // ---------------------------------------------------------------
+        { name: 'IntegrationWiring__SidecarSharedSecretVaultName', value: keyVaultName }
+        { name: 'IntegrationWiring__SidecarSharedSecretSubscriptionId', value: subscription().subscriptionId }
+        { name: 'IntegrationWiring__SidecarSharedSecretName', value: sidecarSharedSecretKvSecretName }
+        { name: 'IntegrationWiring__ExchangeAdminAppId', value: exchangeAdminAppId }
+        {
+          name: 'ExchangeSidecar__SharedSecret'
+          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
+        }
+      ], requireSecretFreeIdentity ? secretFreeCredentialAppSettings : legacyClientSecretAppSettings, speContainerTypeOwnerSettings)
     }
   }
 }
 
 // ============================================================================
-// EXCHANGE APPLICATIONACCESSPOLICY SIDECAR (DS-1b Section 3 / design.md
-// Section 4.2a) -- Microsoft.Web/sites/sitecontainers child resource.
-// Shares the Worker site's network namespace (localhost-only, not publicly
-// routed) and the Worker's UAMI (sitecontainers can reach the App Service
-// MSI endpoint -- IDENTITY_ENDPOINT / IDENTITY_HEADER are injected
-// automatically by the platform for any identity-bound site; NOT set here).
+// H14a EXCHANGE SIDECAR (DS-1b Section 3 / design.md Section 4.2a; task 251)
+// -- Microsoft.Web/sites/sitecontainers child resource. Shares the Worker
+// site's network namespace (localhost-only, not publicly routed). Holds no
+// credential: the Worker sends the Exchange token with each request.
+// Each environmentVariables value NAMES an app setting above (Microsoft's
+// sitecontainers contract) -- never a literal. The sidecar binds its port
+// even when a setting is missing, so it can never hold the Worker site down.
 // ============================================================================
 
 resource exchangePolicySidecar 'Microsoft.Web/sites/sitecontainers@2024-04-01' = {
@@ -406,23 +468,10 @@ resource exchangePolicySidecar 'Microsoft.Web/sites/sitecontainers@2024-04-01' =
     // (the MCR-placeholder default), so unconditionally setting it is safe.
     userManagedIdentityClientId: uamiClientId
     environmentVariables: [
-      // PLATFORM_KV_URI + EXCHANGE_CERT_SECRET_NAME + EXCHANGE_CONNECT_APP_ID
-      // are plain (non-secret) values per Listener.ps1's documented
-      // .ENVIRONMENT contract (task 114).
-      { name: 'PLATFORM_KV_URI', value: keyVaultUri }
-      { name: 'EXCHANGE_CERT_SECRET_NAME', value: exchangeCertKvSecretName }
-      { name: 'EXCHANGE_CONNECT_APP_ID', value: exchangeConnectAppId }
-
-      // SIDECAR_SHARED_SECRET is the main-to-sidecar auth leg (DS-1b
-      // Section 3) -- KV-reference syntax, same convention as every other
-      // secret-bearing appSetting in this module. Requires the Worker's
-      // keyVaultReferenceIdentity PATCH (H4, post-deploy) to resolve at
-      // runtime -- same T1 pattern as the main site's Cosmos/SB/Dataverse
-      // settings above.
-      {
-        name: 'SIDECAR_SHARED_SECRET'
-        value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${sidecarSharedSecretKvSecretName})'
-      }
+      // The Worker -> sidecar shared secret (DS-1b Section 3), through the
+      // ExchangeSidecar__SharedSecret Key Vault reference app setting -- which
+      // resolves with the site's keyVaultReferenceIdentity (Deploy-ControlPlane.ps1).
+      { name: 'SIDECAR_SHARED_SECRET', value: 'ExchangeSidecar__SharedSecret' }
     ]
   }
 }

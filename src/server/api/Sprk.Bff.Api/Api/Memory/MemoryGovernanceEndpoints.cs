@@ -11,9 +11,9 @@ namespace Sprk.Bff.Api.Api.Memory;
 /// <summary>
 /// Minimal memory-governance surface (task AIR2-052, FR-B-03 — RESCOPED to MINIMAL by operator ruling
 /// 2026-07-09). Exposes the ADR-015 Tier-3 user controls over the generalized
-/// <see cref="IMemoryItemStore"/> (task 050) plus a record-authorization-aligned record-memory read.
+/// <see cref="IMemoryItemStore"/> (task 050).
 ///
-/// <para><b>Routes</b> (5):</para>
+/// <para><b>Routes</b> (4):</para>
 /// <list type="bullet">
 ///   <item><c>GET    /api/memory/user</c> — review the caller's OWN User-scope memory (what's remembered).</item>
 ///   <item><c>POST   /api/memory/user/seed</c> — user-INITIATED seed of ONE User-scope MemoryItem
@@ -22,9 +22,20 @@ namespace Sprk.Bff.Api.Api.Memory;
 ///   path — <c>memory.write</c> (task 057) is AI-initiated-only and writes <c>source=ai-derived</c>.</item>
 ///   <item><c>DELETE /api/memory/user/{itemId}</c> — point-delete one User-scope item (GDPR erasure preserved).</item>
 ///   <item><c>DELETE /api/memory/user</c> — GDPR Art. 17 erasure of ALL the caller's User-scope memory.</item>
-///   <item><c>GET    /api/memory/records/{entityLogicalName}/{id}</c> — read Record-scope memory, gated
-///   by the caller's OWN record read access (FR-B-03; no parallel memory ACL).</item>
 /// </list>
+///
+/// <para><b>RETIRED 2026-10-03 — <c>GET /api/memory/records/{entityLogicalName}/{id:guid}</c></b>
+/// (unified-access-control-r2 task 166, route-authorization sweep finding S-42, owner round 10 item 1).
+/// It read any record's AI memory app-only from Cosmos behind an ENTITY-TYPE Read privilege check that
+/// ignored the record id (<c>IDataversePrivilegeChecker.HasReadPrivilegeAsync</c>), so any caller with
+/// Read on <c>sprk_matter</c> at any depth could read the record memory of any matter by GUID, secure
+/// matters included. It had NO caller anywhere in the repository and is in no published API description
+/// (the Copilot OpenAPI does not list it), so per round 10 item 1 it was DELETED rather than gated, with
+/// <c>IMemoryAccessAuthorizer.CanCallerReadRecordAsync</c> — the table-privilege check only it used.
+/// Record memory is still read in-process by chat recall, which runs inside the caller's own session.
+/// Absence is asserted by <c>tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs</c>.
+/// Do not re-add a record-memory read route without a per-RECORD caller check
+/// (<c>RecordRouteAccessAuthorizationFilter</c>).</para>
 ///
 /// <para>
 /// <b>Placement Justification (CLAUDE.md §10 / §11)</b> — the seed route is NEW hot-path BFF surface:
@@ -47,11 +58,8 @@ namespace Sprk.Bff.Api.Api.Memory;
 /// </para>
 ///
 /// <para>
-/// <b>Record-read authorization is STRUCTURAL</b>: <see cref="IMemoryAccessAuthorizer.CanCallerReadRecordAsync"/>
-/// derives allow/deny from the caller's own Dataverse read access. GRANULARITY: entity-type Read
-/// privilege today; true per-row ethical-wall enforcement is DEFERRED to the governance project
-/// (see the authorizer docs). Litigation-hold is NOT implemented (deferred 2026-07-08) — no hold code
-/// path gates any read or delete here.
+/// Litigation-hold is NOT implemented (deferred 2026-07-08) — no hold code path gates any read or
+/// delete here.
 /// </para>
 ///
 /// <para>
@@ -119,15 +127,8 @@ public static class MemoryGovernanceEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
-        group.MapGet("/records/{entityLogicalName}/{id:guid}", ReadRecordMemoryAsync)
-            .WithName("ReadRecordMemory")
-            .WithSummary("Read a record's memory, gated by the caller's own record read access (FR-B-03).")
-            .WithDescription("Returns Record-scope memory for (entityLogicalName, id) IFF the caller has read access to the record's entity. A caller without record read access is denied (403) — no parallel memory ACL.")
-            .Produces<MemoryListResponse>(StatusCodes.Status200OK)
-            .ProducesProblem(StatusCodes.Status400BadRequest)
-            .ProducesProblem(StatusCodes.Status401Unauthorized)
-            .ProducesProblem(StatusCodes.Status403Forbidden)
-            .ProducesProblem(StatusCodes.Status500InternalServerError);
+        // GET /records/{entityLogicalName}/{id:guid} RETIRED by unified-access-control-r2 task 166 — see the
+        // class summary. Do not re-add it without a per-record caller check.
 
         return app;
     }
@@ -320,49 +321,6 @@ public static class MemoryGovernanceEndpoints
 
         logger.LogInformation("[MEMORY-GOV] user erase subject={Subject} count={Count}", subjectKey, itemIds.Count);
         return Results.NoContent();
-    }
-
-    // =========================================================================
-    // GET /api/memory/records/{entityLogicalName}/{id}
-    // =========================================================================
-    internal static async Task<IResult> ReadRecordMemoryAsync(
-        string entityLogicalName,
-        Guid id,
-        HttpContext httpContext,
-        IMemoryItemStore store,
-        IMemoryAccessAuthorizer authorizer,
-        ILogger<MemoryListResponse> logger,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(entityLogicalName) || id == Guid.Empty)
-        {
-            return Results.Problem(statusCode: StatusCodes.Status400BadRequest, title: "Bad Request",
-                detail: "Both 'entityLogicalName' and a non-empty 'id' are required.");
-        }
-
-        if (!TryGetOid(httpContext, out _, out var oidProblem))
-        {
-            return oidProblem!;
-        }
-
-        // STRUCTURAL: read access to record memory derives from the caller's own record read access.
-        var allowed = await authorizer.CanCallerReadRecordAsync(httpContext.User, entityLogicalName, id, ct);
-        if (!allowed)
-        {
-            logger.LogWarning("[MEMORY-GOV] record read DENIED entity={Entity} record={RecordId}", entityLogicalName, id);
-            return Results.Problem(
-                statusCode: StatusCodes.Status403Forbidden,
-                title: "Forbidden",
-                detail: "Caller does not have read access to this record; its memory cannot be read.");
-        }
-
-        // Record memory is keyed by (subjectType, subjectId) = (entityLogicalName, recordId) — the
-        // Dataverse-native record identity (forward contract; legacy migration-era "matter" subjectType
-        // is not exposed via this surface, and no live docs were migrated per the fresh-container ruling).
-        var items = await store.GetForRecordAsync(entityLogicalName.Trim().ToLowerInvariant(), id.ToString(), ct);
-        logger.LogDebug("[MEMORY-GOV] record read entity={Entity} record={RecordId} count={Count}", entityLogicalName, id, items.Count);
-
-        return Results.Ok(MemoryListResponse.From(items));
     }
 
     // =========================================================================

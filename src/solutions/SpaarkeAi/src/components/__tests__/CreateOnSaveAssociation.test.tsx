@@ -5,11 +5,11 @@
  *   - association-choices-render: all five choices render (None / Matter /
  *     Project / Invoice / Work Assignment) in Fluent v9.
  *   - write-on-select: selecting a parent type + record fires onChange with
- *     an AssociationResult, and associateDocumentToParent writes the
- *     resolved @odata.bind lookup onto sprk_document via IDataService.
+ *     an AssociationResult, and associateDocumentToParent files the document
+ *     through the BFF re-file (PUT /api/v1/documents/{id}; UAC-r2 task 147 r1).
  *   - none-is-standalone: choosing "None" fires onChange(null); the
  *     write path (associateDocumentToParent / useCreateOnSaveAssociation's
- *     associate()) no-ops without touching IDataService -- Save is never
+ *     associate()) no-ops without calling the re-file -- Save is never
  *     blocked on a parent.
  *   - dark-mode: the prompt renders under webDarkTheme without error and
  *     with no bespoke dialog/overlay chrome of its own (plain section,
@@ -27,10 +27,10 @@ import * as React from 'react';
 import { render, screen, waitFor, act, renderHook } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme, webDarkTheme } from '@fluentui/react-components';
-import type { AssociationResult, IDataService, INavigationService } from '@spaarke/ui-components';
+import type { AssociationResult, INavigationService } from '@spaarke/ui-components';
 
 import { CreateOnSaveAssociationPrompt } from '../compose/CreateOnSaveAssociationPrompt';
-import { associateDocumentToParent } from '../compose/documentAssociationWrite';
+import { associateDocumentToParent, bffDocumentRefile, type DocumentRefile } from '../compose/documentAssociationWrite';
 import { useCreateOnSaveAssociation } from '../compose/useCreateOnSaveAssociation';
 import { useCreateOnSaveAssociationGate } from '../compose/useCreateOnSaveAssociationGate';
 import { CreateOnSaveAssociationGateDialog } from '../compose/CreateOnSaveAssociationGateDialog';
@@ -53,15 +53,9 @@ function createMockNavigationService(pickedResult?: { id: string; entityType: st
   } as unknown as INavigationService;
 }
 
-function createMockDataService(overrides: Partial<IDataService> = {}): IDataService {
-  return {
-    createRecord: jest.fn().mockResolvedValue('00000000-0000-0000-0000-000000000001'),
-    retrieveRecord: jest.fn().mockResolvedValue({}),
-    retrieveMultipleRecords: jest.fn().mockResolvedValue({ entities: [] }),
-    updateRecord: jest.fn().mockResolvedValue(undefined),
-    deleteRecord: jest.fn().mockResolvedValue(undefined),
-    ...overrides,
-  } as IDataService;
+/** UAC-r2 task 147 r1: the document re-file (PUT /api/v1/documents/{id}) the write path goes through. */
+function createMockRefile(): jest.MockedFunction<DocumentRefile> {
+  return jest.fn<Promise<void>, Parameters<DocumentRefile>>().mockResolvedValue(undefined);
 }
 
 /** Controlled test harness -- mirrors how a real host wires value/onChange. */
@@ -128,33 +122,63 @@ describe('CreateOnSaveAssociationPrompt', () => {
       });
     });
 
-    it('writesTheResolvedLookupOntoSprkDocument', async () => {
-      const fetchMock = jest.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          value: [
-            {
-              ReferencingAttribute: 'sprk_matter',
-              ReferencingEntityNavigationPropertyName: 'sprk_Matter',
-              ReferencedEntity: 'sprk_matter',
-            },
-          ],
-        }),
-      });
-      (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
-
-      const dataService = createMockDataService();
+    it('filesTheDocumentThroughTheBffRefileWithTheParentLookup', async () => {
+      const refile = createMockRefile();
       const association: AssociationResult = {
         entityType: 'sprk_matter',
         recordId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
         recordName: 'Smith v. Jones',
       };
 
-      const result = await associateDocumentToParent(dataService, 'doc-guid-1', association);
+      const result = await associateDocumentToParent(refile, 'doc-guid-1', association);
 
       expect(result.success).toBe(true);
-      expect(dataService.updateRecord).toHaveBeenCalledWith('sprk_document', 'doc-guid-1', {
-        'sprk_Matter@odata.bind': '/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)',
+      expect(refile).toHaveBeenCalledWith('doc-guid-1', { matterLookup: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    });
+
+    it.each([
+      ['sprk_project', 'projectLookup'],
+      ['sprk_invoice', 'invoiceLookup'],
+      ['sprk_workassignment', 'workAssignmentLookup'],
+    ])('files a document under a %s through the documents PUT property %s', async (entityType, property) => {
+      const refile = createMockRefile();
+
+      await associateDocumentToParent(refile, 'doc-guid-1', {
+        entityType,
+        recordId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        recordName: 'Parent',
+      });
+
+      expect(refile).toHaveBeenCalledWith('doc-guid-1', { [property]: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' });
+    });
+
+    it('aRefusedRefileReturnsTheServersMessageAsTheWarning', async () => {
+      const response = {
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: 'The record was not found, or you do not have access to it.' }),
+      } as Response;
+      const fetchMock = jest.fn().mockResolvedValue(response);
+
+      const result = await associateDocumentToParent(bffDocumentRefile(fetchMock, 'https://bff.example'), 'doc-guid-1', {
+        entityType: 'sprk_project',
+        recordId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+        recordName: 'Secure project',
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.warning).toContain('The record was not found, or you do not have access to it.');
+    });
+
+    it('bffDocumentRefilePutsTheLookupToTheDocumentsRoute', async () => {
+      const fetchMock = jest.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({}) } as Response);
+
+      await bffDocumentRefile(fetchMock, 'https://bff.example/')('doc-guid-1', { matterLookup: 'm-1' });
+
+      expect(fetchMock).toHaveBeenCalledWith('https://bff.example/api/v1/documents/doc-guid-1', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ matterLookup: 'm-1' }),
       });
     });
   });
@@ -179,18 +203,18 @@ describe('CreateOnSaveAssociationPrompt', () => {
       expect(screen.getByTestId('association-standalone-note')).toBeInTheDocument();
     });
 
-    it('associateDocumentToParentNoOpsForNoneWithoutTouchingDataService', async () => {
-      const dataService = createMockDataService();
+    it('associateDocumentToParentNoOpsForNoneWithoutCallingTheRefile', async () => {
+      const refile = createMockRefile();
 
-      const result = await associateDocumentToParent(dataService, 'doc-guid-1', null);
+      const result = await associateDocumentToParent(refile, 'doc-guid-1', null);
 
       expect(result.success).toBe(true);
-      expect(dataService.updateRecord).not.toHaveBeenCalled();
+      expect(refile).not.toHaveBeenCalled();
     });
 
     it('useCreateOnSaveAssociationAssociateNoOpsWhenSelectionIsNone', async () => {
-      const dataService = createMockDataService();
-      const { result } = renderHook(() => useCreateOnSaveAssociation({ dataService }));
+      const refile = createMockRefile();
+      const { result } = renderHook(() => useCreateOnSaveAssociation({ refileDocument: refile }));
 
       expect(result.current.association).toBeNull();
 
@@ -200,7 +224,7 @@ describe('CreateOnSaveAssociationPrompt', () => {
       });
 
       expect(outcome?.success).toBe(true);
-      expect(dataService.updateRecord).not.toHaveBeenCalled();
+      expect(refile).not.toHaveBeenCalled();
       expect(result.current.isAssociating).toBe(false);
       expect(result.current.error).toBeNull();
     });
@@ -232,11 +256,11 @@ describe('CreateOnSaveAssociationPrompt', () => {
  */
 function GateHarness(props: {
   navigationService: INavigationService;
-  dataService: IDataService;
+  refileDocument: DocumentRefile;
   documentId: string;
 }) {
   const { onCreateOnSaveComplete, dialogProps } = useCreateOnSaveAssociationGate({
-    dataService: props.dataService,
+    refileDocument: props.refileDocument,
     navigationService: props.navigationService,
   });
   return (
@@ -249,31 +273,13 @@ function GateHarness(props: {
   );
 }
 
-/** Nav-prop discovery fetch mock — resolves sprk_document → sprk_Matter nav prop. */
-function stubNavPropFetch() {
-  const fetchMock = jest.fn().mockResolvedValue({
-    ok: true,
-    json: async () => ({
-      value: [
-        {
-          ReferencingAttribute: 'sprk_matter',
-          ReferencingEntityNavigationPropertyName: 'sprk_Matter',
-          ReferencedEntity: 'sprk_matter',
-        },
-      ],
-    }),
-  });
-  (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as unknown as typeof fetch;
-  return fetchMock;
-}
-
 describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
   describe('picker-renders-in-gate', () => {
     it('gateIsClosedUntilCreateOnSaveCompletes', () => {
       renderLight(
         <GateHarness
           navigationService={createMockNavigationService()}
-          dataService={createMockDataService()}
+          refileDocument={createMockRefile()}
           documentId="doc-guid-1"
         />
       );
@@ -288,7 +294,7 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
       renderLight(
         <GateHarness
           navigationService={createMockNavigationService()}
-          dataService={createMockDataService()}
+          refileDocument={createMockRefile()}
           documentId="doc-guid-1"
         />
       );
@@ -311,11 +317,10 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
   describe('select→setAssociation→associate (with cleanGuid)', () => {
     it('writesTheChosenParentWithACleanGuidWrappedDocumentIdOnConfirm', async () => {
       const user = userEvent.setup();
-      stubNavPropFetch();
-      const dataService = createMockDataService();
+      const refile = createMockRefile();
       // Braced + uppercase parent id from the Xrm lookup, AND a braced + uppercase
       // document id from the server-minted sprk_documentid — both MUST be
-      // cleanGuid-normalized before the @odata.bind / entityset URL.
+      // cleanGuid-normalized before the re-file.
       const navigationService = createMockNavigationService({
         id: '{AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE}',
         entityType: 'sprk_matter',
@@ -325,7 +330,7 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
       renderLight(
         <GateHarness
           navigationService={navigationService}
-          dataService={dataService}
+          refileDocument={refile}
           documentId="{FFFFFFFF-1111-2222-3333-444444444444}"
         />
       );
@@ -338,18 +343,15 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
       await user.click(screen.getByTestId('association-choice-sprk_matter'));
       await user.click(screen.getByTestId('associate-to-step-select-record-button'));
 
-      // Confirm ("Done") → associate(newDocumentId) writes the @odata.bind.
+      // Confirm ("Done") → associate(newDocumentId) re-files the document through the BFF.
       await user.click(screen.getByTestId('association-gate-confirm'));
 
       await waitFor(() => {
-        expect(dataService.updateRecord).toHaveBeenCalledWith(
-          'sprk_document',
+        expect(refile).toHaveBeenCalledWith(
           // documentId cleanGuid-normalized (braces stripped, lowercased)
           'ffffffff-1111-2222-3333-444444444444',
-          {
-            // parent id cleanGuid-normalized inside the @odata.bind entityset URL
-            'sprk_Matter@odata.bind': '/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)',
-          }
+          // parent id cleanGuid-normalized
+          { matterLookup: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' }
         );
       });
 
@@ -363,12 +365,12 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
   describe('none-path-is-a-graceful-no-op (Save never blocked)', () => {
     it('confirmingWithNoneWritesNothingAndClosesTheGate', async () => {
       const user = userEvent.setup();
-      const dataService = createMockDataService();
+      const refile = createMockRefile();
 
       renderLight(
         <GateHarness
           navigationService={createMockNavigationService()}
-          dataService={dataService}
+          refileDocument={refile}
           documentId="doc-guid-1"
         />
       );
@@ -382,12 +384,12 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('create-on-save-association-gate')).not.toBeInTheDocument();
       });
-      expect(dataService.updateRecord).not.toHaveBeenCalled();
+      expect(refile).not.toHaveBeenCalled();
     });
 
     it('skippingTheGateWritesNothingAndLeavesAStandaloneDocument', async () => {
       const user = userEvent.setup();
-      const dataService = createMockDataService();
+      const refile = createMockRefile();
 
       renderLight(
         <GateHarness
@@ -396,7 +398,7 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
             entityType: 'sprk_matter',
             name: 'Smith v. Jones',
           })}
-          dataService={dataService}
+          refileDocument={refile}
           documentId="doc-guid-1"
         />
       );
@@ -412,7 +414,7 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
       await waitFor(() => {
         expect(screen.queryByTestId('create-on-save-association-gate')).not.toBeInTheDocument();
       });
-      expect(dataService.updateRecord).not.toHaveBeenCalled();
+      expect(refile).not.toHaveBeenCalled();
     });
   });
 
@@ -422,7 +424,7 @@ describe('CreateOnSaveAssociationGate (Tier-2c gate hosting)', () => {
       renderDark(
         <GateHarness
           navigationService={createMockNavigationService()}
-          dataService={createMockDataService()}
+          refileDocument={createMockRefile()}
           documentId="doc-guid-1"
         />
       );

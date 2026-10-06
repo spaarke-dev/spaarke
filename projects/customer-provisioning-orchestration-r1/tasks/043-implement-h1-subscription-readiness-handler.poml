@@ -4,7 +4,7 @@
     <title>Implement H1 Subscription Readiness Handler (ARM + Lighthouse Verification)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler'; modifies .cs files; implements pre-Bicep gating handler with subscription-scoped auth surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

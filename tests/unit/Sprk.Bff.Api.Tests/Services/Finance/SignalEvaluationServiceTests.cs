@@ -51,6 +51,7 @@ public class SignalEvaluationServiceTests : IDisposable
         var optionsMock = Options.Create(options);
         return new SignalEvaluationService(
             _dataverseServiceMock.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             optionsMock,
             _telemetry,
             _loggerMock.Object);

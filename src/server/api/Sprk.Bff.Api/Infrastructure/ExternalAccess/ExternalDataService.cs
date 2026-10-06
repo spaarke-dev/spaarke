@@ -56,7 +56,8 @@ public class ExternalDataService
         public List<T>? Value { get; set; }
     }
 
-    private sealed class ProjectRow
+    /// <summary>The project columns the external SPA reads (internal so <see cref="MapProject"/> is testable).</summary>
+    internal sealed class ProjectRow
     {
         [JsonPropertyName("sprk_projectid")] public string? SprkProjectid { get; set; }
         [JsonPropertyName("sprk_projectname")] public string? SprkName { get; set; }
@@ -205,6 +206,7 @@ public class ExternalDataService
         var url = $"{GetApiUrl()}/sprk_projects?$filter={Uri.EscapeDataString(idFilter)}&$select={select}&$orderby=sprk_projectname asc";
 
         var rows = await GetCollectionAsync<ProjectRow>(url, ct);
+        WarnOnEmptySecureFlag(rows);
         return rows.Select(MapProject).ToList();
     }
 
@@ -215,7 +217,9 @@ public class ExternalDataService
         var url = $"{GetApiUrl()}/sprk_projects({projectId})?$select={select}";
 
         var row = await GetSingleAsync<ProjectRow>(url, ct);
-        return row is null ? null : MapProject(row);
+        if (row is null) return null;
+        WarnOnEmptySecureFlag(new[] { row });
+        return MapProject(row);
     }
 
     // ---------------------------------------------------------------------------
@@ -254,27 +258,11 @@ public class ExternalDataService
     /// visible in the SPA's own list.</para>
     /// </remarks>
     public virtual async Task<ExternalDocumentDto> CreateDocumentAsync(
-        Guid projectId, ExternalUploadedFilePointers pointers, CancellationToken ct = default)
+        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId, CancellationToken ct = default)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
-        ArgumentNullException.ThrowIfNull(pointers);
+        var body = BuildDocumentCreatePayload(projectId, pointers, owningTeamId);
 
         var token = await GetAppOnlyTokenAsync(ct);
-
-        var body = new Dictionary<string, object?>
-        {
-            ["sprk_documentname"] = pointers.FileName,
-            ["sprk_filename"] = pointers.FileName,
-            ["sprk_graphitemid"] = pointers.ItemId,
-            ["sprk_graphdriveid"] = pointers.DriveId,
-            ["sprk_Project@odata.bind"] = $"/sprk_projects({projectId})",
-        };
-
-        if (pointers.FileSizeBytes.HasValue)
-            body["sprk_filesize"] = pointers.FileSizeBytes.Value;
-        if (!string.IsNullOrWhiteSpace(pointers.WebUrl))
-            body["sprk_filepath"] = pointers.WebUrl;
 
         var url = $"{GetApiUrl()}/sprk_documents";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
@@ -303,6 +291,60 @@ public class ExternalDataService
             throw new InvalidOperationException("Dataverse returned no document data after create");
 
         return MapDocument(row);
+    }
+
+    /// <summary>
+    /// The COMPLETE create payload for an external upload's <c>sprk_document</c>: the file identity, the project
+    /// bind, and the OWNER (unified-access-control-r2 task 146).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The owner is passed in, and its absence refuses</b> (the <c>OfficeDocumentPersistence</c> pattern,
+    /// PR #1045 F4). The route resolves it from the project through <c>IRecordOwnershipResolver</c> BEFORE any SPE
+    /// write: a document filed to a secure project is owned by the named Secure team, any other by the project's
+    /// business-unit default team. This create is app-only, so without <c>ownerid</c> Dataverse makes the BFF
+    /// application user the owner — in the root business unit, readable by every root-BU user with ordinary depth,
+    /// which is how a secure project's documents were never isolated (C10).</para>
+    /// <para>Pure so a test can read the payload; <see cref="CreateDocumentAsync"/> is a substitution seam.</para>
+    /// </remarks>
+    internal static Dictionary<string, object?> BuildDocumentCreatePayload(
+        Guid projectId, ExternalUploadedFilePointers pointers, Guid owningTeamId)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        ArgumentNullException.ThrowIfNull(pointers);
+        RequireOwner(owningTeamId, "sprk_document");
+
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_documentname"] = pointers.FileName,
+            ["sprk_filename"] = pointers.FileName,
+            ["sprk_graphitemid"] = pointers.ItemId,
+            ["sprk_graphdriveid"] = pointers.DriveId,
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({projectId})",
+            [OwnerBindKey] = $"/teams({owningTeamId})",
+        };
+
+        if (pointers.FileSizeBytes.HasValue)
+            body["sprk_filesize"] = pointers.FileSizeBytes.Value;
+        if (!string.IsNullOrWhiteSpace(pointers.WebUrl))
+            body["sprk_filepath"] = pointers.WebUrl;
+
+        return body;
+    }
+
+    /// <summary>The <c>ownerid</c> bind key every create on this surface carries (task 146).</summary>
+    internal const string OwnerBindKey = "ownerid@odata.bind";
+
+    /// <summary>
+    /// Refuses a create that arrives with no owner — never an app-owned row (task 146, ADR-003). Every route
+    /// resolves the owner first, so this fires only on a programming error.
+    /// </summary>
+    private static void RequireOwner(Guid owningTeamId, string entityLogicalName)
+    {
+        if (owningTeamId == Guid.Empty)
+            throw new InvalidOperationException(
+                $"A {entityLogicalName} create on the external surface must carry its owning team, resolved through "
+                + "IRecordOwnershipResolver from the record it is filed to; refusing to create it app-owned (task 146).");
     }
 
     /// <summary>
@@ -591,15 +633,14 @@ public class ExternalDataService
     /// those are a <c>sprk_todo</c> construct (the 11-entity regarding model). <c>sprk_event</c>
     /// carries a direct project lookup only.
     /// </remarks>
-    public async Task<ExternalEventDto> CreateEventAsync(
-        Guid projectId, CreateExternalEventRequest request, CancellationToken ct = default)
+    // `virtual` per ADR-038 §4 (substitution seam), added by task 146 so the endpoint tests can assert the owner the
+    // route resolved reached the create — and that a refused owner never reached Dataverse at all.
+    public virtual async Task<ExternalEventDto> CreateEventAsync(
+        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId, CancellationToken ct = default)
     {
-        if (projectId == Guid.Empty)
-            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        var body = BuildEventCreatePayload(projectId, request, owningTeamId);
 
         var token = await GetAppOnlyTokenAsync(ct);
-
-        var body = BuildCreateEventBody(projectId, request);
 
         var url = $"{GetApiUrl()}/sprk_events";
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
@@ -641,12 +682,20 @@ public class ExternalDataService
     }
 
     /// <summary>
-    /// The Web API body <see cref="CreateEventAsync"/> POSTs (task 097: the DTO's sprk_name / sprk_status are written
-    /// to the live sprk_eventname / statuscode, with the paired statecode). Internal for tests.
+    /// The COMPLETE create payload for an external calendar event: the caller's fields, the project bind, and the
+    /// OWNER the route resolved from the project (task 146 — the named Secure team for a secure project). Pure so a
+    /// test can read it. Task 097: the DTO's sprk_name / sprk_status are written to the LIVE sprk_eventname / statuscode
+    /// (with the paired statecode) — sprk_event has neither sprk_name nor sprk_status, so the former body was a 400.
     /// <exception cref="ArgumentOutOfRangeException">sprk_status is not in <see cref="ExternalCreatableStatuses"/>.</exception>
     /// </summary>
-    internal static Dictionary<string, object?> BuildCreateEventBody(Guid projectId, CreateExternalEventRequest request)
+    internal static Dictionary<string, object?> BuildEventCreatePayload(
+        Guid projectId, CreateExternalEventRequest request, Guid owningTeamId)
     {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        ArgumentNullException.ThrowIfNull(request);
+        RequireOwner(owningTeamId, "sprk_event");
+
         var status = request.SprkStatus ?? EventStatusCode.Open;
         if (!ExternalCreatableStatuses.Contains(status))
             throw new ArgumentOutOfRangeException(nameof(request), status,
@@ -662,6 +711,7 @@ public class ExternalDataService
 
         // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
         body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+        body[OwnerBindKey] = $"/teams({owningTeamId})";
         return body;
     }
 
@@ -700,6 +750,7 @@ public class ExternalDataService
         TodoRootKind rootKind,
         Guid rootId,
         CreateExternalTodoRequest request,
+        Guid owningTeamId,
         Guid? callerContactId,
         CancellationToken ct = default)
     {
@@ -732,7 +783,8 @@ public class ExternalDataService
 
         // ADR-024: the specific regarding lookup + the 4 resolver fields are written ATOMICALLY in
         // this one request — never in a follow-up PATCH.
-        var body = BuildTodoCreatePayload(request, binding, rootId, rootDisplayName, recordTypeRef?.Id, callerContactId);
+        var body = BuildTodoCreatePayload(
+            request, binding, rootId, rootDisplayName, recordTypeRef?.Id, owningTeamId, callerContactId);
         if (!body.ContainsKey(AssignedToBindKey))
         {
             _logger.LogWarning(
@@ -794,8 +846,13 @@ public class ExternalDataService
         Guid rootId,
         string rootDisplayName,
         Guid? recordTypeRefId,
+        Guid owningTeamId,
         Guid? assignedToContactId = null)
     {
+        // Task 146: the owner the route resolved from the ROOT (the named Secure team for a secure root, else the
+        // root's business-unit default team). Checked first, so a payload without one is never built.
+        RequireOwner(owningTeamId, "sprk_todo");
+
         var body = new Dictionary<string, object?>();
         if (!string.IsNullOrWhiteSpace(request.SprkName))
             body["sprk_name"] = request.SprkName;
@@ -832,6 +889,8 @@ public class ExternalDataService
 
         // Non-fatal when absent, mirroring the SDK path: correctness is intact, only the
         // cross-entity-view icon is lost. The caller logs the warning (it owns the lookup).
+
+        body[OwnerBindKey] = $"/teams({owningTeamId})";
 
         // Task 152: the person this to-do is FOR — the calling contact (the triggering person). PascalCase navigation
         // property, the same bind every client to-do writer uses (CreateTodoWizard/todoService.ts).
@@ -1211,13 +1270,34 @@ public class ExternalDataService
     // Row → DTO mappers
     // ---------------------------------------------------------------------------
 
-    private static ExternalProjectDto MapProject(ProjectRow r) => new()
+    /// <summary>Logs every project row whose <c>sprk_issecure</c> came back EMPTY (shown as secure).</summary>
+    private void WarnOnEmptySecureFlag(IEnumerable<ProjectRow> rows)
+    {
+        var empty = rows.Where(r => r.SprkIssecure is null).Select(r => r.SprkProjectid ?? "(no id)").ToList();
+        if (empty.Count == 0) return;
+
+        _logger.LogError(
+            "[EXT-DATA] sprk_issecure came back EMPTY on {Count} project(s) ({ProjectIds}); shown as SECURE (fail closed). "
+            + "This service has likely lost its field-level-security Read on the column "
+            + "(scripts/Set-SecureFlagFieldSecurity.ps1 -Verify), or the row predates the backfill "
+            + "(scripts/Repair-SecureFlagNulls.ps1).",
+            empty.Count, string.Join(", ", empty));
+    }
+
+    /// <remarks>
+    /// <b>An EMPTY <c>sprk_issecure</c> maps to <c>true</c></b> (task 150, round 17 item 3: fail closed, never "not
+    /// secure"). Every row holds true or false since the task 150 backfill, and the column is field-secured, so an
+    /// empty value means this app identity's field-level Read was lost and the real value was masked. The external SPA
+    /// uses the value only to label the project; labelling a possibly-secure project as secure is the safe direction,
+    /// and <see cref="WarnOnEmptySecureFlag"/> names the cause in the log.
+    /// </remarks>
+    internal static ExternalProjectDto MapProject(ProjectRow r) => new()
     {
         SprkProjectid = r.SprkProjectid ?? "",
         SprkName = r.SprkName ?? "",
         SprkReferencenumber = r.SprkReferencenumber,
         SprkDescription = r.SprkDescription,
-        SprkIssecure = r.SprkIssecure,
+        SprkIssecure = r.SprkIssecure ?? true,
         SprkStatus = r.SprkStatus,
         Createdon = r.Createdon,
         Modifiedon = r.Modifiedon,

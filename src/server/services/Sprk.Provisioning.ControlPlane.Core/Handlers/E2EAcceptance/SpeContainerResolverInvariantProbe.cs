@@ -1,10 +1,42 @@
 // -----------------------------------------------------------------------------
+// ⚠️ RETIRED 2026-08-26 (Wave G-6 on-disk-with-banner convention) — task 204c B07.
+//
+// The I4 (InvariantKind.I4SpeContainerResolver) registration in
+// E2EAcceptanceModule.cs was swapped from THIS class to
+// SpeContainerTenantDerivationInvariantProbe (task 204c B07) on 2026-08-26.
+// Owner directive SESSION 12 2026-08-26 authorized the replacement per the
+// task 204c dispatch principle: "do NOT trust RunStatus.HandlerReports;
+// re-read the underlying Azure/Cosmos/Graph/SPE surface directly."
+//
+// The new probe reads the DEPLOYED App Service config VALUE directly via ARM
+// `Microsoft.Web/sites/{name}/config/appsettings/list` and catches the
+// silent-fail class this probe cannot: a compromised deploy that hardcodes
+// SharePointEmbedded__ContainerTypeId in Bicep (bypassing KV) but whose
+// runtime BFF diagnostic still echoes plausibly (resolvedFromLiteral=false).
+// THIS probe would PASS in that scenario; the new probe FAILS by inspecting
+// the app-setting value directly. See SpeContainerTenantDerivationInvariantProbe.cs
+// § SILENT-FAIL AUDIT for the failure-mode delta.
+//
+// This class is retained on disk (Wave G-6 retirement convention) rather than
+// deleted so its BFF-diagnostic coverage stays reference-visible: it verifies
+// a COMPLEMENTARY class of leak (the resolver returns another tenant's
+// container-id via secret misconfig, not a hardcoded Bicep literal). If a
+// post-186 audit determines both angles should run in parallel, this class
+// can be re-registered under a DISTINCT InvariantKind (composite disallows
+// duplicate Kind, so a new `InvariantKind.I4SpeContainerRuntimeAssertion`
+// or similar would need to be added).
+//
+// DO NOT re-register this class under the current I4SpeContainerResolver Kind
+// — the composite would fail with InvalidOperationException on duplicate Kind
+// registration at DI composition, breaking the entire H13 aggregate gate.
+// -----------------------------------------------------------------------------
 // SpeContainerResolverInvariantProbe.cs
 //
 // H13 I4 REAL invariant probe (task 176, Phase C'' Wave G-7 Batch G-7A2.1)
 // REPLACING the wave-C4 PlaceholderInvariantVerifier's I4 branch (which
 // returned InfraFault unconditionally). Composed into the aggregate
 // IE2EInvariantVerifier via CompositeInvariantVerifier (task 174 seam).
+// [RETIRED — SUPERSEDED BY SpeContainerTenantDerivationInvariantProbe, task 204c B07 2026-08-26]
 //
 // PURPOSE (spec.md FR-31 / design.md §4D I4):
 //   Every SPE container ID handed to the customer's BFF Graph SDK MUST derive

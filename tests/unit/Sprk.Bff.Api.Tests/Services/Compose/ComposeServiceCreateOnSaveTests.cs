@@ -32,6 +32,7 @@ using System.Threading.Tasks;
 using Azure.Messaging.ServiceBus;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -40,7 +41,6 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
-using Microsoft.Extensions.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
@@ -107,7 +107,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
         ComposeServiceCollaborators.Probe().Object,
-        documentProfileAi: _documentProfile.Object);
+        documentProfileAi: _documentProfile.Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     // Fire-and-forget SUT (compose-r2): profiling is DISPATCHED to a detached DI scope, not awaited.
     // A real IServiceScopeFactory whose provider resolves the supplied gated fake facade lets us assert
@@ -129,6 +129,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             NullLogger<ComposeService>.Instance,
             BuildContainerResolver(),
             BuildAccessProbe().Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             documentProfileAi: facade,   // non-null availability gate
             scopeFactory: scopeFactory);
     }
@@ -751,7 +752,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
         ComposeServiceCollaborators.Probe().Object,
         documentProfileAi: _documentProfile.Object,
-        memoryCapture: memoryCapture);
+        memoryCapture: memoryCapture, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     // Extend the harness's session fake so the bound session carries DefinedTermsTracking. The base
     // ctor setup returns null; CaptureDocumentMemoryAsync loads the session via this SAME

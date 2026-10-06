@@ -97,7 +97,9 @@ public sealed class RedisScheduledJobLease : IScheduledJobLease
                 return ScheduledJobLeaseGrant.AlreadyDispatched;
             }
 
-            await db.StringSetAsync(occurrenceKey, occurrence.UtcTicks, expiry: OccurrenceMarkerRetention)
+            // keepTtl: false explicitly — the marker's own expiry is what lets it lapse (and it pins the overload:
+            // StackExchange.Redis 2.13 added an Expiration-typed overload that a bare `expiry:` would bind to).
+            await db.StringSetAsync(occurrenceKey, occurrence.UtcTicks, expiry: OccurrenceMarkerRetention, keepTtl: false)
                 .ConfigureAwait(false);
             return ScheduledJobLeaseGrant.Granted(token);
         }

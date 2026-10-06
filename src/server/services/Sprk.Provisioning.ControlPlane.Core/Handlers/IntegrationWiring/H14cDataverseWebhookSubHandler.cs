@@ -9,9 +9,8 @@
 //   Dataverse `serviceendpoint` webhook record pointing at the customer's
 //   BFF webhook receiver, using the SAME H4-provisioned HMAC signing key
 //   (`Communication-Webhook-SigningKey`) H14b consumes for Graph subscriptions
-//   — one canonical signing secret shared across both webhook consumers per
-//   the StaticKvSecretManifest comment ("FR-19 (H14) — Communication module
-//   webhook signing key").
+//   — one canonical signing secret shared across both webhook consumers
+//   (manifest.yaml entry `Communication-Webhook-SigningKey`, FR-19).
 //
 // PARENT-OWNS-COSMOS DESIGN: see H14aExchangePolicySubHandler.cs's file
 // header for the full rationale — identical here. This sub-handler touches

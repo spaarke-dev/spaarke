@@ -45,10 +45,14 @@
 import { useState, useRef, useCallback } from 'react';
 import {
   applyResolverFields,
+  createChildRecordViaBff,
   TODO_REGARDING_CATALOG,
   type INavPropEntry,
   type IPolymorphicWebApi,
 } from '@spaarke/ui-components/services';
+// The package's BFF convention (briefingService, DailyBriefingApp): @spaarke/auth's authenticatedFetch with relative
+// /api paths.
+import { authenticatedFetch } from '@spaarke/auth';
 import type { IWebApi, NotificationItem, NotificationPriority } from '../types/notifications';
 
 // ---------------------------------------------------------------------------
@@ -193,7 +197,21 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
  *                 cached in a ref for the hook's lifetime.
  * @returns Object with createTodo, isCreated, isPending, getError, getCreatedId functions.
  */
-export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): UseInlineTodoCreateResult {
+/**
+ * How the hook creates the To Do: through the BFF (UAC-r2 task 147 r1, owner round 28 item 1 — G5: the server decides the
+ * owner, so a To Do regarding a secure record is owned by its Secure Record Owners team, never by the user). Injectable for
+ * tests.
+ */
+export type CreateChildRecordFn = (table: string, payload: Record<string, unknown>) => Promise<string>;
+
+const createThroughBff: CreateChildRecordFn = (table, payload) =>
+  createChildRecordViaBff(authenticatedFetch, '', table, payload);
+
+export function useInlineTodoCreate(
+  webApi: IWebApi | null,
+  userId?: string,
+  createChildRecord: CreateChildRecordFn = createThroughBff
+): UseInlineTodoCreateResult {
   const [statusMap, setStatusMap] = useState<Map<string, TodoCreateStatus>>(() => new Map());
   const errorsRef = useRef<Map<string, string>>(new Map());
   const createdIdRef = useRef<Map<string, string>>(new Map());
@@ -314,10 +332,11 @@ export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): Us
           }
         }
 
-        // 3. Create the sprk_todo record (NEVER sprk_event).
-        const createResult = await webApi.createRecord('sprk_todo', record);
-        if (createResult?.id) {
-          createdIdRef.current.set(item.id, createResult.id);
+        // 3. Create the sprk_todo record (NEVER sprk_event) — through the BFF (task 147 r1): the server decides its owner.
+        //    A refusal surfaces the server's message on this item.
+        const createdId = await createChildRecord('sprk_todo', record);
+        if (createdId) {
+          createdIdRef.current.set(item.id, createdId);
         }
 
         // Success
@@ -348,7 +367,7 @@ export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): Us
         });
       }
     },
-    [webApi, userId]
+    [webApi, userId, createChildRecord]
   );
 
   const isCreated = useCallback((itemId: string): boolean => statusMap.get(itemId) === 'created', [statusMap]);

@@ -74,7 +74,8 @@ public class MessageAttachmentMaterializerTests
     private static MessageAttachmentMaterializer CreateSut(
         Mock<ISpeFileOperations> spe,
         Mock<IGenericEntityService> generic,
-        string? archiveContainerId = DriveId) =>
+        string? archiveContainerId = DriveId,
+        Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble? ownership = null) =>
         new(
             spe.Object,
             generic.Object,
@@ -86,6 +87,7 @@ public class MessageAttachmentMaterializerTests
                 WebhookSigningKey = "key",
                 ArchiveContainerId = archiveContainerId,
             }),
+            ownership ?? new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
             NonSecureContainerResolver());
 

@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
@@ -50,6 +51,9 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
     private static readonly Guid OtherMatter = Guid.Parse("55555555-5555-5555-5555-555555555555");
     private static readonly Guid InScopeWorkAssignment = Guid.Parse("66666666-6666-6666-6666-666666666666");
     private static readonly Guid OtherWorkAssignment = Guid.Parse("77777777-7777-7777-7777-777777777777");
+
+    /// <summary>The owning team every payload is built with (task 146: a create without one refuses).</summary>
+    private static readonly Guid OwnerTeam = Guid.Parse("0f0f0f0f-0146-4146-8146-000000000146");
 
     public ExternalTodoScopeTests(ExternalTodoScopeTestFixture fixture)
     {
@@ -787,7 +791,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var body = ExternalDataService.BuildTodoCreatePayload(
             new CreateExternalTodoRequest { SprkName = "n" },
             ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Project)!,
-            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "Display", null, contactId);
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "Display", null, OwnerTeam, contactId);
 
         body.Should().ContainKey(ExternalDataService.AssignedToBindKey)
             .WhoseValue.Should().Be($"/contacts({contactId:D})");
@@ -801,7 +805,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var body = ExternalDataService.BuildTodoCreatePayload(
             new CreateExternalTodoRequest { SprkName = "n" },
             ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Matter)!,
-            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "Display", null, assignedToContactId: null);
+            Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), "Display", null, OwnerTeam, assignedToContactId: null);
 
         body.Should().NotContainKey(ExternalDataService.AssignedToBindKey);
     }
@@ -817,7 +821,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var binding = ExternalDataService.TryGetRootBinding(kind)!;
 
         var body = ExternalDataService.BuildTodoCreatePayload(
-            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "Display Name", null);
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "Display Name", null, OwnerTeam);
 
         body.Should().ContainKey(expectedBindKey);
         body[expectedBindKey].Should().Be($"{expectedEntitySetPrefix}{rootId})");
@@ -849,7 +853,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var binding = ExternalDataService.TryGetRootBinding(kind)!;
 
         var body = ExternalDataService.BuildTodoCreatePayload(
-            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "The Parent", null);
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "The Parent", null, OwnerTeam);
 
         body["sprk_regardingrecordid"].Should().Be(rootId.ToString("D").ToLowerInvariant());
         body["sprk_regardingrecordname"].Should().Be("The Parent");
@@ -867,7 +871,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var binding = ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.Matter)!;
 
         var body = ExternalDataService.BuildTodoCreatePayload(
-            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "M", recordTypeRefId);
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, rootId, "M", recordTypeRefId, OwnerTeam);
 
         body["sprk_RegardingRecordType@odata.bind"].Should()
             .Be($"/sprk_recordtype_refs({recordTypeRefId})");
@@ -886,7 +890,7 @@ public sealed class ExternalTodoScopeTests : IClassFixture<ExternalTodoScopeTest
         var binding = ExternalDataService.TryGetRootBinding(ExternalDataService.TodoRootKind.WorkAssignment)!;
 
         var body = ExternalDataService.BuildTodoCreatePayload(
-            new CreateExternalTodoRequest { SprkName = "n" }, binding, Guid.NewGuid(), "W", null);
+            new CreateExternalTodoRequest { SprkName = "n" }, binding, Guid.NewGuid(), "W", null, OwnerTeam);
 
         body.Should().NotContainKey("sprk_RegardingRecordType@odata.bind");
         body.Should().ContainKey(binding.BindKey);
@@ -1028,6 +1032,15 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 {
     public StubExternalDataService Data { get; } = new();
 
+    /// <summary>
+    /// Task 146: the create routes resolve the to-do's owner from its root before writing. The scope tests here
+    /// assert the AUTHORIZATION gate, so the resolver answers every root with one team at its module boundary. The
+    /// ownership rules are pinned by RecordOwnershipResolverTests; the external routes' owners (to-do on each root type,
+    /// event, document upload — secure, ordinary and refused) by the data-mutation SecureChildOwnershipExternalTests,
+    /// which drives these same routes over the REAL resolver (task 146 r1, verifier item 7).
+    /// </summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     private readonly StubCallerPrincipalResolver _resolver = new();
 
     public CallerPrincipal? Principal
@@ -1041,6 +1054,9 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
     {
         Data.Reset();
         Principal = null;
+        Ownership.TeamId = Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId;
+        Ownership.Fault = null;
+        Ownership.Requests.Clear();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -1049,6 +1065,8 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         builder.ConfigureTestServices(services =>
         {
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
             services.AddScoped<ICallerPrincipalResolver>(_ => _resolver);
             // Overrides the AddHttpClient<ExternalDataService> typed-client registration
             // (ExternalAccessModule.cs:59) — last registration wins for GetRequiredService.
@@ -1095,6 +1113,9 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
         public (ExternalDataService.TodoRootKind Kind, Guid RootId)? LastCreateArgs { get; private set; }
         public CreateExternalTodoRequest? LastCreateRequest { get; private set; }
 
+        /// <summary>Task 146: the owning team the route handed to the create.</summary>
+        public Guid? LastCreateOwningTeamId { get; private set; }
+
         public void Reset()
         {
             TodoLookupResult = (ExternalDataService.TodoRootKind.None, null, null);
@@ -1107,6 +1128,7 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
             CreateCallCount = 0;
             LastCreateArgs = null;
             LastCreateRequest = null;
+            LastCreateOwningTeamId = null;
             LastCreateCallerContactId = null;
         }
 
@@ -1123,11 +1145,12 @@ public sealed class ExternalTodoScopeTestFixture : ExternalCollaborationTestFixt
 
         public override Task<ExternalTodoDto> CreateTodoAsync(
             ExternalDataService.TodoRootKind rootKind, Guid rootId,
-            CreateExternalTodoRequest request, Guid? callerContactId, CancellationToken ct = default)
+            CreateExternalTodoRequest request, Guid owningTeamId, Guid? callerContactId, CancellationToken ct = default)
         {
             CreateCallCount++;
             LastCreateArgs = (rootKind, rootId);
             LastCreateRequest = request;
+            LastCreateOwningTeamId = owningTeamId;
             LastCreateCallerContactId = callerContactId;
             return Task.FromResult(new ExternalTodoDto
             {

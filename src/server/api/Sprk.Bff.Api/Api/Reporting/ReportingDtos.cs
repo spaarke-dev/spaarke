@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace Sprk.Bff.Api.Api.Reporting;
 
 /// <summary>
@@ -6,22 +8,28 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// </summary>
 /// <param name="Token">The embed token string (not a bearer token — PBI-specific format).</param>
 /// <param name="EmbedUrl">The embed URL for the report (from the PBI REST API).</param>
-/// <param name="ReportId">The Power BI report GUID.</param>
+/// <param name="ReportId">The Power BI report GUID (derived server-side from the catalog row — never client input).</param>
 /// <param name="Expiry">UTC expiry of the embed token (typically ~1 hour from issue).</param>
 /// <param name="RefreshAfter">
 ///   UTC time at which the client should proactively call <c>report.setAccessToken()</c> to
 ///   refresh the embed token. Set to 80% of the token's remaining lifetime, so the refresh
 ///   happens before expiry rather than at or after it.
 /// </param>
+/// <param name="WorkspaceId">
+///   The Power BI workspace the report lives in — derived server-side from the <c>sprk_report</c> catalog row
+///   (unified-access-control-r2 task 166 r1). Informational: the client never sends it back (task 166 r2 removed the
+///   in-editor Save As registration it was once returned for; a copy is a server-side clone of a catalog row).
+/// </param>
 public record EmbedConfig(
     string Token,
     string EmbedUrl,
     Guid ReportId,
     DateTimeOffset Expiry,
-    DateTimeOffset RefreshAfter);
+    DateTimeOffset RefreshAfter,
+    Guid WorkspaceId = default);
 
 /// <summary>
-/// Lightweight report descriptor returned by list/get operations.
+/// Lightweight report descriptor returned by the Power BI create/get operations.
 /// Shields callers from Microsoft.PowerBI.Api SDK types (ADR-007).
 /// </summary>
 /// <param name="Id">The Power BI report GUID.</param>
@@ -35,8 +43,10 @@ public record PowerBiReport(
     Guid DatasetId);
 
 /// <summary>
-/// Export format options for Power BI report export operations.
+/// Export format options for Power BI report export operations. Serialized as its NAME ("PDF" / "PPTX") — the
+/// Reporting client sends the name (task 166 r1: without the converter a "PDF" body failed to bind).
 /// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter<ExportFormat>))]
 public enum ExportFormat
 {
     /// <summary>Export as a PDF document.</summary>
@@ -48,30 +58,45 @@ public enum ExportFormat
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Request models (used by ReportingEndpoints.cs)
+//
+// unified-access-control-r2 task 166 r1 (owner round 21 item 2, option A): EVERY report id on the wire is the
+// sprk_report CATALOG ROW id. The Power BI report id, workspace id and dataset id are derived server-side from that
+// row, which is read AS THE CALLER — the client can no longer name a workspace, a Power BI report or a dataset.
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>
-/// Request body for POST /api/reporting/reports.
-/// Creates a new report in the specified Power BI workspace by cloning a template report.
+/// Request body for <c>POST /api/reporting/reports</c> — a new catalog entry derived from an existing one the caller
+/// can read.
 /// </summary>
-/// <param name="WorkspaceId">Target Power BI workspace GUID.</param>
 /// <param name="Name">Display name for the new report.</param>
-/// <param name="DatasetId">Dataset GUID the cloned report will be bound to.</param>
-/// <param name="TemplateReportId">Source report GUID to clone the canvas from.</param>
+/// <param name="SourceReportId">
+///   The <c>sprk_report</c> row the new report is based on. Its workspace and dataset are inherited, and the server
+///   CLONES its Power BI report.
+/// </param>
+/// <remarks>
+/// Task 166 r2 (owner round 23 item 2): the optional <c>PbiReportId</c> ("Save As" registration of a report the client
+/// named) is REMOVED. Embed tokens are view-only, so the SDK's saveAs could never create a report; the property could
+/// only point a new catalog row at an existing Power BI report (an alias). A client that still sends it is ignored
+/// (System.Text.Json skips unknown members) and gets a clone.
+/// </remarks>
 public record CreateReportRequest(
-    Guid WorkspaceId,
     string Name,
-    Guid DatasetId,
-    Guid TemplateReportId);
+    Guid SourceReportId);
+
+/// <summary>Response for <c>POST /api/reporting/reports</c>: the new catalog row.</summary>
+/// <param name="ReportId">The new <c>sprk_report</c> row id.</param>
+/// <param name="EmbedUrl">The new report's Power BI embed URL.</param>
+/// <param name="Name">The display name as stored.</param>
+public record CreateReportResponse(
+    Guid ReportId,
+    string EmbedUrl,
+    string Name);
 
 /// <summary>
-/// Request body for PUT /api/reporting/reports/{reportId}.
-/// Updates catalog metadata for an existing report entry.
+/// Request body for <c>PATCH /api/reporting/reports/{reportId}</c> — updates the catalog row (as the caller).
 /// </summary>
-/// <param name="WorkspaceId">Power BI workspace GUID containing the report.</param>
-/// <param name="Name">Updated display name for the report (optional — pass null to leave unchanged).</param>
+/// <param name="Name">Updated display name (optional — null keeps the current name and only touches the row).</param>
 public record UpdateReportRequest(
-    Guid WorkspaceId,
     string? Name);
 
 /// <summary>
@@ -81,12 +106,10 @@ public record UpdateReportRequest(
 /// <c>Microsoft.PowerBI.Api.Models.ExportReportRequest</c> used internally by
 /// <see cref="ReportingEmbedService"/>.
 /// </summary>
-/// <param name="WorkspaceId">Power BI workspace GUID containing the report.</param>
-/// <param name="ReportId">Report GUID to export.</param>
+/// <param name="ReportId">The <c>sprk_report</c> catalog row id to export.</param>
 /// <param name="Format">Output format: <see cref="ExportFormat.PDF"/> or <see cref="ExportFormat.PPTX"/>.</param>
-/// <param name="FileName">Optional suggested file name (without extension). Defaults to report-{reportId}.</param>
+/// <param name="FileName">Optional suggested file name (without extension). Defaults to the report's name.</param>
 public record ReportingExportRequest(
-    Guid WorkspaceId,
     Guid ReportId,
     ExportFormat Format,
     string? FileName = null);
@@ -94,6 +117,24 @@ public record ReportingExportRequest(
 // ─────────────────────────────────────────────────────────────────────────────
 // Response models (used by ReportingEndpoints.cs)
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// <summary>
+/// One <c>sprk_report</c> catalog entry the caller can read — the shape the Reporting client's
+/// <c>ReportCatalogItem</c> expects (task 166 r1).
+/// </summary>
+/// <param name="Id">The <c>sprk_report</c> row id — the ONLY report id the client ever sends back.</param>
+/// <param name="Name">Display name.</param>
+/// <param name="EmbedUrl">The Power BI embed URL recorded on the row (empty when not recorded).</param>
+/// <param name="DatasetId">The Power BI dataset id recorded on the row (informational).</param>
+/// <param name="Category">Financial | Operational | Compliance | Documents | Custom.</param>
+/// <param name="IsCustom">True for a user-created report.</param>
+public record ReportCatalogItem(
+    Guid Id,
+    string Name,
+    string EmbedUrl,
+    string? DatasetId,
+    string Category,
+    bool IsCustom);
 
 /// <summary>
 /// Response for GET /api/reporting/status.

@@ -80,7 +80,7 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     /// <summary>A retained-original carrier whose STYLES PART carries a distinctive custom style —
     /// the oracle that the save rendered INTO the carrier (parts preserved) rather than synthesizing a

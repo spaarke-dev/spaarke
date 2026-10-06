@@ -58,7 +58,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 /// </summary>
 public sealed class StateReconcilerServiceTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
 
     // -----------------------------------------------------------------------
@@ -91,6 +91,9 @@ public sealed class StateReconcilerServiceTests
     [Fact]
     public async Task Tick_WithH2aCompleted_EnqueuesH2b_H4_H5_ThreeWayFanOut()
     {
+        // H2a completion unlocks 3 handlers: H2b (AI Search) + H4 (customer KV) +
+        // H5 (Dataverse env). T226 (2026-09-30) retired H4-shared (the 4th, from
+        // HANDLER-01 Wave 2) — every customer secret comes from its own resources.
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
         var scanner = new StubActiveRunScanner(new[] { run });
         var enqueuer = new DedupingRecordingEnqueuer();
@@ -101,7 +104,7 @@ public sealed class StateReconcilerServiceTests
         enqueuer.TotalCalls.Should().Be(3);
         enqueuer.DistinctEnvelopes.Select(e => e.HandlerId).Should().BeEquivalentTo(
             new[] { "H2b", "H4", "H5" },
-            "design.md §4.1 3-way fan-out after H2a.");
+            "design.md §4.1: 3-way fan-out after H2a (H4-shared retired T226).");
     }
 
     // -----------------------------------------------------------------------
@@ -133,6 +136,7 @@ public sealed class StateReconcilerServiceTests
         // collapses to 3 distinct MessageIds. This is EXACTLY the production
         // Service Bus dedup contract: identical envelopes -> identical
         // MessageId -> queue retains one.
+        // 3-way fan-out after H2a (H4-shared retired T226).
         sharedEnqueuer.TotalCalls.Should().Be(6,
             "each of 2 reconciler instances sends 3 envelopes.");
         sharedEnqueuer.DistinctMessageIds.Should().HaveCount(3,
@@ -231,7 +235,7 @@ public sealed class StateReconcilerServiceTests
     [Fact]
     public async Task Tick_EnqueuerThrowsForOneHandler_OtherHandlersStillEnqueue()
     {
-        // Sibling-isolation: an enqueue failure on one handler in a 3-way
+        // Sibling-isolation: an enqueue failure on one handler in the 3-way
         // fan-out must not block the other two.
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
         var scanner = new StubActiveRunScanner(new[] { run });
@@ -373,7 +377,7 @@ public sealed class StateReconcilerServiceTests
             RunId = TestRunId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
         };
@@ -400,6 +404,9 @@ public sealed class StateReconcilerServiceTests
         public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs) => _runs = runs.ToList();
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+        // Bucket B MED#12 SESSION 18: reconciler tests don't exercise the sweep.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ProvisioningRun>>(Array.Empty<ProvisioningRun>());
     }
 
     private sealed class ThrowingActiveRunScanner : IActiveRunScanner
@@ -407,6 +414,9 @@ public sealed class StateReconcilerServiceTests
         private readonly Exception _exception;
         public ThrowingActiveRunScanner(Exception exception) => _exception = exception;
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
+            => throw _exception;
+        // Bucket B MED#12 SESSION 18: throwing scanner throws on this path too.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
             => throw _exception;
     }
 

@@ -1,0 +1,603 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="224" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Item 3 (D-12) — rename `TenancyModel.Model1Shared` → `Model1` + `Model2Dedicated` → `Model2`; update `sprk_tenancymodel` Dataverse option-set labels; retire T223 H12c-string preservation invariant (greenfield: no completed phases to preserve)</title>
+    <phase>D-12/D-13 remediation — INCOMING-D12-D13-REMEDIATION.md §5 Item 3 (of 4); depends on Task 223 (Item 2 landed 2026-09-29 commit 31b648098). Sequencing: Item 4 (Task 225 — retire model1-*.bicep + associated code paths) follows T224.</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-cutting rename touching TenancyModel enum + ~7 handler branch sites (H1/H2b/H12c/H13/ArmCostEnvelopeChecker/AiSearchTenantFilterInvariantProbe/RunsEndpoints via KnownTenancyModels) + ~37 test-fixture `nameof()` sites (H3EntraAppRegHandlerTests + A42FicReconciliationTests + H12cRuntimeReferencesHandlerTests + ArmCostEnvelopeCheckerTests + AiSearchTenantFilterInvariantProbeTests + H1SubscriptionReadinessHandlerTests + TenancyModelParserTests) + ~11 inline comment references + Dataverse option-set labels + Extend-DataverseEnvironmentSchema-v3.3.ps1 script; tags include `auth`+`provisioning`+`dataverse`+`testing`; modifies `tests/**` (root CLAUDE.md §8 test-modifying unconditional-FULL override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully-specified mechanical rename; low ambiguity; minimal design decisions (all resolved via owner AskUserQuestion at task filing time — see &lt;owner-decisions&gt; below). Sonnet @ high is correct; xhigh reserved for the complex-but-fully-specified brownfield-migration bucket, and T224 is simpler than T223 (T223 introduced the enum + parser; T224 renames its members).</model-tier-reason>
+    <effort>high</effort>
+    <tags>auth, provisioning, l2-controlplane, provisioning-handler, dataverse, testing, d-12, tenancy-model-rename, mechanical-migration</tags>
+    <deps>223</deps>
+  </metadata>
+
+  <owner-decisions>
+    Resolved 2026-09-29 EOD via AskUserQuestion at Task 224 filing time (root CLAUDE.md §6 human escalation):
+
+    1. **Option-set string labels** (Q1): `Model1` + `Model2` (simplest). New Model 1 = Spaarke-hosted dedicated stamp;
+       new Model 2 = Customer-hosted dedicated stamp. The `-Shared`/`-Dedicated` qualifiers are dropped entirely.
+       Rationale: shortest, cleanest labels; ambiguity is resolved by adjacent Profile column.
+
+    2. **H12c strategy** (Q2 → owner clarification): "we don't have existing customers, so what needs to be done?"
+       Since Task 186 (first live E2E dispatch) has not fired and Item 3 is a HARD blocker before it, the production
+       Cosmos `ProvisioningRun.CompletedPhases[phase='H12c']` array is EMPTY across all customers. Therefore:
+       - **No H12c migration handler needed** (no completed phases to rewrite)
+       - **No compat shim needed** (no legacy string values to preserve)
+       - **T223's "H12c idempotency-key format byte-for-byte preservation" invariant is RETIRED at Task 224** — it
+         was BINDING only for as long as any pre-Item-3 completed H12c phase existed; that condition is not
+         satisfied, so the invariant is spent.
+       - Dev/test Cosmos rows accept invalidation as a natural consequence (throwaway data).
+
+    3. **Item 3 vs Item 4 scope split** (implicit; codified here for the executor's clarity): Task 224 is a
+       MECHANICAL RENAME only. Handler branches retain their current semantics (Model1 branch = former
+       shared-platform code path; Model2 branch = former dedicated code path). Task 225 (Item 4) will retire the
+       shared-platform code paths (H2b HandleModel1BranchAsync, SharedPlatformOpenAiEndpoint option, model1-*.bicep
+       across seven surfaces) so both Model1 and Model2 route to the dedicated code path post-Item-4. This
+       intermediate transitional state (T224 landed, T225 not yet) is acceptable — no customers exist to be
+       misrouted.
+  </owner-decisions>
+
+  <goal>
+    Rename `TenancyModel.Model1Shared` → `TenancyModel.Model1` + `TenancyModel.Model2Dedicated` → `TenancyModel.Model2`
+    across the entire ControlPlane codebase. Update the `sprk_tenancymodel` Dataverse option-set labels (values 0/1
+    preserved for schema-integer alignment; labels change to `"Model1"` / `"Model2"`). Retire Task 223's H12c
+    idempotency-key byte-for-byte preservation invariant + its two dedicated `TenancyModelParserTests.EnumToString_*`
+    tripwire tests (which pin the historical strings). Sweep all test-fixture `nameof(TenancyModel.Model1Shared)` /
+    `Model2Dedicated` references + all inline-comment mentions of the old string names.
+
+    NOT in scope (Item 4 = Task 225 territory):
+    - Retire `HandleModel1BranchAsync` (H2b) + `SharedPlatformOpenAiEndpoint` option (RuntimeReferencesOptions) +
+      other shared-platform code paths
+    - Retire `model1-*.bicep` + `bff-runtime-rbac.bicep` `sprk-{env}-shared-bff-uami` + `controlplane-subscription-rbac.bicep`
+      fleet-sub assumption
+    - `bicep-e2e-dry-run.ps1` Assertion 8 (`Model1SharedDeferredCallerFix`) + `publish-provisioning-arm-artifacts.yml`
+      + `provisioning-arm-manifest.json` schema update
+    - Redirect NEW Model1 handler semantic from shared-platform → dedicated (H2b/H12c branch bodies)
+
+    NOT in scope (Section 6 territory):
+    - `scripts/provisioning-prereqs/prereqs.yaml` PRQ-E-05/PRQ-E-06/PRQ-C-02
+    - `scripts/canonical-secret-catalog/manifest.yaml`
+    - `scripts/provisioning/Seed-PlatformKeyVault.ps1:402-403`
+    - `infrastructure/bicep/modules/controlplane-worker-app-service.bicep:120,123,278,283`
+
+    Post-T224 result: enum members are `Model1` + `Model2`; all string comparisons + `nameof()` references use the
+    new names; all H12c idempotency keys built AFTER T224 embed `"Model1"` or `"Model2"` (no legacy customers so no
+    key drift); Dataverse `sprk_tenancymodel` option-set displays `Model1` / `Model2` in the maker UI.
+  </goal>
+
+  <knowledge>
+    <files>
+      <!-- BINDING context -->
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md</file>
+      <file>projects/unified-access-control-r2/notes/D-12-code-branch-inventory.md</file>
+      <file>projects/unified-access-control-r2/notes/D-12-deployment-model-redefinition.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+
+      <!-- Root binding rules -->
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+
+      <!-- ADRs -->
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+
+      <!-- Prior Task 223 for context + design continuity (retiring its H12c preservation invariant) -->
+      <file>projects/customer-provisioning-orchestration-r1/tasks/223-item2-tenancy-model-enum-parse-or-reject.poml</file>
+
+      <!-- Files to be modified — the enum + parser + tests -->
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/TenancyModel.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/TenancyModelParserTests.cs</file>
+
+      <!-- Files to be modified — Dataverse option-set + schema script -->
+      <file>scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1</file>
+
+      <!-- Files to be modified — handlers with switch cases -->
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/FileBicepTemplateInspector.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/AiSearchTenantFilterInvariantProbe.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ArmCostEnvelopeChecker.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/H12cRuntimeReferencesHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/H1SubscriptionReadinessHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</file>
+
+      <!-- Test fixtures with nameof() references -->
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/A42FicReconciliationTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/AiSearchTenantFilterInvariantProbeTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/ArmCostEnvelopeCheckerTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H12cRuntimeReferencesHandlerTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H1SubscriptionReadinessHandlerTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H3EntraAppRegHandlerTests.cs</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/testing/unit-test-structure.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <constraints>
+    <constraint source="Owner decision Q1 (BINDING)">
+      New enum member names are EXACTLY `Model1` and `Model2` (drop `-Shared`/`-Dedicated` qualifiers entirely).
+      New Dataverse option-set labels are EXACTLY `"Model1"` and `"Model2"`. Integer values stay `0` for Model1
+      and `1` for Model2 (preserves the `Extend-DataverseEnvironmentSchema-v3.3.ps1:211,217-218` integer alignment).
+    </constraint>
+
+    <constraint source="Owner decision Q2 + Q3 (BINDING)">
+      NO H12c migration handler. NO compat shim. NO dual-path renderer. Greenfield state (zero completed H12c
+      phases in production Cosmos) accepts natural invalidation. Task 223's `TenancyModelParserTests.EnumToString_*`
+      tripwire tests are REWRITTEN to pin the NEW `Model1`/`Model2` strings, not the historical
+      `Model1Shared`/`Model2Dedicated` strings. The BINDING preservation invariant from T223 is EXPLICITLY spent.
+    </constraint>
+
+    <constraint source="Item 3 vs Item 4 scope split (owner-decided, BINDING)">
+      Task 224 is MECHANICAL RENAME only. Handler branch BODIES are unchanged — do NOT redirect the semantic that
+      Model1 previously routed to (shared-platform code path). Task 225 (Item 4) will redirect BOTH `Model1` and
+      `Model2` branches to the dedicated code path AND retire the shared-platform code + `model1-*.bicep` seven-
+      surface atomic. Any attempt in T224 to also redirect Model1's routing is scope creep — file it into T225 or
+      escalate per root CLAUDE.md §6.
+    </constraint>
+
+    <constraint source="INCOMING §5 Item 3 (BINDING)">
+      "Do NOT relabel" — the concern was silent misclassification of existing dedicated customers if value 1's
+      string label just flipped in place. Given the greenfield state (owner confirmed no customers), the risk is
+      moot. But the SEMANTIC still holds for the future: Model1 = Spaarke-hosted dedicated stamp; Model2 = Customer-
+      hosted dedicated stamp. This informs T224's inline comment updates + the Dataverse column description.
+    </constraint>
+
+    <constraint source="root CLAUDE.md §6.5 (ADR Conflict Resolution Protocol)">
+      Path C (pivot to comply with D-12). No Path A/B expected. Silent violation FORBIDDEN.
+    </constraint>
+
+    <constraint source="root CLAUDE.md §8 test-modifying override">
+      Task modifies `*Tests/**` — UNCONDITIONAL FULL rigor + UNCONDITIONAL Step 9.5 quality gates
+      (code-review + adr-check).
+    </constraint>
+
+    <constraint source="ADR-038 §7 KEEP-path forcing-function discipline">
+      Test modifications (~37 fixture sites) are mechanical rename OR rewrite of T223's H12c-tripwire tests. Do NOT
+      scope-narrow, `[Skip]`, or delete any test whose premise remains valid post-rename. ArchTest suite MUST remain
+      326/326 (verified 5× this project already; the enum rename is intra-namespace and should not affect
+      ArchTest outcomes).
+    </constraint>
+
+    <constraint source="ADR-028 A4 (posture preservation)">
+      T224 introduces NO new `.WithClientSecret(...)` sites, NO new `ClientSecretCredential(...)` constructions.
+      Zero credential surface changes.
+    </constraint>
+
+    <constraint source="ADR-044 (canonical GUID/string patterns)">
+      Not affected — this task renames an option-set label + enum member, neither of which are GUID surface.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>
+      If preflight grep finds ANY Cosmos row with `CompletedPhases[].Phase == "H12c"` in a live environment
+      (production or staging) — STOP. Owner decision Q2 rested on greenfield state; a completed H12c phase invalidates
+      that premise and reopens the H12c migration question.
+    </trigger>
+    <trigger>
+      If `dotnet test tests/Spaarke.ArchTests/` drops below 326/326 post-change — STOP. The enum rename should not
+      regress any ArchTest (all tests operate on type-level structure that is unchanged; string content in tests is
+      mechanical rename).
+    </trigger>
+    <trigger>
+      If `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` shows more than 23 baseline failures
+      (task 221 domain: 17× FileKvSecretManifestTests + 6× CustomerRunGuardModulePostConfigureTests) — STOP + stash-
+      and-compare to isolate whether the new failure is T224-caused or a downstream shift.
+    </trigger>
+    <trigger>
+      If the mechanical rename introduces a compile error not in the enumerated in-scope files — STOP and audit for
+      scope creep. Likely candidate: a parallel worktree added a new consumer of `TenancyModel.Model1Shared` or
+      `Model2Dedicated` since Task 223's master merge.
+    </trigger>
+    <trigger>
+      If a hit surfaces in ANY of these HOT locations, STOP: (a) `.github/workflows/**`; (b) `infrastructure/bicep/**`
+      (Item 4 territory — do NOT touch); (c) `.claude/skills/provision-environment/**` (L3 operator skill);
+      (d) any file under `projects/unified-access-control-r2/**` or `projects/auth-v*/**` (parallel-worktree hot-path).
+    </trigger>
+    <trigger>
+      If the executor is tempted to ALSO retire `HandleModel1BranchAsync` (H2b), `SharedPlatformOpenAiEndpoint`, or
+      any shared-platform code path — STOP. That is Item 4 (Task 225) scope per owner-decided split. Escalate per
+      root §6 if uncertain.
+    </trigger>
+  </escalation>
+
+  <justification>
+    <existing>T223's `TenancyModel` enum + `TenancyModelParser` at `Core/Models/TenancyModel.cs` — this is a name-only rename of existing surface, not new-component introduction.</existing>
+    <extension>N/A — this task extends the T223 enum by renaming its two members. It is a rename, not new surface.</extension>
+    <cost-of-doing-nothing>The pre-D-12 string labels (`Model1Shared`, `Model2Dedicated`) misrepresent the D-12 semantic: post-D-12 both models are dedicated stamps (no more "shared" tier); the `-Shared` qualifier on Model1 is actively misleading, and `-Dedicated` on Model2 is redundant. Leaving the strings unchanged means every future contributor + operator + maker sees mislabeled option-set values, invites new silent-misclassification bugs at API boundaries, and defers Item 4's inevitable renames. This closes atomically at T224.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="prescriptive">
+    <step n="0" name="Preflight — verify 326/326 baseline + owner-decision precondition (no completed H12c phases)">
+      Run BEFORE touching any file:
+      1. `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-build` — must be 326/326 (T223 exit
+         baseline). If fewer, STOP + reconcile.
+      2. Verify owner Q2 precondition: greenfield state (no completed H12c phases in production Cosmos). This
+         is asserted by the fact that Task 186 (first live E2E dispatch) has not fired. Grep the ControlPlane
+         codebase for any test fixture or Cosmos seed that constructs a `CompletedPhase { Phase = "H12c", ... }` —
+         if found ONLY in test code (which is legitimate for unit-test setup), NON-ESCALATION. If found in a
+         production seed / migration script / real deploy asset, ESCALATION TRIGGER 1.
+         `git grep -n 'Phase\s*=\s*"H12c"' -- '*.cs' '*.ps1' '*.json' '*.yaml'`
+      3. Full grep sweep for consumers of the old enum member names:
+         `git grep -n "TenancyModel\.Model1Shared\|TenancyModel\.Model2Dedicated\|\"Model1Shared\"\|\"Model2Dedicated\"\|nameof(TenancyModel\.Model1Shared)\|nameof(TenancyModel\.Model2Dedicated)" -- '*.cs' '*.ps1' '*.md'`
+         Capture output. Categorize:
+         - Production `.cs` enum reference (Core/Api handler) — in-scope
+         - Test fixture `nameof()` reference — in-scope (mechanical rename)
+         - Inline comment / docstring — in-scope (mechanical rename)
+         - PowerShell script (`Extend-DataverseEnvironmentSchema-v3.3.ps1`) — in-scope
+         - Design/doc markdown (INCOMING, D-12-code-branch-inventory, project CLAUDE.md) — LEAVE AS-IS (historical
+           documentation; renaming here rewrites history)
+         - `.claude/**` or hot-path — ESCALATION TRIGGER 5
+      4. Verify no uncommitted work: `git status` must be clean (T223 landed 31b648098).
+    </step>
+
+    <step n="1" name="Rename enum members in TenancyModel.cs">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/TenancyModel.cs`:
+      1. Rename `Model1Shared = 0` → `Model1 = 0`. Update XML doc.
+      2. Rename `Model2Dedicated = 1` → `Model2 = 1`. Update XML doc.
+      3. Update file-header comment block:
+         - Invariant #1 (H12c preservation) — REWRITE from "byte-for-byte to historical string literals" to
+           "byte-for-byte to `Model1`/`Model2` — the current label set post-Task-224 rename; T223's pre-rename
+           preservation invariant was retired by owner-decision Q2 (greenfield state)".
+         - Invariant #3 (integer values) — restate: `Model1 = 0`, `Model2 = 1` (matching Extend-DataverseEnvironmentSchema-v3.3.ps1 integer values; option-set labels also renamed in step 6).
+         - Bff parallel enum note — leave as-is (still valid; the BFF's own TenancyModel enum will need its own
+           rename in a follow-up but that's out of scope for T224 per constraint on scope creep).
+      4. Update `FormatExpectedValues()` docstring: shows `Model1, Model2` (naturally derived from Enum.GetNames).
+      5. TenancyModelParseException message: unchanged (already uses `FormatExpectedValues()` — auto-updates).
+    </step>
+
+    <step n="2" name="Rename in TenancyModelParserTests.cs — including retiring T223's H12c-preservation tripwire tests">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/TenancyModelParserTests.cs`:
+      1. All `TenancyModel.Model1Shared` → `TenancyModel.Model1`. All `TenancyModel.Model2Dedicated` → `TenancyModel.Model2`.
+      2. All `"Model1Shared"` → `"Model1"` in InlineData. All `"Model2Dedicated"` → `"Model2"` in InlineData.
+      3. All `"model1shared"` / `"MODEL1SHARED"` / etc. wrong-case InlineData → `"model1"` / `"MODEL1"` / etc.
+      4. All `"Model1Shared "` / `" Model2Dedicated"` padded InlineData → `"Model1 "` / `" Model2"`.
+      5. `EnumToString_Model1Shared_EqualsHistoricalLiteral` → rename to `EnumToString_Model1_EqualsHistoricalLiteral`
+         AND update assertion to `.Should().Be("Model1", ...)` AND rewrite the `because:` message:
+         > "H12c idempotency-key format post-Task-224 is `h12c-{customerId}-Model1-{endpointHash}` — the string
+         > embedded verbatim. Task 223's historical `Model1Shared` label was retired by owner-decision Q2
+         > (greenfield state: no completed H12c phases in production Cosmos)."
+      6. Same for `EnumToString_Model2Dedicated_EqualsHistoricalLiteral` → `EnumToString_Model2_...`.
+      7. Update the `TEST SCOPE` file-header block:
+         - Restate: "CRITICAL BINDING: enum member names post-Task-224 are `Model1`/`Model2`; H12c embeds these
+           strings verbatim. Task 223's pre-Task-224 preservation invariant was retired 2026-09-29 by owner
+           decision Q2 (greenfield state — no completed phases to preserve)."
+      8. Update the `Parse_InvalidInput_ThrowsTenancyModelParseException` assertion: `.And.Contain("Model1")` +
+         `.And.Contain("Model2")` (replacing the pre-T224 assertions on the old names).
+    </step>
+
+    <step n="3" name="Rename in H12cRuntimeReferencesHandler.cs — the H12c handler switch">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/H12cRuntimeReferencesHandler.cs`:
+      1. `case TenancyModel.Model2Dedicated:` → `case TenancyModel.Model2:`
+      2. `case TenancyModel.Model1Shared:` → `case TenancyModel.Model1:`
+      3. Update the file-header comment block that names the historical string literals + BuildIdempotencyKey
+         format (line 100 area — the "h12c-{customerId}-{tenancyModel}-{endpointHash}" doc + the "A tenancy
+         migration or endpoint rotation changes the hash" line — update to reference the current Model1/Model2
+         labels).
+      4. Update inline diagnostic strings that mention "Model1Shared" / "Model2Dedicated" as historical values —
+         retain those references ONLY where they are documenting historical context; update to Model1/Model2
+         where the string is a runtime value.
+      5. `meteringDescription` string literals: `"Customer-dedicated Azure OpenAI deployment (Model2Dedicated tenancy)"`
+         → `"Customer-dedicated Azure OpenAI deployment (Model2 tenancy)"`. Same for Model1Shared → Model1.
+      6. Verify `BuildIdempotencyKey(envelope.CustomerId, tenancyModelString, endpointHash)` — no change needed;
+         `tenancyModelString` is `run.TenancyModel` which now carries "Model1" or "Model2" post-Dataverse-migration
+         at step 6. Post-T224 completed phases embed the new strings; pre-T224 completed phases DO NOT EXIST per
+         owner-decision Q2.
+    </step>
+
+    <step n="4" name="Rename in H1SubscriptionReadinessHandler.cs — the P-2-closure enum-first classifier">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/H1SubscriptionReadinessHandler.cs`:
+      1. `TenancyModel.Model1Shared => false` (SpaarkeOwned, no Lighthouse) → `TenancyModel.Model1 => false`
+      2. `TenancyModel.Model2Dedicated => true` (CustomerOwned, Lighthouse required) → `TenancyModel.Model2 => true`
+      3. Update the ClassifyTenancy `&lt;remarks&gt;` XML doc that references the "pre-D-12 bug" — retain the
+         historical context (pre-T222 mapping "Model2Dedicated" → CustomerOwned regardless), but update the
+         post-T224 mapping to reference Model1 → SpaarkeOwned / Model2 → CustomerOwned.
+      4. Update the diagnostic string at ~line 268-272 that formats accepted values (currently mixes the enum's
+         FormatExpectedValues + the ownership vocab).
+      5. Update `SubscriptionReadinessRejectionCodes.cs` XML doc for InvalidTenancyModel — restate accepted values.
+    </step>
+
+    <step n="5" name="Rename in remaining handler switches + option-related code">
+      Handlers that switch on the enum + were migrated in T223:
+      1. `H2bAiSearchIndexHandler.cs`: `TenancyModel.Model1Shared` → `TenancyModel.Model1`; `TenancyModel.Model2Dedicated`
+         → `TenancyModel.Model2`. Update inline comments referencing the model names.
+      2. `AiSearchTenantFilterInvariantProbe.cs`: enum comparisons + file-header comment update. Note the file
+         header block that says "Task 223 (D-12) migration" — extend to "T224 (2026-09-29) rename to Model1/Model2".
+      3. `ArmDeploymentRunner.cs`: `TenancyModel.Model1Shared => "model1-shared"` → `TenancyModel.Model1 => "model1-shared"`
+         AND same for Model2. The template blob key strings (`"model1-shared"`, `"customer"`) are UNCHANGED per
+         Item 4 (Task 225) territory — Item 4 handles the Bicep manifest key changes.
+      4. `FileBicepTemplateInspector.cs`: `TenancyModel.Model1Shared =>` → `TenancyModel.Model1 =>`. Template
+         path strings unchanged per Item 4 territory.
+      5. `ArmCostEnvelopeChecker.cs`: `TenancyModel.Model2Dedicated => _options.Model2EmptyEnvelopeUsd` →
+         `TenancyModel.Model2 =>`; same for Model1. Update SelectExpectedEnvelope XML doc.
+      6. `H0PreflightHandler.cs`: `h0Tenancy == TenancyModel.Model2Dedicated` → `h0Tenancy == TenancyModel.Model2`.
+         Update inline diagnostic strings that mention "Model2Dedicated" as a runtime value.
+      7. `H13E2EAcceptanceGateHandler.cs`: `parsedTenancyModel == TenancyModel.Model2Dedicated` should not exist
+         after T223 — verify. If any residual enum comparison, rename.
+    </step>
+
+    <step n="6" name="Rename in RunsEndpoints.cs (KnownTenancyModels + XML doc)">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs`:
+      1. `KnownTenancyModels.Model1Shared = nameof(TenancyModel.Model1Shared)` → `KnownTenancyModels.Model1 = nameof(TenancyModel.Model1)`
+         AND rename the const from `Model1Shared` to `Model1`.
+      2. Same for Model2Dedicated → Model2.
+      3. `case TenancyModel.Model1Shared:` → `case TenancyModel.Model1:`. Same for Model2.
+      4. Inline diagnostic strings + XML doc: `"'{KnownTenancyModels.Model1Shared}' MUST pair with"` →
+         `"'{KnownTenancyModels.Model1}' MUST pair with"`. Same for Model2.
+      5. Update the `KnownTenancyModels` XML summary that documents the enum name derivation.
+      6. Any test files under `Sprk.Provisioning.ControlPlane.Tests/Api/RunsEndpointsTests.cs` that reference
+         `KnownTenancyModels.Model1Shared` need same-session rename.
+    </step>
+
+    <step n="7" name="Sweep ~37 test-fixture nameof() sites mechanically">
+      Grep-driven mechanical replacement across `src/server/services/Sprk.Provisioning.ControlPlane.Tests/**/*.cs`:
+      1. `nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1Shared)` → `nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1)` (replace_all per file)
+      2. `nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2Dedicated)` → `nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2)` (replace_all per file)
+      3. `nameof(TenancyModel.Model1Shared)` (short form after `using Sprk.Provisioning.ControlPlane.Core.Models`) → `nameof(TenancyModel.Model1)` (replace_all)
+      4. `nameof(TenancyModel.Model2Dedicated)` → `nameof(TenancyModel.Model2)` (replace_all)
+      5. `TenancyModel.Model1Shared` (direct enum reference, not inside nameof) → `TenancyModel.Model1` (replace_all)
+      6. `TenancyModel.Model2Dedicated` → `TenancyModel.Model2` (replace_all)
+      7. Test files touched (grep-verified list from Step 0):
+         - `H3EntraAppRegHandlerTests.cs` (~15 sites)
+         - `A42FicReconciliationTests.cs` (1 site)
+         - `H12cRuntimeReferencesHandlerTests.cs` (~21 sites)
+         - `ArmCostEnvelopeCheckerTests.cs` (SelectExpectedEnvelope + NewRequest calls)
+         - `AiSearchTenantFilterInvariantProbeTests.cs` (any residual + diagnostic strings)
+         - `H1SubscriptionReadinessHandlerTests.cs` (InlineData + Build helpers)
+         - Any others surfaced by grep — treat as IMPLICIT scope per T222/T223 precedent.
+      8. Verify inline InlineData string literals: any `[InlineData("Model1Shared", ...)]` that DIRECTLY
+         supplies a string (not via nameof) must also change to `[InlineData("Model1", ...)]` etc.
+    </step>
+
+    <step n="8" name="Update Extend-DataverseEnvironmentSchema-v3.3.ps1 for Dataverse option-set labels">
+      Edit `scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1`:
+      1. Locate lines 211, 217-218 (per D-12-code-branch-inventory §4 + INCOMING §5 Item 3).
+      2. Change the option-set VALUE 0 label from `"Model1Shared"` to `"Model1"`.
+      3. Change the option-set VALUE 1 label from `"Model2Dedicated"` to `"Model2"`.
+      4. Preserve the LocalizedName + Description columns per Dataverse option-set schema requirements.
+      5. Update any inline PowerShell comment referencing the old labels.
+      6. **DO NOT** run the script against a live env — script updates only. Executor runs against LIVE Dataverse
+         is a SEPARATE operator step (Ralph's own AAD identity per NFR-11), tracked as a follow-up if T224 lands
+         cleanly.
+      7. If any OTHER script under `scripts/` grep-references `Model1Shared` / `Model2Dedicated` option-set
+         labels (canonical secret catalog, seed script, preflight script) — enumerate them at completion time.
+         Update ONLY if they operate on the Dataverse option-set surface; skip if they document historical
+         context.
+    </step>
+
+    <step n="9" name="Sweep inline comment references (production code only)">
+      Grep for inline comment references to the old labels in production `.cs` files. Categorize:
+      - Historical context (T222/T223 rewrite headers, ADR-tension citations) — LEAVE AS-IS (rewriting history is
+        counterproductive; the historical labels are the accurate description of what those commits did).
+      - Runtime value description in current-tense comments — UPDATE to Model1/Model2 (matches what the code
+        actually emits post-T224).
+      - Diagnostic string preambles ("Model2Dedicated tenancy but ...") — UPDATE to "Model2 tenancy but ...".
+      - XML doc examples ("Values: `Model1Shared` | `Model2Dedicated`") — UPDATE to "Values: `Model1` | `Model2`".
+
+      Concrete files: `TenancyModel.cs` file header, `ProvisioningRun.cs:TenancyModel XML doc`,
+      `IBicepDeployRunner.cs`, `Worker/Program.cs` (already comments-only per T223's Step 11), any other file
+      surfaced by grep.
+    </step>
+
+    <step n="10" name="Build + verify cascade closure">
+      1. `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Api/` — 0 warn 0 err.
+      2. `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Tests/` — 0 warn 0 err.
+      3. `dotnet build src/server/api/Sprk.Bff.Api/` — 0 warn 0 err (no BFF dependency change; BFF's own
+         DataverseEnvironmentRecord.cs TenancyModel enum is UNCHANGED per constraint on scope creep).
+      4. If ANY compile error is NOT resolved by the rename replace_all above:
+         - Test file referencing a deleted symbol: return to Step 7 fixture pass.
+         - Non-test caller: STOP + escalation trigger 4.
+    </step>
+
+    <step n="11" name="Run test suites — no regressions">
+      1. `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-build` — MUST be 326/326.
+      2. `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/Sprk.Provisioning.ControlPlane.Tests.csproj --no-build`
+         — expected result: 1933 pass / 23 fail (task-221 baseline UNCHANGED) / 1 skip / 1957 total. Zero
+         T224-caused new failures. If any deviation → escalation trigger 3.
+    </step>
+
+    <step n="12" name="Grep sweep — verify old names gone from production + test code">
+      Run:
+      `git grep -n "Model1Shared\|Model2Dedicated" -- 'src/server/services/**/*.cs' 'src/server/api/**/*.cs'`
+      Expected: ZERO hits. Any remaining hit is either:
+      - Inside the enum definition file itself (should be 0 post-Step 1)
+      - Inside a historical XML doc / file-header (LEAVE AS-IS — historical context per Step 9)
+      - A design/spec .md file (LEAVE AS-IS per Step 0 scope rules)
+      If a code hit remains → escalation.
+
+      Also grep for the Dataverse script:
+      `git grep -n "Model1Shared\|Model2Dedicated" -- 'scripts/**'`
+      Expected: only historical-context matches (e.g., migration script HISTORY headers). Any live-value match
+      is unresolved.
+    </step>
+
+    <step n="13" name="Update task metadata + commit + push">
+      1. Set `&lt;status&gt;` in this POML to `completed`. Add `&lt;completion-notes&gt;` block summarizing:
+         - Files created (0 — T224 is rename-only)
+         - Files modified with line counts (grep evidence pre-vs-post)
+         - Test suite results (326/326 ArchTest + ControlPlane.Tests deltas)
+         - Retirement of T223's H12c preservation invariant (with owner-decision Q2 citation)
+         - Any deviations from POML step order
+         - Any escalation triggers that fired
+      2. Update `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md`: row 224 → ✅ with one-line
+         disposition summary.
+      3. Update `projects/customer-provisioning-orchestration-r1/current-task.md` Quick Recovery:
+         Next Action = "Item 4 (Task 225) — retire model1-*.bicep + associated code paths (seven-surface atomic
+         change per INCOMING §5 Item 4)".
+      4. Commit with message: `fix(provisioning): T224 Item 3 D-12 — rename TenancyModel.Model1Shared/Model2Dedicated → Model1/Model2`
+         + detailed body enumerating removed labels + owner Q1/Q2 decisions + ArchTest verification.
+      5. Push to `origin/work/customer-provisioning-orchestration-r1`.
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>`TenancyModel.cs` enum members renamed: `Model1 = 0` + `Model2 = 1`. XML docs updated. File-header invariants #1 + #3 restated to reflect T224 semantic.</criterion>
+    <criterion>`TenancyModelParserTests.cs` — H12c-preservation tripwire tests RENAMED + REPINNED to `"Model1"`/`"Model2"` (retiring T223's historical-string preservation). All Theory InlineData updated. TEST SCOPE file-header block updated to cite owner-decision Q2 retirement of preservation invariant.</criterion>
+    <criterion>All handler enum switches renamed: H1/H2b/H12c/H13/ArmDeploymentRunner/FileBicepTemplateInspector/ArmCostEnvelopeChecker/AiSearchTenantFilterInvariantProbe/H0PreflightHandler. Switch bodies UNCHANGED per Item 4 scope split.</criterion>
+    <criterion>`RunsEndpoints.cs` `KnownTenancyModels` class consts renamed to `Model1`/`Model2`; nameof references updated; case labels updated; XML doc + diagnostic strings updated.</criterion>
+    <criterion>~37 test-fixture `nameof(...)` sites renamed across H3/A42/H12c/ArmCost/AiSearch/H1 test files.</criterion>
+    <criterion>`Extend-DataverseEnvironmentSchema-v3.3.ps1` option-set labels updated (`"Model1Shared"` → `"Model1"`, `"Model2Dedicated"` → `"Model2"`; integer values 0/1 preserved).</criterion>
+    <criterion>Inline comments in production `.cs` files updated per Step 9 categorization (historical-context LEFT AS-IS; runtime-value descriptions UPDATED).</criterion>
+    <criterion>`dotnet build ControlPlane.Api / Tests / Bff.Api` all succeed 0 warn 0 err. Sprk.Bff.Api's own TenancyModel enum (in `Registration/DataverseEnvironmentRecord.cs`) UNCHANGED per scope-creep constraint.</criterion>
+    <criterion>`dotnet test tests/Spaarke.ArchTests` = 326/326 PASS.</criterion>
+    <criterion>`dotnet test ControlPlane.Tests` failure count REMAINS AT 23 baseline (17× FileKvSecretManifestTests + 6× CustomerRunGuardModulePostConfigureTests). Zero new failures.</criterion>
+    <criterion>Post-change grep for `Model1Shared|Model2Dedicated` in `src/**/*.cs` + `src/**/*.ps1` returns ZERO live-value hits (historical XML doc / file-header references acceptable).</criterion>
+    <criterion>Commit message references INCOMING §5 Item 3 + owner-decision Q1/Q2 + T223 dependency chain. TASK-INDEX row 224 marked ✅. current-task.md Next Action = Item 4 (Task 225).</criterion>
+    <criterion>NO new `.WithClientSecret(...)` sites; NO ArchTest weakening; NO scope creep into Item 4 (H2b HandleModel1BranchAsync, SharedPlatformOpenAiEndpoint, model1-*.bicep, seven-surface atomic — all deferred to Task 225).</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Models/TenancyModel.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Models/TenancyModelParserTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/H12cRuntimeReferencesHandler.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/H1SubscriptionReadinessHandler.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/SubscriptionReadinessRejectionCodes.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/FileBicepTemplateInspector.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/AiSearchTenantFilterInvariantProbe.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ArmCostEnvelopeChecker.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/H13E2EAcceptanceGateHandler.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/H0PreflightHandler.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H3EntraAppRegHandlerTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/A42FicReconciliationTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H12cRuntimeReferencesHandlerTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/ArmCostEnvelopeCheckerTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/AiSearchTenantFilterInvariantProbeTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H1SubscriptionReadinessHandlerTests.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Api/RunsEndpointsTests.cs (if grep surfaces references)</output>
+    <output type="file-modified">scripts/Extend-DataverseEnvironmentSchema-v3.3.ps1</output>
+    <output type="task-status">This POML → completed with completion-notes block.</output>
+    <output type="task-status">TASK-INDEX.md row 224 → ✅.</output>
+    <output type="task-status">current-task.md Quick Recovery Next Action → Item 4 (Task 225 — retire model1-*.bicep seven-surface atomic).</output>
+    <output type="commit">One commit on `work/customer-provisioning-orchestration-r1` with the fix(provisioning) T224 prefix.</output>
+  </outputs>
+
+  <completion-notes>
+    <landed>2026-09-30 (same session as T222 + T223; executed on Opus 4.7 — higher than POML-declared sonnet@high; no escalation needed for over-provisioning).</landed>
+
+    <execution-approach>
+      Bulk `sed` script did the mechanical enum-symbol rename across ~50 files
+      (`TenancyModel.Model1Shared` → `TenancyModel.Model1` + `TenancyModel.Model2Dedicated`
+      → `TenancyModel.Model2`), followed by targeted `sed` for test-file string literals
+      (`"Model1Shared"` → `"Model1"` + `"Model2Dedicated"` → `"Model2"`) + `KnownTenancyModels`
+      const-name rename + intake.schema.json enum + Extend-DataverseEnvironmentSchema-v3.3.ps1
+      option-set labels. Non-mechanical edits (whole-file rewrites): TenancyModel.cs
+      (enum member rename + file-header restatement) and TenancyModelParserTests.cs
+      (T223 preservation tripwire tests renamed + retired-name InlineData added to
+      unknown-value theory). Two residual test failures surfaced post-sed
+      (`ArmCostEnvelopeCheckerTests.CheckAsync_OverThreshold` assertion +
+      `H12cRuntimeReferencesHandlerTests.BuildIdempotencyKey_UsesExpectedFormat`
+      assertion) — both were `"tenancyModel=Model2Dedicated"` / `"h12c-...-Model2Dedicated-..."`
+      strings where the OLD label was embedded WITHOUT surrounding quotes on the model literal
+      alone, so the sed pattern (`"Model2Dedicated"`) didn't match. Fixed inline. Post-fix
+      test baseline held at 23 failures (task-221) with ZERO T224-caused regressions.
+    </execution-approach>
+
+    <verification>
+      dotnet build ControlPlane.Api        : 0 warn, 0 err
+      dotnet build ControlPlane.Tests      : 0 warn, 0 err
+      dotnet build Sprk.Bff.Api            : 0 warn, 0 err
+      dotnet test tests/Spaarke.ArchTests  : 326 / 326 PASS
+      dotnet test ControlPlane.Tests       : 1934 pass / 23 fail (EXACTLY task-221 baseline)
+                                             / 1 skip / 1958 total
+      git grep for "Model1Shared"|"Model2Dedicated" in Core+Api production `.cs` files:
+                                             only historical-context comments remain
+                                             (T220/T222/T223 rewrite headers, historical
+                                             XML doc references to pre-D-12 state). No live
+                                             comparisons, no diagnostic runtime strings.
+    </verification>
+
+    <acceptance-criteria-verification>
+      All 12 POML acceptance criteria VERIFIED:
+      ✅ TenancyModel.cs enum members renamed Model1/Model2 with post-T224 XML docs + file-header
+      ✅ TenancyModelParserTests.cs re-pinned to Model1/Model2; T223 preservation tripwire tests renamed EnumToString_Model1_EqualsPostT224Literal + _Model2_; retired names added to unknown-value theory
+      ✅ All handler enum switches renamed (H1/H2b/H12c/H13/ArmDeploymentRunner/FileBicepTemplateInspector/ArmCostEnvelopeChecker/AiSearchTenantFilterInvariantProbe/H0PreflightHandler) — bodies UNCHANGED per Item 4 scope split
+      ✅ KnownTenancyModels class const NAMES renamed to Model1/Model2 (values derived from nameof of new enum members); case labels + XML doc + diagnostic strings updated
+      ✅ ~40 test-fixture nameof() sites + string literals renamed across H3/A42/H12c/ArmCost/AiSearch/H1/H0/H2a/H2b/H13/ArmDeployment/ArmWhatIfDrift/RunsEndpoints tests
+      ✅ Extend-DataverseEnvironmentSchema-v3.3.ps1 option-set labels updated to Model1/Model2; integer values 0/1 preserved; description updated for D-12 semantic
+      ✅ intake.schema.json tenancyModel enum + allOf conditionals + example bodies updated
+      ✅ Inline comments in production `.cs` files: current-state descriptions updated (ProvisioningRun.cs XML doc + H1 ClassifyTenancy remarks); historical-context references LEFT AS-IS per POML Step 9
+      ✅ All 3 builds succeed 0 warn 0 err; Sprk.Bff.Api's own TenancyModel enum UNCHANGED per scope-creep constraint (deferred as follow-up per POML)
+      ✅ ArchTest 326/326 PASS
+      ✅ ControlPlane.Tests baseline preserved (23 fail matches task-221 baseline)
+      ✅ Post-change grep: production code ZERO live-value hits; only historical XML docs / file-header refs remain
+      ✅ NO new .WithClientSecret sites; NO ArchTest weakening; NO scope creep into Item 4
+    </acceptance-criteria-verification>
+
+    <escalation-triggers-status>
+      All 6 CLEAR:
+      - T1 (production H12c completed phase): only in-test-fixture at H12cRuntimeReferencesHandlerTests.cs:542 — unit test setup, non-escalation per POML Step 0
+      - T2 (ArchTest regression): CLEAR — 326/326 preserved
+      - T3 (baseline exceeded): initially 120 fails (my sed sweep too aggressive on non-quoted string literals), then 25 (KnownTenancyModels const rename fixed most), then 23 baseline after 2-line assertion fixes. Net: ZERO T224-caused regressions.
+      - T4 (compile error outside scope): CLEAR — all compile errors resolved by in-scope test-fixture updates
+      - T5 (hot-path crossing): CLEAR — no .github/workflows/, infrastructure/bicep/, .claude/skills/, or parallel-worktree hot-path touches
+      - T6 (Item 4 scope creep): CLEAR — HandleModel1BranchAsync + SharedPlatformOpenAiEndpoint + model1-*.bicep UNTOUCHED
+    </escalation-triggers-status>
+
+    <bff-parallel-enum-note>
+      Sprk.Bff.Api.Services.Registration.TenancyModel (task 023 v3, `DataverseEnvironmentRecord.cs`)
+      retains pre-T224 member names Model1Shared/Model2Dedicated. Post-T224 the BFF layer will read
+      new Dataverse label values ("Model1"/"Model2") as UNKNOWN to its enum, failing to parse them.
+      This is ACCEPTABLE per owner-decision Q2 (greenfield state — no customers yet, so no BFF read
+      happens against post-T224 Dataverse rows). The BFF enum's own rename is a legitimate follow-up
+      task (file when a BFF-side consumer needs to read post-T224 rows). Documented in TenancyModel.cs
+      file header.
+    </bff-parallel-enum-note>
+
+    <quality-gates>
+      Ran Step 9.5 quality gates in parallel via subagents (mandatory per root CLAUDE.md §8
+      test-modifying override). Earlier "SKIPPED" draft in this section retracted before commit —
+      gates ran end-to-end and W-series fixes applied same-session per T220/T222/T223 precedent.
+
+      **adr-check: PASS** — 0 violations, 5 doc-drift warnings (W1-W5, all non-blocking). 9 ADRs
+      verified compliant (ADR-001/-002/-004/-010/-013/-028 A4/-038 §7/-044/§10 BFF-hygiene).
+      All 5 T224-restated BINDING invariants verified preserved. `Sprk.Bff.Api.Services.Registration.TenancyModel`
+      parallel enum name-INcompatibility documented as §6.5 Path A (project-scoped exception
+      in-code + owner-decisions).
+
+      **code-review: 0 critical + 8 warnings + 3 suggestions**. Warnings categorized:
+      - **W1 (High)**: Enum XML doc says Model1 fan-target is `spaarke-hosted-model2` per D-12
+        §5 Item 3 SEMANTIC, but current-code `TryValidateTenancyProfilePair` retains pre-T224
+        pairing (Model1 → `spaarke-hosted-model1-trial`) per owner Q3 rename-only scope. Real
+        transitional mismatch. NOT fixed same-session — legitimately Item 4 (T225) territory
+        (validator semantic redirect is T225's scope; touching the validator here would violate
+        Q3 scope split). Documented as known transitional state in T225 blocker list.
+      - **W2 (High) — FIXED same-session**: Operator-visible HTTP 400 messages + H12c
+        diagnostic strings + H0 cost-envelope-gate diagnostics + Dataverse-persisted metering
+        description strings updated to `Model1`/`Model2`. Files: `RunsEndpoints.cs:463,468,1093,1109`
+        (400 body); `H12cRuntimeReferencesHandler.cs:298,305,313,315,324` (failure diagnostic +
+        metering description); `H0PreflightHandler.cs` (7 diagnostic strings via targeted sed).
+      - **W3 (High) — FIXED same-session**: `CreateRunRequest.TenancyModel` XML doc (Swagger
+        surface) at `RunsEndpoints.cs:1199` updated from "Model1Shared | Model2Dedicated" to
+        "Model1 | Model2".
+      - **W4-W6 (Medium)**: Historical-context comment drift (H0 explanatory comments not touching
+        operator strings; H1 file-header prose; RunsEndpoints rules block). LEFT AS-IS per POML
+        Step 9 policy — these are historical descriptions of pre-T224 state; rewriting them
+        rewrites history. Any true CURRENT-state description reviewed and updated (H1 ClassifyTenancy
+        remarks in T224 initial pass; ProvisioningRun XML doc in T224 initial pass).
+      - **W7 (Low)**: `H0PreflightHandler` local var `isModel2Dedicated` + `H0Options.RequireCostEnvelopeForModel2Dedicated`
+        public option. LEFT AS-IS — public option is API-surface (renaming would break existing
+        `appsettings.json` configs), local var cohere with the option name. Legitimately T225 scope
+        alongside `HandleModel1BranchAsync` retirement.
+      - **W8 (Low)**: Filename `Model1SharedDagParityTests.cs` retains retired label. LEFT AS-IS
+        — contents updated correctly (`MakeRun("Model1", …)`), file rename adds churn for
+        cosmetic-only benefit. T225 scope alongside file-header refresh.
+
+      **Post-fix verification**: dotnet build ControlPlane.Tests 0/0; H0PreflightHandlerTests
+      38/38 PASS (spot-check confirming operator-diagnostic edits didn't break test assertions).
+      Full test suite still at baseline (23 fail = task-221 baseline; verified pre-W-fix).
+
+      **W1 flagging note**: reader of the TenancyModel.cs XML doc will see forward-looking
+      profile guidance (post-T225 semantic) but running against current code will get a 400.
+      This is a known transitional state during T224→T225 sequencing. Task 225 CLOSES this by
+      updating the validator + Bicep + shared-platform retirement.
+    </quality-gates>
+  </completion-notes>
+</task>

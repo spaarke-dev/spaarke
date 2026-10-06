@@ -111,14 +111,45 @@ public class SpendSnapshotService : ISpendSnapshotService
     private const string DefaultVisibilityFilter = "ACTUAL_INVOICED";
     private const string ToDatePeriodKey = "TO_DATE";
 
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     public SpendSnapshotService(
         IDataverseService dataverseService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         IOptions<FinanceOptions> options,
         ILogger<SpendSnapshotService> logger)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        // unified-access-control-r2 task 146: a spend snapshot is a child of its matter or project (live metadata:
+        // sprk_spendsnapshot carries sprk_matter and sprk_project) — owned by that record's team, the named Secure team
+        // when it is secure.
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// The team that owns every snapshot of <paramref name="parentEntity"/> <paramref name="parentId"/> (task 146), or
+    /// <c>null</c> when the resolver REFUSES — this is a background job with no acting user, so a refusal writes no
+    /// snapshot for the record (logged with the reason) and never an app-owned row. A Dataverse fault propagates.
+    /// </summary>
+    private async Task<Guid?> ResolveSnapshotOwnerAsync(string parentEntity, Guid parentId, CancellationToken ct)
+    {
+        var owner = await _ownership.ResolveOwnerAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                TargetEntityLogicalName = parentEntity,
+                TargetRecordId = parentId,
+            },
+            ct);
+
+        if (owner.IsOwned)
+            return owner.OwningTeamId;
+
+        _logger.LogWarning(
+            "Spend snapshot generation SKIPPED for {ParentEntity} {ParentId}: no owner — {Reason} ({Code}) (task 146).",
+            parentEntity, parentId, owner.Reason, owner.RefusalCode);
+        return null;
     }
 
     /// <inheritdoc />
@@ -164,8 +195,11 @@ public class SpendSnapshotService : ISpendSnapshotService
         var toDateSnapshot = CreateToDateSnapshot(
             toDateAmount, budgetAmount, matterId, generatedAt, effectiveCorrelationId);
 
-        // Step 7: Upsert all snapshots via alternate key
+        // Step 7: Upsert all snapshots via alternate key — owned by the matter's team (task 146)
         var allSnapshots = new List<Entity>(monthlySnapshots) { toDateSnapshot };
+
+        if (await ResolveSnapshotOwnerAsync("sprk_matter", matterId, ct) is not { } owningTeamId)
+            return;
 
         _logger.LogInformation(
             "Upserting {SnapshotCount} spend snapshots for matter {MatterId} ({MonthCount} monthly + 1 ToDate)",
@@ -173,6 +207,7 @@ public class SpendSnapshotService : ISpendSnapshotService
 
         foreach (var snapshot in allSnapshots)
         {
+            snapshot["ownerid"] = new EntityReference("team", owningTeamId);
             await UpsertSnapshotAsync(serviceClient, snapshot, ct);
         }
 
@@ -377,8 +412,11 @@ public class SpendSnapshotService : ISpendSnapshotService
         var toDateSnapshot = CreateToDateSnapshotForProject(
             toDateAmount, budgetAmount, projectId, generatedAt, effectiveCorrelationId);
 
-        // Step 7: Upsert all snapshots via alternate key
+        // Step 7: Upsert all snapshots via alternate key — owned by the project's team (task 146)
         var allSnapshots = new List<Entity>(monthlySnapshots) { toDateSnapshot };
+
+        if (await ResolveSnapshotOwnerAsync("sprk_project", projectId, ct) is not { } owningTeamId)
+            return;
 
         _logger.LogInformation(
             "Upserting {SnapshotCount} spend snapshots for project {ProjectId} ({MonthCount} monthly + 1 ToDate)",
@@ -386,6 +424,7 @@ public class SpendSnapshotService : ISpendSnapshotService
 
         foreach (var snapshot in allSnapshots)
         {
+            snapshot["ownerid"] = new EntityReference("team", owningTeamId);
             await UpsertSnapshotAsync(serviceClient, snapshot, ct);
         }
 

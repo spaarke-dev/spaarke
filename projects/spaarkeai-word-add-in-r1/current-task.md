@@ -1,17 +1,26 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-04 (after the round-4 review). Email-tab switch in; review fixes in; next = the round-4 PR
+> **Last Updated**: 2026-10-05. Round 4 merged (PR #1292 `293fcd4c8`) and live; dev BFF deployed from master `293fcd4c8` (carries 083); next = UAT round 5
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
 
 ## ⚡ Quick Recovery (READ THIS FIRST)
 
+> **2026-10-05: task 100 ✅ DONE in the working tree — UNCOMMITTED** (sub-agent run; the main session commits).
+> Record: `notes/100-create-record-fields.md`. Schema verified live (invoice Assigned To = `sprk_assignedto1`; no
+> escalation). BFF: `practiceAreaId`/`projectTypeId`/`assignedToContactId` + invoice description; `/search/{list}`
+> (generalized matter-types route); `GET /quickcreate/defaults`; Read gate on the posted contact. Pane:
+> `CreateRecordForm` + shared `LookupField` (`@spaarke/ui-components/lookup-field` alias), `useCreateRecordFormData`,
+> `referenceListService.ts` (replaces `matterTypeLookupService.ts`). Gates green (build 0/0, ArchTests 349, jest
+> 77/1075, lint 0, tsc 0 prod, publish +15,634 B). NEXT: commit; deploy BFF + add-in; live checks (§11 of the note).
+> `scripts/check-task-status-drift.ps1` parses only 5 index rows here (pre-existing format mismatch; 099 shows the same).
+
 | Field | Value |
 |---|---|
-| **Task** | **Round-4 PR** (095 + 096 held off + switch + review fixes). Switch + review done 2026-10-04 (`notes/042-uat-round4-2026-10-04.md` §5) |
+| **Task** | **Round 4 merged** — PR #1292 `293fcd4c8` (095 + 096 held off + switch + review fixes, `notes/042-uat-round4-2026-10-04.md` §5). Add-in site redeploys from the master push |
 | **Owner decision 2026-10-04** | *"yes we can follow your recommendation - ensure we have this fully documented"* → the send-route authorization is UAC-r2 task 161's (one implementation); the Word Email tab (096) is held OFF until 161 is on master + deployed; 097 = the archive fix (after UAC-r2 146) + live checks, later |
-| **Next Action** | DONE: 1) switch `ADDIN_EMAIL_TAB_ENABLED` (default off), 2) code-review + adr-check (no Critical; fixes in §5 of the round-4 note), 3) build/jest/lint/typecheck green. NEXT: 4) the round-4 PR — merge on `Router` + `Build & Test (Debug)` (`gh pr merge N --merge`, NEVER `--delete-branch`). 5) ONE dev BFF deploy via `/bff-deploy` (owner already chose this; carries 083). 6) Add-in site auto-deploys on the master push. 7) Tell UAC-r2 that the Word Email tab waits on 161 and that this project owns the archive fix after their 146. 8) UAT round 5. Pending owner: spec.md ADR-012 Tensions row amendment (round-4 note §5) |
+| **Next Action** | DONE: 1) switch `ADDIN_EMAIL_TAB_ENABLED` (default off), 2) code-review + adr-check (no Critical; fixes in §5 of the round-4 note), 3) build/jest/lint/typecheck green. 4) PR #1292 merged `293fcd4c8`. 7) UAC-r2 informed (owner relayed the 097 note; they will report back when 161/146 are done). 5) Dev BFF deployed 2026-10-05 from master `293fcd4c8` (owner: "deploy bff.api now BUT ensure that updated to master"): 45.65 MB, 4/4 critical files SHA-256 match, /healthz 200, office todo/save/search + communications/send all 401 unauthenticated. 6) Add-in site deployed from `293fcd4c8` (deploy-office-addins success). NEXT: 8) UAT round 5. Pending owner: spec.md ADR-012 Tensions row amendment (round-4 note §5) |
 | **Re-upload?** | **No** for round 4: manifests unchanged, package stays 1.1.1 (095's +75 px width is a runtime call). Owner already has `C:\code_files\spaarke-addin-package\spaarke-addin-1.1.1.zip` |
 | **Main checkout** | `C:\code_files\spaarke` is on ANOTHER session's branch (`chore/portfolio-board-hygiene`). Never `git pull` there — `git fetch origin && git branch -f master origin/master` (memory: main-checkout-may-be-on-another-branch) |
 
@@ -19,7 +28,7 @@
 
 | Item | State |
 |---|---|
-| 083 (Office To Do defaults to its creator) | ✅ merged PR #1289 `c2ef1857b`; **not deployed** (waits for the single BFF deploy) |
+| 083 (Office To Do defaults to its creator) | ✅ merged PR #1289 `c2ef1857b`; **deployed** to dev 2026-10-05 (BFF from master `293fcd4c8`) |
 | 088–094 | ✅ merged (#1124 `fb8280aee`, #1284 `6932582b1`); BFF `fb8280aee` + add-in site `6932582b1` deployed; package 1.1.1 |
 | 095 (Related-to row, Save-as link, +75 px pane via `Office.extensionLifeCycle.taskpane.setWidth`) | ✅ on branch (`26a020004`), not in a PR. Its review was inline — run `code-review` + `adr-check` skills on the round-4 diff before the PR |
 | 096 (Word Email tab on shared `EmailComposer` via new wrapper `SendEmailPane`; `shareLinkService` deleted) | ✅ on branch (`26a020004`), not in a PR; shipping depends on the 097 decision. Decision row added to project CLAUDE.md (ADR-012 Path A narrowed) |

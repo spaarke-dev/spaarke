@@ -297,14 +297,21 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         // units and Dataverse Deep depth traverses DOWNWARD (own BU plus descendants), so a child-BU user
         // reaches none of them at any depth below Global — and Global re-opens findings F1 and F9.
         //
-        // Null keeps the pre-existing behaviour (the calling identity owns the row). The OFFICE writers always pass a
-        // team — OfficeDocumentPersistence refuses to call without one — and refuse the save when none resolves.
-        // Several OTHER BFF writers still pass null and so still create app-owned rows in root (Communication
-        // archive/inbound, the external portal); adopting the resolver there is GitHub #1034, not a guarantee here.
-        if (request.OwningTeamId is { } owningTeamId && owningTeamId != Guid.Empty)
+        // unified-access-control-r2 task 146 (#1034): every caller now resolves the team through the BFF's
+        // IRecordOwnershipResolver (Office save + worker, POST /api/v1/documents, EmailAttachmentProcessor), so a
+        // missing owner is a programming error and REFUSES here, before any write — never the old "null keeps the
+        // calling identity", which made the BFF application user own the document in the root business unit.
+        if (request.OwningTeamId is not { } owningTeamId || owningTeamId == Guid.Empty)
         {
-            document["ownerid"] = new EntityReference("team", owningTeamId);
+            throw new InvalidOperationException(
+                "CreateDocumentAsync requires CreateDocumentRequest.OwningTeamId (resolved by IRecordOwnershipResolver); "
+                + "refusing to create an app-owned sprk_document (task 146).");
         }
+
+        document["ownerid"] = new EntityReference("team", owningTeamId);
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.StampIfKnown(document, request.CreatedByPersonId);
 
         document["statuscode"] = new OptionSetValue(1); // Draft
         document["statecode"] = new OptionSetValue(0);  // Active
@@ -428,7 +435,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         };
     }
 
-    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, CancellationToken ct = default)
+    public async Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, Guid? owningTeamId = null, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
         // FR-D9: at least one anchor is required — a source document OR a regarding (matter/project)
         // target. A document-less analysis is valid ONLY when a regarding target makes it discoverable.
@@ -438,11 +445,24 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 "CreateAnalysisAsync requires either a documentId or a regarding target (FR-D9).", nameof(documentId));
         }
 
+        // unified-access-control-r2 task 146: the owner is resolved upstream and its absence REFUSES — before any
+        // write — rather than leaving the BFF application user owning an analysis of a secure document in root.
+        if (owningTeamId is not { } teamId || teamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "CreateAnalysisAsync requires the owning team resolved by IRecordOwnershipResolver; refusing to create "
+                + "an app-owned sprk_analysis (task 146).");
+        }
+
         var analysis = new Entity("sprk_analysis")
         {
             ["sprk_name"] = name ?? $"Analysis {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}",
-            ["statuscode"] = new OptionSetValue(1) // Active
+            ["statuscode"] = new OptionSetValue(1), // Active
+            ["ownerid"] = new EntityReference("team", teamId),
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked — createdby is the application user here.
+        RecordCreatorPersonColumn.StampIfKnown(analysis, createdByPersonId);
 
         // Document anchor is now optional (FR-D9). Only bind when supplied.
         if (documentId is { } docId && docId != Guid.Empty)
@@ -598,12 +618,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public async Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(output);
+
+        // unified-access-control-r2 task 146: an output carries its analysis's content, so it is owned like the
+        // analysis; the owner is resolved upstream and its absence refuses before any write.
+        if (output.OwningTeamId is not { } teamId || teamId == Guid.Empty)
+        {
+            throw new InvalidOperationException(
+                "CreateAnalysisOutputAsync requires AnalysisOutputEntity.OwningTeamId resolved by IRecordOwnershipResolver; "
+                + "refusing to create an app-owned sprk_analysisoutput (task 146).");
+        }
+
         var entity = new Entity("sprk_analysisoutput")
         {
             ["sprk_name"] = output.Name ?? "Output",
             ["sprk_value"] = output.Value,
-            ["sprk_analysisid"] = new EntityReference("sprk_analysis", output.AnalysisId)
+            ["sprk_analysisid"] = new EntityReference("sprk_analysis", output.AnalysisId),
+            ["ownerid"] = new EntityReference("team", teamId),
         };
+
+        // Task 146 c1-r1 (owner round 13 item 9): the person who asked.
+        RecordCreatorPersonColumn.StampIfKnown(entity, output.CreatedByPersonId);
 
         if (output.OutputTypeId.HasValue)
         {
@@ -1946,6 +1981,19 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         return entity == null ? null : ToProcessingJobRecord(entity);
     }
 
+    /// <summary>
+    /// The request property an artifact create maps to <c>ownerid</c> (a team) — task 146. A create without it is
+    /// REFUSED: an app-only create would be owned by the application user in the root business unit, readable only
+    /// through root depth, and outside its document's team.
+    /// </summary>
+    public const string ArtifactOwningTeamProperty = "OwningTeamId";
+
+    /// <summary>
+    /// The request property an artifact create maps to <c>sprk_createdbyperson</c> (a <c>systemuser</c>) — task 146 c1-r1,
+    /// owner round 13 item 9: the person who asked, since the create is app-only. Optional (a writer acting for nobody).
+    /// </summary>
+    public const string ArtifactCreatedByPersonProperty = "CreatedByPersonId";
+
     public async Task<Guid> CreateEmailArtifactAsync(object request, CancellationToken ct = default)
     {
         var entity = new Entity("sprk_emailartifact");
@@ -1962,6 +2010,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             if (prop.Name == "DocumentId")
             {
                 // Skip setting the Document lookup for now to test if other fields work
+                continue;
+            }
+
+            // unified-access-control-r2 task 146: the artifact is owned like its document — an owner TEAM the caller
+            // resolved (never a generic "sprk_owningteamid" column, which does not exist).
+            if (prop.Name == ArtifactOwningTeamProperty)
+            {
+                if (value is Guid owningTeamId && owningTeamId != Guid.Empty)
+                    entity["ownerid"] = new EntityReference("team", owningTeamId);
+                continue;
+            }
+
+            // Task 146 c1-r1: the person who asked (a systemuser), never a generic "sprk_createdbypersonid" column.
+            if (prop.Name == ArtifactCreatedByPersonProperty)
+            {
+                RecordCreatorPersonColumn.StampIfKnown(entity, value as Guid?);
                 continue;
             }
 
@@ -2002,10 +2066,21 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
 
         entity["statecode"] = new OptionSetValue(0); // Active
+        RequireArtifactOwner(entity);
 
         var artifactId = await _serviceClient.CreateAsync(entity, ct);
         _logger.LogInformation("EmailArtifact created with ID: {ArtifactId}", artifactId);
         return artifactId;
+    }
+
+    private static void RequireArtifactOwner(Entity entity)
+    {
+        if (!entity.Contains("ownerid"))
+        {
+            throw new InvalidOperationException(
+                $"A {entity.LogicalName} create must carry an owner team ({ArtifactOwningTeamProperty}) resolved from its "
+                + "document; refusing to create it app-owned (task 146).");
+        }
     }
 
     public async Task<object?> GetEmailArtifactAsync(Guid id, CancellationToken ct = default)
@@ -2047,6 +2122,22 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 continue;
             }
 
+            // unified-access-control-r2 task 146: the artifact is owned like its document — an owner TEAM the caller
+            // resolved (never a generic "sprk_owningteamid" column, which does not exist).
+            if (prop.Name == ArtifactOwningTeamProperty)
+            {
+                if (value is Guid owningTeamId && owningTeamId != Guid.Empty)
+                    entity["ownerid"] = new EntityReference("team", owningTeamId);
+                continue;
+            }
+
+            // Task 146 c1-r1: the person who asked (a systemuser), never a generic "sprk_createdbypersonid" column.
+            if (prop.Name == ArtifactCreatedByPersonProperty)
+            {
+                RecordCreatorPersonColumn.StampIfKnown(entity, value as Guid?);
+                continue;
+            }
+
             var fieldName = $"sprk_{prop.Name.ToLower()}";
 
             if (value is Guid gv)
@@ -2080,6 +2171,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
 
         entity["statecode"] = new OptionSetValue(0); // Active
+        RequireArtifactOwner(entity);
 
         var artifactId = await _serviceClient.CreateAsync(entity, ct);
         _logger.LogInformation("AttachmentArtifact created with ID: {ArtifactId}", artifactId);
@@ -2120,7 +2212,7 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
     public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(
         int? regardingRecordType = null,
-        string? regardingRecordId = null,
+        Guid? regardingRecordId = null,
         Guid? eventTypeId = null,
         int? statusCode = null,
         int? priority = null,
@@ -2129,10 +2221,31 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         int skip = 0,
         int top = 50,
         Guid? ownerUserId = null,
+        IReadOnlyCollection<int>? excludeStatusCodes = null,
         CancellationToken ct = default)
     {
         // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
         throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
+    }
+
+    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsCallerAsync(
+        Guid callerSystemUserId,
+        int? regardingRecordType = null,
+        Guid? regardingRecordId = null,
+        Guid? regardingRecordTypeRefId = null,
+        Guid? eventTypeId = null,
+        int? statusCode = null,
+        int? priority = null,
+        DateTime? dueDateFrom = null,
+        DateTime? dueDateTo = null,
+        int skip = 0,
+        int top = 50,
+        EventOwnershipScope? mine = null,
+        CancellationToken ct = default)
+    {
+        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
+        // unified-access-control-r2 task 159: a silent-empty stub here would read as "the caller may see nothing".
+        throw new NotImplementedException("QueryEventsAsCallerAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
     }
 
     public Task<EventEntity?> GetEventAsync(Guid id, CancellationToken ct = default)
@@ -2147,31 +2260,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("CreateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task UpdateEventAsync(Guid id, UpdateEventRequest request, CancellationToken ct = default)
-    {
-        // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
-        throw new NotImplementedException("UpdateEventAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
-    }
-
     public Task UpdateEventStatusAsync(Guid id, int statusCode, DateTime? completedDate = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("UpdateEventStatusAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public Task<EventLogEntity[]> QueryEventLogsAsync(Guid eventId, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route (see section banner). Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("QueryEventLogsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
-    }
-
-    public Task<(EventEntity[] Items, int TotalCount)> QueryEventsAsync(EventQueryFilter filter, CancellationToken ct = default)
-    {
-        // RED-4 B: fail LOUD on mis-route. Inject IEventDataverseService, not the composite.
-        throw new NotImplementedException("QueryEventsAsync is implemented in DataverseWebApiService. Inject IEventDataverseService (not the composite IDataverseService).");
-    }
-
-    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, CancellationToken ct = default)
+    public Task<Guid> CreateEventLogAsync(Guid eventId, int action, string? description, Guid? owningTeamId, Guid? createdByPersonId = null, CancellationToken ct = default)
     {
         // Stub: Not implemented in ServiceClient version - use DataverseWebApiService
         throw new NotImplementedException("CreateEventLogAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
@@ -2545,8 +2640,8 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// <summary>
     /// Pure (no-I/O) builder for <see cref="BulkUpdateAsync"/>: ONE <c>ExecuteTransactionRequest</c> holding
     /// one <c>UpdateRequest</c> per row, in input order. A C# <c>null</c> field value is skipped, so only
-    /// the fields supplied are written. <see cref="DBNull.Value"/> is rejected: it cannot be serialized here,
-    /// and failing before anything is sent avoids an "outcome unknown" error for a request that never left.
+    /// the fields supplied are written; <see cref="DBNull.Value"/> CLEARS the column (the attribute is set to null),
+    /// exactly as <c>UpdateAsync</c> treats it (task 140, 2026-10-04 — it used to be rejected).
     ///
     /// <para>Exposed <c>public static</c> for direct testability — the <c>ServiceClient</c> is built from
     /// configuration inside this class and <c>ServiceClient.Execute</c> cannot be overridden, so the request
@@ -2579,18 +2674,13 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             foreach (var field in fields)
             {
-                if (field.Value is DBNull)
-                {
-                    throw new ArgumentException(
-                        $"The update at index {index} sets '{field.Key}' to DBNull. BulkUpdateAsync cannot clear a " +
-                        "column; use UpdateAsync with DBNull.Value instead.",
-                        nameof(updates));
-                }
+                // UpdateAsync's convention exactly: C# null → SKIP; DBNull.Value → explicit CLEAR (the attribute is
+                // set to null, which the SDK serializes as "clear the column / sever the lookup"). The DBNull itself
+                // is never put into the entity — that was the unserializable shape this builder used to reject.
+                if (field.Value is null)
+                    continue;
 
-                if (field.Value != null)
-                {
-                    entity[field.Key] = field.Value;
-                }
+                entity[field.Key] = field.Value is DBNull ? null : field.Value;
             }
 
             transaction.Requests.Add(new Microsoft.Xrm.Sdk.Messages.UpdateRequest { Target = entity });

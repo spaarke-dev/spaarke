@@ -303,7 +303,7 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [documentId, open]);
+  }, [projectId, documentId, open]);
 
   return (
     <Dialog

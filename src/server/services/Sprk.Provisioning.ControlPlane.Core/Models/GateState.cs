@@ -85,7 +85,15 @@ public sealed class GateEntry
     /// Dataverse query result for app-user-created, etc.). Kept as an open JSON
     /// document so gate shapes can evolve without a POCO change per gate.
     /// </summary>
+    /// <remarks>
+    /// The Newtonsoft converter is LOAD-BEARING (unified-access-control-r2 task 165, owner round 49 item 2): the Cosmos
+    /// SDK's default serializer is Newtonsoft-based and, without it, persisted every <see cref="JsonElement"/> as
+    /// <c>{"valueKind":1}</c> — the evidence was lost and a run read back from Cosmos could not be serialized by
+    /// <c>GET /api/runs/{id}</c>. Evidence is an operator record; no handler resumes from it (H8's resume record is the
+    /// typed <see cref="InterStepState.SpeContainerCreation"/>).
+    /// </remarks>
     [JsonPropertyName("evidence")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftJsonElementConverter))]
     public JsonElement? Evidence { get; set; }
 }

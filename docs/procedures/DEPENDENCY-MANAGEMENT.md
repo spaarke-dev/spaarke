@@ -1,8 +1,8 @@
 # Dependency Management
 
 > **Last Updated**: April 5, 2026
-> **Last Reviewed**: 2026-04-05
-> **Reviewed By**: ai-procedure-refactoring-r2
+> **Last Reviewed**: 2026-09-30
+> **Reviewed By**: ai-procedure-refactoring-r2; `customer-provisioning-orchestration-r1` (2026-09-30 doc-drift fix — `nightly-quality.yml` references corrected to `nightly-health.yml` after its 2026-06-01 deletion)
 > **Status**: New
 > **Applies To**: All developers modifying NuGet or npm dependencies
 
@@ -12,7 +12,7 @@
 
 - Adding, updating, or removing any NuGet or npm package
 - Updating shared library versions (`@spaarke/ui-components`, `@spaarke/auth`, `@spaarke/sdap-client`)
-- Resolving vulnerability audit findings from nightly or weekly quality reports
+- Resolving vulnerability audit findings from the nightly health report (`nightly-health.yml`'s `dep-audit` / `vuln-scan` jobs)
 - Updating Kiota packages (requires special coordination)
 
 ## .NET Dependency Management
@@ -196,8 +196,8 @@ Solutions (src/solutions/*)
 
 | Step | Automated By | Manual? |
 |------|-------------|---------|
-| Vulnerability detection (.NET) | `sdap-ci.yml` code-quality job, `nightly-quality.yml` dependency-audit | No |
-| Vulnerability detection (npm) | `nightly-quality.yml` dependency-audit | No |
+| Vulnerability detection (.NET) | `sdap-ci.yml` code-quality job (legacy, advisory), `nightly-health.yml` `dep-audit` + `vuln-scan` jobs | No |
+| Vulnerability detection (npm) | `nightly-health.yml` `dep-audit` + `vuln-scan` jobs | No |
 | Build verification | `sdap-ci.yml` build-test matrix | No |
 | Kiota version alignment check | Manual (see procedure above) | Yes |
 | Shared library consumer testing | Manual (build representative consumers) | Yes |

@@ -8,12 +8,12 @@ namespace Sprk.Bff.Api.Services.Dataverse.FetchXml;
 /// </summary>
 /// <remarks>
 /// <para>
-/// SECURITY-CRITICAL. This extractor is the load-bearing input for the cross-entity
-/// privilege check performed by <c>DataverseAuthorizationFilter</c> on
-/// <c>POST /api/dataverse/fetch</c> (FR-BFF-04). It MUST return EVERY entity referenced
-/// by the FetchXML — the primary <c>&lt;entity name="…"&gt;</c> plus every nested
-/// <c>&lt;link-entity name="…"&gt;</c> at any depth — so the filter can reject any
-/// request that touches an entity the caller lacks Read privilege on.
+/// SECURITY-CRITICAL. This extractor is the load-bearing input for the external module
+/// seam's FetchXML guard (<c>ExternalModuleDataEndpoints.EvaluateFetchXmlGuard</c>). It MUST
+/// return EVERY entity referenced by the FetchXML — the primary <c>&lt;entity name="…"&gt;</c>
+/// plus every nested <c>&lt;link-entity name="…"&gt;</c> at any depth — so the guard can reject
+/// any request that touches an entity outside the module. (Its first consumer, the internal
+/// <c>POST /api/dataverse/fetch</c>, was deleted by unified-access-control-r2 task 160.)
 /// </para>
 /// <para>
 /// Per task 010 §5, Dataverse server-side RBAC does NOT cascade Read enforcement
@@ -36,8 +36,7 @@ namespace Sprk.Bff.Api.Services.Dataverse.FetchXml;
 ///         <see cref="HashSet{T}"/> uses <see cref="StringComparer.OrdinalIgnoreCase"/>
 ///         and matches the privilege checker's case-insensitive contract.</item>
 ///   <item>Malformed XML is wrapped in <see cref="FetchXmlParseException"/> per the
-///         interface contract — the authorization filter maps this to
-///         <c>400 ProblemDetails (errorCode: DV_FETCHXML_MALFORMED)</c> per task 010 §7.</item>
+///         interface contract — the caller maps this to a 400 ProblemDetails.</item>
 /// </list>
 /// <para>
 /// Stateless and safe to register as a singleton.

@@ -51,12 +51,21 @@ public class SpeFileStore : ISpeFileOperations
     /// the only available assertion was that provisioning reached business-unit creation and then
     /// failed on the unavailable test-host Graph services — and business-unit creation no longer exists.
     /// </remarks>
+    /// <param name="containerTypeId">The container type.</param>
+    /// <param name="displayName">The container's display name.</param>
+    /// <param name="owningBusinessUnitId">
+    /// Stamped on the container before this returns (unified-access-control-r2 task 165, owner round 20 item 1) —
+    /// every container this BFF creates carries the business unit that owns it.
+    /// </param>
+    /// <param name="description">Optional description.</param>
+    /// <param name="ct">Cancellation token.</param>
     public virtual Task<ContainerDto?> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
+        Guid owningBusinessUnitId,
         string? description = null,
         CancellationToken ct = default)
-        => _containerOps.CreateContainerAsync(containerTypeId, displayName, description, ct);
+        => _containerOps.CreateContainerAsync(containerTypeId, displayName, owningBusinessUnitId, description, ct);
 
     public Task<ContainerDto?> GetContainerDriveAsync(string containerId, CancellationToken ct = default)
         => _containerOps.GetContainerDriveAsync(containerId, ct);
@@ -134,6 +143,12 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.GetFileMetadataAsUserAsync(ctx, driveId, itemId, ct);
 
+    /// <inheritdoc />
+    /// <remarks><c>virtual</c> (task 166 f1): the module-boundary test double of <c>DocumentContainerRelocator</c>
+    /// substitutes it, as the upload / download / delete siblings already are.</remarks>
+    public virtual Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default)
+        => _driveItemOps.GetItemCreatorAsync(driveId, itemId, ct);
+
     public Task<Stream?> DownloadFileAsUserAsync(
         HttpContext ctx,
         string driveId,
@@ -170,11 +185,26 @@ public class SpeFileStore : ISpeFileOperations
     // authorizes on the Dataverse side (project participation + document→project scoping) and then
     // reads app-only, exactly as the sibling content-download route does — an external CIAM contact
     // is not a Dataverse principal, so there is no delegated permission to exchange.
-    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+    // `virtual` (task 166, owner round 45 item 1): the relocation's version replay lists the source's history through it,
+    // and its module-boundary test double substitutes it (see UploadSmallAsync).
+    public virtual Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
         string driveId,
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.ListFileVersionsAsync(driveId, itemId, ct);
+
+    /// <summary>
+    /// App-only download of a specific PRIOR version (unified-access-control-r2 task 166, owner round 45 item 1): the ONE
+    /// facade method the relocation's version replay adds. Performs NO authorization — its only caller,
+    /// <c>DocumentContainerRelocator</c>, reads the source of a server-derived move of a document's own file. Not on
+    /// <see cref="ISpeFileOperations"/>: no route reads a version app-only. <c>virtual</c> for the module-boundary double.
+    /// </summary>
+    public virtual Task<Stream?> DownloadFileVersionAsync(
+        string driveId,
+        string itemId,
+        string versionId,
+        CancellationToken ct = default)
+        => _driveItemOps.DownloadFileVersionAsync(driveId, itemId, versionId, ct);
 
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,

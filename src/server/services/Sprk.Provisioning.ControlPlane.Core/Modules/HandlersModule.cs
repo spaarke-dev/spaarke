@@ -30,15 +30,16 @@
 // TASK 120 UPDATE (Wave G-2, Option D hybrid per DS-1b §1 H0 row):
 //   The four probes are now pure .NET SDK/REST implementations
 //   (ArmCognitiveServicesTpmProbe, BapRestEnvironmentRateProbe,
-//   ArmComputeVCpuProbe, KeyVaultCertBootstrapProbe) — the shell-out
+//   ArmComputeVCpuProbe, KeyVaultCertBootstrapProbe — task 248 replaced the last
+//   with SpeOwnerCredentialProbe) — the shell-out
 //   PowerShellPreflightProbe + its Preflight:{PwshExecutable,
 //   ScriptsDirectory, Timeout} options binding are RETIRED (grep-verified
 //   zero remaining callers). The TPM + vCPU probes share ONE platform
 //   ArmClient singleton (built here from the CosmosModule TokenCredential,
 //   TryAddSingleton so task 121's ArmSubscriptionReadinessProbe can reuse
 //   the same instance rather than constructing a second one — CLAUDE.md
-//   §11); the KV probe reuses the TokenCredential directly (SecretClient is
-//   constructed per-call since the vault name is a per-run parameter); the
+//   §11); the SPE owner probe (task 248) resolves SpeConfidentialClientGraphFactory
+//   (registered by the Worker's Program.cs next to H8, which shares it); the
 //   BAP REST probe is a typed HttpClient (AddHttpClient<IPreflightQuotaProbe,
 //   BapRestEnvironmentRateProbe>) since it scopes DefaultAzureCredential
 //   per-tenant internally (§4D I5).
@@ -59,8 +60,11 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 
 namespace Sprk.Provisioning.ControlPlane.Modules;
 
@@ -108,9 +112,26 @@ public static class HandlersModule
         services.AddScoped<IPreflightQuotaProbe>(sp => new ArmComputeVCpuProbe(
             sp.GetRequiredService<ArmClient>(),
             sp.GetRequiredService<ILogger<ArmComputeVCpuProbe>>()));
-        services.AddScoped<IPreflightQuotaProbe>(sp => new KeyVaultCertBootstrapProbe(
-            sp.GetRequiredService<TokenCredential>(),
-            sp.GetRequiredService<ILogger<KeyVaultCertBootstrapProbe>>()));
+        services.AddScoped<IPreflightQuotaProbe>(sp => new SpeOwnerCredentialProbe(
+            sp.GetRequiredService<SpeConfidentialClientGraphFactory>(),
+            sp.GetRequiredService<IOptions<SpeContainerOptions>>(),
+            sp.GetRequiredService<ILogger<SpeOwnerCredentialProbe>>()));
+
+        // HANDLER-03 (Wave 2 pre-dispatch remediation 2026-08-27) — F1
+        // verbatim absorption: pinned Azure OpenAI model freshness probe.
+        // Fails H0 fast if any ADR-020 pin (PinnedModelCatalog.Models) is
+        // Deprecating / already-Deprecated / not-reported in the target
+        // region, sparing the operator the ~20-30 min wait for H2a to fail
+        // with ServiceModelDeprecated. Reuses the shared platform ArmClient
+        // singleton (TryAddSingleton above); reuses the canonical ADR-020
+        // catalog (no second source of truth); reuses the ambient
+        // TimeProvider (test-injectable per docs/standards/TEST-ARCHITECTURE.md).
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IPreflightQuotaProbe>(sp => new ArmOpenAiPinFreshnessProbe(
+            sp.GetRequiredService<ArmClient>(),
+            PinnedModelCatalog.Models,
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ArmOpenAiPinFreshnessProbe>>()));
 
         // FR-34 version-compat matrix (Wave G-8 Batch 10, defect #24) —
         // singleton: the parsed matrix is immutable per process lifetime
@@ -121,6 +142,15 @@ public static class HandlersModule
         services.TryAddSingleton<IVersionCompatMatrix>(sp => new JsonFileVersionCompatMatrix(
             configuration["Preflight:VersionCompatMatrixPath"],
             sp.GetRequiredService<ILogger<JsonFileVersionCompatMatrix>>()));
+
+        // COMP-10 (SESSION 17): H0Options — cost-envelope gate configuration.
+        // Bound to the "H0" section (H0Options.SectionName). Absent-config
+        // yields the built-in defaults (CostEnvelopeAbortsPreflight=true;
+        // shared-trial/smb/enterprise/dedicated ceilings per SKILL Step 2
+        // BAT-10). Operator overrides via appsettings / env:
+        //   "H0": { "CostEnvelopeAbortsPreflight": false }
+        //   "H0__CostEnvelopeAbortsPreflight": "false"
+        services.Configure<H0Options>(configuration.GetSection(H0Options.SectionName));
 
         // H0 handler — Scoped per IProvisioningHandler contract + parity
         // with IHandlerEnqueuer's Scoped registration. Concrete-only: the

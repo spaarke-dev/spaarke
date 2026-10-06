@@ -217,7 +217,7 @@ public sealed class NamingConformanceCheckerTests
 
             var checker = NewChecker(tmp);
             var outcome = await checker.CheckAsync(
-                new NamingConformanceRequest("customer-01", "run-01"), CancellationToken.None);
+                new NamingConformanceRequest("cust01", "run-01"), CancellationToken.None);
 
             outcome.Should().BeOfType<NamingConformanceOutcome.Success>();
         }
@@ -236,7 +236,7 @@ public sealed class NamingConformanceCheckerTests
 
             var checker = NewChecker(tmp);
             var outcome = await checker.CheckAsync(
-                new NamingConformanceRequest("customer-01", "run-01"), CancellationToken.None);
+                new NamingConformanceRequest("cust01", "run-01"), CancellationToken.None);
 
             var failure = outcome.Should().BeOfType<NamingConformanceOutcome.Failure>().Subject;
             failure.ExitCode.Should().Be(1);
@@ -256,7 +256,7 @@ public sealed class NamingConformanceCheckerTests
         {
             var checker = NewChecker(tmp);
             var outcome = await checker.CheckAsync(
-                new NamingConformanceRequest("customer-01", "run-01"), CancellationToken.None);
+                new NamingConformanceRequest("cust01", "run-01"), CancellationToken.None);
 
             var failure = outcome.Should().BeOfType<NamingConformanceOutcome.Failure>().Subject;
             failure.ExitCode.Should().Be(1);

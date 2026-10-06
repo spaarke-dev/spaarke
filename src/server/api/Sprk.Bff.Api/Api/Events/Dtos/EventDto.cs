@@ -45,7 +45,8 @@ public record EventDto
     public string? RegardingRecordName { get; init; }
 
     /// <summary>
-    /// Entity type of the regarding record (sprk_regardingrecordtype option set value).
+    /// Entity type of the regarding record, as the API's integer (derived from the typed regarding lookup — see
+    /// <see cref="Dtos.RegardingRecordType"/>; <c>sprk_regardingrecordtype</c> itself is a lookup, not this value).
     /// Values: Project (0), Matter (1), Invoice (2), Analysis (3), Account (4), Contact (5), Work Assignment (6), Budget (7)
     /// </summary>
     public int? RegardingRecordType { get; init; }
@@ -114,15 +115,18 @@ public record EventDto
     public DateTime ModifiedOn { get; init; }
 }
 
-// Status reason values: Spaarke.Dataverse.EventStatusCode (task 097 — the former fictional 1..7 set that lived here
-// was rejected by Dataverse; the live set has one home, next to the payload builders that write it).
+// Status reason values: Spaarke.Dataverse.EventStatusCode — ONE home, next to the payload builders that write them
+// (task 097; unified-access-control-r2 task 159 fixed the same values independently in a copy here — merged into one).
 
 // Priority values: Spaarke.Dataverse.EventPriority (task 097 — the former 0..3 set that lived here was rejected by
 // Dataverse; live sprk_priority is Low 100000000 … Urgent 100000003).
 
 /// <summary>
-/// The API's regarding record type values (0..7). NOT an option set: <c>sprk_regardingrecordtype</c> is a lookup to
-/// <c>sprk_recordtype_ref</c>; Spaarke.Dataverse.RegardingRecordType maps each value to its lookup and catalog row.
+/// The API's regarding record type values (0-7). These are NOT Dataverse values: <c>sprk_regardingrecordtype</c> is a
+/// LOOKUP to <c>sprk_recordtype_ref</c>, not an option set (task 159, #1098). The API's integer names which typed
+/// regarding lookup an event uses; the server binds the record-type lookup to the environment's
+/// <c>sprk_recordtype_ref</c> row and derives this integer on read from the typed lookup whose value equals
+/// <c>sprk_regardingrecordid</c>.
 /// </summary>
 public static class RegardingRecordType
 {

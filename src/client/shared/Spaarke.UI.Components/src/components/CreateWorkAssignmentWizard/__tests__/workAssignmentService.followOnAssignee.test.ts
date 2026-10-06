@@ -10,6 +10,9 @@
  * the picked person there. Reproduced live: the follow-on event was created with
  * `sprk_assignedto` empty. ADR-038 rule 1: the asserted target is pinned to the live-verified
  * docs/data-model/sprk_event-related-tables.md row.
+ *
+ * Since unified-access-control-r2 task 147 the event is created THROUGH THE BFF (`POST /api/v1/child-records/sprk_event`,
+ * withBffChildWrites) with the same Web API payload, so the payload is read from that request.
  */
 
 import * as fs from 'fs';
@@ -74,6 +77,20 @@ function makeDataService(): IDataService & { created: Array<{ entity: string; da
   };
 }
 
+/** An authenticatedFetch that records every BFF child-record create and answers it with a new id. */
+function makeBffFetch(): jest.Mock & { childCreates: Array<{ url: string; body: Record<string, unknown> }> } {
+  const childCreates: Array<{ url: string; body: Record<string, unknown> }> = [];
+  const fn = jest.fn(async (url: string, init?: { body?: string }) => {
+    if (String(url).includes('/api/v1/child-records/')) {
+      childCreates.push({ url: String(url), body: JSON.parse(init?.body ?? '{}') });
+      return { ok: true, status: 201, json: async () => ({ id: 'new-event-id' }) };
+    }
+    return { ok: true, status: 200, json: async () => ({}) };
+  }) as jest.Mock & { childCreates: typeof childCreates };
+  fn.childCreates = childCreates;
+  return fn;
+}
+
 describe('WorkAssignmentService.createFollowOnEvent — Assigned To (task 097)', () => {
   beforeEach(() => {
     _resetNavPropCacheForTests();
@@ -91,7 +108,8 @@ describe('WorkAssignmentService.createFollowOnEvent — Assigned To (task 097)',
 
   it('binds the picked contact to sprk_AssignedTo (exact column), never to a systemuser lookup', async () => {
     const dataService = makeDataService();
-    const service = new WorkAssignmentService(dataService, jest.fn(), 'https://bff.example/api', undefined);
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff, 'https://bff.example/api', undefined);
 
     const result = await service.createFollowOnEvent(WA_ID, {
       ...EMPTY_FOLLOW_ON_EVENT_STATE,
@@ -100,7 +118,9 @@ describe('WorkAssignmentService.createFollowOnEvent — Assigned To (task 097)',
     });
 
     expect(result.success).toBe(true);
-    const payload = dataService.created.find(c => c.entity === 'sprk_event')!.data;
+    const create = bff.childCreates.find(c => c.url.endsWith('/api/v1/child-records/sprk_event'))!;
+    expect(create).toBeDefined();
+    const payload = create.body;
     expect(payload['sprk_AssignedTo@odata.bind']).toBe(`/contacts(${CONTACT_ID})`);
     expect(payload).not.toHaveProperty('createdby@odata.bind');
     expect(payload).not.toHaveProperty('sprk_AssignedToExternal@odata.bind');
@@ -110,11 +130,12 @@ describe('WorkAssignmentService.createFollowOnEvent — Assigned To (task 097)',
 
   it('writes no assignee bind when none was picked', async () => {
     const dataService = makeDataService();
-    const service = new WorkAssignmentService(dataService, jest.fn(), 'https://bff.example/api', undefined);
+    const bff = makeBffFetch();
+    const service = new WorkAssignmentService(dataService, bff, 'https://bff.example/api', undefined);
 
     await service.createFollowOnEvent(WA_ID, { ...EMPTY_FOLLOW_ON_EVENT_STATE });
 
-    const payload = dataService.created.find(c => c.entity === 'sprk_event')!.data;
+    const payload = bff.childCreates.find(c => c.url.endsWith('/api/v1/child-records/sprk_event'))!.body;
     expect(Object.keys(payload).some(k => /assignedto/i.test(k))).toBe(false);
   });
 

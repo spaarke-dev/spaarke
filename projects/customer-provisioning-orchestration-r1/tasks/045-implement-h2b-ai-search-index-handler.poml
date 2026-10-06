@@ -4,7 +4,7 @@
     <title>Implement H2b AI Search Index Provisioning Handler (7 canonical indexes)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler'; modifies .cs files; owns the tenant-isolation-filter template for Model 1 (I2 invariant).</rigor-reason>
     <model-tier>sonnet</model-tier>

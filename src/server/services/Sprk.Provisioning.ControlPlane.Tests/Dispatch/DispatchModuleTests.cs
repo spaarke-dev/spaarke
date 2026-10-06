@@ -24,10 +24,13 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.StackExchangeRedis;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Dispatch;
+using StackExchange.Redis;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Dispatch;
@@ -71,19 +74,77 @@ public sealed class DispatchModuleTests
             .WithMessage("*Redis*");
     }
 
+    // ---------- Task 242: Redis:Endpoint (managed identity) vs connection string ----------
+
     [Fact]
-    public void AddDispatchModule_RedisConnectionStringSet_DoesNotThrow_RegardlessOfEnvironment()
+    public void AddDispatchModule_Endpoint_DeployedEnvironment_RegistersManagedIdentityMultiplexerFactory()
+    {
+        var services = new ServiceCollection();
+        var configuration = BuildConfiguration(
+            redisConnectionString: null, redisEndpoint: Endpoint, managedIdentityClientId: ClientId);
+
+        services.AddDispatchModule(configuration, new FakeHostEnvironment("Production"));
+        var options = services.BuildServiceProvider().GetRequiredService<IOptions<RedisCacheOptions>>().Value;
+
+        options.ConnectionMultiplexerFactory.Should().NotBeNull(
+            "with an endpoint the Worker builds its own Entra-authenticated multiplexer (no connect at startup)");
+        options.Configuration.Should().BeNull("no connection string is used when an endpoint is set");
+        options.InstanceName.Should().Be("provisioning:");
+    }
+
+    [Fact]
+    public void AddDispatchModule_Endpoint_WithoutManagedIdentityClientId_ThrowsNamingTheSetting()
+    {
+        var services = new ServiceCollection();
+        var configuration = BuildConfiguration(redisConnectionString: null, redisEndpoint: Endpoint);
+
+        var act = () => services.AddDispatchModule(configuration, new FakeHostEnvironment("Production"));
+
+        act.Should().Throw<InvalidOperationException>().WithMessage("*ManagedIdentity__ClientId*");
+    }
+
+    [Fact]
+    public async Task BuildManagedIdentityOptionsAsync_AuthenticatesWithTheClientId_OverResp3AndTls_WithoutAPassword()
+    {
+        string? clientIdUsed = null;
+
+        var options = await DispatchModule.BuildManagedIdentityOptionsAsync(
+            Endpoint, ClientId, (_, id) => { clientIdUsed = id; return Task.CompletedTask; });
+
+        clientIdUsed.Should().Be(ClientId);
+        options.Protocol.Should().Be(RedisProtocol.Resp3, "RESP3 lets the token refresh re-authenticate every connection");
+        options.Ssl.Should().BeTrue();
+        options.Password.Should().BeNullOrEmpty();
+        options.EndPoints.Should().ContainSingle().Which.ToString().Should().Contain("10000");
+    }
+
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Staging")]
+    public void AddDispatchModule_ConnectionStringOnly_DeployedEnvironment_ThrowsNamingRedisEndpoint(string environmentName)
     {
         var services = new ServiceCollection();
         var configuration = BuildConfiguration(redisConnectionString: "localhost:6379");
-        var environment = new FakeHostEnvironment("Production");
 
-        var act = () => services.AddDispatchModule(configuration, environment);
+        var act = () => services.AddDispatchModule(configuration, new FakeHostEnvironment(environmentName));
 
-        act.Should().NotThrow(
-            "a configured Redis connection string satisfies the gate in every environment -- " +
-            "AddStackExchangeRedisCache does not connect eagerly, so this registers without any " +
-            "live network call.");
+        act.Should().Throw<InvalidOperationException>(
+            "deployed environments are keyless (task 242) -- a connection string without an endpoint is refused")
+            .WithMessage("*Redis__Endpoint*");
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Testing")]
+    public void AddDispatchModule_ConnectionStringOnly_LocalLikeEnvironment_RegistersRedisCache(string environmentName)
+    {
+        var services = new ServiceCollection();
+        var configuration = BuildConfiguration(redisConnectionString: "localhost:6379");
+
+        services.AddDispatchModule(configuration, new FakeHostEnvironment(environmentName));
+        var options = services.BuildServiceProvider().GetRequiredService<IOptions<RedisCacheOptions>>().Value;
+
+        options.Configuration.Should().Be("localhost:6379");
     }
 
     [Fact]
@@ -104,7 +165,11 @@ public sealed class DispatchModuleTests
             "to the real Redis-backed implementation.");
     }
 
-    private static IConfiguration BuildConfiguration(string? redisConnectionString)
+    private const string Endpoint = "sprk-acme-prod-redis.westus2.redis.azure.net:10000";
+    private const string ClientId = "00000000-1111-2222-3333-555555555555";
+
+    private static IConfiguration BuildConfiguration(
+        string? redisConnectionString, string? redisEndpoint = null, string? managedIdentityClientId = null)
     {
         var data = new Dictionary<string, string?>
         {
@@ -114,6 +179,16 @@ public sealed class DispatchModuleTests
         if (redisConnectionString is not null)
         {
             data["Redis:ConnectionString"] = redisConnectionString;
+        }
+
+        if (redisEndpoint is not null)
+        {
+            data["Redis:Endpoint"] = redisEndpoint;
+        }
+
+        if (managedIdentityClientId is not null)
+        {
+            data["ManagedIdentity:ClientId"] = managedIdentityClientId;
         }
 
         return new ConfigurationBuilder().AddInMemoryCollection(data).Build();

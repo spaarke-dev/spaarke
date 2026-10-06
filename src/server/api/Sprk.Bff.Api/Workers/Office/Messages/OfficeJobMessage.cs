@@ -177,6 +177,16 @@ public record UploadFinalizationPayload
     /// </remarks>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public Guid? OwningTeamId { get; init; }
+
+    /// <summary>
+    /// unified-access-control-r2 task 146 c1-r1 (owner round 13 item 9): the person who made the save, resolved by
+    /// <c>SaveAsync</c> with <see cref="OwningTeamId"/> and carried with it, so every document the worker creates for the
+    /// save records them as its creator person (<c>sprk_createdbyperson</c>) — the create is app-only. Null when the
+    /// person could not be resolved, for a version save, and for a message enqueued before this field; the worker then
+    /// resolves it from the message's user only when it resolves the team itself. Omitted from the JSON when null.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Guid? CreatedByPersonId { get; init; }
 }
 
 /// <summary>

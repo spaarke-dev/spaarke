@@ -273,12 +273,33 @@ it does not re-open design.
 - ✅ MUST route every AI invocation through Event / Click / Text; ✅ MUST write every output +
   tool chain to the ledger before rendering; ✅ MUST gate side effects via the ONE gate by
   declared `side_effect_class`; ✅ MUST keep both catalogs closed; ✅ MUST run user-OBO for all
-  Dataverse tool access; ✅ MUST ship Null-Object peers for gated registrations (ADR-032);
+  Dataverse tool access (**AMENDED 2026-10-02 for the two CREATE tools, and 2026-10-03 for the update tool's re-file
+  owner step — see "Amendment A-UAC146" under ADR Tensions; and 2026-10-04 for securing a work assignment or project
+  the tools file under a secure record — "Amendment A-UAC158"**);
+  ✅ MUST ship Null-Object peers for gated registrations (ADR-032);
   ✅ MUST keep new composites as `coded` workflows.
 - ❌ MUST NOT add a second intent-detection mechanism anywhere; ❌ MUST NOT add routing config
   outside the Binding table; ❌ MUST NOT gate by tool-name lists; ❌ MUST NOT land new capability
   on the frozen engine; ❌ MUST NOT emit ungrounded free-form output; ❌ MUST NOT create new
   manifest tables; ❌ MUST NOT retain compat shims past a surface's cutover.
+- ⚠️ **Amendment A-UAC156 (2026-10-03): the update tool's core-ancestor re-stamp.** It amends "✅ MUST run
+  user-OBO for all Dataverse tool access" (above) and FR-P0-10 for ONE step of `dataverse.update_record`
+  (`DataverseUpdateRecordHandler`). This is CLAUDE.md §6.5 **path B**, decided by the owner in unified-access-control-r2
+  owner decisions round 8 item 1 (`projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`).
+  The caller's PATCH still runs user-OBO. Once that PATCH has succeeded, `CoreAncestorAfterWriteRestamp.AfterWriteAsync`
+  re-stamps APP-ONLY, in the same operation, the `sprk_regarding{core}` copies the write moved: the record's own copy and
+  the copies of the records filed under it. The helper is narrow by construction: one member, no `IServiceProvider`, no
+  client exposed, stamp columns only, and values derived from the data, never from the caller. A refused PATCH re-stamps
+  nothing. This amendment covers only that re-stamp. Record: `projects/unified-access-control-r2/notes/task-156-stamp-freshness.md`,
+  "Owner round 8".
+- ⚠️ **Amendment A-UAC158 (2026-10-04, owner round 32): securing a work assignment or project the tools file under a
+  SECURE record.** Beside A-UAC156 above (owner round 8 item 1) and the re-file owner step folded into path B (owner round
+  13 item 7), the same "✅ MUST run user-OBO" rule and FR-P0-10 are amended, CLAUDE.md §6.5 **path B, ACCEPTED by the
+  owner** in unified-access-control-r2 owner round 32 (task 158 Q2, "Path B: secure inline"), extending Amendment
+  A-UAC146: when `dataverse.update_record` re-files a work assignment or project under a secure matter or project, it
+  runs provisioning's app-only steps inline, right after the caller's own (still user-OBO) PATCH, for the record's
+  recorded creator; `dataverse.create_record` creates such a record INTO isolation (A-UAC146's G5 create) and completes it
+  through the same steps. Full text: "Amendment A-UAC158" under ADR Tensions below.
 
 ### Existing Patterns to Follow
 - Prompted executor: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/` (ActionRunner + PromptSchemaRenderer)
@@ -296,6 +317,80 @@ it does not re-open design.
 > amendment; ADR-037 engine-steering rescind — see `notes/audit-inputs/ADR-REVIEW-VS-GREENFIELD.md`
 > §5, applied 2026-07-05). All listed ADRs apply without exception. This section updates if
 > tensions emerge during implementation.
+
+### Amendment A-UAC146 (2026-10-02; widened 2026-10-03) — the "user-OBO for all Dataverse tool access" MUST, for creates and the update tool's re-file
+
+- **Rule amended**: "✅ MUST run user-OBO for all Dataverse tool access" (MUST Rules, above) and FR-P0-10 ("no
+  app-only Dataverse path reachable from AI"), for the two CREATE tools — `dataverse.create_record`
+  (`DataverseCreateRecordHandler`) and `email.draft` (`EmailDraftToolHandler`) — and, since 2026-10-03, for the
+  app-only steps of the UPDATE tool's re-file (`dataverse.update_record`, `DataverseUpdateRecordHandler`).
+- **Path**: CLAUDE.md §6.5 **path B**, decided by the owner — unified-access-control-r2 owner decisions round 7
+  item 3 (the two create tools) and round 13 item 7 (2026-10-03: "the update tool's re-file step is folded into ADR
+  path B, as round 8 did for 156's re-stamp") (`projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`).
+  It supersedes the project-scoped path-A record task 146 r2 had made (note §12c) in BOTH of that record's scopes: the
+  filed child creates (round 7) and the update tool's re-file owner assignment (round 13).
+- **New rule (the G5 pattern)**: check the caller's rights AS THE USER (Create on the table — plus Append when the row
+  sets a lookup — and AppendTo on every record a lookup names, via `RetrievePrincipalAccess`; no field-secured or
+  owner/audit column), then the APPLICATION creates the row OWNED BY THE TEAM `IRecordOwnershipResolver` names (the named
+  Secure Record team under a secure parent, otherwise the parent's — or, unfiled, the caller's — business-unit team),
+  and records the person in the table's Assigned-To / "for" column where one exists.
+- **Why**: a run-as-user create leaves the row owned by the caller in their own business unit — readable by every
+  colleague with ordinary depth, including the children of a secure record (UAC C10, CRITICAL), and contrary to owner
+  round 5 ("records … assigned to the creating user's business unit/team").
+- **Still user-OBO**: every read and delete tool; every update tool's PATCH; and the creates where the resolver keeps
+  the creator (per-user tables, unfiled communications/threads — UAC escalation E1/E2 — and tables with no user/team
+  ownership).
+- **The update tool's re-file — covered by this amendment since 2026-10-03** (`dataverse.update_record`,
+  `DataverseUpdateRecordHandler`). When the caller's PATCH sets or clears a lookup to a project, matter, work assignment
+  or other ownership parent on a CHILD table, the row is re-filed through `RecordOwnershipResolver.ReparentAsync`. After
+  as-the-caller checks (the row is visible to them; AppendTo on every record it is moved under; and, for a move OUT of a
+  secure record, F3 — Full Access on that record or being the row's creator — asked AS THE CALLER), the resolver reads
+  the row and its parents' owners APP-ONLY, the caller's own PATCH is applied (still user-OBO — Dataverse authorizes it),
+  and the owner is then ASSIGNED APP-ONLY and read back. If that assignment fails, the filing columns the PATCH moved are
+  restored APP-ONLY. Those app-only steps are path B under owner round 13 item 7 (they were the path-A record of task 146
+  note §12c until then; that record is superseded for them). The caller's PATCH itself is NOT amended — it stays
+  user-OBO.
+- **Implementation and tests**: `Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs` (creates),
+  `Services/Ai/Handlers/DataverseUpdateRecordHandler.cs` (the re-file);
+  `tests/integration/data-mutation/RecordOwnership/SecureChildOwnershipAiToolTests.cs`; record:
+  `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §12c, §13, §14 and §17 (round 13).
+
+### Amendment A-UAC158 (2026-10-04) — extends A-UAC146: securing a work assignment or project the tools file under a secure record
+
+- **Rule amended**: "✅ MUST run user-OBO for all Dataverse tool access" (MUST Rules, above) and FR-P0-10, extending
+  Amendment A-UAC146 — beside A-UAC156 (owner round 8 item 1, the re-stamp) and owner round 13 item 7 (the re-file's
+  owner step folded into path B). Covers `dataverse.update_record` (`DataverseUpdateRecordHandler`) and the follow-on of
+  `dataverse.create_record` (`DataverseCreateRecordHandler`), for a `sprk_workassignment` or `sprk_project` only.
+- **Path**: CLAUDE.md §6.5 **path B**, ACCEPTED by the owner — unified-access-control-r2 owner round 32 (2026-10-04,
+  answering task 158's Q2), on owner rounds 6 ("a work assignment or project filed under a SECURE matter or project is
+  itself secure") and 31 (its creator honours every No Access list; a create under a secure parent is created INTO
+  isolation). Recorded in `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md`.
+- **New rule**: when the caller's own write files a work assignment or project under a SECURE matter or project, the
+  record is secured IN THE SAME OPERATION through provisioning's own app-only steps (`SecureRootFilingGate` →
+  `SecureRootInheritance` → `ProvisionProjectEndpoint.ProvisionInheritedAsync`), for the person who CREATED the record —
+  never a person the caller names:
+  - **update (re-file)**: before the caller's PATCH, the record's recorded creator (`createdby` when a usable person,
+    else `sprk_createdbyperson`) is checked against the No Access list of the record and of every secure parent it would
+    be filed under (APP-ONLY reads; walled or unverifiable refuses, nothing written); the caller's PATCH still runs
+    user-OBO; then provisioning flags the record, shares it to that creator (read back), moves it to the named Secure
+    Record Owners team, gives it its own container and its parents' sharees (their provenance recorded on task 142's
+    `sprk_assignedaccess` ledger, owner round 30).
+  - **create**: under A-UAC146 the application already creates the row after the as-the-caller check (now also AppendTo
+    on every secure parent, including one named only by the polymorphic pair); A-UAC158 adds that it is created INTO
+    isolation (owned by the named team, `sprk_issecure` in the create, `sprk_createdbyperson` = the caller) after the
+    caller's No Access check against every secure parent and the record's own list, and that provisioning's re-entry
+    steps then share it to the caller (read back), give it its container and sharees — or DELETE it again (read back)
+    when the caller's share cannot be made.
+- **Why**: the alternative (path C — leave it to the 5-minute job) leaves a record the user explicitly filed under a
+  secure matter readable by their whole business unit and the tool reporting success for a record that is not secure
+  (ADR-003; owner R3/R4: immediate on save, the job only a safety net).
+- **Narrow by construction**: the app-only steps act only on the ONE record the caller just wrote, for its recorded
+  creator; the caller's own write is unchanged (user-OBO PATCH; A-UAC146's G5 create). `SecureRootFilingGate` exposes no
+  Dataverse client and resolves only `SecureRootInheritance`.
+- **Implementation and tests**: `Services/Access/SecureRootFilingGate.cs`, `Services/Access/SecureRootInheritance.cs`,
+  `Services/Ai/Handlers/Dataverse/OwnedChildWrite.cs`, `DataverseCreateRecordHandler.cs`,
+  `DataverseUpdateRecordHandler.cs`; `tests/integration/data-mutation/ExternalAccess/SecureRootInheritanceWriterTests.cs`;
+  record: `projects/unified-access-control-r2/notes/task-158-secure-inherit-filed-records.md` §6 (viii), §11 Q2, §14.
 
 ## Success Criteria
 

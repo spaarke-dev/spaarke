@@ -1,3 +1,5 @@
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Services.SpeAdmin;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
@@ -32,6 +34,9 @@ public static class ContainerCustomPropertyEndpoints
     /// Called from <see cref="SpeAdminEndpoints.MapSpeAdminEndpoints"/> with the /api/spe group.
     /// </summary>
     /// <param name="group">The /api/spe route group to register endpoints on.</param>
+    /// <summary>Deny code: the business-unit stamp is server-owned (task 165, owner round 20 item 1).</summary>
+    internal const string ContainerBindingServerOwnedCode = "spe.admin.deny.container_binding_server_owned";
+
     public static void MapContainerCustomPropertyEndpoints(RouteGroupBuilder group)
     {
         // GET /api/spe/containers/{containerId}/customproperties?configId={id}
@@ -124,11 +129,7 @@ public static class ContainerCustomPropertyEndpoints
                     "GetCustomProperties: container '{ContainerId}' not found for configId {ConfigId}, TraceId={TraceId}",
                     containerId, configGuid, context.TraceIdentifier);
 
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -155,11 +156,7 @@ public static class ContainerCustomPropertyEndpoints
                 "GetCustomProperties: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Not Found",
-                detail: $"Container '{containerId}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
         }
         catch (SpaarkeStorageException ex)
         {
@@ -257,6 +254,13 @@ public static class ContainerCustomPropertyEndpoints
                 extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
         }
 
+        // Task 165, owner round 20 item 1: the container's business-unit stamp is SERVER-OWNED — only the BFF's creation
+        // paths and the backfill script write it. Writing it here would let an administrator re-bind a container into
+        // another customer's view (or out of their own). The shipped editor re-sends EVERY property it loaded, the stamp
+        // included, so an UNCHANGED stamp is accepted and simply not written; any other value is refused.
+        var stampEntries = request.Properties.Where(p => SpeContainerBusinessUnitStamp.IsReserved(p?.Name)).ToList();
+        var toWrite = request.Properties.Where(p => !SpeContainerBusinessUnitStamp.IsReserved(p?.Name)).ToList();
+
         try
         {
             var config = await graphService.ResolveConfigAsync(configGuid, ct);
@@ -265,8 +269,39 @@ public static class ContainerCustomPropertyEndpoints
                 throw new SpeAdminGraphService.ConfigNotFoundException(configGuid);
             }
 
+            if (stampEntries.Count > 0)
+            {
+                var current = await graphService.GetCustomPropertiesForConfigAsync(config, containerId, ct);
+                if (current is null)
+                {
+                    return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
+                }
+
+                var currentBinding = SpeContainerBusinessUnitStamp.Read(current);
+                if (currentBinding.BusinessUnitId is null
+                    || SpeContainerBusinessUnitStamp.Read(stampEntries) != currentBinding)
+                {
+                    logger.LogWarning(
+                        "PutCustomProperties: refused a change to the reserved business-unit stamp on container '{ContainerId}', " +
+                        "configId={ConfigId}, TraceId={TraceId}",
+                        containerId, configGuid, context.TraceIdentifier);
+
+                    return ProblemDetailsHelper.Forbidden(
+                        ContainerBindingServerOwnedCode,
+                        $"The custom property '{SpeContainerBusinessUnitStamp.PropertyName}' binds the container to its " +
+                        "owning business unit and is managed by Spaarke; it cannot be set or changed here.",
+                        context.TraceIdentifier);
+                }
+
+                if (toWrite.Count == 0)
+                {
+                    // Only the unchanged stamp was sent: nothing to write.
+                    return TypedResults.Ok(new CustomPropertiesResponse(current, current.Count));
+                }
+            }
+
             var updated = await graphService.UpdateCustomPropertiesForConfigAsync(
-                config, containerId, request.Properties, ct);
+                config, containerId, toWrite, ct);
 
             if (updated is null)
             {
@@ -274,11 +309,7 @@ public static class ContainerCustomPropertyEndpoints
                     "PutCustomProperties: container '{ContainerId}' not found for configId {ConfigId}, TraceId={TraceId}",
                     containerId, configGuid, context.TraceIdentifier);
 
-                return Results.Problem(
-                    title: "Not Found",
-                    detail: $"Container '{containerId}' was not found.",
-                    statusCode: StatusCodes.Status404NotFound,
-                    extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+                return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
             }
 
             logger.LogInformation(
@@ -305,11 +336,7 @@ public static class ContainerCustomPropertyEndpoints
                 "PutCustomProperties: Graph returned 404 for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
 
-            return Results.Problem(
-                title: "Not Found",
-                detail: $"Container '{containerId}' was not found.",
-                statusCode: StatusCodes.Status404NotFound,
-                extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+            return SpeAdminTenantScopeFilter.ContainerNotFound(containerId, context.TraceIdentifier);
         }
         catch (SpaarkeStorageException ex)
         {

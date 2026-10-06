@@ -8,6 +8,7 @@ import {
   setupCodePageThemeListener,
   setUserThemePreference,
 } from '@spaarke/ui-components/utils/themeStorage';
+import { DataGridExternalHostProvider } from '@spaarke/ui-components/components/DataGrid/DataGridExternalHost';
 import { APP_VERSION } from './config';
 import { clearStoredRealm } from './auth/realm';
 import { AppHeader } from './components/AppHeader';
@@ -176,6 +177,10 @@ const AppShell: React.FC<{
  * - Routes for WorkspaceHomePage (/), ProjectPage (/project/:id), SettingsPage (/settings)
  * - ErrorBoundary wrapping all route content
  * - AppHeader with Spaarke logo, user settings link, and theme toggle
+ * - DataGridExternalHostProvider ABOVE every route (unified-access-control-r2 task 157): every shared Spaarke
+ *   grid in this app renders with no view picker and never requests the entity's saved-query list, whatever
+ *   props reach it. A security setting: the BFF's external column allow-lists admit only each grid's own
+ *   columns. ExternalSpaGridViewSelectorGuardTests asserts this mount.
  */
 export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) => {
   // Use shared 4-level theme cascade: localStorage > URL flags > navbar DOM > system preference.
@@ -224,17 +229,19 @@ export const App: React.FC<{ teamsHost?: boolean }> = ({ teamsHost = false }) =>
   }, [instance]);
 
   return (
-    <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <BrowserRouter>
-        <AppShell
-          isDark={isDark}
-          onToggleDark={handleToggleDark}
-          portalUser={portalUser}
-          teamsHost={teamsHost}
-          onSignOut={handleSignOut}
-        />
-      </BrowserRouter>
-    </FluentProvider>
+    <DataGridExternalHostProvider>
+      <FluentProvider theme={theme} style={{ height: '100%' }}>
+        <BrowserRouter>
+          <AppShell
+            isDark={isDark}
+            onToggleDark={handleToggleDark}
+            portalUser={portalUser}
+            teamsHost={teamsHost}
+            onSignOut={handleSignOut}
+          />
+        </BrowserRouter>
+      </FluentProvider>
+    </DataGridExternalHostProvider>
   );
 };
 

@@ -10,9 +10,9 @@
 //   <see cref="ArmCognitiveServicesTpmProbe"/>,
 //   <see cref="BapRestEnvironmentRateProbe"/>,
 //   <see cref="ArmComputeVCpuProbe"/>, and
-//   <see cref="KeyVaultCertBootstrapProbe"/> — are pure .NET SDK/REST calls
-//   under <c>DefaultAzureCredential</c> pinned to the L2 UAMI (Option D
-//   hybrid per DS-1b §1 H0 row). They REPLACE the original shell-out
+//   <see cref="SpeOwnerCredentialProbe"/> (task 248; replaced KeyVaultCertBootstrapProbe) — are pure .NET SDK/REST calls
+//   under the L2 UAMI (Option D hybrid per DS-1b §1 H0 row); the SPE probe signs in
+//   as the container type's owning app through the UAMI's federated credential. They REPLACE the original shell-out
 //   implementation (<c>PowerShellPreflightProbe</c>, which invoked
 //   scripts/preflight/*.ps1 — retired by task 120; the L2 App Service has no
 //   pwsh runtime under Option D's zero-shell main site per design.md §4.2a).
@@ -56,9 +56,8 @@ public interface IPreflightQuotaProbe
     /// <summary>
     /// Executes the check with the given <paramref name="input"/> and
     /// returns the result. Domain failures (insufficient headroom, missing
-    /// cert, etc.) return <c>Passed=false</c> WITH a diagnostic; only
-    /// unexpected infrastructure errors (e.g. pwsh not on PATH, script
-    /// parse error, network fault) should throw.
+    /// SPE owner setup, etc.) return <c>Passed=false</c> WITH a diagnostic; only
+    /// unexpected infrastructure errors (e.g. network fault, 5xx) should throw.
     /// </summary>
     /// <param name="input">Customer + tenant + non-secret parameter snapshot.</param>
     /// <param name="cancellationToken">Cancellation token.</param>

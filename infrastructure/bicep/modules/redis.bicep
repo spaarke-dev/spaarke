@@ -1,100 +1,109 @@
 // infrastructure/bicep/modules/redis.bicep
-// Azure Redis Cache module — hardened with VNet injection, RDB persistence,
-// allkeys-lru eviction, and public access disabled (PPI-043)
+// Azure Managed Redis (Microsoft.Cache/redisEnterprise) — Microsoft Entra only.
 //
-// FR-09 (spaarke-redis-cache-remediation-r1, task 020): parameter audit complete
-// 2026-06-25. SKU shape retained as string+int (NOT migrated to object) because
-// 3 in-tree callers (customer.bicep, stacks/model1-shared.bicep, stacks/model2-full.bicep)
-// already pass sku+capacity as separate args; the object decomposition is computed
-// internally below (family derived via skuFamilies map). See
-// projects/spaarke-redis-cache-remediation-r1/notes/redis-bicep-audit.md for the
-// full decision record.
+// Owner D12 (2026-09-30, customer-provisioning-orchestration-r1 task 242): every Spaarke Redis is Azure Managed Redis.
+// Azure Cache for Redis Basic/Standard/Premium retires 2028-09-30 and new-customer creation has been blocked since
+// 2026-04-01. Owner D13 (keyless stamps): access keys are disabled on the database, so there is no key, no connection
+// string and no Key Vault secret. Clients authenticate with a managed identity that holds an access-policy assignment
+// below; the BFF and the L2 Worker connect with `Microsoft.Azure.StackExchangeRedis`
+// (`ConfigureForAzureWithUserAssignedManagedIdentityAsync`, RESP3) using the `redisEndpoint` output as `Redis__Endpoint`.
+//
+// Callers: customer.bicep (per-customer stamp: Balanced_B0, HA on — the D12 defaults) and the per-environment
+// parameter files parameters/redis-{env}.bicepparam (dev: B0 non-HA, task 242b).
+//
+// Managed Redis rules that shape this module (researcher redis-per-customer-stamp-amr-decision-2026-09-30.md):
+//   - high availability can only be chosen at create time (it cannot be turned off later) and there is no scale-down;
+//   - the clustering policy is immutable once set — OSSCluster (clients must be cluster-aware; StackExchange.Redis is);
+//   - the database must be named 'default'; port 10000; TLS only.
 
-@description('Name of the Redis Cache')
+@description('Name of the Azure Managed Redis cluster (globally unique DNS label).')
 param redisName string
 
-@description('Location for the Redis Cache')
+@description('Location for the cluster.')
 param location string = resourceGroup().location
 
-@description('SKU for Redis Cache (Premium required for VNet injection + persistence)')
-@allowed(['Basic', 'Standard', 'Premium'])
-param sku string = 'Premium'
+@description('Azure Managed Redis SKU. Owner D12: Balanced_B0 for customer stamps; size up only on a measured memory metric (no scale-down).')
+@allowed([
+  'Balanced_B0'
+  'Balanced_B1'
+  'Balanced_B3'
+  'Balanced_B5'
+  'Balanced_B10'
+])
+param skuName string = 'Balanced_B0'
 
-@description('SKU capacity (family size). Premium: 1-5')
-param capacity int = 1
+@description('High availability (two nodes, zone-redundant in AZ regions). Owner D12: Enabled for customer stamps; dev uses Disabled. Can only be set at create time.')
+@allowed([
+  'Enabled'
+  'Disabled'
+])
+param highAvailability string = 'Enabled'
 
-@description('Enable non-SSL port (not recommended)')
-param enableNonSslPort bool = false
-
-@description('Minimum TLS version')
+@description('Minimum TLS version.')
 param minimumTlsVersion string = '1.2'
 
-@description('Redis server major version. Empty string lets Azure pick the default (currently 6.0). Set to "6" to pin major version. FR-09 (R1 task 020).')
-param redisVersion string = ''
+@description('Public network access. Set explicitly (the 2025-07-01 API requires it). Customer stamps have no VNet, matching Cosmos DB / OpenAI / AI Search in customer.bicep.')
+@allowed([
+  'Enabled'
+  'Disabled'
+])
+param publicNetworkAccess string = 'Enabled'
 
-@description('Subnet resource ID for VNet injection (Premium SKU required). Also aliased as vnetSubnetId in FR-09; this module retains the existing name to preserve compatibility with 3 in-tree callers.')
-param subnetId string = ''
+@description('Object (principal) IDs of the managed identities granted the built-in "default" data access policy. The only way in: access keys are disabled, so an empty list would deploy a cache nobody can use.')
+@minLength(1)
+param accessPolicyPrincipalIds array
 
-@description('Optional static IP within the injected subnet (Premium VNet-injected SKU only). Empty string lets Azure assign one. FR-09 (R1 task 020).')
-param staticIP string = ''
-
-@description('Enable RDB persistence (Premium SKU required)')
-param enableRdbPersistence bool = true
-
-@description('RDB backup frequency in minutes (15, 30, 60, 360, 720, 1440)')
-@allowed([15, 30, 60, 360, 720, 1440])
-param rdbBackupFrequencyMinutes int = 15
-
-@description('Tags for the resource')
+@description('Tags for the resource.')
 param tags object = {}
 
-var skuFamilies = {
-  Basic: 'C'
-  Standard: 'C'
-  Premium: 'P'
-}
+var databasePort = 10000
 
-// Build Redis configuration — base settings always applied
-var baseRedisConfig = {
-  'maxmemory-policy': 'allkeys-lru'
-}
-
-// RDB persistence settings (Premium only)
-var rdbConfig = enableRdbPersistence && sku == 'Premium' ? {
-  'rdb-backup-enabled': 'true'
-  'rdb-backup-frequency': '${rdbBackupFrequencyMinutes}'
-  'rdb-backup-max-snapshot-count': '1'
-} : {}
-
-// Merge configurations
-var redisConfiguration = union(baseRedisConfig, rdbConfig)
-
-resource redisCache 'Microsoft.Cache/redis@2023-08-01' = {
+resource cluster 'Microsoft.Cache/redisEnterprise@2025-07-01' = {
   name: redisName
   location: location
   tags: tags
+  sku: {
+    name: skuName
+  }
   properties: {
-    sku: {
-      name: sku
-      family: skuFamilies[sku]
-      capacity: capacity
-    }
-    enableNonSslPort: enableNonSslPort
+    highAvailability: highAvailability
     minimumTlsVersion: minimumTlsVersion
-    redisVersion: empty(redisVersion) ? null : redisVersion
-    publicNetworkAccess: subnetId != '' ? 'Disabled' : 'Enabled'
-    subnetId: subnetId != '' ? subnetId : null
-    staticIP: (subnetId != '' && staticIP != '') ? staticIP : null
-    redisConfiguration: redisConfiguration
+    publicNetworkAccess: publicNetworkAccess
   }
 }
 
-output redisId string = redisCache.id
-output redisName string = redisCache.name
-output redisHostName string = redisCache.properties.hostName
-output redisPort int = redisCache.properties.sslPort
-@description('Primary access key (admin-key auth). Sensitive — do not log; deploy script extracts to KV. FR-09 (R1 task 020).')
-#disable-next-line outputs-should-not-contain-secrets
-output redisPrimaryKey string = redisCache.listKeys().primaryKey
-#disable-next-line outputs-should-not-contain-secrets
-output redisConnectionString string = '${redisCache.properties.hostName}:${redisCache.properties.sslPort},password=${redisCache.listKeys().primaryKey},ssl=True,abortConnect=False'
+resource database 'Microsoft.Cache/redisEnterprise/databases@2025-07-01' = {
+  parent: cluster
+  name: 'default'
+  properties: {
+    clientProtocol: 'Encrypted'
+    port: databasePort
+    clusteringPolicy: 'OSSCluster'
+    evictionPolicy: 'AllKeysLRU'
+    // Explicit: D13 keyless. With keys disabled there is nothing to list or rotate.
+    accessKeysAuthentication: 'Disabled'
+  }
+}
+
+// One assignment per identity. Names are the object id without dashes (stable across deploys, so an upgrade what-if
+// shows no change). batchSize(1): the cluster accepts one update operation at a time.
+@batchSize(1)
+resource accessPolicyAssignments 'Microsoft.Cache/redisEnterprise/databases/accessPolicyAssignments@2025-07-01' = [
+  for principalId in accessPolicyPrincipalIds: {
+    parent: database
+    name: replace(principalId, '-', '')
+    properties: {
+      accessPolicyName: 'default'
+      user: {
+        objectId: principalId
+      }
+    }
+  }
+]
+
+output redisId string = cluster.id
+output redisName string = cluster.name
+output redisHostName string = cluster.properties.hostName
+output redisPort int = databasePort
+@description('host:port — the value of the BFF / Worker `Redis__Endpoint` setting. Not a secret.')
+output redisEndpoint string = '${cluster.properties.hostName}:${databasePort}'

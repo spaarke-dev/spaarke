@@ -192,13 +192,13 @@ public static class OperationAccessPolicy
         // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
 
-        // "event.attach" — AppendTo on the regarding PARENT a POST/PUT /api/v1/events names (sprk_event's
-        // regarding lookup points at it). spaarke-ontology-platform-r1 task 097 round 6 (review F2), same reasoning
-        // as "finance.attach_invoice" above: attaching a child is the right Dataverse itself demands of the parent,
-        // and neither Read nor Write implies it. Its own key so the deny log names the operation truthfully.
-        // ⚠️ TodoSourceAccessFilter (POST /api/office/todo) still asks Read of its regarding parent — a split
-        // precedent recorded in task 097's PR, not changed there.
-        ["event.attach"] = AccessRights.AppendTo,
+        // "analysis.attach" — Read AND AppendTo on each PARENT record a NEW app-created sprk_analysis will point
+        // at: the document and the regarding matter/project of POST /api/ai/analysis/promote (body, or the
+        // session's own document). Added by unified-access-control-r2 task 162 (G5, owner rounds 3b / 7 item 3 /
+        // 9: check as the user, then the app writes). AppendTo for the "finance.attach_invoice" reasoning (the
+        // new row's lookup attaches it to the parent); Read because the analysis then surfaces the parent's
+        // metadata to its creator. A separate key so deny logs name the operation.
+        ["analysis.attach"] = AccessRights.Read | AccessRights.AppendTo,
 
         // "finance.link_invoice" — Write AND Append on the body DocumentId of POST /api/finance/invoice-review/
         // confirm, through the entity-generic record path. Added by task 130 (owner decision G5, 2026-10-01).
@@ -219,6 +219,28 @@ public static class OperationAccessPolicy
         // AppendToAccess into the snapshot, or this route stays permanently 403 — a silent failure.
         // Recorded as an explicit obligation on task 005.
         ["entity.associate_document"] = AccessRights.AppendTo,
+
+        // "event.attach_regarding" — AppendTo on the REGARDING record an sprk_event is filed under: the body
+        // RegardingRecordType/RegardingRecordId of POST /api/v1/events. Added by unified-access-control-r2 task 159
+        // (#1098). The event HOLDS the typed lookup; the record it points AT is the one being attached to, and
+        // Dataverse asks AppendTo of that record ("other records can be attached to this record") — the
+        // "finance.attach_invoice" reasoning. Not Write: filing an event under a matter does not modify the matter.
+        // A separate key rather than "entity.associate_document" (which names an Office DOCUMENT being filed) or
+        // "finance.attach_invoice" (which names an invoice): reusing either would misdescribe the act in every deny
+        // log. Resource = the regarding record, in the entity set Dataverse's own metadata names for its type.
+        ["event.attach_regarding"] = AccessRights.AppendTo,
+        // "memory.pin_matter" — AppendTo on the MATTER a pinned-memory item names: the body matterId of
+        // POST /api/memory/pins and PUT /api/memory/pins/{pinId} (PinnedMemoryEndpoints.AuthorizePinMatterAsync).
+        // Added by unified-access-control-r2 task 166 (findings S-43 / S-68). A pin carrying a matter id is not
+        // private to its author: PinnedContextRepository.GetByMatterAsync returns every user's pins for the matter
+        // and ContextBinder injects them into the prompt of everyone who chats on it as "authoritative context".
+        // Writing one ATTACHES content to the matter, so it costs the same right Dataverse asks of a record other
+        // records are attached to — AppendTo, not Write (pinning does not modify the matter's own fields) and not
+        // Read (a reader of a matter is not thereby entitled to steer every colleague's AI context on it).
+        // A separate key rather than "entity.associate_document": a pin is not a document, and two acts sharing a
+        // key would make every deny log misdescribe one of them and couple their rights forever.
+        // Resource = the matter, in sprk_matters, asked of the CALLER through CallerRecordAccessProbe.
+        ["memory.pin_matter"] = AccessRights.AppendTo,
 
         // ========================================================================
         // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)
@@ -244,8 +266,10 @@ public static class OperationAccessPolicy
         // these routes are unavailable, not merely degraded, if RPA is misconfigured. Live RPA
         // verification is owned by task 034; see the RPA-FALLBACK log marker.
 
-        // "write" — mutation of the authorized record's own fields (PUT /api/v1/documents/{id}), and
-        // the checkout family, which mints an EDITABLE url and moves the record's lock state.
+        // "write" — mutation of the authorized record's own fields, and the checkout family, which mints an
+        // EDITABLE url and moves the record's lock state. (Its first consumer, PUT /api/v1/documents/{id}, is the Compose
+        // re-file since unified-access-control-r2 task 147; task 166 S-36 made it refuse the SPE pointer fields, and task
+        // 146 asks AppendTo on any new parent.)
         // Deliberately not Write|Create: these change an existing row, they do not create one.
         ["write"] = AccessRights.Write,
 

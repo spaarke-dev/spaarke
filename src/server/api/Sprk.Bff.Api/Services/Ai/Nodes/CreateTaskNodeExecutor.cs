@@ -37,20 +37,26 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
     private readonly ITemplateEngine _templateEngine;
     private readonly IGenericEntityService _entityService;
     private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
     private readonly Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService _identity;
+    private readonly ICommunicationDataverseService _recordTypes;
     private readonly ILogger<CreateTaskNodeExecutor> _logger;
 
     public CreateTaskNodeExecutor(
         ITemplateEngine templateEngine,
         IGenericEntityService entityService,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
+        ICommunicationDataverseService recordTypes,
         ILogger<CreateTaskNodeExecutor> logger)
     {
         _templateEngine = templateEngine;
         _entityService = entityService;
         _coreAncestors = coreAncestors;
+        _ownership = ownership; // task 146 — the task's owner (the regarding record's team)
         _identity = identity;
+        _recordTypes = recordTypes; // task 156, owner round 8 item 2 — the regarding pair's sprk_recordtype_ref lookup
         _logger = logger;
     }
 
@@ -222,7 +228,7 @@ public sealed class CreateTaskNodeExecutor : INodeExecutor
             // Task 152: the playbook's acting user (PlaybookSchedulerService sets NodeExecutionContext.UserId for
             // per-user runs) is the triggering person — TaskActionCore writes their linked contact to
             // sprk_event.sprk_assignedto so the task reaches them (Created By is the BFF app user).
-            var taskId = await new TaskActionCore(_entityService, _coreAncestors, _identity, _logger).CreateAsync(
+            var taskId = await new TaskActionCore(_entityService, _coreAncestors, _ownership, _identity, _recordTypes, _logger).CreateAsync(
                 new TaskActionInput(
                     subject,
                     description,

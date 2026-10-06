@@ -185,8 +185,9 @@ public sealed class ComposeCleanApplySeamTests : IClassFixture<ComposeFidelitySe
                 It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Entity("sprk_document", recordId));
 
-        // The durable origin marker the server reads to select clean-vs-tracked apply.
-        var documentEntity = new Entity("sprk_document", recordId);
+        // The durable origin marker the server reads to select clean-vs-tracked apply. Task 166 r1: the record id
+        // is honoured only when its row IS the row of the item being saved, so the row carries this item's pointer.
+        var documentEntity = new Entity("sprk_document", recordId) { ["sprk_graphitemid"] = speId };
         if (storedOriginOptionValue is { } value)
         {
             documentEntity[ComposeOriginAttribute] = new OptionSetValue(value);

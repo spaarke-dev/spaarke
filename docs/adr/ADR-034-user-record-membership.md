@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted, as amended** |
 | Date | 2026-06-21 |
-| Updated | 2026-09-04 (Amendment A1) |
+| Updated | 2026-10-03 (Amendment A4 accepted; A3 2026-10-02; A1 2026-09-04) |
 | Authors | Spaarke Engineering, R3 project |
 | Source project | `spaarke-platform-foundations-r3` Part 1 |
 | Supersedes | n/a (closes a gap — there was no prior canonical mechanism) |
@@ -21,6 +21,10 @@
 > the "Assigned *" contacts through the linked contact; never team / business-unit ownership. It admits `createdby` on
 > that surface only, and states the event semantics: an owner event names the row's REAL owner (team or user) in
 > Dataverse ids.
+>
+> ⚠️ **[Amendment A4](#amendment-a4-2026-10-03-accepted-assigned-to-access-for-contacts-is-materialized-as-removable-grants) (ACCEPTED by the owner, round 11, 2026-10-03 — §6.5 path B; task 142) gives the registry a second, WRITE-time consumer:**
+> the "Assigned *" contacts and organizations receive Collaborate as explicit, removable grants (or a POA share for a
+> linked internal user), maintained by one invariant owner with a provenance ledger. The read-time terms stay.
 
 ---
 
@@ -473,6 +477,127 @@ who made it", and `createdonbehalfby` is also excluded and empty for app-only cr
 | `LookupUserMembershipNodeExecutor` without `targeting` | AI scoping (unchanged) |
 | `MembershipEndpoints` (`/api/users/me/memberships/*`) | AI scoping (unchanged) |
 | `AccessibleRecordSetService` | Authorization (unchanged) |
+
+---
+
+## Amendment A4 (2026-10-03, accepted): Assigned-To access for contacts is materialized as removable grants
+
+> **Status**: **ACCEPTED** (owner round 11, 2026-10-03) — resolution path **B — amendment**, per root CLAUDE.md §6.5.
+> The owner accepted it explicitly in round 11, item 1: "142: ADR-034 Amendment A4 is ACCEPTED (§6.5 path B).
+> Assigned-To access for contacts is materialized as removable Collaborate grants (the substance is round 2 item 5 and
+> Q5). The main session applies the concise `.claude/adr/ADR-034` edit with the 142 PR." (Round 3 D1 had accepted path B
+> for the 036 and 152 amendments only; this acceptance is A4's own.) The SUBSTANCE is owner-decided and binding:
+> round 2 item 5 ("The 'Assigned To *' auto grants were one of the core
+> reasons for the UAC — this needs to continue being a feature") and **Q5** ("the 'Assigned *' contacts are automatically
+> granted Collaborate by a function that ADDS the contact to the grant-access list, so an operator can remove it");
+> round 3 **A1** (Collaborate, no grantor cap), **A2 reversed** (standing grants and organization access STAY; Assigned-To
+> grants are ADDED), **A3–A6, A8** accepted as recommended, **R3/R4** (minutes, not hourly). Source:
+> `projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md` and
+> `notes/raw/session27-owner-questions.json`.
+> **Driver**: `unified-access-control-r2` task 142 (GitHub #1065). Full record:
+> `projects/unified-access-control-r2/notes/task-142-assigned-field-auto-grants.md`.
+> **Concise version**: `.claude/adr/ADR-034-user-record-membership.md` is applied by the MAIN session (sub-agents cannot
+> write `.claude/`), with the task 142 PR. **Merge rule**: the task 142 code merges with this amendment accepted (it is,
+> round 11) and with that concise edit in the same PR, never before.
+
+### Why
+
+A1 made the access-conferring registry first-class and gave it one consumer: the evaluator's **read-time** terms. For a
+CONTACT, a registry column confers nothing by itself today — the standing-grant term (FR-25) and organization expansion
+(FR-24) confer only for a contact or organization that already holds a standing grant. The owner requires the opposite
+shape for Assigned-To access: a contact named in an "Assigned *" column receives **Collaborate** as an **entry on the
+record's grant-access list**, which an operator can see and **remove** in Manage Access.
+
+A read-time term cannot carry that: it is invisible on the model-driven app (so MDA and Teams/SPA would disagree — C9),
+and it cannot be removed without a veto. The only veto is the No Access List, which is a stronger, different statement
+("this subject must never see this record") — an operator who removes an auto grant has not walled the contact, and may
+grant them again by hand.
+
+**Alternatives considered.** (A) A project-scoped exception — rejected: the rule being changed ("MUST NOT materialize
+derived access into grant rows", spec.md / FR-32 / design §7) is repo-wide via this ADR, and every later reader would
+meet the contradiction. (C) Keep the read-time term and add a per-record "declined" veto — rejected: a second deny
+mechanism beside the No Access List (CLAUDE.md §11), still invisible on MDA (C9).
+
+### The decision
+
+The A1 registry gains a **second consumer: a write-time invariant owner**. For each registry-listed Contact- or
+Organization-typed column on a project, matter or work assignment, `AssignedAccessMaterializer`
+(`Services/ExternalAccess/`) maintains Collaborate access for the named subject as **ordinary, explicit, removable
+access**: a `sprk_externalrecordaccess` grant (contact or organization), or a POA share when the contact is linked
+(task 141) to an eligible internal user. Its provenance — per (root, source field, subject) — lives in the
+`sprk_assignedaccess` ledger. The read-time terms are **kept** (A2 reversed).
+
+| Consumer of the registry | What it does with a registry column |
+|---|---|
+| Authorization, read time (A1 — **unchanged**) | Derived-member and org-expansion terms, standing-grant-gated for contacts/organizations |
+| People targeting (A3 — **unchanged**) | Contact columns bind the caller's linked contact (attention, not access) |
+| **Assigned-To materialization (A4 — new)** | Writes and maintains explicit grants/shares for the named subjects, with a ledger |
+
+### New MUST / MUST NOT rules
+
+- **MUST** materialize Assigned-To access only through the ONE invariant owner (`AssignedAccessMaterializer`), called
+  by every trigger: L1 inline after each BFF writer of the columns, the sync route
+  (`POST /api/v1/external-access/assigned-access/sync` — form post-save, client wizards, "Update Access"), and L4
+  `AssignedAccessReconciliationJob`. **MUST NOT** add a second writer, a plugin, a flow or a service-endpoint step
+  (ADR-002, D-1).
+- **MUST** read the conferring columns from the bound registry (`MembershipOptions.AccessConferringRoles`) — the same
+  registry A1 governs, so adding a conferring column remains a reviewed registry edit and renaming a column grants or
+  revokes nothing. **MUST NOT** materialize from a child-entity registry entry (event, invoice, to-do, analysis): a
+  contact assigned to one event is not assigned to the matter (owner A6).
+- **MUST** write at Collaborate through the existing write cores — grants through `GrantExternalAccessEndpoint.CreateGrantAsync`
+  with the documented ceiling `GrantCeiling.AssignedToRule` (uncapped by the saving user's level, owner A1; an absent
+  expiry becomes today + 90 through `DefaultExpiry`), shares through `IDataverseRecordShareService` with the
+  `RecordShareLevels` Collaborate mask and the strict read + read-back discipline. **MUST NOT** write
+  `sprk_externalrecordaccess` directly or introduce a new level constant.
+- **MUST NOT** lower existing access: an equal or higher grant/share that confers access is left untouched
+  (`CoveredByExisting`); a lower one is raised and put back — its level AND its date — when the assignment ends. (An
+  expired grant confers nothing and is not existing access: the rule gives Collaborate over it, even over an expired
+  Full Access level, which it cannot write back — task 142 notes §6.)
+- **MUST** record an operator's removal (Manage Access revoke/unshare, Dismiss of a suggestion, or a removal outside the
+  BFF that no known cause explains) as **`Declined`**, and **MUST NOT** re-create a Declined entry while the assignment
+  persists. Declined is **not** a veto: a manual grant of the same subject still succeeds (and is recorded `Adopted`).
+  Known causes are not declines: an inactive root, an inactive organization (R2), task 143's No Access enforcer
+  (re-created once the wall is lifted).
+- **MUST**, when the column is changed or cleared, remove only the owner's own **unmodified** access (owner A4) — never
+  an `Adopted` or `Declined` entry, never while another registry column on the same root still names the subject.
+- **MUST** apply the record's policy before writing (round 2 item 3; owner A3/A8): Restricted → no contact or
+  organization grant (a linked internal user's share is unaffected); Secure or Limited → no organization grant; Secure →
+  contact grants and shares are **suggested** (`PendingConfirmation`, Grant/Dismiss in Manage Access), not written, and
+  an auto grant that existed before the record became secure is kept; the No Access List for contacts everywhere and,
+  via task 143's guard, for internal users on secure records. **MUST** write nothing when a flag set, deny list, link
+  or ledger cannot be read (ADR-003 / WP-6).
+- **MUST**, when an operator removes an auto grant from a subject that still reaches the record through a kept read-time
+  term (standing grant, organization expansion), **say so, naming the term**, before and after the removal — an
+  operator is never shown "removed" while access silently remains.
+
+### Spec / design amendment text (applied with this amendment)
+
+- **spec.md, MUST NOT list** — "❌ MUST NOT materialize derived access into grant rows" becomes: "❌ MUST NOT materialize
+  derived access into grant rows — **except Assigned-To access (ADR-034 A4)**, which is materialized as explicit,
+  removable grants or POA shares by its one invariant owner, with provenance in `sprk_assignedaccess`."
+- **spec.md FR-32** — the acceptance clause "derived access is **not** materialized into rows" becomes: "derived access
+  is not materialized into rows, **other than Assigned-To access (ADR-034 A4)**: those grants are ordinary grant state
+  changes, written through `CreateGrantAsync` and logged like any other grant."
+- **spec.md FR-25** — **unchanged** (owner A2 reversed: standing grants keep contributing at their baseline).
+- **design.md §7 Attestation** — after "Do **not** materialize derived access into rows", add: "The one exception is
+  Assigned-To access (ADR-034 A4, task 142): the owner requires it to be a removable entry on the grant-access list, so
+  it is written as ordinary grants/shares, each grant change captured by the FR-32 event log; the ledger
+  `sprk_assignedaccess` records why each exists."
+
+### Explicitly NOT amended
+
+- **A1 / A1.1** — the registry, its per-surface policy and the read-time evaluator terms are unchanged.
+  `AccessibleRecordSetService` is untouched by this amendment.
+- **A3** — people targeting is unchanged.
+- **FR-24 / FR-25** read-time standing and organization-expansion terms — kept (A2 reversed).
+- **The 1-hop cap, M1, N2, M8/M9 event semantics** — unchanged.
+
+### Residual stated with the amendment
+
+A non-product write of an "Assigned *" column (grid edit, import, flow) is materialized at the next job tick (≤ 5 min).
+In the removal direction the job is report-only until `ExternalAccess:AssignedAccess:JobRevokeOnChangeEnabled` is
+turned on (owner R3/(g): turned on in dev after the live gate) — until then a field cleared OUTSIDE the product leaves its
+auto grant in place (fail-open in that direction only). The sync route and the L1 writers always remove.
 
 ---
 

@@ -51,6 +51,18 @@ public sealed class CosmosActiveRunScanner : IActiveRunScanner
     private const string ActiveRunsQuery =
         "SELECT * FROM c WHERE c.status IN ('Running', 'WaitingOnGate')";
 
+    // Bucket B MED#12 SESSION 18: terminal runs older than @minCompletedIso.
+    // Newtonsoft serialises RunStatus as string per the [JsonConverter(StringEnumConverter)]
+    // attribute on the enum, and DateTimeOffset as ISO 8601 — the same wire shape used
+    // by the active-runs query. `completedOn` on ProvisioningRun is nullable; the IS_DEFINED
+    // + IS_NULL predicates handle the null case explicitly (Cosmos comparison operators
+    // return Undefined on null which does NOT satisfy the WHERE clause — so we exclude
+    // terminal runs missing CompletedOn from the sweep to be safe).
+    private const string StaleTerminalRunsQuery =
+        "SELECT * FROM c WHERE c.status IN ('Completed', 'Failed', 'Cancelled', 'Quarantined') " +
+        "AND IS_DEFINED(c.completedOn) AND NOT IS_NULL(c.completedOn) " +
+        "AND c.completedOn < @maxCompletedIso";
+
     // Page size for the cross-partition scan. 100 balances round-trip count
     // (fewer larger pages) against per-request RU (very large pages cost
     // proportionally more). Reconciler cadence (5s) makes latency non-critical.
@@ -111,6 +123,44 @@ public sealed class CosmosActiveRunScanner : IActiveRunScanner
         _logger.LogDebug(
             "Reconciler active-run scan returned {ActiveRunCount} runs (status in Running/WaitingOnGate).",
             results.Count);
+
+        return results;
+    }
+
+    /// <inheritdoc/>
+    [AllowCrossPartitionScan("Bucket B MED#12 SESSION 18 (customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we) — CrashRecoveryStartupService orphan-guard sweep: scans terminal runs across all customer partitions to release leaked sprk_currentrunid pins from mid-write crashes.")]
+    public async Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(
+        TimeSpan minAge, CancellationToken cancellationToken)
+    {
+        if (minAge < TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minAge), minAge, "minAge must be non-negative.");
+        }
+
+        var maxCompletedIso = DateTimeOffset.UtcNow.Subtract(minAge)
+            .ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+
+        var query = new QueryDefinition(StaleTerminalRunsQuery)
+            .WithParameter("@maxCompletedIso", maxCompletedIso);
+        var requestOptions = new QueryRequestOptions
+        {
+            MaxItemCount = PageMaxItemCount,
+        };
+
+        var results = new List<ProvisioningRun>();
+        using var iterator = _container.GetItemQueryIterator<ProvisioningRun>(query, requestOptions: requestOptions);
+
+        while (iterator.HasMoreResults)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var page = await iterator.ReadNextAsync(cancellationToken).ConfigureAwait(false);
+            results.AddRange(page.Resource);
+        }
+
+        _logger.LogDebug(
+            "Bucket B MED#12 stale-terminal-run scan returned {TerminalRunCount} runs " +
+            "(status in Completed/Failed/Cancelled/Quarantined, CompletedOn < {MaxCompletedIso}).",
+            results.Count, maxCompletedIso);
 
         return results;
     }

@@ -70,6 +70,7 @@ public class SuggestAssociationsTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>());
     }
 
@@ -85,6 +86,7 @@ public class SuggestAssociationsTests
             dv,
             AssociationTestSupport.Mapper(),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<IncomingAssociationResolver>.Instance);
 
     // =========================================================================

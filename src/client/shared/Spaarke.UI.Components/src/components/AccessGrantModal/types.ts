@@ -50,6 +50,13 @@ export interface IAccessGrantRecord {
   email?: string;
   accessLevel: number;
   grantedByName?: string;
+  /**
+   * The CONTACT who issued this grant from the external SPA (`sprk_grantedbycontact`, unified-access-control-r2
+   * task 140 — contact-side Grant Access). Set only on a contact-issued row; `grantedByName` (the systemuser
+   * `sprk_grantedby`) is empty on such a row. Rendered as "Granted by {name} (external contact)"; the row stays
+   * revocable here exactly like any other grant.
+   */
+  grantedByContactName?: string;
   /** ISO 8601 grant date (`sprk_granteddate`). */
   grantedDate?: string;
   /** Display-only provenance label — NOT sent to the BFF (the endpoint has no

@@ -21,12 +21,12 @@ public class CreateDocumentRequest
     /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
     /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
     /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
-    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
-    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
-    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
-    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
-    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
-    /// unreachable by any child-BU user at Deep depth.</para>
+    /// <para><b>Required in practice, nullable in shape.</b> Since unified-access-control-r2 task 146 (#1034)
+    /// <c>DataverseServiceClientImpl.CreateDocumentAsync</c> REFUSES (throws, before any write) when this is null:
+    /// every caller resolves it, and "null keeps the calling identity" made the BFF application user the owner, in
+    /// the ROOT business unit (measured 2026-09-22, ALL 512 existing rows sat there, unreachable by any child-BU user
+    /// at Deep depth, and readable by every root-BU user — which is how a secure record's documents were never
+    /// isolated). It stays a nullable property so the JSON shape of this shared contract does not change.</para>
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
     /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
     /// and so the business unit — that owns the document it creates, including a secure business unit it has no
@@ -59,6 +59,15 @@ public class CreateDocumentRequest
     /// </remarks>
     [JsonIgnore]
     public Guid? Id { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the document (unified-access-control-r2 task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>: this create is app-only, so <c>createdby</c> is the BFF
+    /// application user. Resolved by the BFF from the request's own caller; <c>null</c> for a writer that acts for nobody
+    /// (inbound mail). 🔒 Never bound from a request body, for the same reason as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 /// <summary>
@@ -828,6 +837,21 @@ public class AnalysisOutputEntity
 
     /// <summary>Created date/time</summary>
     public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// The team that owns a NEW output (unified-access-control-r2 task 146) — the same team as its analysis, resolved by
+    /// the BFF's <c>IRecordOwnershipResolver</c>. Required by <c>CreateAnalysisOutputAsync</c>; never bound from a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the output (task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>; <c>null</c> for a writer that acts for nobody. Never bound from
+    /// a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -943,14 +967,52 @@ public class CreateEventRequest
     /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Regarding record type</summary>
+    // ── The ADR-024 regarding write set (unified-access-control-r2 task 159, #1098). Every value is RESOLVED BY
+    //    THE BFF (this library cannot reach CoreAncestorResolver or the record-type catalog) and passed here as
+    //    plain values; DataverseWebApiService.BuildCreateEventPayload only shapes them. Set all of them together
+    //    with RegardingRecordType/RegardingRecordId, or none.
+
+    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>; names the typed lookup).</summary>
     public int? RegardingRecordType { get; set; }
 
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record ID.</summary>
+    public Guid? RegardingRecordId { get; set; }
 
-    /// <summary>Regarding record name</summary>
+    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>The regarding record's entity SET, from live metadata — the same set the caller's AppendTo was asked of.</summary>
+    public string? RegardingEntitySetName { get; set; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for the regarding type, or null when the environment has none.</summary>
+    public Guid? RegardingRecordTypeRefId { get; set; }
+
+    /// <summary><c>sprk_regardingrecordurl</c> — the relative model-driven record URL.</summary>
+    public string? RegardingRecordUrl { get; set; }
+
+    /// <summary><c>sprk_regardingrecordnumber</c> — the business-key number (matter/project), or null.</summary>
+    public string? RegardingRecordNumber { get; set; }
+
+    /// <summary>The FR-26 core-ancestor stamps to bind besides the target's own lookup (lookup attribute, entity set, id).</summary>
+    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
+    /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
+    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create
+    /// without it: the write is app-only, so an unset owner would make the BFF application user own the event in the
+    /// root business unit, where any root-BU user with ordinary depth reads it. Same shape as
+    /// <see cref="CreateDocumentRequest.OwningTeamId"/>, and for the same reason never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the event (task 146 c1-r1, owner round 13 item 9), bound as
+    /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/>: the create is app-only. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 
     /// <summary>
     /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
@@ -959,89 +1021,8 @@ public class CreateEventRequest
     /// </summary>
     public Guid? AssignedToContactId { get; set; }
 
-    /// <summary>FR-26 core-ancestor stamps for the regarding parent (BFF-derived; written after the regarding).</summary>
-    public IReadOnlyList<EventAncestorStamp>? AncestorStamps { get; set; }
-
-    /// <summary>
-    /// Write-path invariant I-6: the owning TEAM, resolved by the BFF's <c>RecordOwnershipResolver</c> (record-first:
-    /// the regarding parent's business unit, else the acting user's) and written as <c>ownerid</c>. Without it an
-    /// app-only create is owned by the application user in the ROOT business unit, where child-BU users cannot reach
-    /// it. Resolved by the caller and passed in — this library does not depend on BFF services (the
-    /// <c>CreateDocumentRequest.OwningTeamId</c> precedent).
-    /// </summary>
-    public Guid? OwnerTeamId { get; set; }
 }
 
-/// <summary>
-/// Request model for updating an Event
-/// </summary>
-public class UpdateEventRequest
-{
-    /// <summary>Event name</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Description</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Event Type ID</summary>
-    public Guid? EventTypeId { get; set; }
-
-    /// <summary>Base date</summary>
-    public DateTime? BaseDate { get; set; }
-
-    /// <summary>Due date</summary>
-    public DateTime? DueDate { get; set; }
-
-    /// <summary>Priority (sprk_priority) — live <see cref="EventPriority"/> value: Low 100000000 … Urgent 100000003.</summary>
-    public int? Priority { get; set; }
-
-    /// <summary>Status reason (statuscode) — must be a live <see cref="EventStatusCode"/> value; the matching
-    /// statecode is written with it.</summary>
-    public int? StatusCode { get; set; }
-
-    /// <summary>Regarding record type</summary>
-    public int? RegardingRecordType { get; set; }
-
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
-
-    /// <summary>Regarding record name</summary>
-    public string? RegardingRecordName { get; set; }
-
-    /// <summary>FR-26 core-ancestor stamps for the NEW regarding parent (BFF-derived; written after the clear).</summary>
-    public IReadOnlyList<EventAncestorStamp>? AncestorStamps { get; set; }
-}
-
-/// <summary>
-/// Event Log entity model (sprk_eventlog)
-/// </summary>
-public class EventLogEntity
-{
-    /// <summary>Event Log ID (sprk_eventlogid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_eventlogname) - Primary field</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Event lookup ID (_sprk_event_value)</summary>
-    public Guid EventId { get; set; }
-
-    /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
-    public int Action { get; set; }
-
-    /// <summary>The log text — sprk_eventlog has no sprk_description column (live, task 097), so the description is
-    /// folded into sprk_eventlogname and read back from it.</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Created date/time</summary>
-    public DateTime CreatedOn { get; set; }
-
-    /// <summary>Created by user ID</summary>
-    public Guid? CreatedById { get; set; }
-
-    /// <summary>Created by user name</summary>
-    public string? CreatedByName { get; set; }
-}
 
 /// <summary>
 /// Event Log action constants
@@ -1147,8 +1128,8 @@ public static class EventStatusCode
     }
 
     /// <summary>
-    /// THE definition of "open work" for events — the ONE place to change when the owner decides it (task 097 review
-    /// L2; owner decision pending). Today's reading: Draft, Open, On Hold, Reassigned.
+    /// THE definition of "open work" for events — ONE predicate for the complete gate AND the To Do generation rules
+    /// (task 097 review L2; OWNER DECISION A, 2026-10-06: Draft, Open, On Hold, Reassigned — Reassigned is completable).
     /// <list type="bullet">
     ///   <item>Open, On Hold, Reassigned: Active statuses whose label says the work is not finished.</item>
     ///   <item>Draft: included because it is where the client CreateEventWizard and every Dataverse-form create LAND
@@ -1156,7 +1137,7 @@ public static class EventStatusCode
     ///   filters already treat Draft as live work. Excluding it would make most user-created events un-completable.</item>
     ///   <item>Not open: Completed and Closed (Active, but finished), Cancelled, Transferred, No Further Action.</item>
     /// </list>
-    /// Used by the complete/cancel gate and by the To Do generation rules (<see cref="NotOpenWork"/>).
+    /// Used by the complete gate (EventEndpoints.CanCompleteEvent) and the To Do generation rules (<see cref="NotOpenWork"/>).
     /// </summary>
     public static bool IsOpenWork(int statusCode) =>
         statusCode is Draft or Open or OnHold or Reassigned;
@@ -1179,65 +1160,33 @@ public static class EventStatusCode
 }
 
 /// <summary>
-/// Filter for <see cref="IEventDataverseService.QueryEventsAsync(EventQueryFilter, System.Threading.CancellationToken)"/>.
-/// Adds <see cref="ExcludeStatusCodes"/>, which the positional overload cannot express (task 097 review F5: the
-/// To Do generation rules exclude Completed / Cancelled IN the query instead of after it).
+/// The "my events" narrowing of the caller-scoped event list (task 097 round 8; owner decision B, 2026-10-06): an event is
+/// the caller's when it is OWNED by them, OR ASSIGNED to their linked contact (<c>sprk_assignedto</c>, task 152 S1), OR
+/// CREATED by them (<c>sprk_createdbyperson</c>, a SYSTEMUSER lookup — <see cref="RecordCreatorPersonColumn"/>, task 146
+/// c1-r1). The three are OR-ed; the query still runs AS the caller, so this narrows — it never widens — what Dataverse
+/// lets them read. An event the BFF creates is owned by a business-unit TEAM (I-6), so ownership alone would hide it
+/// from the person who created it.
 /// </summary>
-public sealed record EventQueryFilter
+public sealed record EventOwnershipScope(Guid? OwnerUserId, Guid? AssignedToContactId, Guid? CreatedByPersonId)
 {
-    public int? RegardingRecordType { get; init; }
-    public string? RegardingRecordId { get; init; }
-    public Guid? EventTypeId { get; init; }
-    public int? StatusCode { get; init; }
-    public int? Priority { get; init; }
-    public DateTime? DueDateFrom { get; init; }
-    public DateTime? DueDateTo { get; init; }
-    public int Skip { get; init; }
-    public int Top { get; init; } = 50;
-    public Guid? OwnerUserId { get; init; }
-
-    /// <summary>Status reasons excluded server-side (<c>statuscode ne …</c>).</summary>
-    public IReadOnlyCollection<int>? ExcludeStatusCodes { get; init; }
-
-    /// <summary>The <c>sprk_recordtype_ref</c> row for <see cref="RegardingRecordType"/> (resolved by the service).</summary>
-    public Guid? RegardingRecordTypeRefId { get; init; }
-
-    /// <summary>"Mine" also includes events assigned to this contact (OR with <see cref="OwnerUserId"/>).</summary>
-    public Guid? AssignedToContactId { get; init; }
-
-    /// <summary>Run the query IMPERSONATED as this systemuser (MSCRMCallerID), so Dataverse trims to what they may see.
-    /// Null = app-only (internal jobs). <see cref="Guid.Empty"/> is refused (fail closed).</summary>
-    public Guid? ImpersonateSystemUserId { get; init; }
+    /// <summary>The <c>$filter</c> clause, or null when no part is set (no narrowing).</summary>
+    public string? ToFilter(IFormatProvider inv)
+    {
+        var parts = new List<string>();
+        if (OwnerUserId is { } owner && owner != Guid.Empty)
+            parts.Add(string.Format(inv, "_ownerid_value eq {0:D}", owner));
+        if (AssignedToContactId is { } contact && contact != Guid.Empty)
+            parts.Add(string.Format(inv, "_sprk_assignedto_value eq {0:D}", contact));
+        if (CreatedByPersonId is { } person && person != Guid.Empty)
+            parts.Add(string.Format(inv, "_{0}_value eq {1:D}", RecordCreatorPersonColumn.LogicalName, person));
+        return parts.Count switch
+        {
+            0 => null,
+            1 => parts[0],
+            _ => "(" + string.Join(" or ", parts) + ")",
+        };
+    }
 }
-/// <summary>
-/// The regarding parent of a <c>sprk_event</c> write, fully resolved against Dataverse BEFORE the write: the API type
-/// (0..7) and parent id, the <c>sprk_recordtype_ref</c> catalog row, the parent's display name and reference number.
-/// Produced by <c>DataverseWebApiService</c>; applied by its payload builders (task 097 review F3).
-/// </summary>
-public sealed record ResolvedEventRegarding(
-    int RecordType,
-    Guid RecordId,
-    string EntityLogicalName,
-    Guid RecordTypeRefId,
-    string? RecordName,
-    string? RecordNumber);
-
-/// <summary>
-/// A core-ancestor stamp to write onto a <c>sprk_event</c> (FR-26): the regarding LOOKUP attribute, the ancestor's
-/// entity logical name and id. Derived by the BFF's CoreAncestorResolver (Spaarke.Dataverse cannot reference it) and
-/// written by the event payload builders AFTER the re-parent clear, so it is never wiped (task 097 review H2).
-/// </summary>
-public sealed record EventAncestorStamp(string LookupAttribute, string EntityLogicalName, Guid RecordId);
-/// <summary>
-/// A regarding parent that cannot be resolved (unknown type, missing/invalid id, no <c>sprk_recordtype_ref</c> row, or
-/// the parent record does not exist). The endpoints turn it into a 400 with this message — never a partial write that
-/// would leave an inconsistent regarding field-set (task 097 review F3c).
-/// </summary>
-public sealed class EventRegardingResolutionException : Exception
-{
-    public EventRegardingResolutionException(string message) : base(message) { }
-}
-
 /// <summary>
 /// <c>sprk_event.sprk_priority</c> values — the single source of truth for every BFF read and write of an event's
 /// priority. Verified against the LIVE option set (spaarkedev1, 2026-10-05) and pinned by
@@ -1447,31 +1396,41 @@ public static class RegardingRecordType
         _ => null
     };
 
-    // ── sprk_event Web API binding (task 097) ─────────────────────────────────────────────────────────────
-    // Verified live (spaarkedev1, 2026-10-05, ManyToOneRelationships + EntitySetName). An @odata.bind key MUST be
-    // the case-sensitive navigation property and the value MUST use the entity SET name — the former code bound
-    // `sprk_regardingmatter@odata.bind` to `/{logicalName}s(...)` (which also gave `sprk_analysiss`, the set is
-    // `sprk_analysises`), and wrote `sprk_regardingrecordtype` as an int although it is a LOOKUP to
-    // sprk_recordtype_ref — Dataverse rejected both.
+    // ── sprk_event's Web API write names (unified-access-control-r2 task 159, #1098) ──
+    // Read from live metadata (spaarkedev1 EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships,
+    // 2026-10-03; projects/unified-access-control-r2/notes/task-159-events-authorization.md §0.2) and pinned by
+    // EventRegardingPayloadTests. A lookup is WRITTEN only as "{navigationProperty}@odata.bind" — never as the
+    // logical name (the Web API rejects it) and never as a "_x_value" key. Every navigation property here is
+    // PascalCase; none equals its logical name.
 
-    /// <summary>The <c>sprk_event</c> navigation property of the record-type lookup (→ <c>sprk_recordtype_ref</c>).</summary>
-    public const string RecordTypeNavigationProperty = "sprk_RegardingRecordType";
+    /// <summary>The navigation property of <c>sprk_event.sprk_regardingrecordtype</c> (lookup → <c>sprk_recordtype_ref</c>).</summary>
+    public const string EventRecordTypeNavigationProperty = "sprk_RegardingRecordType";
 
-    /// <summary>Entity set of <c>sprk_recordtype_ref</c>.</summary>
+    /// <summary><c>sprk_recordtype_ref</c>'s entity SET (live metadata), the target of <see cref="EventRecordTypeNavigationProperty"/>.</summary>
     public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
 
-    /// <summary>The <c>sprk_event</c> navigation property of the entity-specific regarding lookup.</summary>
-    public static string? GetNavigationPropertyName(int recordType) => recordType switch
+    /// <summary>
+    /// The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown. Covers
+    /// the full live typed-lookup family (14) plus <c>sprk_regardingrecordtype</c>.
+    /// </summary>
+    public static string? GetEventNavigationProperty(string lookupAttribute) => lookupAttribute switch
     {
-        Project => "sprk_RegardingProject",
-        Matter => "sprk_RegardingMatter",
-        Invoice => "sprk_RegardingInvoice",
-        Analysis => "sprk_RegardingAnalysis",
-        Account => "sprk_RegardingAccount",
-        Contact => "sprk_RegardingContact",
-        WorkAssignment => "sprk_RegardingWorkAssignment",
-        Budget => "sprk_RegardingBudget",
-        _ => null
+        "sprk_regardingaccount" => "sprk_RegardingAccount",
+        "sprk_regardingagreement" => "sprk_RegardingAgreement",
+        "sprk_regardinganalysis" => "sprk_RegardingAnalysis",
+        "sprk_regardingbudget" => "sprk_RegardingBudget",
+        "sprk_regardingcommunication" => "sprk_RegardingCommunication",
+        "sprk_regardingcontact" => "sprk_RegardingContact",
+        "sprk_regardingevent" => "sprk_RegardingEvent",
+        "sprk_regardinginvoice" => "sprk_RegardingInvoice",
+        "sprk_regardingmatter" => "sprk_RegardingMatter",
+        "sprk_regardingorganization" => "sprk_RegardingOrganization",
+        "sprk_regardingproject" => "sprk_RegardingProject",
+        "sprk_regardingreportcard" => "sprk_RegardingReportCard",
+        "sprk_regardingservicerequest" => "sprk_RegardingServiceRequest",
+        "sprk_regardingworkassignment" => "sprk_RegardingWorkAssignment",
+        "sprk_regardingrecordtype" => EventRecordTypeNavigationProperty,
+        _ => null,
     };
 
     /// <summary>The Web API entity set of the regarding entity (via the one logical-name map below).</summary>
@@ -1483,44 +1442,11 @@ public static class RegardingRecordType
         AllTypes.Where(t => string.Equals(GetEntityLogicalName(t), entityLogicalName, StringComparison.OrdinalIgnoreCase))
             .Select(t => (int?)t).FirstOrDefault();
 
-    /// <summary>
-    /// Fallback order for deriving the API type from populated lookups when <c>sprk_regardingrecordtypelogicalname</c>
-    /// is empty (rows written by other paths). CHILD types first, then unclassified, then CORE: a core-ancestor-stamped
-    /// row carries the child's lookup AND its matter/project lookup, and the child is the real parent (review H3).
-    /// </summary>
-    public static IReadOnlyList<int> TypeResolutionOrder { get; } = new[]
-    {
-        Invoice, Analysis, Budget, Account, Contact, WorkAssignment, Matter, Project
-    };
-
-    /// <summary>The <c>sprk_event</c> navigation property for one of its regarding lookup ATTRIBUTES (e.g.
-    /// <c>sprk_regardingmatter</c> → <c>sprk_RegardingMatter</c>), or null.</summary>
-    public static string? GetEventNavigationPropertyByLookup(string lookupAttribute) =>
-        AllEventRegardingNavigationProperties.FirstOrDefault(
-            nav => string.Equals(nav, lookupAttribute, StringComparison.OrdinalIgnoreCase));
-
     /// <summary>Every record type this API maps (0..7).</summary>
     public static IReadOnlyList<int> AllTypes { get; } = new[]
     {
         Project, Matter, Invoice, Analysis, Account, Contact, WorkAssignment, Budget
     };
-
-    /// <summary>
-    /// EVERY entity-specific regarding navigation property on <c>sprk_event</c> — the 14 live ones (spaarkedev1,
-    /// 2026-10-05, ManyToOneRelationships), not only the 8 this API can set. A re-parent clears all of them except
-    /// the new parent's (ADR-024; task 097 review F3a), so exactly one is set as the REGARDING parent; the FR-26 core-ancestor
-    /// stamp written after the clear may populate a second (matter/project) one on purpose (registry I-1). Pinned against the doc.
-    /// </summary>
-    public static IReadOnlyList<string> AllEventRegardingNavigationProperties { get; } = new[]
-    {
-        "sprk_RegardingAccount", "sprk_RegardingAgreement", "sprk_RegardingAnalysis", "sprk_RegardingBudget",
-        "sprk_RegardingCommunication", "sprk_RegardingContact", "sprk_RegardingEvent", "sprk_RegardingInvoice",
-        "sprk_RegardingMatter", "sprk_RegardingOrganization", "sprk_RegardingProject", "sprk_RegardingReportCard",
-        "sprk_RegardingServiceRequest", "sprk_RegardingWorkAssignment",
-    };
-
-    /// <summary>ADR-024 resolver field: the regarding entity's logical name (sprk_event).</summary>
-    public const string RecordTypeLogicalNameField = "sprk_regardingrecordtypelogicalname";
 
     /// <summary>
     /// The ADR-024 <c>sprk_regardingrecordurl</c> value — a RELATIVE model-driven-app URL (the host origin is resolved
@@ -1529,7 +1455,6 @@ public static class RegardingRecordType
     /// </summary>
     public static string BuildRecordUrl(string entityLogicalName, string recordId) =>
         $"/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId}";
-
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──
     // These map a target entity's LOGICAL NAME (as chosen in the client picker / AnalysisRegardingTarget)
     // to the ADR-024 fields the resolver writes on sprk_analysis. The canonical field-name maps live

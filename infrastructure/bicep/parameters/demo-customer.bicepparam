@@ -35,14 +35,6 @@ param environmentName = 'prod'
 param location = 'westus2'
 
 // ============================================================================
-// SHARED PLATFORM REFERENCES
-// ============================================================================
-
-// Platform Key Vault name — from platform.bicep deployment outputs
-// Get from: az deployment sub show -n platform-prod --query properties.outputs.keyVaultName.value
-param platformKeyVaultName = 'sprk-platform-prod-kv'
-
-// ============================================================================
 // STORAGE
 // ============================================================================
 

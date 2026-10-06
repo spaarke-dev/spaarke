@@ -22,7 +22,6 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events;
 using Xunit;
 using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
-using DataverseUpdateEventRequest = Spaarke.Dataverse.UpdateEventRequest;
 
 namespace Sprk.Bff.Api.Tests.Api.Events;
 
@@ -90,43 +89,11 @@ public class EventStatusWritePathTests
     [Fact]
     public void CreatePayload_WritesLiveOpen_Active()
     {
-        var payload = DataverseWebApiService.BuildCreateEventPayload(new DataverseCreateEventRequest { Name = "Filing" });
+        var payload = DataverseWebApiService.BuildCreateEventPayload(
+            new DataverseCreateEventRequest { Name = "Filing", OwningTeamId = Guid.NewGuid() });
 
         payload["statuscode"].Should().Be(659490001, "live Open — the former 3 does not exist in the option set");
         payload["statecode"].Should().Be(0);
-    }
-
-    [Fact]
-    public void StatusPayload_Completed_IsLiveCompleted_AndStaysActive_WithTheCompletedDate()
-    {
-        var payload = DataverseWebApiService.BuildUpdateEventStatusPayload(
-            EventStatusCode.Completed, new DateTime(2026, 10, 5, 14, 0, 0, DateTimeKind.Utc));
-
-        payload["statuscode"].Should().Be(659490002);
-        payload["statecode"].Should().Be(0, "Completed is an ACTIVE status reason; pairing it with Inactive is rejected");
-        payload["sprk_completeddate"].Should().Be("2026-10-05");
-    }
-
-    [Fact]
-    public void StatusPayload_Cancelled_IsLiveCancelled_Inactive()
-    {
-        var payload = DataverseWebApiService.BuildUpdateEventStatusPayload(EventStatusCode.Cancelled, null);
-
-        payload["statuscode"].Should().Be(659490004);
-        payload["statecode"].Should().Be(1);
-        payload.Should().NotContainKey("sprk_completeddate");
-    }
-
-    [Theory]
-    [InlineData(3)]
-    [InlineData(5)]
-    [InlineData(6)]
-    [InlineData(7)]
-    public void StatusPayload_AValueOutsideTheLiveSet_IsRefusedBeforeDataverse(int fictional)
-    {
-        var act = () => DataverseWebApiService.BuildUpdateEventStatusPayload(fictional, null);
-
-        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
     [Theory]
@@ -134,36 +101,33 @@ public class EventStatusWritePathTests
     [InlineData(659490003, 0)] // Closed — Active
     [InlineData(659490004, 1)] // Cancelled — Inactive
     [InlineData(2, 1)]         // No Further Action — Inactive
-    public void UpdatePayload_WithAStatus_PairsItsLiveState(int statusCode, int expectedState)
-    {
-        var payload = DataverseWebApiService.BuildUpdateEventPayload(new DataverseUpdateEventRequest { StatusCode = statusCode });
+    public void StateCode_IsTheOneTheLiveStatusBelongsTo(int statusCode, int expectedState) =>
+        EventStatusCode.GetStateCode(statusCode).Should().Be(expectedState);
 
-        payload["statuscode"].Should().Be(statusCode);
-        payload["statecode"].Should().Be(expectedState);
+    [Theory]
+    [InlineData(3)]
+    [InlineData(5)]
+    [InlineData(6)]
+    [InlineData(7)]
+    public void StateCode_AValueOutsideTheLiveSet_IsRefusedBeforeDataverse(int fictional)
+    {
+        var act = () => EventStatusCode.GetStateCode(fictional);
+
+        act.Should().Throw<ArgumentOutOfRangeException>();
     }
 
-    [Fact]
-    public void UpdatePayload_DueDateOnly_WritesNoStatus()
-    {
-        var payload = DataverseWebApiService.BuildUpdateEventPayload(
-            new DataverseUpdateEventRequest { DueDate = new DateTime(2026, 10, 20) });
-
-        payload.Should().ContainKey("sprk_duedate").WhoseValue.Should().Be("2026-10-20");
-        payload.Should().NotContainKey("statuscode").And.NotContainKey("statecode");
-    }
-
-    // ── The endpoints, executed ───────────────────────────────────────────────────────────────────────────────
+    // ── OWNER DECISION A (2026-10-06): ONE predicate for "open work" — the complete gate AND To Do generation ──
 
     [Theory]
     [InlineData(1)]          // Draft
-    [InlineData(659490001)]  // Open — refused with 400 before task 097
-    [InlineData(659490006)]  // On Hold — refused with 400 before task 097
-    [InlineData(659490007)]  // Reassigned
+    [InlineData(659490001)]  // Open
+    [InlineData(659490006)]  // On Hold
+    [InlineData(659490007)]  // Reassigned — completable (owner decision A; uac-r2 task 159 had refused it)
     public async Task Complete_FromAnOpenWorkStatus_WritesLiveCompleted(int currentStatus)
     {
         var dv = EventService(currentStatus);
 
-        var result = await EventEndpoints.CompleteEventAsync(EventId, dv.Object, NullLogger<Program>.Instance, default);
+        var result = await Complete(dv, NullLogger<Program>.Instance);
 
         StatusOf(result).Should().Be(StatusCodes.Status200OK);
         dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490002, It.Is<DateTime?>(dt => dt.HasValue), It.IsAny<CancellationToken>()),
@@ -180,7 +144,7 @@ public class EventStatusWritePathTests
     {
         var dv = EventService(currentStatus);
 
-        var result = await EventEndpoints.CompleteEventAsync(EventId, dv.Object, NullLogger<Program>.Instance, default);
+        var result = await Complete(dv, NullLogger<Program>.Instance);
 
         StatusOf(result).Should().Be(StatusCodes.Status400BadRequest);
         dv.Verify(d => d.UpdateEventStatusAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<DateTime?>(), It.IsAny<CancellationToken>()),
@@ -188,16 +152,16 @@ public class EventStatusWritePathTests
     }
 
     [Fact]
-    public async Task Cancel_AnOpenEvent_WritesLiveCancelled_AndAuditsCancelled()
+    public void TheCompleteGate_AndToDoGeneration_UseTheSamePredicate()
     {
-        var dv = EventService(EventStatusCode.Open);
+        foreach (var status in EventStatusCode.All.Select(s => s.Value))
+        {
+            EventEndpoints.CanCompleteEvent(status).Should().Be(EventStatusCode.IsOpenWork(status));
+            Sprk.Bff.Api.Services.Workspace.TodoGenerationService.ExcludedFromGeneration.Contains(status)
+                .Should().Be(!EventStatusCode.IsOpenWork(status), "To Do generation excludes exactly what is not open work");
+        }
 
-        var result = await EventEndpoints.CancelEventAsync(EventId, dv.Object, NullLogger<Program>.Instance, default);
-
-        StatusOf(result).Should().Be(StatusCodes.Status200OK);
-        dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490004, null, It.IsAny<CancellationToken>()), Times.Once);
-        dv.Verify(d => d.CreateEventLogAsync(EventId, EventLogAction.Cancelled, It.Is<string?>(s => s!.Contains("Cancelled")),
-            It.IsAny<CancellationToken>()), Times.Once);
+        EventEndpoints.CanCompleteEvent(EventStatusCode.Reassigned).Should().BeTrue("owner decision A");
     }
 
     [Fact]
@@ -205,43 +169,14 @@ public class EventStatusWritePathTests
     {
         var dv = EventService(EventStatusCode.Open);
 
-        await EventEndpoints.CompleteEventAsync(EventId, dv.Object, NullLogger<Program>.Instance, default);
+        await Complete(dv, NullLogger<Program>.Instance);
 
         dv.Verify(d => d.CreateEventLogAsync(EventId, EventLogAction.Completed,
-            It.Is<string?>(s => s == "Status changed from Open to Completed"), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task SoftDelete_WritesLiveCancelled_AsTheRouteDescriptionPromises()
-    {
-        var dv = EventService(EventStatusCode.Open);
-
-        var result = await EventEndpoints.DeleteEventAsync(EventId, dv.Object, NullLogger<Program>.Instance, default);
-
-        StatusOf(result).Should().Be(StatusCodes.Status204NoContent);
-        dv.Verify(d => d.UpdateEventStatusAsync(EventId, 659490004, null, It.IsAny<CancellationToken>()), Times.Once,
-            "there is no Deleted status reason; the former 7 was rejected");
-        dv.Verify(d => d.CreateEventLogAsync(EventId, EventLogAction.Deleted, It.IsAny<string?>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+            It.Is<string?>(s => s == "Status changed from Open to Completed"), It.IsAny<Guid?>(), It.IsAny<Guid?>(),
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     // ── Review F1: an audit-log failure never turns a committed write into a 500, and is never silent ─────────
-
-    [Fact]
-    public async Task SoftDelete_WhenTheAuditWriteFails_StillReturns204_AndLogsTheStableErrorEvent()
-    {
-        var dv = EventService(EventStatusCode.Open, auditThrows: true);
-        var log = new CapturingLogger();
-        using var metric = new AuditFailureMetric();
-
-        var result = await EventEndpoints.DeleteEventAsync(EventId, dv.Object, log, default);
-
-        StatusOf(result).Should().Be(StatusCodes.Status204NoContent,
-            "the event write already committed; a 500 would invite a retry that repeats it");
-        log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701
-            && e.EventId.Name == "EventAuditLogWriteFailed");
-        metric.CountFor("Deleted").Should().BeGreaterThanOrEqualTo(1, "event_audit_log_write_failures_total is incremented");
-    }
 
     [Fact]
     public async Task Complete_WhenTheAuditWriteFails_StillReturns200_AndLogsTheStableErrorEvent()
@@ -250,13 +185,17 @@ public class EventStatusWritePathTests
         var log = new CapturingLogger();
         using var metric = new AuditFailureMetric();
 
-        var result = await EventEndpoints.CompleteEventAsync(EventId, dv.Object, log, default);
+        var result = await Complete(dv, log);
 
         StatusOf(result).Should().Be(StatusCodes.Status200OK);
         log.Entries.Should().ContainSingle(e => e.Level == LogLevel.Error && e.EventId.Id == 9701
             && e.EventId.Name == "EventAuditLogWriteFailed", "never swallowed silently (the former helper logged a Warning)");
         metric.CountFor("Completed").Should().BeGreaterThanOrEqualTo(1);
     }
+
+    private static Task<IResult> Complete(Mock<IEventDataverseService> dv, ILogger<Program> log) =>
+        EventEndpoints.CompleteEventAsync(EventId, new DefaultHttpContext(), dv.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), log, default);
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Mock<IEventDataverseService> EventService(int currentStatus, bool auditThrows = false)
@@ -270,7 +209,7 @@ public class EventStatusWritePathTests
                 StatusCode = currentStatus,
                 StateCode = EventStatusCode.IsDefined(currentStatus) ? EventStatusCode.GetStateCode(currentStatus) : 0,
             });
-        var audit = dv.Setup(d => d.CreateEventLogAsync(EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()));
+        var audit = dv.Setup(d => d.CreateEventLogAsync(EventId, It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()));
         if (auditThrows)
             audit.ThrowsAsync(new HttpRequestException("400: Invalid property 'sprk_description'"));
         else

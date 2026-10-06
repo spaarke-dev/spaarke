@@ -4,7 +4,7 @@
     <title>Delete DemoProvisioning__Environments__* + __DefaultEnvironment from Azure App Service config post-verification + publish-size delta report</title>
     <phase>E DemoExpirationService Migration</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api','deploy','azure-deployment'; deletes LIVE Azure App Service config keys — reversible only via explicit re-add; requires post-verification. NFR-01 publish-size + SC #7 acceptance scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

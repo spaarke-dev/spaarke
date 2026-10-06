@@ -90,6 +90,16 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
             return new PerEnvSettingsManifestReadResult.Failure(diagnostic);
         }
 
+        return Parse(yaml);
+    }
+
+    /// <summary>
+    /// Parses + validates manifest YAML text. Split from the embedded-resource load so the
+    /// validation rules (including the task 245a PerEnvSourceCatalog check) can be exercised
+    /// against hand-written YAML.
+    /// </summary>
+    internal PerEnvSettingsManifestReadResult Parse(string yaml)
+    {
         ManifestYamlDocument document;
         try
         {
@@ -108,7 +118,7 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
         {
             _logger.LogInformation(
                 "H4b FilePerEnvSettingsManifest: manifest.yaml carries no per_env_settings; H4b run will be a no-op.");
-            return new PerEnvSettingsManifestReadResult.Success(Array.Empty<PerEnvSettingEntry>());
+            return new PerEnvSettingsManifestReadResult.Success(Array.Empty<PerEnvSettingEntry>(), ArtifactVersion.Of(yaml));
         }
 
         var entries = new List<PerEnvSettingEntry>(document.PerEnvSettings.Count);
@@ -125,6 +135,18 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
                 return new PerEnvSettingsManifestReadResult.Failure(
                     $"manifest.yaml per_env_settings entry '{raw.Key}' has unrecognized per_env_source " +
                     $"'{raw.PerEnvSource}' (expected 'literal' OR 'from-{{handler}}-{{output|parameter}}:{{key}}').");
+            }
+
+            // Task 245a (G25): a non-literal source must be one H4b can actually resolve. Before
+            // this check every source was looked up in run.Parameters.NonSecret, where nothing
+            // writes these keys, so a typo or a mislabelled origin surfaced only at run time.
+            if (kind != PerEnvSettingSource.Literal && !PerEnvSourceCatalog.TryGet(raw.PerEnvSource!, out _))
+            {
+                return new PerEnvSettingsManifestReadResult.Failure(
+                    $"manifest.yaml per_env_settings entry '{raw.Key}' has per_env_source '{raw.PerEnvSource}', " +
+                    "which is not in PerEnvSourceCatalog (unknown source key, or the origin prefix does not " +
+                    "match the handler/intake value that actually produces it). Accepted: " +
+                    string.Join(", ", PerEnvSourceCatalog.All.Select(s => s.Expression)) + ".");
             }
 
             if (kind == PerEnvSettingSource.Literal && raw.LiteralValue is null)
@@ -156,14 +178,15 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
             "H4b FilePerEnvSettingsManifest: loaded {Count} per_env_settings entries",
             entries.Count);
 
-        return new PerEnvSettingsManifestReadResult.Success(entries);
+        return new PerEnvSettingsManifestReadResult.Success(entries, ArtifactVersion.Of(yaml));
     }
 
     /// <summary>
     /// Parses a manifest <c>per_env_source</c> string. Format:
-    /// <c>literal</c> OR <c>from-{handler}-{output|parameter}:{key}</c>.
-    /// Returns the enum kind and (for non-literals) the parameter key H4b
-    /// looks up in <c>envelope.Parameters.NonSecret</c>.
+    /// <c>literal</c> OR <c>from-{origin}-{output|parameter}:{key}</c>.
+    /// Returns the enum kind and (for non-literals) the source key, which H4b
+    /// resolves through <see cref="PerEnvSourceCatalog"/> (task 245a). Grammar only —
+    /// whether the source exists is checked against the catalog by the caller.
     /// </summary>
     internal static bool TryParsePerEnvSource(string? raw, out PerEnvSettingSource kind, out string? parameterKey)
     {
@@ -211,7 +234,31 @@ public sealed class FilePerEnvSettingsManifest : IPerEnvSettingsManifest
         public string? Key { get; set; }
         public string? PerEnvSource { get; set; }
         public string? LiteralValue { get; set; }
+
+        // BUG FIX (task 205c / punch row A39, discovered 2026-08-26): the
+        // manifest spells this key "iOptionsModule" (camelCase, matching the
+        // file header's documented schema) rather than the underscored
+        // "i_options_module" UnderscoredNamingConvention would derive from
+        // the property name by default. Without an explicit alias, EVERY
+        // per_env_settings entry failed IOptionsModule binding silently, so
+        // ReadAsync() against the REAL embedded manifest.yaml has returned
+        // Failure ("has empty iOptionsModule") for every entry since task
+        // 201 shipped this reader -- undetected because no prior test
+        // exercised the real embedded resource through this reader (only
+        // hand-rolled test fixtures, which set IOptionsModuleName directly).
+        //
+        // ApplyNamingConventions = false is REQUIRED alongside Alias: YamlDotNet
+        // 18.1.0 runs the configured INamingConvention over the alias string
+        // too (verified empirically -- Alias alone still produced
+        // "i_options_module" and mismatched), not just the bare property
+        // name. Without this flag the alias is silently neutered back to the
+        // same mismatched underscored form the bug started with.
+        //
+        // Verified via FilePerEnvSettingsManifestTests (added alongside this
+        // fix) exercising the real embedded manifest end-to-end.
+        [YamlMember(Alias = "iOptionsModule", ApplyNamingConventions = false)]
         public string? IOptionsModule { get; set; }
+
         public bool Required { get; set; } = true;
         public string? Notes { get; set; }
     }

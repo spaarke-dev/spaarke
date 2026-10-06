@@ -45,7 +45,7 @@ import {
   type SendEmailRelatedRecordInput,
 } from './services/sendEmailService';
 import { fileNameFromWebUrl } from './services/quickSaveHelpers';
-import { cleanGuid } from './utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { describeFetchFailure } from './utils/errorMessages';
 
 // Loaded on first open of the Email tab, never at startup: the view carries the shared compose engine and its
@@ -797,6 +797,8 @@ export const App: React.FC<AppProps> = ({
               }
             }}
             onSaved={handleSaved}
+            // Task 100: the "+ New" form's Assigned To uses the pane's ONE contact search (To Do, Email and Save).
+            onSearchContacts={handleSearchContacts}
             onQuickCreate={(entityType, searchQuery) => {
               // Quick Create - opens Dataverse form in new window.
               // Org URL (email-communication-solution-r4 task 072 / FR-25): config-driven,

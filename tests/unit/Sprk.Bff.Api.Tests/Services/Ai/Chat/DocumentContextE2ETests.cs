@@ -28,6 +28,13 @@ public class DocumentContextE2ETests
 {
     private const int MaxDocumentBudget = 30_000;
 
+    /// <summary>
+    /// A fixture's document id as a real sprk_document id: the app-only download verifies the pointer of the row it
+    /// names, and a name that is not a GUID names no row (task 166 r1). Deterministic, so a name maps to one id.
+    /// </summary>
+    private static string Id(string name)
+        => new Guid(System.Security.Cryptography.MD5.HashData(Encoding.UTF8.GetBytes(name))).ToString("D");
+
     // -------------------------------------------------------------------
     // Helpers: build mock infrastructure
     // -------------------------------------------------------------------
@@ -56,7 +63,10 @@ public class DocumentContextE2ETests
             speOps.Object,
             textExtractor.Object,
             openAiClient.Object,
-            logger.Object);
+            logger.Object,
+            // Every fixture's pointer names a business-unit container ("drive-…"), so the app-only branch's
+            // pointer check (task 166 r1) passes and these tests stay about chunking.
+            TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("drive-", StringComparison.Ordinal)));
 
         return (sut, docService, speOps, textExtractor, openAiClient);
     }
@@ -208,14 +218,14 @@ public class DocumentContextE2ETests
         var (sut, docService, speOps, textExtractor, openAiClient) = CreateServiceWithMocks();
 
         var documentText = GenerateLargeDocument(50_000); // exceeds 30K budget
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-001", "Contract.pdf", documentText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-001"), "Contract.pdf", documentText);
 
         // Mock embeddings: chunks containing "largesection3" get high similarity
         SetupEmbeddingMocks(openAiClient, "largesection3", totalChunkCount: 200);
 
         // Act — query about section 3
         var result = await sut.InjectDocumentContextAsync(
-            "doc-001",
+            Id("doc-001"),
             httpContext: null,
             latestUserMessage: "Tell me about section 3");
 
@@ -249,22 +259,22 @@ public class DocumentContextE2ETests
         var (sut, docService, speOps, textExtractor, openAiClient) = CreateServiceWithMocks();
 
         var documentText = GenerateLargeDocument(60_000);
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-resel", "LargeContract.pdf", documentText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-resel"), "LargeContract.pdf", documentText);
 
         // --- Query 1: about section 1 ---
         SetupEmbeddingMocks(openAiClient, "largesection1", totalChunkCount: 200);
 
         var result1 = await sut.InjectDocumentContextAsync(
-            "doc-resel", httpContext: null, latestUserMessage: "Explain section 1");
+            Id("doc-resel"), httpContext: null, latestUserMessage: "Explain section 1");
 
         // --- Query 2: about section 50 ---
         SetupEmbeddingMocks(openAiClient, "largesection50", totalChunkCount: 200);
 
         // Re-setup document mocks since stream was consumed
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-resel", "LargeContract.pdf", documentText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-resel"), "LargeContract.pdf", documentText);
 
         var result2 = await sut.InjectDocumentContextAsync(
-            "doc-resel", httpContext: null, latestUserMessage: "Explain section 50");
+            Id("doc-resel"), httpContext: null, latestUserMessage: "Explain section 50");
 
         // Assert — different queries should select different chunks
         result1.SelectedChunks.Should().NotBeEmpty();
@@ -308,12 +318,12 @@ public class DocumentContextE2ETests
         actualTokens.Should().BeGreaterThan(128_000,
             "test document must exceed 128K total context to test budget enforcement");
 
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-huge", "Massive.pdf", hugeDocumentText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-huge"), "Massive.pdf", hugeDocumentText);
         SetupEmbeddingMocks(openAiClient, "largesection10", totalChunkCount: 500);
 
         // Act — inject the oversized document
         var result = await sut.InjectDocumentContextAsync(
-            "doc-huge", httpContext: null, latestUserMessage: "Tell me about section 10");
+            Id("doc-huge"), httpContext: null, latestUserMessage: "Tell me about section 10");
 
         // Assert — budget enforcement
         result.TotalTokensUsed.Should().BeLessOrEqualTo(MaxDocumentBudget,
@@ -344,12 +354,12 @@ public class DocumentContextE2ETests
         var (sut, docService, speOps, textExtractor, openAiClient) = CreateServiceWithMocks();
 
         var documentText = GenerateLargeDocument(35_000); // slightly over 30K
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-30k", "JustOver30K.pdf", documentText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-30k"), "JustOver30K.pdf", documentText);
 
         // Position-based selection (no user message)
         // Act
         var result = await sut.InjectDocumentContextAsync(
-            "doc-30k", httpContext: null, latestUserMessage: null);
+            Id("doc-30k"), httpContext: null, latestUserMessage: null);
 
         // Assert
         result.TotalTokensUsed.Should().BeLessOrEqualTo(MaxDocumentBudget,
@@ -376,7 +386,7 @@ public class DocumentContextE2ETests
         var contents = new Dictionary<string, string>();
         for (var i = 1; i <= 5; i++)
         {
-            var docId = $"doc-multi-{i}";
+            var docId = Id($"doc-multi-{i}");
             var fileName = $"Document{i}.pdf";
             documentIds.Add(docId);
 
@@ -450,7 +460,7 @@ public class DocumentContextE2ETests
         var contents = new Dictionary<string, string>();
         for (var i = 1; i <= 5; i++)
         {
-            var docId = $"doc-large-{i}";
+            var docId = Id($"doc-large-{i}");
             var fileName = $"LargeDoc{i}.pdf";
             documentIds.Add(docId);
 
@@ -524,11 +534,11 @@ public class DocumentContextE2ETests
         var (sut, docService, speOps, textExtractor, openAiClient) = CreateServiceWithMocks();
 
         var massiveText = GenerateLargeDocument(200_000);
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-massive", "Enormous.pdf", massiveText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-massive"), "Enormous.pdf", massiveText);
 
         // Act — should NOT throw, should return a valid truncated result
         var result = await sut.InjectDocumentContextAsync(
-            "doc-massive", httpContext: null, latestUserMessage: null);
+            Id("doc-massive"), httpContext: null, latestUserMessage: null);
 
         // Assert — graceful degradation
         result.Should().NotBeNull("service should never return null even for oversized documents");
@@ -557,10 +567,10 @@ public class DocumentContextE2ETests
         var content1 = GenerateDocumentWithSections(5, wordsPerSection: 50);
         contents["Good1.pdf"] = content1;
         docService
-            .Setup(d => d.GetDocumentAsync("doc-ok-1", It.IsAny<CancellationToken>()))
+            .Setup(d => d.GetDocumentAsync(Id("doc-ok-1"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-ok-1",
+                Id = Id("doc-ok-1"),
                 Name = "Good1.pdf",
                 FileName = "Good1.pdf",
                 GraphDriveId = "drive-doc-ok-1",
@@ -573,16 +583,16 @@ public class DocumentContextE2ETests
 
         // doc-2: not found in Dataverse
         docService
-            .Setup(d => d.GetDocumentAsync("doc-missing", It.IsAny<CancellationToken>()))
+            .Setup(d => d.GetDocumentAsync(Id("doc-missing"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((DocumentEntity?)null);
 
         var content3 = GenerateDocumentWithSections(5, wordsPerSection: 50);
         contents["Good3.pdf"] = content3;
         docService
-            .Setup(d => d.GetDocumentAsync("doc-ok-3", It.IsAny<CancellationToken>()))
+            .Setup(d => d.GetDocumentAsync(Id("doc-ok-3"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new DocumentEntity
             {
-                Id = "doc-ok-3",
+                Id = Id("doc-ok-3"),
                 Name = "Good3.pdf",
                 FileName = "Good3.pdf",
                 GraphDriveId = "drive-doc-ok-3",
@@ -606,7 +616,7 @@ public class DocumentContextE2ETests
 
         // Act
         var result = await sut.InjectMultiDocumentContextAsync(
-            new List<string> { "doc-ok-1", "doc-missing", "doc-ok-3" },
+            new List<string> { Id("doc-ok-1"), Id("doc-missing"), Id("doc-ok-3") },
             httpContext: null,
             latestUserMessage: null);
 
@@ -619,7 +629,7 @@ public class DocumentContextE2ETests
         result.TotalTokensUsed.Should().BeLessOrEqualTo(MaxDocumentBudget);
 
         // The failed document should have an empty chunk group
-        var failedGroup = result.DocumentGroups.FirstOrDefault(g => g.DocumentId == "doc-missing");
+        var failedGroup = result.DocumentGroups.FirstOrDefault(g => g.DocumentId == Id("doc-missing"));
         failedGroup.Should().NotBeNull();
         failedGroup!.SelectedChunks.Should().BeEmpty("missing document should have no chunks");
     }
@@ -642,11 +652,11 @@ public class DocumentContextE2ETests
                            "Section Beta: Liability and indemnification.\n\n" +
                            "Section Gamma: Termination clauses.";
 
-        SetupDocumentMocks(docService, speOps, textExtractor, "doc-small", "Small.pdf", documentText);
+        SetupDocumentMocks(docService, speOps, textExtractor, Id("doc-small"), "Small.pdf", documentText);
 
         // Act
         var result = await sut.InjectDocumentContextAsync(
-            "doc-small", httpContext: null, latestUserMessage: null);
+            Id("doc-small"), httpContext: null, latestUserMessage: null);
 
         // Assert — all content should be present in chunks
         result.WasTruncated.Should().BeFalse("small document should fit within budget");

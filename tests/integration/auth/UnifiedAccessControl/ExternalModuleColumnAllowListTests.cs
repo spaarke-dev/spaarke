@@ -20,6 +20,9 @@
 //     way to exercise the post-execution strip.
 //   • The REAL production registrations (ExternalAccessModule), checked against the LIVE grid FetchXML and
 //     the LIVE primary-name metadata read on 2026-09-30 (notes/task-134-external-module-column-allow-list.md).
+//   • Task 157 (section 6): the lists shrank once the external grids lost their view selector; each list is
+//     pinned to its live re-derivation (2026-10-01) and every dropped column is proven unreadable on both
+//     routes (notes/task-157-external-grid-columns.md).
 //
 // Every assertion on a refusal pins the exact verdict / errorCode. The guard has three ordered signals and
 // the pipelines have two defences; asserting only "refused" would stay green if one of them were deleted.
@@ -709,5 +712,238 @@ public sealed class ExternalModuleColumnAllowListTests : IClassFixture<ExternalA
         // DataGrid.tsx fetchConfigRecord: retrieveRecord('sprk_gridconfiguration', id, ['sprk_configjson']).
         ProductionRegistry().FindByEntity("sprk_gridconfiguration")!
             .ReadableColumns.Should().Contain("sprk_configjson", "otherwise no external grid could load its configuration");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // 6. TASK 157 — the shrink: rule (b) (sibling-view columns) retired
+    // ═════════════════════════════════════════════════════════════════════════════
+    //
+    // Task 134 admitted, besides the grid's own columns, every column of an internal MDA main view the grid's
+    // ViewSelector offered (rule (b)). Owner round 4 item 7 (2026-10-01) turned the selector off on every
+    // external grid (GridWidgetBody.tsx showViewSelector={false}, pinned by the arch guard
+    // ExternalSpaGridViewSelectorGuardTests), so rule (b) no longer applies. Each list is now exactly
+    // (a) the grid configuration's columns + (c) the scope attributes + (d) the /record default projection,
+    // re-derived READ-ONLY from live dev data on 2026-10-01 (notes/task-157-external-grid-columns.md).
+
+    /// <summary>
+    /// Each module's list as task 157 derived it from LIVE data (2026-10-01): (a) sprk_gridconfiguration
+    /// columns (FetchXML attributes/conditions/orders, layoutXml cells, configjson column keys), (c) scope
+    /// attributes, (d) EntityDefinitions primary id + primary name. Nothing else.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string[]> LiveDerivedAllowLists = new Dictionary<string, string[]>
+    {
+        ["sprk_project"] = new[] { "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "modifiedon" },
+        ["sprk_document"] = new[]
+        {
+            "sprk_documentid", "sprk_documentname", "sprk_documenttype", "createdon",
+            "sprk_project", "sprk_matter", "sprk_workassignment",
+        },
+        ["sprk_invoice"] = new[]
+        {
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            "sprk_totalamount", "sprk_project", "sprk_matter",
+        },
+        ["sprk_workassignment"] = new[]
+        {
+            "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
+            "sprk_responseduedate", "statuscode", "sprk_regardingproject",
+        },
+        ["sprk_matter"] = new[] { "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode" },
+        ["sprk_servicerequest"] = new[]
+        {
+            "sprk_servicerequestid", "sprk_servicerequestnumber", "sprk_name", "statuscode", "createdon",
+            "sprk_requestedby",
+        },
+        ["sprk_gridconfiguration"] = new[] { "sprk_gridconfigurationid", "sprk_name", "sprk_configjson" },
+    };
+
+    /// <summary>
+    /// The lists task 134 shipped (2026-09-30), kept verbatim as the "before" side of the shrink: the new
+    /// list must be a SUBSET of it (a shrink never adds a column) and the difference must be exactly the
+    /// rule-(b)-only columns.
+    /// </summary>
+    private static readonly IReadOnlyDictionary<string, string[]> Task134AllowLists = new Dictionary<string, string[]>
+    {
+        ["sprk_project"] = new[]
+        {
+            "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "statuscode", "statecode",
+            "modifiedon", "createdon", "ownerid", "sprk_practicearea", "sprk_projecttype_ref",
+        },
+        ["sprk_document"] = LiveDerivedAllowLists["sprk_document"],
+        ["sprk_invoice"] = new[]
+        {
+            "sprk_invoiceid", "sprk_name", "sprk_invoicenumber", "sprk_invoicedate", "sprk_invoicestatus",
+            "sprk_totalamount", "sprk_project", "sprk_matter", "sprk_visibilitystate", "modifiedon", "statecode",
+        },
+        ["sprk_workassignment"] = new[]
+        {
+            "sprk_workassignmentid", "sprk_name", "sprk_workassignmentnumber", "sprk_priority",
+            "sprk_responseduedate", "statuscode", "statecode", "sprk_regardingproject", "createdon",
+            "ownerid", "sprk_assignedto",
+        },
+        ["sprk_matter"] = new[]
+        {
+            "sprk_matterid", "sprk_mattername", "sprk_matternumber", "statuscode", "statecode",
+            "createdon", "sprk_mattertype", "sprk_practicearea",
+        },
+        ["sprk_servicerequest"] = LiveDerivedAllowLists["sprk_servicerequest"],
+        ["sprk_gridconfiguration"] = LiveDerivedAllowLists["sprk_gridconfiguration"],
+    };
+
+    /// <summary>The drop set: columns task 134 admitted ONLY by rule (b). Each must now be unreadable.</summary>
+    public static TheoryData<string, string> RuleBOnlyColumns => new()
+    {
+        { "sprk_project", "statecode" },
+        { "sprk_project", "createdon" },
+        { "sprk_project", "ownerid" },
+        { "sprk_project", "sprk_practicearea" },
+        { "sprk_project", "sprk_projecttype_ref" },
+        { "sprk_invoice", "sprk_visibilitystate" },
+        { "sprk_invoice", "modifiedon" },
+        { "sprk_invoice", "statecode" },
+        { "sprk_workassignment", "statecode" },
+        { "sprk_workassignment", "createdon" },
+        { "sprk_workassignment", "ownerid" },
+        { "sprk_workassignment", "sprk_assignedto" },
+        { "sprk_matter", "statecode" },
+        { "sprk_matter", "createdon" },
+        { "sprk_matter", "sprk_mattertype" },
+        { "sprk_matter", "sprk_practicearea" },
+    };
+
+    public static TheoryData<string> DerivedEntities
+    {
+        get
+        {
+            var data = new TheoryData<string>();
+            foreach (var entity in LiveDerivedAllowLists.Keys)
+            {
+                data.Add(entity);
+            }
+            return data;
+        }
+    }
+
+    private static string LiveGridFetchXmlFor(string entity) =>
+        (string)LiveGridFetchXml.Single(row => (string)row[0] == entity)[1];
+
+    /// <summary>
+    /// A caller for whom the Tier-2 gate passes on <paramref name="id"/> in EVERY module: the id is a
+    /// readable project, matter and work assignment at once. Used so a refusal or strip below can only come
+    /// from the COLUMN scope, never from row scope.
+    /// </summary>
+    private static CallerPrincipal GrantedEverywhere(Guid id) => new()
+    {
+        Plane = CallerPrincipalPlane.CiamContact,
+        ContactId = Guid.NewGuid(),
+        Email = "external@lawfirm.test",
+        Oid = Guid.NewGuid().ToString(),
+        ProjectAccess = new[] { CallerProjectAccess.FromLevel(id, ExternalAccessLevel.Collaborate) },
+        MatterAccess = new Dictionary<Guid, AccessRights> { [id] = AccessRights.Read },
+        WorkAssignmentAccess = new Dictionary<Guid, AccessRights> { [id] = AccessRights.Read },
+    };
+
+    [Theory]
+    [MemberData(nameof(DerivedEntities))]
+    public void ProductionModule_ForEachRegisteredEntity_ReadableColumnsEqualTheLiveDerivation(string entity)
+    {
+        var module = ProductionRegistry().FindByEntity(entity);
+
+        module.Should().NotBeNull($"'{entity}' is a registered external module");
+        module!.ReadableColumns.Should().BeEquivalentTo(LiveDerivedAllowLists[entity],
+            "each list is exactly grid config + scope + /record default (task 157), nothing from a sibling view");
+    }
+
+    [Fact]
+    public void ProductionRegistry_EveryRegisteredModule_HasALiveDerivation()
+    {
+        // A module added later must record its derivation here, or the equality pin above proves nothing for it.
+        ProductionRegistry().Modules.Select(m => m.RecordEntity)
+            .Should().BeSubsetOf(LiveDerivedAllowLists.Keys);
+    }
+
+    [Theory]
+    [MemberData(nameof(DerivedEntities))]
+    public void LiveDerivation_ComparedWithTask134_OnlyShrinksAndDropsExactlyTheRuleBColumns(string entity)
+    {
+        var before = Task134AllowLists[entity];
+        var after = LiveDerivedAllowLists[entity];
+        var expectedDrop = RuleBOnlyColumns.Where(row => (string)row[0] == entity).Select(row => (string)row[1]);
+
+        after.Should().BeSubsetOf(before, "a shrink never adds a column");
+        before.Except(after).Should().BeEquivalentTo(expectedDrop);
+    }
+
+    [Theory]
+    [MemberData(nameof(RuleBOnlyColumns))]
+    public async Task ExecuteScopedFetch_WhenAColumnAdmittedOnlyByTheRetiredViewRuleIsRequested_Returns400AndNeverQueries(
+        string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var registry = ProductionRegistry();
+        var gridFetch = LiveGridFetchXmlFor(entity);
+
+        // Positive control: the grid's own FetchXML still runs for this caller, so the 400 below is the column.
+        var control = new FetchDouble();
+        var allowed = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto(entity, gridFetch, PagingCookie: null), GrantedEverywhere(id), registry,
+            new FetchXmlEntityExtractor(), control.Execute, NullLogger.Instance, CancellationToken.None);
+        allowed.Should().BeOfType<Ok<FetchResponseDto>>();
+        control.Calls.Should().Be(1);
+
+        // The same grid FetchXML with the sibling-view column added — what the ViewSelector used to send.
+        var withColumn = gridFetch.Replace("<order", $"<attribute name='{column}'/><order", StringComparison.Ordinal);
+        var dataverse = new FetchDouble();
+
+        var result = await ExternalModuleDataEndpoints.ExecuteScopedFetchCoreAsync(
+            new FetchRequestDto(entity, withColumn, PagingCookie: null), GrantedEverywhere(id), registry,
+            new FetchXmlEntityExtractor(), dataverse.Execute, NullLogger.Instance, CancellationToken.None);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorFetchXmlColumnNotPermitted);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(RuleBOnlyColumns))]
+    public async Task GetScopedRecord_WhenSelectNamesAColumnAdmittedOnlyByTheRetiredViewRule_Returns400AndNeverReads(
+        string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var dataverse = new RecordDouble(new Dictionary<string, object?> { [column] = "x" });
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, id, column, GrantedEverywhere(id), ProductionRegistry(), dataverse.Read,
+            NullLogger.Instance, CancellationToken.None);
+
+        ShouldBeProblem(result, StatusCodes.Status400BadRequest, ExternalModuleDataEndpoints.ErrorRecordColumnNotPermitted);
+        dataverse.Calls.Should().Be(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(RuleBOnlyColumns))]
+    public async Task GetScopedRecord_WhenTheReadReturnsAColumnAdmittedOnlyByTheRetiredViewRule_StripsIt(
+        string entity, string column)
+    {
+        var id = Guid.NewGuid();
+        var module = ProductionRegistry().FindByEntity(entity)!;
+        var primaryId = $"{entity}id";
+        var dataverse = new RecordDouble(new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            [primaryId] = id,
+            [module.PrimaryNameAttribute] = "REC-0001",
+            [column] = "was readable through a sibling view",
+            ["@formattedValues"] = new Dictionary<string, string> { [column] = "display value" },
+        });
+
+        var result = await ExternalModuleDataEndpoints.GetScopedRecordCoreAsync(
+            entity, id, select: null, GrantedEverywhere(id), ProductionRegistry(), dataverse.Read,
+            NullLogger.Instance, CancellationToken.None);
+
+        var record = result.Should().BeOfType<Ok<IReadOnlyDictionary<string, object?>>>().Subject.Value!;
+        dataverse.Calls.Should().Be(1);
+        record.Should().NotContainKey(column);
+        record.Should().NotContainKey("@formattedValues", "its only entry was the dropped column's display value");
+        record.Should().ContainKey(primaryId).And.ContainKey(module.PrimaryNameAttribute,
+            "the /record default projection survives the shrink");
     }
 }

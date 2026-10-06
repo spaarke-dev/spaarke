@@ -49,7 +49,7 @@ import { EmailReadingHeader, EmailReadingAttachments } from '../EmailReadingHead
 import { EmailRecipients } from '../EmailRecipients';
 import { EmailConnectionsReview, ConfirmedChip, useConnectionsReviewStyles } from '../EmailAssociationsAndTracking';
 import { useEmailComposeActions } from '../EmailComposeActions';
-import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding } from '../../logic/connections';
+import { derivePrimaryReview, summarizePrimaryReview, clearPrimaryRegarding, bffRefile } from '../../logic/connections';
 import { launchCreate, type CreateKind } from '../../logic/actions';
 import { CollapsibleSection } from './CollapsibleSection';
 import {
@@ -329,7 +329,13 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
           // NOT just a typed-lookup unlink — a denorm-only primary has no typed
           // lookup to null, so plain unlink silently no-oped (owner UAT item 2).
           await clearPrimaryRegarding(
-            { webApi, hostEntity: COMMUNICATION_ENTITY, hostRecordId: communicationId },
+            {
+              webApi,
+              hostEntity: COMMUNICATION_ENTITY,
+              hostRecordId: communicationId,
+              // UAC-r2 task 147 r1: a regarding write is a re-file — through the BFF.
+              refileThroughBff: bffRefile(authenticatedFetch, bffBaseUrl),
+            },
             entity
           );
           record.reload();
@@ -438,6 +444,8 @@ export const EmailWorkspace: React.FC<EmailWorkspaceProps> = ({
                     webApi,
                     hostEntity: COMMUNICATION_ENTITY,
                     hostRecordId: id,
+                    // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
+                    refileThroughBff: bffRefile(authenticatedFetch, bffBaseUrl),
                     // FR-A4 (R-1): after a human confirms, record affinity to the BFF so the AffinityRung
                     // learns this email's signals → this record. Fire-and-forget + best-effort — the .catch
                     // swallows failures so a learning signal never affects the confirmation (mirrors the

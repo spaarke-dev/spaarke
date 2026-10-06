@@ -56,6 +56,13 @@ public sealed class IncomingCommunicationProcessor
     private readonly ILogger<IncomingCommunicationProcessor> _logger;
 
     /// <summary>
+    /// unified-access-control-r2 task 146: the inbound email's owner — resolved from the association evaluated BEFORE
+    /// the create (the named Secure team for an email filed to a secure record) — and its attachment documents,
+    /// attachment rows and archived <c>.eml</c> follow it.
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
+    /// <summary>
     /// Matches a GUID pattern — Graph webhook resource paths use user object IDs (GUIDs)
     /// instead of email addresses, e.g. "users/e2e9000e-ce35-4f33-b0de-9c203fd5087a/messages/..."
     /// </summary>
@@ -79,11 +86,13 @@ public sealed class IncomingCommunicationProcessor
         ITextExtractor textExtractor,
         IOptions<AttachmentMatchOptions> attachmentMatchOptions,
         IConfiguration configuration,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<IncomingCommunicationProcessor> logger,
         IThreadResolver? threadResolver = null,
         CommunicationParticipantIndexer? participantIndexer = null,
         CommunicationArrivedProducer? arrivedProducer = null)
     {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _graphClientFactory = graphClientFactory;
         _communicationService = communicationService;
         _genericEntityService = genericEntityService;
@@ -281,12 +290,28 @@ public sealed class IncomingCommunicationProcessor
             }
         }
 
+        // ── Boundary normalization (FR-09) ───────────────────────────────────────
+        // Map the Graph message → channel-neutral envelope ONCE, here at the pipeline boundary.
+        // Downstream (Association Engine + enrichment) see only NormalizedMessage, never Graph types.
+        var envelope = _messageNormalizer.Normalize(message, CommunicationDirection.Incoming);
+
+        // ── Step 3.6: Attachment text as a MATCH signal (Phase 2, owner spec 2026-07-18) ─────────
+        // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
+        // association so an email whose matter/project name appears only in the attachment still matches.
+        // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
+        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
+
+        // ── Steps 3.7 + 3.8: the association and the OWNER, decided BEFORE the create (task 146) ─────────
+        var (decision, owner, filingFields) = await ResolveInboundFilingAsync(envelope, account, graphMessageId, ct);
+
         // ── Step 4: Create sprk_communication record ─────────────────────────────
         // Direction = Incoming (100000000)
         // CommunicationType = Email (100000000)
         // StatusCode = Delivered (659490003)
-        // Note: Regarding fields are set in step 4.5 by IncomingAssociationResolver
-        var (communicationId, wasDuplicate) = await CreateCommunicationRecordAsync(message, mailboxEmail, graphMessageId, ct);
+        // An email OWNED from its filing is created WITH that filing (task 146 r2, verifier item 9); an unfiled one has
+        // its (non-ownership) association fields set in step 4.5 by IncomingAssociationResolver, as before.
+        var (communicationId, wasDuplicate) = await CreateCommunicationRecordAsync(
+            message, mailboxEmail, graphMessageId, owner, filingFields, ct);
 
         if (wasDuplicate)
         {
@@ -328,31 +353,26 @@ public sealed class IncomingCommunicationProcessor
             "Direction: Incoming, GraphMessageId: {GraphMessageId}",
             communicationId, graphMessageId);
 
-        // ── Boundary normalization (FR-09) ───────────────────────────────────────
-        // Map the Graph message → channel-neutral envelope ONCE, here at the pipeline boundary.
-        // Downstream (Association Engine + enrichment) see only NormalizedMessage, never Graph types.
-        var envelope = _messageNormalizer.Normalize(message, CommunicationDirection.Incoming);
-
-        // ── Step 4.4: Attachment text as a MATCH signal (Phase 2, owner spec 2026-07-18) ─────────
-        // Extract bounded plain text from the message's attachments and add it to the envelope BEFORE
-        // association so an email whose matter/project name appears only in the attachment still matches.
-        // Best-effort + non-fatal: on any failure the envelope keeps its subject/body-only match surface.
-        envelope = await AddAttachmentTextAsync(envelope, message, mailboxEmail, graphMessageId, ct);
-
-        // ── Step 4.5: Resolve associations via the Association Engine (non-fatal) ──
-        try
+        // ── Step 4.5: Apply the association evaluated in step 3.7 (non-fatal) ──
+        // Only for an email that kept its creator (E1): one owned from its filing was created WITH the filing (task 146
+        // r2 — written separately, a failed write left a secure team's email filed under nothing, which nobody can see).
+        // The row was created with the owner this decision resolved, so this writes only the association fields, status
+        // and provenance — no reparent re-derivation is needed.
+        if (filingFields is null)
         {
-            await _associationResolver.ResolveAsync(
-                communicationId, envelope, new AssociationContext { Account = account }, ct);
-        }
-        catch (Exception ex)
-        {
-            // Association resolution failure is non-fatal
-            _logger.LogWarning(
-                ex,
-                "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
-                "GraphMessageId: {GraphMessageId}",
-                communicationId, graphMessageId);
+            try
+            {
+                await _associationResolver.ApplyToNewRecordAsync(communicationId, decision, ct);
+            }
+            catch (Exception ex)
+            {
+                // Association resolution failure is non-fatal
+                _logger.LogWarning(
+                    ex,
+                    "Association resolution failed (non-fatal) | CommunicationId: {CommunicationId}, " +
+                    "GraphMessageId: {GraphMessageId}",
+                    communicationId, graphMessageId);
+            }
         }
 
         // ── Step 4.6: Thread resolution (task 040 / FR-06) — best-effort, non-fatal (NFR-02) ──
@@ -423,7 +443,7 @@ public sealed class IncomingCommunicationProcessor
             try
             {
                 await ProcessIncomingAttachmentsAsync(
-                    message.Attachments, mailboxEmail, graphMessageId, communicationId, ct);
+                    message.Attachments, mailboxEmail, graphMessageId, communicationId, owner, ct);
             }
             catch (Exception ex)
             {
@@ -446,7 +466,7 @@ public sealed class IncomingCommunicationProcessor
         {
             try
             {
-                await ArchiveEmlAsync(message, mailboxEmail, communicationId, ct);
+                await ArchiveEmlAsync(message, mailboxEmail, communicationId, owner, ct);
             }
             catch (Exception ex)
             {
@@ -610,11 +630,98 @@ public sealed class IncomingCommunicationProcessor
     }
 
     /// <summary>
-    /// Creates a sprk_communication record for the incoming email.
-    /// Sets all required fields per schema; does NOT set any regarding fields.
+    /// Steps 3.7 + 3.8 of <see cref="ProcessAsync"/> (unified-access-control-r2 task 146): EVALUATE the association
+    /// BEFORE the create, then decide the email's OWNER from it. The decision names the records the email will be filed
+    /// to, and those — with the FR-26 core-ancestor stamps derived from them (r1, verifier item 4) — decide the owner:
+    /// an email filed to a secure matter, or to an invoice/event/document under one, is owned by the named Secure team
+    /// from its very first write, never visible in between. Filed → the team the ONE resolver names (secure-if-any).
+    /// Unfiled → the creator (E1: inbound mail has no acting user and is never dropped).
     /// </summary>
-    private async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRecordAsync(
-        Message message, string mailboxEmail, string graphMessageId, CancellationToken ct)
+    /// <exception cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException">
+    /// HOLD (owner round 3 amendment R3 — "never create a record nobody can see"), thrown BEFORE anything is written:
+    /// the owner is REFUSED (a named record unreadable, flagged secure but not isolated, its team missing), or — r1 —
+    /// the records the email is filed to cannot be DETERMINED (the evaluation or the stamp derivation failed;
+    /// <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined"/>). The job retries, and at its
+    /// last attempt holds the email in the dead-letter queue and alerts administrators
+    /// (<c>IncomingCommunicationJobHandler</c>). Such a failure used to be swallowed into an UNFILED, creator-owned
+    /// email in an ordinary business unit — the exposure R3 forbids. Individual rungs stay defensive (a rung that
+    /// throws is a non-match, NFR-06); a Dataverse fault while resolving the owner itself propagates as a fault.
+    /// </exception>
+    /// <returns>
+    /// The decision, the owner, and — when the owner is a TEAM decided from the filing — the filing fields the email is
+    /// CREATED with (task 146 r2, verifier item 9: an email owned by a secure record's memberless team must never exist
+    /// filed under nothing, which a separate, non-fatal filing write allowed). <c>null</c> fields when the email keeps its
+    /// creator (E1). A failure to build them HOLDS the email like an undeterminable filing.
+    /// </returns>
+    internal async Task<(AssociationDecision Decision, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution Owner,
+            Dictionary<string, object>? FilingFields)>
+        ResolveInboundFilingAsync(
+            NormalizedMessage envelope, CommunicationAccount? account, string graphMessageId, CancellationToken ct)
+    {
+        AssociationDecision decision;
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext ownershipContext;
+        try
+        {
+            decision = await _associationResolver.EvaluateAsync(
+                envelope, new AssociationContext { Account = account }, ct);
+            ownershipContext = await _associationResolver.OwnershipContextForNewRecordAsync(decision, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "Association evaluation failed — the email's records cannot be determined, so it is HELD, not captured "
+                + "unfiled (task 146 / R3) | GraphMessageId: {GraphMessageId}",
+                graphMessageId);
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(
+                "sprk_communication",
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                    $"the records the email is filed to could not be determined ({ex.GetType().Name})"),
+                ex);
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(ownershipContext, ct);
+        if (owner.IsRefused)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", owner);
+        }
+
+        if (!owner.IsOwned)
+        {
+            return (decision, owner, null);
+        }
+
+        try
+        {
+            return (decision, owner, await _associationResolver.BuildNewRecordFieldsAsync(decision, ct));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                ex,
+                "The email's filing could not be built, so it is HELD rather than created owned by its records' team and "
+                + "filed under nothing (task 146 r2 / R3) | GraphMessageId: {GraphMessageId}",
+                graphMessageId);
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(
+                "sprk_communication",
+                Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution.Refused(
+                    Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.ParentUndetermined,
+                    $"the records the email is filed to could not be written with it ({ex.GetType().Name})"),
+                ex);
+        }
+    }
+
+    /// <summary>
+    /// Creates a sprk_communication record for the incoming email.
+    /// Sets all required fields per schema; the regarding fields only when <paramref name="filingFields"/> carries them
+    /// (an email owned from its filing — task 146 r2). Otherwise step 4.5 writes them. <c>internal</c> so the create
+    /// itself is driven by the writer tests from a Graph <see cref="Message"/> (task 146 r2, verifier item 14).
+    /// </summary>
+    internal async Task<(Guid Id, bool WasDuplicate)> CreateCommunicationRecordAsync(
+        Message message, string mailboxEmail, string graphMessageId,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, Dictionary<string, object>? filingFields,
+        CancellationToken ct)
     {
         // Determine body content: prefer the FULL body (the complete conversation thread) over
         // Graph's uniqueBody, which strips all quoted reply/forward content and reduces a multi-
@@ -658,8 +765,8 @@ public sealed class IncomingCommunicationProcessor
             ["sprk_sentat"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
             ["sprk_receiveddate"] = message.ReceivedDateTime?.UtcDateTime ?? DateTime.UtcNow,
 
-            // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization,
-            // sprk_regardingperson) are set in step 4.5 by IncomingAssociationResolver.
+            // Note: Regarding fields (sprk_regardingmatter, sprk_regardingorganization, sprk_regardingperson) come
+            // from the filing fields below when the email is owned from its filing (task 146 r2), else step 4.5.
         };
 
         // Set CC if present
@@ -678,6 +785,20 @@ public sealed class IncomingCommunicationProcessor
             {
                 communication["sprk_attachmentcount"] = attachmentCount;
             }
+        }
+
+        // Task 146 r2 (verifier item 9): an email owned from its filing carries that filing ON the create — never a
+        // team-owned row filed under nothing.
+        foreach (var (field, value) in filingFields ?? new Dictionary<string, object>())
+        {
+            communication[field] = value;
+        }
+
+        // Task 146: the owner the evaluated association resolved — set ON the create, so a secure email is never
+        // owned by anyone else, even for an instant. Unchanged (unfiled, E1) leaves the creator.
+        if (owner.IsOwned)
+        {
+            communication["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
         }
 
         // Route the create through the race-proof seam (FR-C1 / NFR-02 / task 021): the task-020 UNIQUE
@@ -816,7 +937,7 @@ public sealed class IncomingCommunicationProcessor
 
     private async Task ProcessIncomingAttachmentsAsync(
         IList<Attachment> graphAttachments, string mailboxEmail, string graphMessageId,
-        Guid communicationId, CancellationToken ct)
+        Guid communicationId, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         var fileAttachments = graphAttachments
             .OfType<FileAttachment>()
@@ -939,6 +1060,7 @@ public sealed class IncomingCommunicationProcessor
                         ["sprk_graphitemid"] = fileHandle.Id,
                         ["sprk_graphdriveid"] = driveId,
                     };
+                    ApplyOwner(attachmentDoc, owner); // task 146 — owned like its communication
 
                     attachmentDocumentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 
@@ -974,6 +1096,7 @@ public sealed class IncomingCommunicationProcessor
                     attachmentRecord["sprk_document"] = new EntityReference("sprk_document", attachmentDocumentId.Value);
                 }
 
+                ApplyOwner(attachmentRecord, owner); // task 146 — owned like its communication
                 await _genericEntityService.CreateAsync(attachmentRecord, ct);
                 processedCount++;
 
@@ -1075,7 +1198,7 @@ public sealed class IncomingCommunicationProcessor
     /// transitively), and that path can refuse with the ancestor codes. Three of them are permanent data shapes,
     /// exactly like the two original codes: <c>container_ancestor_ambiguous</c> (two different secure roots above
     /// it, or its regarding fields disagree), <c>container_ancestor_unverifiable</c> (filed under a service request,
-    /// event, analysis, budget or report card, or an invoice regarding an agreement), and
+    /// or an intermediate on a row that carries no copy to compare — task 156 narrowed it), and
     /// <c>container_ancestor_unresolved</c> at <b>409</b> (a record above it does not exist, its type is unknown, or
     /// the chain is longer than the walk follows). Left out, they fell into the transient path — the retry loop that
     /// can never succeed and loses the message capture. (<c>communication_secure_container_ambiguous</c> is no longer
@@ -1084,6 +1207,10 @@ public sealed class IncomingCommunicationProcessor
     /// <para><c>container_ancestor_unresolved</c> at <b>503</b> is the opposite case — the communication's row, a
     /// regarding type or a row above it could not be READ — so it stays transient and propagates. The status code
     /// is what separates them, so the predicate checks it rather than the code alone.</para>
+    ///
+    /// <para><c>container_ancestor_stale</c> (task 156) is TRANSIENT and deliberately absent: the row's copy of the
+    /// root of the record it is filed under is out of date, the resolver has enqueued its re-stamp, and a retry
+    /// succeeds once that lands (the reconciliation job repairs it within one cycle otherwise).</para>
     /// </remarks>
     internal static bool IsPermanentContainerRefusal(Infrastructure.Exceptions.SdapProblemException ex)
         => ex.Code is "secure_record_container_missing"
@@ -1098,7 +1225,8 @@ public sealed class IncomingCommunicationProcessor
     /// Follows the same pattern as CommunicationService.ArchiveToSpeAsync.
     /// </summary>
     private async Task ArchiveEmlAsync(
-        Message message, string mailboxEmail, Guid communicationId, CancellationToken ct)
+        Message message, string mailboxEmail, Guid communicationId,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner, CancellationToken ct)
     {
         // Use GraphMessageToEmlConverter for proper RFC 2822 .eml with preserved headers
         // (InternetMessageId, In-Reply-To, References) and inline attachments
@@ -1161,6 +1289,8 @@ public sealed class IncomingCommunicationProcessor
         if (message.ReceivedDateTime.HasValue)
             document["sprk_emaildate"] = message.ReceivedDateTime.Value.DateTime;
 
+        ApplyOwner(document, owner); // task 146 — owned like its communication
+
         var documentId = await _genericEntityService.CreateAsync(document, ct);
 
         _logger.LogInformation(
@@ -1179,6 +1309,17 @@ public sealed class IncomingCommunicationProcessor
                 _genericEntityService, communicationId, _logger, ct);
             await EnqueueRagIndexingAsync(driveId, fileHandle.Id, documentId, emlResult.FileName, communicationId, parentEntity, ct);
         }
+    }
+
+    /// <summary>
+    /// Writes the communication's resolved owner onto a row created under it (task 146): its attachment documents,
+    /// attachment rows and archived <c>.eml</c> are owned exactly as the communication is. Unchanged (an unfiled
+    /// email, E1) leaves the creator, as for the communication itself.
+    /// </summary>
+    private static void ApplyOwner(DataverseEntity row, Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution owner)
+    {
+        if (owner.IsOwned)
+            row["ownerid"] = new EntityReference("team", owner.OwningTeamId!.Value);
     }
 
     /// <summary>

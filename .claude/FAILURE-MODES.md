@@ -1094,6 +1094,19 @@ writing to `task` succeeds. Nothing in the build, the tests, or the runtime obje
 `sprk_event` constant, the write) · `Services/Ai/PublicContracts/IActionSeam.cs:44` (the misleading
 signature) · `projects/spaarke-ontology-platform-r1/notes/mvp-technical-spec.md` §15.
 
+### AP-15: A Dataverse DateOnly-FORMAT column with TimeZoneIndependent BEHAVIOUR comes back from the Web API as a timestamp
+
+> **Found** 2026-10-05 by `unified-access-control-r2` task 140 (round v1c-v1), after it had broken every dated grant-row read since task 023.
+
+**The shape**: `"sprk_expiresdate":"2026-12-10T00:00:00Z"`, not `"2026-12-10"` — only DateOnly *behaviour* returns a bare
+date. System.Text.Json's `DateOnly` converter throws on the timestamp, so a `DateOnly?` property bound to such a column fails
+every read that carries a value — and in-memory doubles that serialize the shape the test chose never show it.
+
+**The rule**:
+- Before typing a Web API row property as `DateOnly`, read the column's `DateTimeBehavior`.
+- For TimeZoneIndependent, use a converter that takes the leading `yyyy-MM-dd` as written (`DataverseDateOnlyJsonConverter`, task 140).
+- Pin it with a wire test that serves the live response shape, not one the test invented.
+
 ---
 
 *Established 2026-05-14 by project `ai-procedure-quality-r1` (task 013). Cross-reference: [.claude/CHANGELOG.md](CHANGELOG.md) for the entry stream.*

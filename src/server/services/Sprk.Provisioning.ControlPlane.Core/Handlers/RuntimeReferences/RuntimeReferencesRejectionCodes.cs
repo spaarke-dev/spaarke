@@ -43,22 +43,15 @@ public static class RuntimeReferencesRejectionCodes
     /// </summary>
     public const string MissingUpstreamHandlers = "runtimerefs-missing-upstream-handlers";
 
-    /// <summary><c>run.TenancyModel</c> is neither <c>Model1Shared</c> nor <c>Model2Dedicated</c>. Handler does NOT upsert on this branch.</summary>
+    /// <summary><c>run.TenancyModel</c> is not a recognized <c>TenancyModel</c> (<c>Model1</c> / <c>Model2</c>). Handler does NOT upsert on this branch.</summary>
     public const string UnknownTenancyModel = "runtimerefs-unknown-tenancy-model";
 
     /// <summary>
-    /// Model2Dedicated branch: <c>run.InterStepState.OpenAiEndpoint</c> was
-    /// null/blank — H2a (task 044) MUST complete + populate interStepState
-    /// before H12c dispatches on a dedicated-tier customer.
+    /// <c>run.InterStepState.OpenAiEndpoint</c> was null/blank (either tenancy
+    /// model — task 225b) — H2a (task 044) MUST complete + populate
+    /// interStepState before H12c dispatches.
     /// </summary>
     public const string MissingOpenAiEndpoint = "runtimerefs-missing-openai-endpoint";
-
-    /// <summary>
-    /// Model1Shared branch: <c>RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint</c>
-    /// is not configured. Operator/infra issue, not a per-customer condition —
-    /// blocks EVERY Model1Shared run in this environment until set.
-    /// </summary>
-    public const string MissingSharedPlatformEndpointConfiguration = "runtimerefs-missing-shared-platform-endpoint-configuration";
 
     /// <summary>
     /// <see cref="IModelDeploymentReferenceWriter.UpsertAsync"/> returned
