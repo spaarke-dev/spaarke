@@ -53,7 +53,9 @@ export function createFilePreviewServices(apiBaseUrl: string): IFilePreviewServi
           });
         } else {
           // Fallback: open in new window
-          const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+          // No frame could openForm: the client URL comes from the nearest frame that has it.
+          const clientUrl =
+            getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
           window.open(
             `${clientUrl}/main.aspx?etn=${params.entityName}&id=${params.entityId}&pagetype=entityrecord`,
             params.openInNewWindow ? '_blank' : '_self'

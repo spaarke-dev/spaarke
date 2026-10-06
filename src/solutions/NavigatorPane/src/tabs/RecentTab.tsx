@@ -315,7 +315,8 @@ export const RecentTab: React.FC = () => {
   }, []);
 
   const handleRowClick = React.useCallback((row: NavItemRecord) => {
-    const xrm = getXrm(['webApi', 'navigation']);
+    // A web-link row calls Navigation.openUrl; every other row navigateTo (task 081 round 5).
+    const xrm = getXrm(['webApi', row.sprk_pagetype === NavItemPageType.WebLink ? 'openUrl' : 'navigation']);
     if (!xrm) return;
     navigateToRow(xrm, row);
   }, []);

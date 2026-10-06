@@ -421,7 +421,8 @@ export const App: React.FC<AppProps> = ({ params, isDark = false, apiBaseUrl }) 
         entityId: previewDocumentId,
       });
     } else {
-      const clientUrl = xrm?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
+      // No frame could openForm: the client URL comes from the nearest frame that has it.
+      const clientUrl = getXrm('clientUrl')?.Utility?.getGlobalContext?.()?.getClientUrl?.() ?? window.location.origin;
       window.open(`${clientUrl}/main.aspx?etn=sprk_document&id=${previewDocumentId}&pagetype=entityrecord`, '_blank');
     }
   }, [previewDocumentId]);

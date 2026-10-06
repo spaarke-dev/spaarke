@@ -36,7 +36,7 @@ import {
 import { FormRenderer } from "./components/form";
 import { MemoSection } from "./components/MemoSection";
 import { closeSidePane } from "./services/sidePaneService";
-import { getXrmWithWebApiAndUtility } from "./utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "./utils/xrmAccess";
 import { IEventRecord } from "./types/EventRecord";
 import type { ILookupValue } from "./types/FormConfig";
 import {
@@ -614,7 +614,7 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
 
     // No memo section visible — create one via WebApi
     if (!params.eventId) return;
-    const xrm = getXrmWithWebApiAndUtility();
+    const xrm = getXrmWithWebApiAnd();
     if (!xrm?.WebApi?.createRecord) {
       console.warn("[App] Xrm.WebApi.createRecord not available");
       return;
@@ -663,7 +663,7 @@ export const App: React.FC<AppProps> = ({ onRowUpdated }) => {
    */
   const handleAddTodo = React.useCallback(async () => {
     if (!params.eventId) return;
-    const xrm = getXrmWithWebApiAndUtility();
+    const xrm = getXrmWithWebApiAnd();
     if (!xrm?.WebApi?.createRecord) {
       console.warn("[App] Xrm.WebApi.createRecord not available");
       return;

@@ -313,6 +313,7 @@ export interface SidePane {
  * - `'clientUrl'`: `Xrm.Utility.getGlobalContext().getClientUrl()` returns a non-empty string
  * - `'lookupObjects'`: `Xrm.Utility.lookupObjects` is a function
  * - `'metadata'`: `Xrm.Utility.getEntityMetadata` is a function
+ * - `'pageContext'`: `Xrm.Utility.getPageContext` is a function
  * - `'sidePanes'`: `Xrm.App.sidePanes` is present
  * - `'page'`: `Xrm.Page` is present
  * - a predicate, for anything else
@@ -331,6 +332,7 @@ export type XrmCapability =
   | 'clientUrl'
   | 'lookupObjects'
   | 'metadata'
+  | 'pageContext'
   | 'sidePanes'
   | 'page'
   | ((xrm: any) => boolean); // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -369,6 +371,8 @@ function hasCapability(xrm: any, capability: XrmCapability): boolean {
       return typeof xrm.Utility?.lookupObjects === 'function';
     case 'metadata':
       return typeof xrm.Utility?.getEntityMetadata === 'function';
+    case 'pageContext':
+      return typeof xrm.Utility?.getPageContext === 'function';
     case 'sidePanes':
       return !!xrm.App?.sidePanes;
     case 'page':
@@ -516,6 +520,12 @@ export function getXrmPage(): XrmPageLike | null {
  * One copy for the dataset code pages that are launched from a parent form
  * (`sprk_kpiassessmentspage`, `sprk_invoicespage`), which each hand-rolled the
  * same `parent -> top` walk (task 081 round 4, review F3). NEVER throws.
+ *
+ * Frame set: the shared walk — window FIRST, then every ancestor (up to
+ * {@link XRM_MAX_FRAME_DEPTH}), then `top`. The replaced loops tried only
+ * `[parent, top]`: they never read the page's own window and skipped
+ * intermediate ancestors. In the dataset pages' normal host (a dialog iframe
+ * whose own window has no Xrm) the result is the same.
  */
 export function getHostFormRecordId(): string | undefined {
   /* eslint-disable @typescript-eslint/no-explicit-any */

@@ -322,6 +322,7 @@ describe('xrmContext', () => {
           getGlobalContext: () => ({ getClientUrl: () => clientUrl }),
           lookupObjects: jest.fn(),
           getEntityMetadata: jest.fn(),
+          getPageContext: jest.fn(),
         },
         App: { sidePanes: {} },
         Page: { getAttribute: jest.fn() },
@@ -341,6 +342,7 @@ describe('xrmContext', () => {
         'clientUrl',
         'lookupObjects',
         'metadata',
+        'pageContext',
         'sidePanes',
         'page',
       ] as const)("'%s' skips a child frame whose Xrm lacks it", capability => {
@@ -482,6 +484,25 @@ describe('xrmContext', () => {
         writable: true,
       });
       expect(getHostFormRecordId()).toBe('{AAA}');
+    });
+
+    // Frame set (round 5, R4-6): window first, then every ancestor, then top.
+    // The two hand-rolled loops this replaced tried [parent, top] only.
+    it('reads the WINDOW frame first (the former loops started at parent)', () => {
+      (window as any).Xrm = { Page: { data: { entity: { getId: () => 'from-window' } } } };
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { Page: { data: { entity: { getId: () => 'from-parent' } } } } },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('from-window');
+    });
+
+    it('reads an intermediate ancestor before top (the former loops skipped it)', () => {
+      const grandparent: any = { Xrm: { Page: { data: { entity: { getId: () => 'from-grandparent' } } } } };
+      grandparent.parent = grandparent;
+      Object.defineProperty(window, 'parent', { value: { parent: grandparent }, writable: true });
+      setWindowTop({ Xrm: { Page: { data: { entity: { getId: () => 'from-top' } } } } });
+      expect(getHostFormRecordId()).toBe('from-grandparent');
     });
 
     it('falls back to Utility.getPageContext().input.entityId', () => {

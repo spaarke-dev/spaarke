@@ -185,7 +185,9 @@ function getWebApiSafe(): any | null {
 }
 
 function getUserIdSafe(): string {
-  const xrm = getXrm('utility');
+  // getGlobalContext, else the legacy Xrm.userSettings shape (both per frame).
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm: any = getXrm('utility') ?? getXrm((x: any) => !!x.userSettings?.userId);
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext() as any;
     const raw = ctx.getUserId?.() ?? ctx.userSettings?.userId ?? '';

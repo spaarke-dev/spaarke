@@ -5,7 +5,7 @@
  * via the shared cross-frame walker in @spaarke/ui-components.
  */
 
-import { getXrm } from '@spaarke/ui-components';
+import { getXrm, type XrmCapability } from '@spaarke/ui-components';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -63,15 +63,17 @@ export interface IXrmContext {
 }
 
 /**
- * The nearest Xrm that has BOTH `WebApi` and `Utility`, typed as this side
- * pane's {@link IXrmContext}; null when no frame has both.
+ * The nearest Xrm that has `WebApi` AND the capability the caller uses
+ * (`'metadata'` for `Utility.getEntityMetadata`, `'lookupObjects'` for the
+ * lookup dialog; default `'webApi'` alone), typed as this side pane's
+ * {@link IXrmContext}; null when no frame has both.
  *
  * The frame walk is the shared `getXrm` (task 081 / C-8) with the requirement
- * checked PER FRAME, so a child frame whose Xrm has only `WebApi` is skipped
- * in favour of an outer frame that has both. (Named for its contract; was
- * `getXrm`, then `getSidePaneXrm`.)
+ * checked PER FRAME. Round 5 (review R4-3): this used to require only that
+ * `Utility` exist, so a frame with a partial `Utility` could be picked for a
+ * metadata or lookup call; each caller now names the member it calls.
  */
-export function getXrmWithWebApiAndUtility(): IXrmContext | null {
-  const xrm: any = getXrm(['webApi', x => !!x.Utility]);
+export function getXrmWithWebApiAnd(capability: XrmCapability = 'webApi'): IXrmContext | null {
+  const xrm: any = getXrm(['webApi', capability]);
   return xrm ? (xrm as IXrmContext) : null;
 }

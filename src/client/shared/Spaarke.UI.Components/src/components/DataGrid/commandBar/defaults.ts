@@ -190,9 +190,12 @@ export const defaultDeleteSelectedHandler: DefaultHandler = async ctx => {
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('[CommandBar] Bulk delete failed:', err);
-    if (xrm?.Navigation?.openAlertDialog) {
+    // The alert is best-effort: the nearest frame that can open one (task 081 round 5).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const alertXrm: any = getXrm((x: any) => typeof x.Navigation?.openAlertDialog === 'function');
+    if (alertXrm?.Navigation?.openAlertDialog) {
       try {
-        await xrm.Navigation.openAlertDialog({
+        await alertXrm.Navigation.openAlertDialog({
           title: 'Delete failed',
           text: `Some records failed to delete: ${err instanceof Error ? err.message : String(err)}`,
         });

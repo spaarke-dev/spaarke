@@ -74,8 +74,10 @@ interface XrmUtilityWithEntityMetadata {
   ) => Promise<{ PrimaryNameAttribute?: string }>;
 }
 
-async function resolvePrimaryNameField(xrm: XrmContext, entityLogicalName: string): Promise<string | null> {
-  const utility = xrm.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
+async function resolvePrimaryNameField(entityLogicalName: string): Promise<string | null> {
+  // getEntityMetadata is optional here (callers fall back to a label): ask for the
+  // nearest frame that has it, separately from the WebApi frame (task 081 round 5).
+  const utility = getXrm('metadata')?.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
   if (!utility?.getEntityMetadata) return null;
   try {
     const meta = await utility.getEntityMetadata(entityLogicalName);
@@ -117,7 +119,7 @@ async function searchEntityRecords(
 
   try {
     const idField = `${entityLogicalName}id`;
-    const primaryNameField = await resolvePrimaryNameField(xrm, entityLogicalName);
+    const primaryNameField = await resolvePrimaryNameField(entityLogicalName);
     if (!primaryNameField) return []; // No name field to safely search — skip this entity.
 
     const filter = `contains(${primaryNameField}, '${encodeODataStringLiteral(query)}')`;

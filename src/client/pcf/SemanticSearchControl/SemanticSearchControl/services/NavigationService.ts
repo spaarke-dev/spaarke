@@ -336,8 +336,8 @@ export class NavigationService {
    * @param onDialogClosed - Optional callback after dialog closes (e.g. refresh results)
    */
   async openAddDocument(scopeId: string | null, entityType: string | null, onDialogClosed?: () => void): Promise<void> {
-    // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm('navigation') as unknown as Xrm.XrmStatic | undefined;
+    // Shared cross-frame walker (task 081 / C-8): navigateTo + the parent-name WebApi read.
+    const xrm = getXrm(['webApi', 'navigation']) as unknown as Xrm.XrmStatic | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('NavigationService.openAddDocument: Xrm.Navigation not available');
       return;

@@ -79,8 +79,9 @@ export { LazyAISummaryDialog, AISummaryFallback };
 
 // ---------------------------------------------------------------------------
 // Client-side filter predicates
-// These mirror queryHelpers.buildEventCategoryFilter for offline filtering
-// against the locally cached All-filter event list.
+// Offline filtering against the locally cached All-filter event list. Most
+// mirror queryHelpers.buildEventCategoryFilter; Overdue uses the feed's
+// local-day rule (isFeedEventOverdue), not the server's UTC-midnight filter.
 // ---------------------------------------------------------------------------
 
 function applyClientFilter(

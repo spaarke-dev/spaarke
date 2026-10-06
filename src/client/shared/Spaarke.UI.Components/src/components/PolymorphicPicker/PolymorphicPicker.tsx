@@ -56,7 +56,7 @@ import {
 } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
 import { cleanGuid } from '../../utils/guid';
-import { getXrm, type XrmPartialContext } from '../../utils/xrmContext';
+import { getXrm, type XrmCapability, type XrmPartialContext } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -187,15 +187,19 @@ const useStyles = makeStyles({
  * `Utility.lookupObjects`, via the shared `getXrm('lookupObjects')` (task 081
  * / C-8 — one frame walk; this module no longer has its own). A distinct
  * contract from plain `getXrm()` (which needs only `WebApi`), hence a
- * distinct name. Imported by `EmailConnectionsReview.tsx`,
+ * distinct name. Callers that use more than the lookup dialog pass the
+ * capability they use (task 081 round 5, R4-3), e.g. `getXrmForPicker('metadata')`.
+ * Imported by `EmailConnectionsReview.tsx`,
  * `FieldUpdateReconcileTab.tsx` and `TaskReconcileTab.tsx`.
  *
  * Before task 081 this was a `window ?? parent ?? top` read accepting the
  * first truthy `Xrm` (and throwing on a cross-origin parent); it now checks
  * `lookupObjects` per frame and skips cross-origin frames.
  */
-export function getXrmForPicker(): XrmPartialContext | undefined {
-  return getXrm('lookupObjects');
+export function getXrmForPicker(
+  required: XrmCapability | readonly XrmCapability[] = 'lookupObjects'
+): XrmPartialContext | undefined {
+  return getXrm(required);
 }
 
 // ---------------------------------------------------------------------------

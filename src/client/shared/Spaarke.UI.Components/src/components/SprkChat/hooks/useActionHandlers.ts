@@ -270,7 +270,8 @@ export function navigateToTarget(payload: INavigatePayload): void {
   // Shared cross-frame walker (task 081 / C-8) — was a window-only read,
   // which missed Xrm when the chat is hosted in an iframe.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm('navigation');
+  // Ask for the method this payload calls: openUrl (url) or navigateTo (Code Page).
+  const xrm: any = getXrm(payload.url ? 'openUrl' : 'navigation');
 
   if (!xrm?.Navigation) {
     console.warn(

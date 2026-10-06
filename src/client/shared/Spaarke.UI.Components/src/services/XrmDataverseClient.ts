@@ -71,6 +71,11 @@ interface XrmLike {
   Utility?: XrmUtilityLike;
 }
 
+/** Whether `utility` can answer `getEntityMetadata` (the 'metadata' capability). */
+function hasEntityMetadata(utility: unknown): utility is XrmUtilityLike {
+  return typeof (utility as { getEntityMetadata?: unknown } | undefined)?.getEntityMetadata === 'function';
+}
+
 const XRM_MISSING_MESSAGE = 'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
 
 /**
@@ -88,7 +93,7 @@ function resolveXrm(): XrmLike {
   // window -> parent walk (no top); the throw-on-missing contract is unchanged.
   const xrm = getXrm();
   if (xrm?.WebApi) {
-    return xrm as unknown as XrmLike;
+    return xrm as XrmLike;
   }
   throw new Error(XRM_MISSING_MESSAGE);
 }
@@ -574,18 +579,17 @@ export class XrmDataverseClient implements IDataverseClient {
     entityName: string,
     attributes?: readonly string[]
   ): Promise<EntityMetadata> {
-    // Metadata needs Xrm.Utility.getEntityMetadata: ask the shared walker for the
-    // nearest frame that has it (task 081 round 4), falling back to the cached
-    // WebApi frame (which on a real host has it too; tests stub `getXrm`).
-    const xrm = (getXrm('metadata') as unknown as XrmLike | undefined) ?? this.getXrm();
-    if (!xrm.Utility) {
+    // Metadata needs Xrm.Utility.getEntityMetadata: the nearest frame that has it
+    // (task 081 rounds 4-5), narrowed by a type guard rather than a double cast.
+    const utility = getXrm('metadata')?.Utility;
+    if (!hasEntityMetadata(utility)) {
       throw new Error(`XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`);
     }
 
     const legacyMeta =
       attributes && attributes.length > 0
-        ? await xrm.Utility.getEntityMetadata(entityName, [...attributes])
-        : await xrm.Utility.getEntityMetadata(entityName);
+        ? await utility.getEntityMetadata(entityName, [...attributes])
+        : await utility.getEntityMetadata(entityName);
 
     return projectEntityMetadata(legacyMeta);
   }

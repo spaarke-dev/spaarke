@@ -25,7 +25,7 @@
  */
 
 import type { XrmContext, XrmUtility } from '@spaarke/ui-components';
-import { cleanGuid } from '@spaarke/ui-components';
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 // `xrmContext.ts`'s `XrmUtility` (task 010) does not declare `getEntityMetadata`
 // — narrowed locally + cast at the boundary, mirroring the identical pattern in
@@ -49,7 +49,9 @@ export async function resolveRecordName(
   entityId: string
 ): Promise<string | null> {
   if (!xrm?.WebApi) return null;
-  const utility = xrm.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
+  // getEntityMetadata is optional here (callers fall back to a label): ask for the
+  // nearest frame that has it, separately from the WebApi frame (task 081 round 5).
+  const utility = getXrm('metadata')?.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
   if (!utility?.getEntityMetadata) return null;
 
   try {

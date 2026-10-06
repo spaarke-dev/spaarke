@@ -11,7 +11,7 @@
  */
 
 import * as React from "react";
-import { getXrmWithWebApiAndUtility } from "../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../utils/xrmAccess";
 import { cleanGuid } from '@spaarke/ui-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +79,7 @@ export function useRelatedRecord(
       setIsLoading(true);
       setError(null);
 
-      const xrm = getXrmWithWebApiAndUtility();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         setIsLoading(false);
@@ -132,7 +132,7 @@ export function useRelatedRecord(
     async (data: Record<string, unknown>): Promise<string | null> => {
       if (!parentId) return null;
 
-      const xrm = getXrmWithWebApiAndUtility();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         return null;
@@ -171,7 +171,7 @@ export function useRelatedRecord(
     async (data: Record<string, unknown>): Promise<boolean> => {
       if (!recordId) return false;
 
-      const xrm = getXrmWithWebApiAndUtility();
+      const xrm = getXrmWithWebApiAnd();
       if (!xrm?.WebApi) {
         setError("Xrm.WebApi not available");
         return false;
