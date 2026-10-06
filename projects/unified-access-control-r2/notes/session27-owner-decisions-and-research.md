@@ -1015,6 +1015,13 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - **The cap:** this is the only new vocabulary. It does not loosen any existing rule.
    - Use it for those five, and for any later fix shape the scanner cannot see.
 
+## Round 66 (2026-10-05). BINDING. OWNER decision. Task 148's open escalation (r2 verifier item 3).
+
+1. **The double-fault stranded mirror on unsecure is ACCEPTED as a known limit (option C).** The owner chose "Accept and document" over the write-ahead marker (A) and the schema column (B).
+   - **The case:** on unsecure, a released child's mirror revoke fails, AND putting it back on the Secure team also fails. The call answers 500 `children_incomplete` and logs Critical once, naming the row and the manual revoke. A second `/unsecure-project` call then treats the child as never isolated (round 22) and completes. The record's former sharees keep their share on that one child.
+   - **Why accepted (round 56):** it takes two consecutive write failures on the same row, it is bounded to the record's own former sharees, and it is logged with the row id. Option A would amend round 22, add a marker principal and a standing live invariant (a memberless team in every environment). That is a fix bigger than the problem.
+   - **Recorded:** as a known limit in 148's note, the PR description, and the deployment guide's residual-risk section (the operator's manual revoke). No code change.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
