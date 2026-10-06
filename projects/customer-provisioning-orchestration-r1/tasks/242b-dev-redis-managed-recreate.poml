@@ -4,7 +4,7 @@
     <title>Dev + demo Redis → Azure Managed Redis B0 non-HA, Entra-only (owner D12) — preflight, create, no-outage cut-over of the shared dev BFF and the L2 Worker, demo BFF wired, retire dev key rotation</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T242 (live half)</phase>
     <gate>T242 code complete (committed on the branch); every live step needs owner confirmation; the ordering constraint below is binding</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live, irreversible infrastructure change (cache recreation, data loss of cached entries) on resources two running services depend on; edits deploy scripts, a CI workflow and Bicep.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -114,7 +114,7 @@
     <criterion testable="true">The old dev cache is deleted only after the owner confirmed; every live step and its approval is logged in current-task.md.</criterion>
   </acceptance-criteria>
 
-  <notes>Filed 2026-10-04 as the live half of plan §7 T242 (see T242 notes). Extended 2026-10-04 session 35 after a read-only live check found every deployed BFF/Worker runs as Production (owner: additional cache migration work is not deferred, it is addressed in this project): demo BFF cache, no-outage dev cut-over, ordering gates.</notes>
+  <notes>Filed 2026-10-04 as the live half of plan §7 T242 (see T242 notes). Extended 2026-10-04 session 35 after a read-only live check found every deployed BFF/Worker runs as Production (owner: additional cache migration work is not deferred, it is addressed in this project): demo BFF cache, no-outage dev cut-over, ordering gates. COMPLETED 2026-10-06 (session 36). Live: dev cache spaarke-bff-redis-dev = Azure Managed Redis Balanced_B0 non-HA, Entra only, two assignments (mi-bff-api-dev, sprk-controlplane-dev-uami); dev BFF + L2 Worker on Redis__Endpoint, no connection string; old classic cache deleted (owner OK); dev alerts on the new cluster, missed-rotation alert deleted; demo cache spaarke-bff-redis-demo created (demo BFF stopped -> T242c, re-scoped by D27). Ordering held: T242 reached master in PR #1298 (2677d48c0) with the INDEX.md note before the connection string was removed and the old cache deleted; no BFF/Worker health failure. Repo: dev entries retired, then (owner) the whole Redis key-rotation tooling removed; alerts.bicep on redisEnterprise; Seed-PlatformKeyVault no longer seeds Redis-ConnectionString; inventory drift fixed (validator 0/0); docs rewritten. Step 9.5: two code reviews (0 Critical) + adr-check (ArchTests 349/349) - findings fixed; ADR-009 amended (latency alert = average BFF-observed per op, owner Path B). Found + fixed on the way: CustomerRunGuard REG-02/05 restore, Worker boot-test race, Tier 2 sharding, BFF redis health check leaking a service provider per minute (3f48f6a87, deployed to dev, publish +0.00 MB). Every live step and its approval is in current-task.md.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

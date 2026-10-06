@@ -36,15 +36,15 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 35, 2026-10-04)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 36, 2026-10-06)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **242b — Dev + demo Redis → Azure Managed Redis B0 non-HA, Entra-only — LIVE** · `tasks/242b-dev-redis-managed-recreate.poml` · status **pending** · FULL · opus @ high · steps **prescriptive** |
-| **Step** | 1–5 ✅; step 6 in progress (S36): **PR #1298** re-reviewed via /merge-to-master (owner asked). Master merged in twice more (`2706fccb4`, `8e6b954d2`; CHANGELOG conflict → both entries kept). Tier 2 now sharded (`5eb979eb3`). Owner chose "wait for all checks, then merge": background watcher merges with `--merge` only if 0 fail, 0 pending, CLEAN, head `8e6b954d2`. |
-| **Status** | in-progress — steps 1–9 ✅; Step 9.5 gates run + findings fixed (S36). Waiting on owner items (see live-changes log "Open owner items") and on the BFF full suite + publish-size measurement for commit `3f48f6a87`. |
-| **Next Action** | Report BFF suite + publish size; owner decisions (rotation delete, SPE config clear, dev deploy of the health-check fix + alert redeploy); then close-out: POML 242b notes/status completed, TASK-INDEX ✅, plan T242 ✅, push, PR to master — it MUST merge before 2026-10-08 06:00 UTC, because scheduled workflows run from master and master still has the staging rotation cron; then reset current-task → next task. BFF commit 3f48f6a87 publish size: master 45.88 MB / 214 files vs branch 45.88 MB / 214 files = +0.00 MB (fresh short-path worktrees, Compress-Archive Optimal, incl. PDBs). |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → **T242b** (in progress, step 6 next) → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+| **Task** | **T242b ✅ COMPLETED 2026-10-06.** Next: **T244** — keyless resources in Bicep (D13, G16) — POML to be authored/located (plan row T244). T242c is pending an owner re-scope (D27: demo becomes the provisioning test environment). |
+| **Step** | Before T244: open the PR for this branch (T242b follow-ups, review fixes, BFF health-check fix, rotation-tooling removal, demo config, D27) — it MUST merge before 2026-10-08 06:00 UTC (master still carries the staging rotation cron; scheduled workflows run from master). |
+| **Status** | between tasks. Open owner items: SPE Model 1 grant for mi-bff-api-dev (SPE Admin UI; explained); config 68f9a952 `sprk_keyvaultsecretname="null"` (harmless, offered to clear); redeploy dev alerts with the fixed latency alert (not yet approved); W7 — deploy the L2 Api template before its next code deploy. |
+| **Next Action** | `/push-to-github` (PR to master) → CI → owner OK → merge before 2026-10-08 06:00 UTC; recheck dev redis health-check latency (fix deployed 2026-10-06 00:06 UTC as 0911515d7: first window 4/4 probes < 4 ms); then task-execute T244. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → T244 → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 ### Completed (SESSIONS 30–32)
 | Item | Commit | Outcome |
