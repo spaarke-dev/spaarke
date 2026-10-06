@@ -78,6 +78,17 @@
 // spaarke-hosted-model2 + Model 1 (UAMI lives in Spaarke's subscription for
 // both — intra-Spaarke-tenant) OR the customer's own tenant for
 // customer-owned-model2 (UAMI lives in the customer's subscription).
+//
+// KEYLESS-PROOF APP ROLE (task 230b, owner D13): the app-reg exposes the application role
+// KeylessProofContract.AppRoleValue (fixed id, allowedMemberTypes ["Application"]) and H3 assigns it to
+// the L2 Worker identity (ControlPlaneIdentityOptions.PrincipalObjectId) — the only caller of the
+// stamp BFF's POST /api/platform/keyless-proof, which H13 calls. Create, reconcile and assignment are
+// idempotent (the role is matched by value, the assignment by principal + role). L2 already holds the
+// Graph permissions this needs: it owns the app it created (Application.ReadWrite.OwnedBy is enough to
+// PATCH appRoles) and H10 already assigns app roles with AppRoleAssignment.ReadWrite.All. MODEL 2 GAP
+// (out of scope, owner 2026-09-30): a customer-owned-model2 app-reg lives in the customer's tenant,
+// where the Spaarke-tenant L2 identity has no service principal — the role is defined but not
+// assigned, and H13's keyless proof cannot authenticate there (recorded in task 230b's notes).
 // -----------------------------------------------------------------------------
 
 using Azure.Core;
@@ -87,6 +98,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
+using Spaarke.Contracts.Provisioning;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.EntraAppReg;
 
@@ -107,19 +119,27 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     /// <summary>Shared UAMI-pinned credential — used for KV writes only (see file-header KV WRITES note). Graph calls build a FRESH per-tenant credential (GOTCHA 1).</summary>
     private readonly TokenCredential _sharedCredential;
     private readonly EntraAppRegOptions _options;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<GraphAppRegistrationProvisioner> _logger;
 
-    /// <summary>Constructs the production provisioner. <paramref name="sharedCredential"/> is L2's own platform UAMI-pinned credential (KV writes only).</summary>
+    /// <summary>
+    /// Constructs the production provisioner. <paramref name="sharedCredential"/> is L2's own platform UAMI-pinned
+    /// credential (KV writes only); <paramref name="identity"/> names that identity, which H3 assigns the keyless-proof
+    /// app role (task 230b).
+    /// </summary>
     public GraphAppRegistrationProvisioner(
         TokenCredential sharedCredential,
         IOptions<EntraAppRegOptions> options,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<GraphAppRegistrationProvisioner> logger)
     {
         ArgumentNullException.ThrowIfNull(sharedCredential);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
         _sharedCredential = sharedCredential;
         _options = options.Value;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -175,7 +195,15 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             }
 
             // (3) Ensure service principal.
-            await EnsureServicePrincipalAsync(graph, app.AppId!, cancellationToken).ConfigureAwait(false);
+            var servicePrincipalId = await EnsureServicePrincipalAsync(graph, app.AppId!, cancellationToken).ConfigureAwait(false);
+
+            // (3b) Task 230b: the keyless-proof app role goes to the L2 Worker identity (H13 calls the stamp BFF with it).
+            var roleFailure = await EnsureKeylessProofRoleAssignmentAsync(
+                graph, app, servicePrincipalId, request, cancellationToken).ConfigureAwait(false);
+            if (roleFailure is not null)
+            {
+                return roleFailure;
+            }
 
             // (4) Ensure client secret (skip-if-valid) — GATED on
             //     RequireSecretFreeIdentity. Bucket B HIGH#3 SESSION 18: when
@@ -324,6 +352,7 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             {
                 Oauth2PermissionScopes = new List<PermissionScope> { BuildExposedScope() },
             },
+            AppRoles = new List<AppRole> { BuildKeylessProofAppRole() },
         };
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -393,10 +422,145 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             dirty = true;
         }
 
+        var plannedRoles = PlanKeylessProofAppRoles(app.AppRoles);
+        if (plannedRoles is not null)
+        {
+            patch.AppRoles = plannedRoles;
+            dirty = true;
+        }
+
         if (dirty)
         {
             await graph.Applications[app.Id].PatchAsync(patch, cancellationToken: timeoutCts.Token)
                 .ConfigureAwait(false);
+            if (plannedRoles is not null)
+            {
+                // The assignment step reads the role from the app object it was handed.
+                app.AppRoles = plannedRoles;
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Keyless-proof app role (task 230b) — see file header
+    // ---------------------------------------------------------------------
+
+    /// <summary>The application role that admits the L2 Worker identity to the stamp BFF's keyless proof.</summary>
+    internal static AppRole BuildKeylessProofAppRole() => new()
+    {
+        Id = Guid.Parse(KeylessProofContract.AppRoleId),
+        Value = KeylessProofContract.AppRoleValue,
+        AllowedMemberTypes = new List<string> { "Application" },
+        DisplayName = "Provisioning keyless proof",
+        Description = "Lets the Spaarke provisioning control plane run the stamp's keyless proof (one managed-identity " +
+                      "call per Azure service). Assigned only to the control plane's identity.",
+        IsEnabled = true,
+    };
+
+    /// <summary>
+    /// The app roles to PATCH so the keyless-proof role is present and enabled, or null when nothing changes. The role
+    /// is matched by VALUE: an existing role keeps its id (an enabled role's id cannot change), every other role is
+    /// carried over unchanged, and a disabled one is re-enabled.
+    /// </summary>
+    internal static List<AppRole>? PlanKeylessProofAppRoles(IReadOnlyList<AppRole>? current)
+    {
+        var roles = current ?? Array.Empty<AppRole>();
+        var existing = roles.FirstOrDefault(r => string.Equals(r.Value, KeylessProofContract.AppRoleValue, StringComparison.Ordinal));
+        if (existing is null)
+        {
+            return roles.Append(BuildKeylessProofAppRole()).ToList();
+        }
+        if (existing.IsEnabled == true
+            && existing.AllowedMemberTypes?.Count == 1
+            && string.Equals(existing.AllowedMemberTypes[0], "Application", StringComparison.Ordinal))
+        {
+            return null;
+        }
+        return roles
+            .Select(r => ReferenceEquals(r, existing)
+                ? new AppRole
+                {
+                    Id = existing.Id,
+                    Value = existing.Value,
+                    AllowedMemberTypes = new List<string> { "Application" },
+                    DisplayName = existing.DisplayName,
+                    Description = existing.Description,
+                    IsEnabled = true,
+                }
+                : r)
+            .ToList();
+    }
+
+    /// <summary>The keyless-proof role's id on this app — the existing role's when present, else the contract's.</summary>
+    internal static Guid KeylessProofRoleId(IReadOnlyList<AppRole>? roles)
+        => roles?.FirstOrDefault(r => string.Equals(r.Value, KeylessProofContract.AppRoleValue, StringComparison.Ordinal))?.Id
+           ?? Guid.Parse(KeylessProofContract.AppRoleId);
+
+    /// <summary>True when <paramref name="principalId"/> already holds <paramref name="appRoleId"/>.</summary>
+    internal static bool HasRoleAssignment(IEnumerable<AppRoleAssignment>? assignments, Guid principalId, Guid appRoleId)
+        => assignments?.Any(a => a.PrincipalId == principalId && a.AppRoleId == appRoleId) == true;
+
+    /// <summary>
+    /// Assigns the keyless-proof role on the BFF service principal to the L2 Worker identity, idempotently. Retries the
+    /// POST while Entra has not yet propagated a just-added role. Returns null on success or a Failure.
+    /// </summary>
+    private async Task<EntraAppRegOutcome?> EnsureKeylessProofRoleAssignmentAsync(
+        GraphServiceClient graph, Application app, string servicePrincipalId, EntraAppRegRequest request, CancellationToken ct)
+    {
+        if (string.Equals(request.Profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "H3: keyless-proof role defined but NOT assigned — the {Profile} app-reg is in the customer's tenant, where " +
+                "the L2 identity has no service principal (Model 2 gap, task 230b). customerId={CustomerId}",
+                request.Profile, request.CustomerId);
+            return null;
+        }
+
+        var principalId = Guid.Parse(_identity.CanonicalPrincipalObjectId());
+        var resourceId = Guid.Parse(servicePrincipalId);
+        var appRoleId = KeylessProofRoleId(app.AppRoles);
+
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeoutCts.CancelAfter(_options.GraphRequestTimeout);
+
+                var existing = await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo
+                    .GetAsync(rc => rc.QueryParameters.Top = 999, timeoutCts.Token).ConfigureAwait(false);
+                if (HasRoleAssignment(existing?.Value, principalId, appRoleId))
+                {
+                    return null;
+                }
+
+                await graph.ServicePrincipals[servicePrincipalId].AppRoleAssignedTo.PostAsync(new AppRoleAssignment
+                {
+                    PrincipalId = principalId,
+                    ResourceId = resourceId,
+                    AppRoleId = appRoleId,
+                }, cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+
+                _logger.LogInformation(
+                    "H3 assigned the keyless-proof role to the L2 identity: customerId={CustomerId} appId={AppId} principal={PrincipalId}",
+                    request.CustomerId, app.AppId, principalId);
+                return null;
+            }
+            catch (ODataError ex) when (ex.ResponseStatusCode == 400 && attempt < _options.FicExchangeRetryCount)
+            {
+                // A role added moments ago may not be visible to the assignment endpoint yet.
+                _logger.LogInformation(ex,
+                    "H3 keyless-proof role assignment attempt {Attempt}/{Max} returned 400 — retrying after propagation delay.",
+                    attempt, _options.FicExchangeRetryCount);
+                await Task.Delay(_options.FicExchangeRetryDelay, ct).ConfigureAwait(false);
+            }
+            catch (ODataError ex)
+            {
+                return new EntraAppRegOutcome.Failure(
+                    $"Assigning the keyless-proof app role ({KeylessProofContract.AppRoleValue}) to the L2 identity {principalId} on " +
+                    $"the BFF service principal {servicePrincipalId} failed: Graph ODataError {ex.ResponseStatusCode}: " +
+                    $"{ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. [{EntraAppRegRejectionCodes.KeylessProofRoleAssignmentFailed}]");
+            }
         }
     }
 
@@ -446,7 +610,8 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
     // Service principal + client secret
     // ---------------------------------------------------------------------
 
-    private async Task EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
+    /// <summary>Ensures the app's service principal exists and returns its object id.</summary>
+    private async Task<string> EnsureServicePrincipalAsync(GraphServiceClient graph, string appId, CancellationToken ct)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeoutCts.CancelAfter(_options.GraphRequestTimeout);
@@ -455,13 +620,16 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             rc.QueryParameters.Filter = $"appId eq '{EscapeODataLiteral(appId)}'";
         }, timeoutCts.Token).ConfigureAwait(false);
 
-        if (existing?.Value?.Count > 0)
+        var found = existing?.Value?.FirstOrDefault()?.Id;
+        if (!string.IsNullOrWhiteSpace(found))
         {
-            return;
+            return found;
         }
 
-        await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
+        var created = await graph.ServicePrincipals.PostAsync(new ServicePrincipal { AppId = appId },
             cancellationToken: timeoutCts.Token).ConfigureAwait(false);
+        return created?.Id
+            ?? throw new InvalidOperationException($"Graph POST /servicePrincipals returned no id for app '{appId}'.");
     }
 
     private async Task<string> EnsureClientSecretAsync(GraphServiceClient graph, Application app, CancellationToken ct)

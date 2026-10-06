@@ -74,15 +74,33 @@ public static class H13Rejections
     // ---- extended Validate-DeployedEnvironment.ps1 (SC #5) ----
 
     /// <summary>
-    /// The extended Validate-DeployedEnvironment.ps1 (Phase B) reported at
-    /// least one sample-check failure — BFF /healthz OR sample analysis OR
-    /// sample doc upload+index OR workspace-layout render OR wizard field-map.
-    /// R7 EFFECT assertion failed (not intent assertion).
+    /// A live check against the deployed BFF failed — /healthz, /ping, the Dataverse CORS origin, or the keyless proof
+    /// (task 230b: the L2 identity refused, or any stamp service not proved with the BFF's managed identity).
     /// </summary>
     public const string ExtendedValidationFailed = "h13-extended-validation-failed";
 
-    /// <summary>The Validate-DeployedEnvironment.ps1 invocation threw (pwsh not on PATH, script not found, timeout) — no confirmed E2E outcome.</summary>
+    /// <summary>The validation runner threw — no confirmed outcome.</summary>
     public const string ExtendedValidationInfraFault = "h13-extended-validation-infra-fault";
+
+    /// <summary>
+    /// Task 230b: no live check failed, but at least one reached no verdict (transport fault, timeout, throttling,
+    /// a server error, or a stamp service the BFF could not reach). Resumable.
+    /// </summary>
+    public const string ExtendedValidationInconclusive = "h13-extended-validation-inconclusive";
+
+    /// <summary>Task 230b: <c>InterStepState.bffAppRegId</c> (H3's output) is missing — the keyless proof's token audience.</summary>
+    public const string MissingBffAppRegId = "h13-missing-bff-app-reg-id";
+
+    // ---- Keyless stamp (task 230b, owner D13) ----
+
+    /// <summary>
+    /// ARM shows a stamp resource that accepts keys (local/shared-key auth enabled), a slot carrying a key setting, or an
+    /// expected keyed resource absent. QuarantineRequired — the stamp is not keyless.
+    /// </summary>
+    public const string StampKeyAuthEnabled = "h13-stamp-key-auth-enabled";
+
+    /// <summary>Task 230b: the ARM keyless check could not read the stamp (permission, transport, throttling). Resumable.</summary>
+    public const string StampKeylessInfraFault = "h13-stamp-keyless-infra-fault";
 
     // ---- §4B silent-fail trap failures (SC #6 — one code per trap) ----
 
@@ -166,8 +184,11 @@ public static class H13Rejections
 /// </summary>
 public static class H13Gates
 {
-    /// <summary>Flips to Verified when the extended Validate-DeployedEnvironment.ps1 exits 0 (SC #5).</summary>
+    /// <summary>Flips to Verified when every live check against the BFF passes, the keyless proof included (SC #5, task 230b).</summary>
     public const string ExtendedValidationVerified = "h13-extended-validation";
+
+    /// <summary>Flips to Verified when ARM shows every keyed stamp resource keyless and no key setting on any slot (task 230b).</summary>
+    public const string StampKeylessVerified = "h13-stamp-keyless";
 
     /// <summary>Flips to Verified when ALL 7 §4B T1–T7 trap re-verifications pass (SC #6).</summary>
     public const string TrapCatalogVerified = "h13-trap-catalog";

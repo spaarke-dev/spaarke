@@ -128,6 +128,9 @@ public static class E2EAcceptanceModule
         services.AddSingleton<IE2EValidationRunner, E2EValidationRunner>();
         services.AddSingleton<IE2ETrapVerifier, CompositeTrapVerifier>();
         services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
+        // Task 230b — the ARM half of the keyless gate (key auth off, no key setting on any slot).
+        services.AddHttpClient(ArmStampKeylessVerifier.HttpClientName);
+        services.AddSingleton<IStampKeylessVerifier, ArmStampKeylessVerifier>();
         // Task 185 (Wave G-7 Batch G-7D): 7 real ITrapProbe registrations (T7 added by task 238) for
         // the composite trap verifier. Order does not matter (composite
         // dispatches per Kind); each probe's own file header documents its

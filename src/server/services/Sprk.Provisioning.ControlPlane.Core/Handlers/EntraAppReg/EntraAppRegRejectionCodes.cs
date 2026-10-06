@@ -74,6 +74,12 @@ public static class EntraAppRegRejectionCodes
     /// <summary>H3 requires <c>InterStepState.MiObjectId</c> (UAMI principalId — the FIC <c>subject</c>, per auth-v4 §3.1) populated by H2a before H3 dispatches, in BOTH tenancy models post-task-222 per D-13.</summary>
     public const string MissingUamiObjectId = "appreg-missing-uami-object-id";
 
+    /// <summary>
+    /// Task 230b: assigning the keyless-proof app role on the customer's BFF service principal to the L2 Worker
+    /// identity failed (after the propagation retries). Without it H13 cannot run the stamp's keyless proof.
+    /// </summary>
+    public const string KeylessProofRoleAssignmentFailed = "appreg-keyless-proof-role-assignment-failed";
+
     /// <remarks>
     /// RETIRED 2026-09-29 (task 222 per D-13): the H3 shared-app-reg branch was deleted from
     /// <see cref="H3EntraAppRegHandler"/>. This code is no longer emitted by any live code path.

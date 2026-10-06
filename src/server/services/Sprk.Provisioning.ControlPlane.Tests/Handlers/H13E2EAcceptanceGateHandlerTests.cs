@@ -30,6 +30,9 @@
 //   AC-3   Extended validate script Failure (SC #5) → QuarantineRequired +
 //          ExtendedValidationFailed.
 //   AC-4   Extended validate script infra fault → Resumable + ExtendedValidationInfraFault.
+//   AC-22..27 (task 230b) missing BffAppRegId → Resumable; the ARM keyless check Failed → QuarantineRequired
+//          StampKeyAuthEnabled, InfraFault / throw → Resumable StampKeylessInfraFault; an Inconclusive validation →
+//          Resumable ExtendedValidationInconclusive; BffAppRegId and the stamp coordinates reach the collaborators.
 //   AC-5a..g Each of 7 T1–T7 trap fail branches → QuarantineRequired + distinct code.
 //   AC-6a..d Each of 4 runtime I2–I5 invariant fail branches → QuarantineRequired + distinct code
 //          (task 230a: I1 is build-time — the I1 ArchTest — not a runtime invariant).
@@ -104,6 +107,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H13");
 
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.ExtendedValidationVerified);
+        repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.StampKeylessVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.TrapCatalogVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.InvariantCatalogVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.CostEnvelopeVerified);
@@ -696,6 +700,105 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         failure.RejectionCode.Should().Be(H13Rejections.TrapT1Failed, "trap failure has higher priority in aggregation");
     }
 
+    // ---------- AC-22..27 keyless (task 230b) ----------
+
+    [Fact]
+    public async Task AC22_MissingBffAppRegId_FailsResumable_NoSeamInvoked()
+    {
+        var run = BuildRun();
+        run.InterStepState.BffAppRegId = null;
+        var repo = new FakeRepository(run, etag: "etag-22");
+        var handler = BuildHandler(repo, out var seams);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.MissingBffAppRegId);
+        failure.Diagnostic.Should().Contain("H3").And.Contain("api://");
+        seams.Validator.CallCount.Should().Be(0);
+        seams.Keyless.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC23_StampAcceptsKeys_FailsQuarantine_NamingTheViolations()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-23");
+        var handler = BuildHandler(repo, out var seams,
+            configureSeams: s => s.Keyless = FakeKeyless.Of(new StampKeylessOutcome.Failed(new[]
+            {
+                "Microsoft.Storage/storageAccounts 'sprkacmesa': allowSharedKeyAccess is not false",
+                "App Service 'acme-bff' slot 'staging': app setting 'AzureOpenAI__ApiKey' is a key",
+            })));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(H13Rejections.StampKeyAuthEnabled);
+        failure.Diagnostic.Should().Contain("allowSharedKeyAccess").And.Contain("AzureOpenAI__ApiKey");
+        seams.Registry.CallCount.Should().Be(0, "a stamp that accepts keys never reaches Ready");
+    }
+
+    [Fact]
+    public async Task AC24_KeylessInfraFault_FailsResumable()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-24");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Keyless = FakeKeyless.Of(new StampKeylessOutcome.InfraFault("ARM GET returned HTTP 429")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H13Rejections.StampKeylessInfraFault);
+    }
+
+    [Fact]
+    public async Task AC25_KeylessVerifierThrows_IsAnInfraFault_FailsResumable()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-25");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Keyless = FakeKeyless.Throws(new HttpRequestException("socket closed")));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Failure>().Which.RejectionCode.Should().Be(H13Rejections.StampKeylessInfraFault);
+    }
+
+    [Fact]
+    public async Task AC26_ValidationInconclusive_FailsResumable_NotQuarantine()
+    {
+        var repo = new FakeRepository(BuildRun(), etag: "etag-26");
+        var handler = BuildHandler(repo, out _,
+            configureSeams: s => s.Validator = FakeValidator.Inconclusive(new[] { "keyless-proof-redis" }, "keyless-proof-redis: unreachable (redis-connection)"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable, "no check failed — a transient fault reaches no verdict");
+        failure.RejectionCode.Should().Be(H13Rejections.ExtendedValidationInconclusive);
+        failure.Diagnostic.Should().Contain("keyless-proof-redis");
+    }
+
+    [Fact]
+    public async Task AC27_BffAppRegIdAndStampCoordinates_ReachTheCollaborators()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-27");
+        var handler = BuildHandler(repo, out var seams);
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        seams.Validator.LastRequest!.BffAppRegId.Should().Be(run.InterStepState.BffAppRegId,
+            "the keyless proof's token audience is H3's app registration");
+        seams.Keyless.LastRequest.Should().BeEquivalentTo(new
+        {
+            ResourceGroupName = run.InterStepState.ResourceGroupName,
+            AppServiceName = run.InterStepState.AppServiceName,
+        }, o => o.ExcludingMissingMembers());
+    }
+
     // ---------- helpers ----------
 
     private sealed class Seams
@@ -703,12 +806,14 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public IE2EValidationRunner Validator { get; set; } = FakeValidator.Success();
         public IE2ETrapVerifier Traps { get; set; } = FakeTrapVerifier.AllPassed();
         public IE2EInvariantVerifier Invariants { get; set; } = FakeInvariantVerifier.AllPassed();
+        public IStampKeylessVerifier Keyless { get; set; } = FakeKeyless.Of(new StampKeylessOutcome.Passed(new[] { "acme-search" }));
         public ICostEnvelopeChecker Cost { get; set; } = FakeCostChecker.WithinBudget();
         public IRegistrySetupStatusUpdater Registry { get; set; } = FakeRegistryUpdater.Success();
 
         public FakeValidator ValidatorFake => (FakeValidator)Validator;
         public FakeTrapVerifier TrapsFake => (FakeTrapVerifier)Traps;
         public FakeInvariantVerifier InvariantsFake => (FakeInvariantVerifier)Invariants;
+        public FakeKeyless KeylessFake => (FakeKeyless)Keyless;
         public FakeCostChecker CostFake => (FakeCostChecker)Cost;
         public FakeRegistryUpdater RegistryFake => (FakeRegistryUpdater)Registry;
 
@@ -720,6 +825,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public required FakeValidator Validator { get; init; }
         public required FakeTrapVerifier Traps { get; init; }
         public required FakeInvariantVerifier Invariants { get; init; }
+        public required FakeKeyless Keyless { get; init; }
         public required FakeCostChecker Cost { get; init; }
         public required FakeRegistryUpdater Registry { get; init; }
         // MED#10 SESSION-19: expose the wire-registry-client so tests can
@@ -749,13 +855,14 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             Validator = seams.ValidatorFake,
             Traps = seams.TrapsFake,
             Invariants = seams.InvariantsFake,
+            Keyless = seams.KeylessFake,
             Cost = seams.CostFake,
             Registry = seams.RegistryFake,
             RegistryClient = registryClient,
         };
 
         return new H13E2EAcceptanceGateHandler(
-            repo, seams.Validator, seams.Traps, seams.Invariants,
+            repo, seams.Validator, seams.Traps, seams.Invariants, seams.Keyless,
             seams.Cost, seams.Registry,
             registryClient, Options.Create(options),
             NullLogger<H13E2EAcceptanceGateHandler>.Instance);
@@ -891,11 +998,33 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         }
     }
 
+    private sealed class FakeKeyless : IStampKeylessVerifier
+    {
+        private readonly Func<StampKeylessOutcome> _verify;
+        public int CallCount { get; private set; }
+        public StampKeylessRequest? LastRequest { get; private set; }
+        private FakeKeyless(Func<StampKeylessOutcome> verify) { _verify = verify; }
+
+        public static FakeKeyless Of(StampKeylessOutcome outcome) => new(() => outcome);
+        public static FakeKeyless Throws(Exception ex) => new(() => throw ex);
+
+        public Task<StampKeylessOutcome> VerifyAsync(StampKeylessRequest request, CancellationToken cancellationToken)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_verify());
+        }
+    }
+
     private sealed class FakeValidator : IE2EValidationRunner
     {
         private readonly Func<Task<E2EValidationOutcome>> _run;
         public int CallCount { get; private set; }
+        public E2EValidationRequest? LastRequest { get; private set; }
         private FakeValidator(Func<Task<E2EValidationOutcome>> run) { _run = run; }
+
+        public static FakeValidator Inconclusive(IReadOnlyList<string> checks, string diag) =>
+            new(() => Task.FromResult<E2EValidationOutcome>(new E2EValidationOutcome.Inconclusive(checks, diag)));
 
         public static FakeValidator Success() =>
             new(() => Task.FromResult<E2EValidationOutcome>(new E2EValidationOutcome.Success(
@@ -907,6 +1036,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public Task<E2EValidationOutcome> RunAsync(E2EValidationRequest request, CancellationToken ct)
         {
             CallCount++;
+            LastRequest = request;
             return _run();
         }
     }

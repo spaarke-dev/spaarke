@@ -145,6 +145,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     private readonly IE2EValidationRunner _validationRunner;
     private readonly IE2ETrapVerifier _trapVerifier;
     private readonly IE2EInvariantVerifier _invariantVerifier;
+    private readonly IStampKeylessVerifier _keylessVerifier;
     private readonly ICostEnvelopeChecker _costChecker;
     private readonly IRegistrySetupStatusUpdater _registryUpdater;
     private readonly IDataverseEnvironmentRegistryClient _registryClient;
@@ -159,6 +160,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         IE2EValidationRunner validationRunner,
         IE2ETrapVerifier trapVerifier,
         IE2EInvariantVerifier invariantVerifier,
+        IStampKeylessVerifier keylessVerifier,
         ICostEnvelopeChecker costChecker,
         IRegistrySetupStatusUpdater registryUpdater,
         IDataverseEnvironmentRegistryClient registryClient,
@@ -169,6 +171,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(validationRunner);
         ArgumentNullException.ThrowIfNull(trapVerifier);
         ArgumentNullException.ThrowIfNull(invariantVerifier);
+        ArgumentNullException.ThrowIfNull(keylessVerifier);
         ArgumentNullException.ThrowIfNull(costChecker);
         ArgumentNullException.ThrowIfNull(registryUpdater);
         ArgumentNullException.ThrowIfNull(registryClient);
@@ -179,6 +182,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         _validationRunner = validationRunner;
         _trapVerifier = trapVerifier;
         _invariantVerifier = invariantVerifier;
+        _keylessVerifier = keylessVerifier;
         _costChecker = costChecker;
         _registryUpdater = registryUpdater;
         _registryClient = registryClient;
@@ -295,6 +299,16 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
+        // Task 230b: H3's output — the keyless proof's token audience (api://{bffAppRegId}).
+        var bffAppRegIdRequired = run.InterStepState.BffAppRegId;
+        if (string.IsNullOrWhiteSpace(bffAppRegIdRequired))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBffAppRegId,
+                "InterStepState.bffAppRegId is not populated — H3 (BFF app registration) produces it and must complete " +
+                "before H13. The keyless proof's token is requested for api://{bffAppRegId}.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, buildId);
 
         // (3) Level-3 idempotency: durable no-op on duplicate.
@@ -348,7 +362,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     RunId: envelope.RunId,
                     DataverseUrl: dataverseUrl,
                     BffApiUrl: bffApiUrl,
-                    TargetSlotName: _options.TargetSlotName),
+                    TargetSlotName: _options.TargetSlotName,
+                    BffAppRegId: bffAppRegId),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -440,6 +455,25 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         // Task 230a: the naming-conformance step (SC #17) DELETED — a repo lint, now a blocking CI step.
 
+        // (6b) Keyless stamp (task 230b, owner D13): ARM shows key auth off on every keyed resource and no key
+        //      setting on any slot. The runtime half is the keyless proof inside step (4).
+        StampKeylessOutcome keylessOutcome;
+        try
+        {
+            keylessOutcome = await _keylessVerifier.VerifyAsync(
+                new StampKeylessRequest(
+                    CustomerId: envelope.CustomerId,
+                    RunId: envelope.RunId,
+                    SubscriptionId: subscriptionId,
+                    ResourceGroupName: resourceGroupName,
+                    AppServiceName: appServiceName),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            keylessOutcome = new StampKeylessOutcome.InfraFault($"{ex.GetType().Name}: {ex.Message}");
+        }
+
         // (7) Cost envelope (SC #14 + §15 #14).
         // Task 223 (D-12): parse tenancyModel at the handler edge (matches H1's pattern) —
         // pre-D-12 the ArmCostEnvelopeChecker had an `_`-arm fallback that silently used
@@ -517,6 +551,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 $"Full invariant catalog: {invariantResult.ToLogSummary()}",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (keylessOutcome is StampKeylessOutcome.Failed keyed)
+        {
+            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                H13Rejections.StampKeyAuthEnabled,
+                $"The stamp is not keyless (owner D13): {string.Join(" | ", keyed.Violations)}. Disable key auth in the " +
+                "module / remove the setting, redeploy (H2a / H4b), then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
         if (validationOutcome is E2EValidationOutcome.Failure valFail)
         {
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
@@ -547,6 +589,20 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 H13Rejections.InvariantVerifierInfraFault,
                 $"Invariant verifier could not verdict I{(int)invInfra.Kind}: {invInfra.Diagnostic}. " +
                 $"Full invariant catalog: {invariantResult.ToLogSummary()}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (keylessOutcome is StampKeylessOutcome.InfraFault keylessInfra)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.StampKeylessInfraFault,
+                $"The ARM keyless check could not read the stamp: {keylessInfra.Diagnostic}",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (validationOutcome is E2EValidationOutcome.Inconclusive valInconclusive)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.ExtendedValidationInconclusive,
+                $"Live checks reached no verdict for {valInconclusive.ChecksInconclusive.Count} check(s): {valInconclusive.Diagnostic}",
                 cancellationToken).ConfigureAwait(false);
         }
         if (costTenancyDiag is not null)
@@ -990,6 +1046,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             VerifierHandler = HandlerIdentifier,
         };
         run.GateStates[H13Gates.ExtendedValidationVerified] = verified;
+        run.GateStates[H13Gates.StampKeylessVerified] = verified;
         run.GateStates[H13Gates.TrapCatalogVerified] = verified;
         run.GateStates[H13Gates.InvariantCatalogVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry

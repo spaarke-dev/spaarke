@@ -42,12 +42,12 @@ public sealed class H13AcceptanceOptions
     public TimeSpan InvariantVerifierTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Maximum time to wait for a single SC #5 sample-workload check inside
-    /// <see cref="E2EValidationRunner"/> (sample AI analysis / doc-index query /
-    /// layout render / wizard field-map — G-8 Batch 11). Defaults to 60 seconds;
-    /// the sample AI analysis in particular can be slow (live LLM round-trip).
+    /// Maximum time to wait for the customer BFF's keyless proof (<see cref="E2EValidationRunner"/>, task 230b). The
+    /// BFF runs its ten service probes concurrently, each limited to 30 seconds; 90 seconds leaves room for a cold
+    /// managed-identity token and a first connection. (Replaces SampleWorkloadCheckTimeout — the four user-workflow
+    /// sample checks it bounded were removed by task 230b.)
     /// </summary>
-    public TimeSpan SampleWorkloadCheckTimeout { get; set; } = TimeSpan.FromSeconds(60);
+    public TimeSpan KeylessProofTimeout { get; set; } = TimeSpan.FromSeconds(90);
 
     /// <summary>
     /// Expected monthly cost of an EMPTY dedicated customer stamp in whole USD — one envelope for both tenancy

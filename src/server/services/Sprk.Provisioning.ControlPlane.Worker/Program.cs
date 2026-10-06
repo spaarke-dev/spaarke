@@ -378,8 +378,9 @@ builder.Services.AddSingleton<IEntraAppRegProvisioner>(sp =>
 {
     var credential = sp.GetRequiredService<TokenCredential>();
     var options = sp.GetRequiredService<IOptions<EntraAppRegOptions>>();
+    var identity = sp.GetRequiredService<IOptions<ControlPlaneIdentityOptions>>();
     var logger = sp.GetRequiredService<ILogger<GraphAppRegistrationProvisioner>>();
-    return new GraphAppRegistrationProvisioner(credential, options, logger);
+    return new GraphAppRegistrationProvisioner(credential, options, identity, logger);
 });
 builder.Services.AddSingleton<IAdminConsentVerifier, GraphAdminConsentVerifier>();
 builder.Services.AddScoped<H3EntraAppRegHandler>();
