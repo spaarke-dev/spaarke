@@ -1075,6 +1075,14 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 4. **Why not membership as the model:** a container member can open every file in that container directly through Office or SharePoint, whatever Dataverse says about the record the file belongs to. That cannot honour per-record privileges, even with one container per customer environment, and per-record secure containers would multiply the lists to keep in sync.
 5. **Task 171** owns it, first in batch 5. It escalates if Office edit needs a container-level role, because of the exposure on business-unit containers.
 
+## Round 70 (2026-10-06). BINDING. OWNER decision. Office edit and container membership (task 171).
+
+- **Premise (owner):** SPE access is container-level, not per file.
+- **Option (c) chosen:** internal system users (`sprk_isexternal` not true) are standing WRITERS on the environment/BU container, kept in sync automatically (created, enabled, moved, disabled, flagged external). Content narrower than all internal users is made Secure, which gives it its own container. Owner: "this is e.g., why we have secure containers".
+- **Secure containers:** no standing members. JIT membership for Office edit is granted to users with Write on the record and removed when Write goes away.
+- **Users flagged external** are never members of an environment/BU container. Every non-edit byte path stays broker-only (app-only after the Dataverse check) on all containers.
+- **Accepted consequence:** for non-secure documents, Dataverse privileges finer than "internal user" are not enforced on a direct SharePoint/Office path.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
