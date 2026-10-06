@@ -174,7 +174,7 @@ export const MonitoredTab: React.FC = () => {
   }, []);
 
   const handleRowClick = React.useCallback((item: MonitoredItem) => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'navigation']);
     if (!xrm) return;
     navigateToMonitoredItem(xrm, item);
   }, []);

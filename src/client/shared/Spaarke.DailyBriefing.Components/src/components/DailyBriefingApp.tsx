@@ -314,14 +314,14 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
   // cross-origin parent threw before `top` was ever tried; `getXrm()` guards
   // each frame separately.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [xrm, setXrm] = React.useState<any>(() => getXrm() ?? null);
+  const [xrm, setXrm] = React.useState<any>(() => getXrm(['webApi', 'utility']) ?? null);
 
   // Poll for Xrm if not available on mount (welcome screen / left nav timing)
   React.useEffect(() => {
     if (xrm?.WebApi) return; // Already available
     let cancelled = false;
     const interval = setInterval(() => {
-      const found = getXrm();
+      const found = getXrm(['webApi', 'utility']);
       if (found?.WebApi && !cancelled) {
         setXrm(found);
         clearInterval(interval);
@@ -506,15 +506,20 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             // R7 W12 fix (2026-07-01): call xrm.Navigation.navigateTo as a method
             // (not destructured) — the platform's implementation relies on `this`
             // to access its internal _clientApiExecutor. Destructuring breaks it.
-            if (typeof xrm?.Navigation?.navigateTo !== 'function') return;
+            // Nearest frame that can navigateTo (task 081 round 4) — the held
+            // `xrm` is resolved for WebApi + Utility.
+            const nav = getXrm('navigation')?.Navigation;
+            if (typeof nav?.navigateTo !== 'function') return;
             // `record` OOB size (85%×85%) — record-modal-selection.md
             // invariant (spec FR-11/FR-18, task 090); was ad-hoc 80%×80%.
-            xrm.Navigation.navigateTo(
-              { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
-              { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
-            ).catch(() => {
-              /* user closed dialog */
-            });
+            nav
+              .navigateTo(
+                { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
+                { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+              )
+              .catch(() => {
+                /* user closed dialog */
+              });
           };
           dispatchToast(
             <Toast>
@@ -579,22 +584,26 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
       //   `const navigateTo = xrm.Navigation.navigateTo`
       //   `navigateTo(...)`
       // throws `Cannot read properties of undefined ('_clientApiExecutor')`.
-      if (typeof xrm?.Navigation?.navigateTo !== 'function') {
+      // Nearest frame that can navigateTo (task 081 round 4).
+      const nav = getXrm('navigation')?.Navigation;
+      if (typeof nav?.navigateTo !== 'function') {
         dispatchAccessToast();
         return;
       }
       // `record` OOB size (85%×85%) — record-modal-selection.md invariant
       // (spec FR-11/FR-18, task 090); was an ad-hoc 80%×80% literal.
-      xrm.Navigation.navigateTo(
-        {
-          pageType: 'entityrecord',
-          entityName: entityType,
-          entityId: entityId,
-        },
-        { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
-      ).catch(() => {
-        dispatchAccessToast();
-      });
+      nav
+        .navigateTo(
+          {
+            pageType: 'entityrecord',
+            entityName: entityType,
+            entityId: entityId,
+          },
+          { target: 2, width: OOB_MODAL_SIZES.record.width, height: OOB_MODAL_SIZES.record.height }
+        )
+        .catch(() => {
+          dispatchAccessToast();
+        });
     },
     [xrm, dispatchToast]
   );

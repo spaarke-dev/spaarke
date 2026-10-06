@@ -56,7 +56,7 @@ import {
 } from '@fluentui/react-components';
 import { SearchRegular } from '@fluentui/react-icons';
 import { cleanGuid } from '../../utils/guid';
-import { getXrm, type XrmContext } from '../../utils/xrmContext';
+import { getXrm, type XrmPartialContext } from '../../utils/xrmContext';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -194,7 +194,7 @@ const useStyles = makeStyles({
  * first truthy `Xrm` (and throwing on a cross-origin parent); it now checks
  * `lookupObjects` per frame and skips cross-origin frames.
  */
-export function getXrmForPicker(): XrmContext | undefined {
+export function getXrmForPicker(): XrmPartialContext | undefined {
   return getXrm('lookupObjects');
 }
 

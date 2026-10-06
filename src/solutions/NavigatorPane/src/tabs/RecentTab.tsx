@@ -263,7 +263,7 @@ export const RecentTab: React.FC = () => {
     let cancelled = false;
 
     async function load(): Promise<void> {
-      const xrm = getXrm();
+      const xrm = getXrm(['webApi', 'utility']);
       const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
       if (!xrm || !ownerId) {
         if (!cancelled) {
@@ -315,7 +315,7 @@ export const RecentTab: React.FC = () => {
   }, []);
 
   const handleRowClick = React.useCallback((row: NavItemRecord) => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'navigation']);
     if (!xrm) return;
     navigateToRow(xrm, row);
   }, []);

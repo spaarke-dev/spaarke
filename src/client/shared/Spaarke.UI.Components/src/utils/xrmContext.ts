@@ -308,9 +308,11 @@ export interface SidePane {
  * - `'webApi'` (the default): `Xrm.WebApi` is present
  * - `'navigation'`: `Xrm.Navigation.navigateTo` is a function
  * - `'openForm'`: `Xrm.Navigation.openForm` is a function
+ * - `'openUrl'`: `Xrm.Navigation.openUrl` is a function
  * - `'utility'`: `Xrm.Utility.getGlobalContext` is a function
  * - `'clientUrl'`: `Xrm.Utility.getGlobalContext().getClientUrl()` returns a non-empty string
  * - `'lookupObjects'`: `Xrm.Utility.lookupObjects` is a function
+ * - `'metadata'`: `Xrm.Utility.getEntityMetadata` is a function
  * - `'sidePanes'`: `Xrm.App.sidePanes` is present
  * - `'page'`: `Xrm.Page` is present
  * - a predicate, for anything else
@@ -324,12 +326,23 @@ export type XrmCapability =
   | 'webApi'
   | 'navigation'
   | 'openForm'
+  | 'openUrl'
   | 'utility'
   | 'clientUrl'
   | 'lookupObjects'
+  | 'metadata'
   | 'sidePanes'
   | 'page'
   | ((xrm: any) => boolean); // eslint-disable-line @typescript-eslint/no-explicit-any
+
+/**
+ * What {@link getXrm} returns for a capability OTHER than the default
+ * `'webApi'`: the frame's Xrm is only guaranteed to have what was asked for,
+ * so `WebApi` is optional here (task 081 round 4, review F10). The default
+ * form, `getXrm()` / `getXrm('webApi')`, returns {@link XrmContext} with a
+ * non-optional `WebApi`.
+ */
+export type XrmPartialContext = Omit<XrmContext, 'WebApi'> & { WebApi?: XrmWebApi };
 
 /** How many ancestors {@link getXrm} visits above `window` before trying `window.top`. */
 export const XRM_MAX_FRAME_DEPTH = 10;
@@ -344,6 +357,8 @@ function hasCapability(xrm: any, capability: XrmCapability): boolean {
       return typeof xrm.Navigation?.navigateTo === 'function';
     case 'openForm':
       return typeof xrm.Navigation?.openForm === 'function';
+    case 'openUrl':
+      return typeof xrm.Navigation?.openUrl === 'function';
     case 'utility':
       return typeof xrm.Utility?.getGlobalContext === 'function';
     case 'clientUrl': {
@@ -352,6 +367,8 @@ function hasCapability(xrm: any, capability: XrmCapability): boolean {
     }
     case 'lookupObjects':
       return typeof xrm.Utility?.lookupObjects === 'function';
+    case 'metadata':
+      return typeof xrm.Utility?.getEntityMetadata === 'function';
     case 'sidePanes':
       return !!xrm.App?.sidePanes;
     case 'page':
@@ -417,7 +434,13 @@ function usableXrm(frame: Window, required: readonly XrmCapability[]): XrmContex
  * const nav = getXrm('navigation')?.Navigation; // nearest frame that can navigate
  * ```
  */
-export function getXrm(required: XrmCapability | readonly XrmCapability[] = 'webApi'): XrmContext | undefined {
+export function getXrm(required?: 'webApi'): XrmContext | undefined;
+/** A capability list that starts with `'webApi'` also guarantees `WebApi`. */
+export function getXrm(required: readonly ['webApi', ...XrmCapability[]]): XrmContext | undefined;
+export function getXrm(required: XrmCapability | readonly XrmCapability[]): XrmPartialContext | undefined;
+export function getXrm(
+  required: XrmCapability | readonly XrmCapability[] = 'webApi'
+): XrmContext | XrmPartialContext | undefined {
   if (typeof window === 'undefined') return undefined;
   const capabilities: readonly XrmCapability[] = Array.isArray(required)
     ? (required as readonly XrmCapability[])
@@ -479,6 +502,35 @@ export function getXrm(required: XrmCapability | readonly XrmCapability[] = 'web
  */
 export function getXrmPage(): XrmPageLike | null {
   return getXrm('page')?.Page ?? null;
+}
+
+/**
+ * The id of the record whose FORM hosts this code page / web resource, or
+ * `undefined` when no frame exposes one.
+ *
+ * Read from the nearest frame (the shared {@link getXrm} walk) whose Xrm yields
+ * an id: the legacy form buffer `Xrm.Page.data.entity.getId()` first, then
+ * `Xrm.Utility.getPageContext().input.entityId`. Returned as the platform
+ * gives it (may be brace-wrapped) — callers normalise with `cleanGuid`.
+ *
+ * One copy for the dataset code pages that are launched from a parent form
+ * (`sprk_kpiassessmentspage`, `sprk_invoicespage`), which each hand-rolled the
+ * same `parent -> top` walk (task 081 round 4, review F3). NEVER throws.
+ */
+export function getHostFormRecordId(): string | undefined {
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const read = (x: any): string | undefined => {
+    try {
+      const legacyId = x?.Page?.data?.entity?.getId?.();
+      if (legacyId) return legacyId as string;
+      const entityId = x?.Utility?.getPageContext?.()?.input?.entityId;
+      return entityId ? (entityId as string) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  return read(getXrm((x: any) => !!read(x)));
+  /* eslint-enable @typescript-eslint/no-explicit-any */
 }
 
 /**

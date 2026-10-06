@@ -60,7 +60,7 @@ export async function openEmailCompose(options?: OpenEmailComposeOptions): Promi
     return;
   }
 
-  const xrm = getXrm();
+  const xrm = getXrm('navigation');
   if (typeof xrm?.Navigation?.navigateTo !== 'function') {
     console.warn(
       '[openEmailCompose] Xrm.Navigation.navigateTo is unavailable — this launcher only works inside a Model-Driven App host. No-op.'

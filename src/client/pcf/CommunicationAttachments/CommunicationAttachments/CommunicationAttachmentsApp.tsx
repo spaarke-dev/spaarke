@@ -150,7 +150,7 @@ function openExternal(desktopUrl: string | null, webUrl: string | null): void {
   const url = desktopUrl || webUrl;
   if (!url) return;
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm();
+  const xrm = getXrm('openUrl');
   try {
     if (typeof xrm?.Navigation?.openUrl === 'function') {
       xrm.Navigation.openUrl(url);
@@ -195,7 +195,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
     let dataverseUrl: string;
     try {
       // Shared cross-frame walker (task 081 / C-8).
-      const xrm = getXrm();
+      const xrm = getXrm('clientUrl');
       dataverseUrl =
         typeof xrm?.Utility?.getGlobalContext === 'function'
           ? xrm.Utility.getGlobalContext().getClientUrl()
@@ -313,7 +313,7 @@ export const CommunicationAttachmentsApp: React.FC<ICommunicationAttachmentsAppP
 
   const openDocumentRecord = React.useCallback((documentId: string): void => {
     // Shared cross-frame walker (task 081 / C-8).
-    const xrm = getXrm();
+    const xrm = getXrm('openForm');
     try {
       if (typeof xrm?.Navigation?.openForm === 'function') {
         Promise.resolve(

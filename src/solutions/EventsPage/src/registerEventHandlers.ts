@@ -64,7 +64,7 @@ async function executeBulkStatusUpdate(
   // task 081: the shared walker with the 'sidePanes' capability replaces the
   // former xrmHelpers.getSidePanesXrm copy of the walk.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm('sidePanes');
+  const xrm: any = getXrm(['webApi', 'sidePanes']);
   if (!xrm?.WebApi) return false;
 
   const updateData: Record<string, unknown> = { sprk_eventstatus: newStatus };
@@ -98,7 +98,7 @@ async function executeBulkStatusUpdate(
  */
 async function executeBulkArchive(eventIds: ReadonlyArray<string>): Promise<boolean> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm('sidePanes');
+  const xrm: any = getXrm(['webApi', 'sidePanes']);
   if (!xrm?.WebApi) return false;
 
   const cleanIds = eventIds.map(id => cleanGuid(id));

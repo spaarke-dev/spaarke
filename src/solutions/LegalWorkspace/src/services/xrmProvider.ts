@@ -29,7 +29,7 @@ export function getWebApi(): any | null {
  */
 export function getUserId(): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm: any = getXrm('utility') ?? getXrm();
+  const xrm: any = getXrm('utility') ?? getXrm((x: any) => !!x.userSettings?.userId);
   if (xrm?.Utility?.getGlobalContext) {
     const ctx = xrm.Utility.getGlobalContext();
     // getUserId() returns GUID with braces: {xxxxxxxx-xxxx-...}

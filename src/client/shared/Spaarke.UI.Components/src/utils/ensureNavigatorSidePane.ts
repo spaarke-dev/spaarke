@@ -54,7 +54,7 @@ let _started = false;
 
 function getSidePanes(): SidePanesApi | null {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('sidePanes');
     const sp = xrm?.App?.sidePanes;
     return sp && typeof sp.createPane === 'function' ? sp : null;
   } catch {

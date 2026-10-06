@@ -434,7 +434,7 @@ async function launchEditWizard(
   bffBaseUrl: string,
 ): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('navigation') as any;
   if (!xrm?.Navigation?.navigateTo) {
     console.warn(
       "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Edit launch is a no-op.",
@@ -527,7 +527,7 @@ function consumeWizardDialogResult(): void {
 
 async function launchCreateWizard(bffBaseUrl: string): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const xrm = getXrm() as any;
+  const xrm = getXrm('navigation') as any;
   if (!xrm?.Navigation?.navigateTo) {
     console.warn(
       "[ManageWorkspacesPane] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Create launch is a no-op.",

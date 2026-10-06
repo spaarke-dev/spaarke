@@ -95,7 +95,7 @@ export function createXrmNavigationService(): INavigationService {
    * when the host environment does not expose navigation capabilities.
    */
   function getNavigation() {
-    const xrm = getXrm();
+    const xrm = getXrm('navigation');
     if (!xrm?.Navigation) {
       throw new Error(
         'Xrm.Navigation is not available. Ensure this adapter is used within a Dataverse-hosted context (PCF control or Code Page).'
@@ -162,7 +162,7 @@ export function createXrmNavigationService(): INavigationService {
         // the dialog is closed. The actual Xrm API accepts (pageInput, navOptions)
         // but our typed interface only has one parameter. We use the underlying
         // runtime call directly via the Xrm object.
-        const xrm = getXrm();
+        const xrm = getXrm('navigation');
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const xrmNav = xrm?.Navigation as any;
         const result = await xrmNav.navigateTo(pageInput, navOptions);
@@ -219,7 +219,7 @@ export function createXrmNavigationService(): INavigationService {
     },
 
     async openLookup(options: LookupOptions): Promise<LookupResult[]> {
-      const xrm = getXrm();
+      const xrm = getXrm('lookupObjects');
       if (!xrm?.Utility) {
         throw new Error(
           'Xrm.Utility is not available. Ensure this adapter is used within a Dataverse-hosted context (PCF control or Code Page).'

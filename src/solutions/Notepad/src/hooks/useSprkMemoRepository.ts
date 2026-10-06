@@ -196,7 +196,7 @@ interface IXrmWebApiLike {
  * React tree does not crash.
  */
 function getXrmWebApi(): IXrmWebApiLike | null {
-  const webApi = getXrm()?.WebApi;
+  const webApi = getXrm((x: any) => typeof x.WebApi?.retrieveMultipleRecords === 'function')?.WebApi;
   return webApi?.retrieveMultipleRecords ? (webApi as unknown as IXrmWebApiLike) : null;
 }
 

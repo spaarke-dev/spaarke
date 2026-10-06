@@ -215,7 +215,7 @@ export async function searchLookupTarget(
  */
 export async function openAdvancedLookup(target: string, logLabel: string): Promise<ILookupFieldValue | null> {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('lookupObjects');
     if (typeof xrm?.Utility?.lookupObjects !== 'function') {
       // WARN, though it is a no-op: silently doing nothing on click is
       // indistinguishable from a dead control, and cost a full UAT round.

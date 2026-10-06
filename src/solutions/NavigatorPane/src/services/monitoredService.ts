@@ -191,7 +191,7 @@ async function listMonitoredForEntity(
  * shows nothing) even though it no longer appears in the query filter.
  */
 export async function listMonitoredByMe(options: ListMonitoredByMeOptions = {}): Promise<MonitoredItem[]> {
-  const xrm = getXrm();
+  const xrm = getXrm(['webApi', 'utility']);
   const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
   if (!xrm?.WebApi || !ownerId) return [];
 

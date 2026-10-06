@@ -270,7 +270,7 @@ export function startNavigatorCapture(options: NavigatorCaptureOptions = {}): St
     inFlight = true;
     try {
       // Task-001 spike lesson #1: re-acquire Xrm fresh EVERY tick — never cache.
-      const xrm = getXrm();
+      const xrm = getXrm(['webApi', 'utility']);
       const page = derivePageFromXrm(xrm);
 
       if (page === undefined) return; // Xrm/getPageContext unreachable this tick — preserve last known state

@@ -442,7 +442,7 @@ export const BookmarksTab: React.FC = () => {
    * client-side.
    */
   const loadPins = React.useCallback(async () => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'utility']);
     const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
     if (!xrm || !ownerId) {
       if (mountedRef.current) {
@@ -492,7 +492,7 @@ export const BookmarksTab: React.FC = () => {
   }, [loadPins]);
 
   const handleRowClick = React.useCallback((row: NavItemRecord) => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'navigation']);
     if (!xrm) return;
     navigateToRow(xrm, row);
   }, []);
@@ -570,7 +570,7 @@ export const BookmarksTab: React.FC = () => {
   // ── Gesture handlers ─────────────────────────────────────────────────────
 
   const handlePinCurrentPageClick = React.useCallback(async () => {
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'utility']);
     const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
     if (!xrm || !ownerId) {
       setPinCurrentPageMessage("Can't pin this page right now.");
@@ -601,7 +601,7 @@ export const BookmarksTab: React.FC = () => {
     const trimmed = bookmarkInput.trim();
     if (!trimmed || addingBookmark) return;
 
-    const xrm = getXrm();
+    const xrm = getXrm(['webApi', 'utility']);
     const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
     if (!xrm || !ownerId) {
       setBookmarkMessage({ tone: 'error', text: "Can't add a bookmark right now." });

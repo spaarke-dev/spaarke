@@ -98,9 +98,9 @@ const EVENT_MODAL_FORM_ID = "90d2eff7-6703-f111-8407-7ced8d1dc988";
 export function openEventRecord(eventId: string): void {
   try {
     // Shared cross-frame walker (task 081 / C-8): nearest frame that can
-    // navigateTo, else any Xrm (for the openForm fallback below).
+    // navigateTo, else the nearest that can openForm (the fallback below).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm('navigation') ?? getXrm();
+    const xrm: any = getXrm('navigation') ?? getXrm('openForm');
 
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[SidePaneService] Xrm.Navigation.navigateTo not available, falling back to openForm");

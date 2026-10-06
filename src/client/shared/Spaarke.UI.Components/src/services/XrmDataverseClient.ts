@@ -574,7 +574,10 @@ export class XrmDataverseClient implements IDataverseClient {
     entityName: string,
     attributes?: readonly string[]
   ): Promise<EntityMetadata> {
-    const xrm = this.getXrm();
+    // Metadata needs Xrm.Utility.getEntityMetadata: ask the shared walker for the
+    // nearest frame that has it (task 081 round 4), falling back to the cached
+    // WebApi frame (which on a real host has it too; tests stub `getXrm`).
+    const xrm = (getXrm('metadata') as unknown as XrmLike | undefined) ?? this.getXrm();
     if (!xrm.Utility) {
       throw new Error(`XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`);
     }

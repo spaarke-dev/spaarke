@@ -671,8 +671,10 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // -------------------------------------------------------------------------
 
   const handleNavigate = React.useCallback((target: NavigateTarget) => {
+    // Shared cross-frame walker (task 081 / C-8), asking for the method this
+    // target type calls: navigateTo (view) / openForm (record) / openUrl (url).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm('navigation'); // Shared cross-frame walker (task 081 / C-8).
+    const xrm: any = getXrm(target.type === "record" ? "openForm" : target.type === "url" ? "openUrl" : "navigation");
 
     if (target.type === "view" && target.viewId && xrm?.Navigation?.navigateTo) {
       // NOTE (task 091): mapped onto `record` (85%x85%) — nearest named OOB

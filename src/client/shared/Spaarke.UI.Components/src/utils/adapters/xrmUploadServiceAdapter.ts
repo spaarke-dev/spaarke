@@ -38,7 +38,7 @@ import { getXrm } from '../xrmContext';
  */
 function getBearerToken(): string | undefined {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('clientUrl');
     if (xrm?.Utility) {
       const globalContext = xrm.Utility.getGlobalContext();
       // In Dataverse-hosted context, authentication is cookie-based for

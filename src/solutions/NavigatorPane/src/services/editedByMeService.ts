@@ -190,7 +190,7 @@ async function listEditedForEntity(
  * or every per-entity fetch fails, resolves to `[]`.
  */
 export async function listEditedByMe(options: ListEditedByMeOptions = {}): Promise<EditedByMeItem[]> {
-  const xrm = getXrm();
+  const xrm = getXrm(['webApi', 'utility']);
   const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
   if (!xrm?.WebApi || !ownerId) return [];
 

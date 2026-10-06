@@ -91,7 +91,7 @@ function shouldAutoOpenConversation(): boolean {
 /** OOB record open via the sanctioned Layout 1 (`Xrm.Navigation.navigateTo`, target 2, 85% × 85%). */
 function openRecordViaXrm(entityType: string, id: string): void {
   // Shared cross-frame walker (task 081 / C-8).
-  const xrm = getXrm();
+  const xrm = getXrm('navigation');
   try {
     void xrm?.Navigation?.navigateTo?.(
       { pageType: 'entityrecord', entityName: entityType, entityId: cleanGuid(id) },

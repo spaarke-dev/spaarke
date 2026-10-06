@@ -73,7 +73,7 @@ export async function openEmailRecord(communicationId: string, options?: OpenEma
     return;
   }
 
-  const xrm = getXrm();
+  const xrm = getXrm('navigation');
   if (typeof xrm?.Navigation?.navigateTo !== 'function') {
     console.warn(
       '[openEmailRecord] Xrm.Navigation.navigateTo is unavailable — this launcher only works inside a Model-Driven App host. No-op.'

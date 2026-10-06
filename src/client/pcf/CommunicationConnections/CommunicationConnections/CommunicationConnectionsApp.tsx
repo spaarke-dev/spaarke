@@ -715,7 +715,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
     // Shared cross-frame walker (task 081 / C-8).
     // `any` view: typed XrmContext does not declare the members used below.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = getXrm('openForm') as any;
+    const xrm = (getXrm('openForm') ?? getXrm('navigation')) as any;
     const onLaunchError = (err: unknown) => console.warn('[CommunicationConnections] create-type launch failed:', err);
     try {
       if (typeof xrm?.Navigation?.openForm === 'function') {
@@ -828,7 +828,7 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
         return;
       }
       // Shared cross-frame walker (task 081 / C-8).
-      const xrm = getXrm();
+      const xrm = getXrm('navigation');
       if (typeof xrm?.Navigation?.navigateTo !== 'function') {
         console.warn('[CommunicationConnections] Xrm.Navigation.navigateTo unavailable; cannot open record.');
         return;

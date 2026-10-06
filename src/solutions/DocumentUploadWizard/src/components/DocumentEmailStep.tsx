@@ -128,7 +128,7 @@ async function searchSystemUsers(query: string): Promise<ILookupItem[]> {
     if (!query || query.trim().length < 2) return [];
 
     // Shared cross-frame walker (task 081 / C-8).
-    const webApi = getXrm()?.WebApi;
+    const webApi = getXrm((x: any) => typeof x.WebApi?.retrieveMultipleRecords === 'function')?.WebApi;
     if (!webApi?.retrieveMultipleRecords) {
         console.error("[DocumentEmailStep] Xrm.WebApi not available for user search");
         return [];

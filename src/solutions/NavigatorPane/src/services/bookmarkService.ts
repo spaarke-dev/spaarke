@@ -297,7 +297,7 @@ function deriveCurrentPageWeblinkName(input: PageContextInput | undefined, url: 
  * @param ownerId - Current user id (GUID, no braces) — `_ownerid_value`.
  */
 export async function pinCurrentPage(ownerId: string): Promise<PinResult> {
-  const xrm = getXrm();
+  const xrm = getXrm(['webApi', (x: any) => typeof x.Utility?.getPageContext === 'function']);
   const target = deriveCapturedTarget(xrm);
   if (target) {
     // When the host didn't preload `entityRecordName`, `deriveCapturedTarget`

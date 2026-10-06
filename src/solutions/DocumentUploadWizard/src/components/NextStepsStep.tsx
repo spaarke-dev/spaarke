@@ -413,7 +413,7 @@ const WorkOnAnalysisStepContent: React.FC<IWorkOnAnalysisStepContentProps> = ({
     // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const webApi: any = React.useMemo(() => {
-        const api = getXrm()?.WebApi;
+        const api = getXrm((x: any) => typeof x.WebApi?.retrieveMultipleRecords === 'function')?.WebApi;
         return api?.retrieveMultipleRecords ? api : undefined;
     }, []);
 

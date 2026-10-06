@@ -7,6 +7,7 @@
 import {
   getXrm,
   getXrmPage,
+  getHostFormRecordId,
   isCustomPageContext,
   isPcfContext,
   detectThemeFromHost,
@@ -316,8 +317,12 @@ describe('xrmContext', () => {
       const full = (clientUrl = 'https://org.crm.dynamics.com') => ({
         source: 'full',
         WebApi: { retrieveMultipleRecords: jest.fn() },
-        Navigation: { navigateTo: jest.fn(), openForm: jest.fn() },
-        Utility: { getGlobalContext: () => ({ getClientUrl: () => clientUrl }), lookupObjects: jest.fn() },
+        Navigation: { navigateTo: jest.fn(), openForm: jest.fn(), openUrl: jest.fn() },
+        Utility: {
+          getGlobalContext: () => ({ getClientUrl: () => clientUrl }),
+          lookupObjects: jest.fn(),
+          getEntityMetadata: jest.fn(),
+        },
         App: { sidePanes: {} },
         Page: { getAttribute: jest.fn() },
       });
@@ -328,14 +333,21 @@ describe('xrmContext', () => {
         expect((getXrm() as any).source).toBe('webApiOnly');
       });
 
-      it.each(['navigation', 'openForm', 'utility', 'clientUrl', 'lookupObjects', 'sidePanes', 'page'] as const)(
-        "'%s' skips a child frame whose Xrm lacks it",
-        capability => {
-          (window as any).Xrm = webApiOnly();
-          Object.defineProperty(window, 'parent', { value: { Xrm: full() }, writable: true });
-          expect((getXrm(capability) as any).source).toBe('full');
-        }
-      );
+      it.each([
+        'navigation',
+        'openForm',
+        'openUrl',
+        'utility',
+        'clientUrl',
+        'lookupObjects',
+        'metadata',
+        'sidePanes',
+        'page',
+      ] as const)("'%s' skips a child frame whose Xrm lacks it", capability => {
+        (window as any).Xrm = webApiOnly();
+        Object.defineProperty(window, 'parent', { value: { Xrm: full() }, writable: true });
+        expect((getXrm(capability) as any).source).toBe('full');
+      });
 
       it("'clientUrl' skips a frame whose getClientUrl returns an empty string", () => {
         (window as any).Xrm = full('');
@@ -460,6 +472,65 @@ describe('xrmContext', () => {
       // Object.defineProperty(window, 'parent', { value: ... }) doesn't itself
       // throw against the getter-only descriptor installed above.
       Object.defineProperty(window, 'parent', { value: window, writable: true, configurable: true });
+    });
+  });
+
+  describe('getHostFormRecordId (task 081 round 4, F3)', () => {
+    it('reads the legacy Xrm.Page record id from the parent frame', () => {
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { Page: { data: { entity: { getId: () => '{AAA}' } } } } },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('{AAA}');
+    });
+
+    it('falls back to Utility.getPageContext().input.entityId', () => {
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { Utility: { getPageContext: () => ({ input: { entityId: 'bbb' } }) } } },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('bbb');
+    });
+
+    it('prefers the legacy Page id over the page context on the same frame (former order)', () => {
+      Object.defineProperty(window, 'parent', {
+        value: {
+          Xrm: {
+            Page: { data: { entity: { getId: () => 'legacy' } } },
+            Utility: { getPageContext: () => ({ input: { entityId: 'ctx' } }) },
+          },
+        },
+        writable: true,
+      });
+      expect(getHostFormRecordId()).toBe('legacy');
+    });
+
+    it('skips a frame whose Xrm yields no id and keeps walking to top', () => {
+      (window as any).Xrm = { WebApi: {}, Page: { data: { entity: { getId: () => '' } } } };
+      Object.defineProperty(window, 'parent', { value: { Xrm: { WebApi: {} } }, writable: true });
+      setWindowTop({ Xrm: { Utility: { getPageContext: () => ({ input: { entityId: 'from-top' } }) } } });
+      expect(getHostFormRecordId()).toBe('from-top');
+    });
+
+    it('returns undefined (never throws) when no frame has an id or a probe throws', () => {
+      Object.defineProperty(window, 'parent', {
+        value: {
+          Xrm: {
+            Page: {
+              data: {
+                entity: {
+                  getId: () => {
+                    throw new Error('form not ready');
+                  },
+                },
+              },
+            },
+          },
+        },
+        writable: true,
+      });
+      expect(() => getHostFormRecordId()).not.toThrow();
+      expect(getHostFormRecordId()).toBeUndefined();
     });
   });
 

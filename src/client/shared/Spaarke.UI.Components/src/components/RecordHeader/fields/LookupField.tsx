@@ -369,7 +369,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
       // Xrm may be unavailable in test / non-Xrm hosts — swallow gracefully
       // rather than throwing (FR-04 acceptance criterion + task constraint).
       try {
-        const xrm = getXrm();
+        const xrm = getXrm('navigation');
         if (xrm && xrm.Navigation && typeof xrm.Navigation.navigateTo === 'function') {
           // Fire-and-forget: navigateTo returns a Promise; consumers of
           // LookupField don't observe its resolution here. Swallow rejections
