@@ -459,6 +459,15 @@ jobs:
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npm install --legacy-peer-deps --no-audit --no-fund
 
+      # getXrm capability guard (task 081 round 6, review R5-2): an AST scan of ALL of
+      # src/ (every client package, not only UI.Components), so it runs here, on every
+      # non-docs PR, rather than only in the nightly client-tests.yml. Needs only this
+      # package's node_modules (typescript + jest); ~25 s. Non-blocking while this job
+      # carries job-level continue-on-error (read the STEP conclusion).
+      - name: getXrm capability guard (AST scan of src/)
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx jest --ci src/utils/__tests__/xrmCapabilityUsage.guard.test.ts
+
       - name: Build Spaarke.UI.Components (declarations required by Widgets typecheck)
         working-directory: src/client/shared/Spaarke.UI.Components
         run: npx tsc
