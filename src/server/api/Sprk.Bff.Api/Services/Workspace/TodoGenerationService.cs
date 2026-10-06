@@ -1049,13 +1049,13 @@ public sealed class TodoGenerationService : IScheduledJob
     }
 
     /// <summary>
-    /// Queries task-type events (active + open sprk_event records).
+    /// Queries task-type events that are open work (<see cref="EventStatusCode.IsOpenWork"/>).
     /// </summary>
     /// <remarks>
     /// Uses QueryExpression via ServiceClient.
     /// Explicit column selection per ADR-002.
     /// Note: r3 Phase 1 removed the legacy <c>sprk_todoflag</c> field from <c>sprk_event</c>,
-    /// so we no longer filter on it. All active+open events are candidates.
+    /// so we no longer filter on it. Every open-work event is a candidate.
     /// </remarks>
     private async Task<IEnumerable<TaskScanRecord>> QueryAssignedTasksAsync(CancellationToken ct)
     {
@@ -1070,8 +1070,11 @@ public sealed class TodoGenerationService : IScheduledJob
             TopCount = 100
         };
 
-        query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);  // Active
-        query.Criteria.AddCondition("statuscode", ConditionOperator.Equal, EventStatusCode.Open); // task 097: live Open (was 3, which matched no row)
+        // OWNER DECISION A (task 097 round 9): the ONE "open work" predicate, EventStatusCode.IsOpenWork, selects the
+        // events — expressed exactly as Rules 1 and 3 express it (statuscode ne each NOT-open status), so Draft, Open,
+        // On Hold and Reassigned assigned events all get their "Assigned:" To Do. (Was statuscode eq Open only.)
+        foreach (var excluded in ExcludedFromGeneration)
+            query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, excluded);
 
         var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
 

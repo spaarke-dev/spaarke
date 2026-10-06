@@ -833,7 +833,8 @@ public static class EventEndpoints
     ///   <item>entity set — <see cref="IGenericEntityService.GetEntitySetNameAsync"/>, the SAME call the filter made;</item>
     ///   <item>record-type row — <see cref="ICommunicationDataverseService.QueryRecordTypeRefAsync"/>; absent or faulted →
     ///   the record-type lookup is left unset with a warning (non-fatal, as TodoRegardingBuilder);</item>
-    ///   <item>name/number — the target's own columns for matter/project (non-fatal; the request's name otherwise);</item>
+    ///   <item>name/number — the target's own columns: the name from the one display-name map, the number from the column the</item>
+    ///   <item>record-type row names (non-fatal; the request's name otherwise, no number);</item>
     ///   <item>core stamps — <see cref="CoreAncestorResolver.DeriveForHostAsync"/>; an Error outcome, or a stamp whose
     ///   entity set cannot be read, refuses the write.</item>
     /// </list>
@@ -854,12 +855,16 @@ public static class EventEndpoints
         var entitySet = await entities.GetEntitySetNameAsync(logicalName, ct);
 
         Guid? recordTypeRefId = null;
+        string? numberField = null;
         try
         {
             var row = await recordTypes.QueryRecordTypeRefAsync(logicalName, ct);
             if (row is not null && row.Id != Guid.Empty)
             {
                 recordTypeRefId = row.Id;
+                // Task 097 round 9: the type's reference-number column, as its catalog row names it (invoice, analysis,
+                // account, work assignment and budget had no number before — the hard-coded map knew matter/project only).
+                numberField = DataverseRegardingRecordType.RecordNumberFieldOf(row);
             }
             else
             {
@@ -878,7 +883,6 @@ public static class EventEndpoints
         var name = requestName;
         string? number = null;
         var nameField = DataverseRegardingRecordType.GetPrimaryNameField(logicalName);
-        var numberField = DataverseRegardingRecordType.GetReferenceNumberField(logicalName);
         if (nameField is not null || numberField is not null)
         {
             try

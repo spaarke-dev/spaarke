@@ -6,6 +6,7 @@
 //   SPAARKE_LIVE_EVENTS_DATAVERSE_URL=https://<env>.crm.dynamics.com   (e.g. spaarkedev1)
 //   SPAARKE_LIVE_EVENTS_MATTER_ID=<existing sprk_matter id>  SPAARKE_LIVE_EVENTS_PROJECT_ID=<existing sprk_project id>
 //   SPAARKE_LIVE_EVENTS_DENIED_USER_ID=<systemuserid of a REAL non-root, non-admin user>   (optional: the child-BU leg)
+//   SPAARKE_LIVE_EVENTS_INVOICE_ID=<existing sprk_invoice id with a number>   (optional: the regarding-number leg)
 // and an `az login` session for an identity that may read/write sprk_event in that environment.
 //
 // WHAT IS REAL: the BFF host (routing, binding, RecordRouteAccessAuthorizationFilter, the EventEndpoints handlers)
@@ -165,6 +166,27 @@ public sealed class EventRoutesLiveTests
             row = await ReadEventAsync(dv, childEvent);
             row.GetProperty("_sprk_regardinganalysis_value").GetGuid().Should().Be(analysisId);
             row.GetProperty("_sprk_regardingmatter_value").GetGuid().Should().Be(matterId, "the FR-26 core-ancestor stamp");
+            row.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be("ZZ-097-AN-001",
+                "round 9: the number column the analysis catalog row names (sprk_analysis_number)");
+
+            // 6b. Round 9: an event under an INVOICE carries the invoice's number (sprk_invoicenumber, from the catalog row).
+            if (Guid.TryParse(Environment.GetEnvironmentVariable("SPAARKE_LIVE_EVENTS_INVOICE_ID"), out var invoiceId))
+            {
+                var invoiceNumber = (await dv.GetFromJsonAsync<JsonElement>($"sprk_invoices({invoiceId})?$select=sprk_invoicenumber"))
+                    .GetProperty("sprk_invoicenumber").GetString();
+                var invPost = await bff.PostAsJsonAsync("/api/v1/events", new
+                {
+                    subject = "zz-097-test regarding invoice",
+                    regardingRecordType = RegardingRecordType.Invoice,
+                    regardingRecordId = invoiceId,
+                });
+                var invEvent = await RegisterCreatedAsync(invPost, createdEvents);
+                Log("POST (regarding invoice)", invPost);
+                invPost.StatusCode.Should().Be(HttpStatusCode.Created);
+                var invRow = await ReadEventAsync(dv, invEvent);
+                Log("  read-back", invRow);
+                invRow.GetProperty("sprk_regardingrecordnumber").GetString().Should().Be(invoiceNumber);
+            }
 
             // 7. An unfiled event → the operator's own business-unit team (I-6 fallback).
             var unfiled = await CreateAsync(bff, "zz-097-test operator unfiled", createdEvents);
@@ -303,6 +325,7 @@ public sealed class EventRoutesLiveTests
         var r = await dv.PostAsJsonAsync("sprk_analysises", new Dictionary<string, object>
         {
             ["sprk_name"] = "zz-097-test analysis (H2 re-parent target)",
+            ["sprk_analysis_number"] = "ZZ-097-AN-001",
             ["sprk_RegardingMatter@odata.bind"] = $"/sprk_matters({matterId})",
         });
         if (r.Headers.TryGetValues("OData-EntityId", out var values))
@@ -546,9 +569,18 @@ public sealed class EventRoutesLiveTests
 
         private async Task<Entity?> LiveRecordTypeRefAsync(string logicalName, CancellationToken ct)
         {
+            // The same columns the production QueryRecordTypeRefAsync selects (incl. the number column, round 9).
             var rows = await _metadata.GetFromJsonAsync<JsonElement>(
-                $"sprk_recordtype_refs?$select=sprk_recordtype_refid&$filter=sprk_recordlogicalname eq '{logicalName}' and statecode eq 0&$top=1", ct);
-            return rows.GetProperty("value").EnumerateArray().Select(r => new Entity("sprk_recordtype_ref", r.GetProperty("sprk_recordtype_refid").GetGuid()))
+                $"sprk_recordtype_refs?$select=sprk_recordtype_refid,sprk_recorddisplayname,{RegardingRecordType.RecordNumberFieldColumn}"
+                + $"&$filter=sprk_recordlogicalname eq '{logicalName}' and statecode eq 0&$top=1", ct);
+            return rows.GetProperty("value").EnumerateArray().Select(r =>
+                {
+                    var e = new Entity("sprk_recordtype_ref", r.GetProperty("sprk_recordtype_refid").GetGuid());
+                    foreach (var column in new[] { "sprk_recorddisplayname", RegardingRecordType.RecordNumberFieldColumn })
+                        if (r.TryGetProperty(column, out var v) && v.ValueKind == JsonValueKind.String)
+                            e[column] = v.GetString();
+                    return e;
+                })
                 .FirstOrDefault();
         }
         private readonly Dictionary<string, (string Set, string PrimaryId, Dictionary<string, string> Types)> _meta = new();

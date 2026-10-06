@@ -39,24 +39,13 @@ namespace Sprk.Bff.Api.Services.Communication;
 public static class RegardingNameFields
 {
     /// <summary>The primary display-name attribute for <paramref name="entityLogicalName"/>, or <c>null</c>.</summary>
-    public static string? PrimaryNameField(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_mattername",
-        "sprk_project" => "sprk_projectname",
-        "sprk_invoice" => "sprk_name",
-        "sprk_event" => "sprk_eventname",
-        // Verified live 2026-10-02 (spaarkedev1 describe, read-only): sprk_name NVARCHAR(850), e.g. "Email: <subject>".
-        "sprk_communication" => "sprk_name",
-        "sprk_workassignment" => "sprk_name",
-        "sprk_servicerequest" => "sprk_name",
-        "sprk_budget" => "sprk_name",
-        "sprk_reportcard" => "sprk_name",
-        "sprk_analysis" => "sprk_name",
-        "sprk_organization" => "sprk_organizationname",
-        "contact" => "fullname",
-        "account" => "name",
-        _ => null,
-    };
+    /// <remarks>
+    /// Delegates to the ONE map, <see cref="RegardingRecordType.GetPrimaryNameField"/> in the shared library — the
+    /// Spaarke.Dataverse analysis stager needs it too and cannot reference this class (task 097 round 9: the two copies had
+    /// drifted — the shared one lacked sprk_communication and sprk_reportcard).
+    /// </remarks>
+    public static string? PrimaryNameField(string entityLogicalName) =>
+        RegardingRecordType.GetPrimaryNameField(entityLogicalName);
 
     /// <summary>
     /// The OData entity-set (collection) name for <paramref name="entityLogicalName"/>, or <c>null</c>

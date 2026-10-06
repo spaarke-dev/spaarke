@@ -1433,21 +1433,6 @@ public static class RegardingRecordType
         _ => null,
     };
 
-    /// <summary>The Web API entity set of the regarding entity (via the one logical-name map below).</summary>
-    public static string? GetEntitySetName(int recordType) =>
-        GetEntityLogicalName(recordType) is { } logicalName ? GetEntitySetNameByLogicalName(logicalName) : null;
-
-    /// <summary>The API type (0..7) for a regarding entity logical name, or null when this API does not map it.</summary>
-    public static int? FromEntityLogicalName(string? entityLogicalName) =>
-        AllTypes.Where(t => string.Equals(GetEntityLogicalName(t), entityLogicalName, StringComparison.OrdinalIgnoreCase))
-            .Select(t => (int?)t).FirstOrDefault();
-
-    /// <summary>Every record type this API maps (0..7).</summary>
-    public static IReadOnlyList<int> AllTypes { get; } = new[]
-    {
-        Project, Matter, Invoice, Analysis, Account, Contact, WorkAssignment, Budget
-    };
-
     /// <summary>
     /// The ADR-024 <c>sprk_regardingrecordurl</c> value — a RELATIVE model-driven-app URL (the host origin is resolved
     /// at click time; no org URL or tenant id is hard-coded). The single server-side owner of this format;
@@ -1471,23 +1456,27 @@ public static class RegardingRecordType
         _ => null,
     };
 
-    // ── THE regarding-target catalogue (task 097 review M2) ────────────────────────────────────────────────
-    // ONE map from a regarding target's logical name to its display-name attribute and its Web API entity set,
-    // for every target any writer uses. Merged from the BFF's RegardingNameFields (which now delegates here) and
-    // the sprk_event writer's own table. Verified live (spaarkedev1, 2026-10-05, EntityDefinitions): the
-    // analysis set is `sprk_analysises` (RegardingNameFields said `sprk_analyses`, a 404) and the organization
-    // primary name is `sprk_organizationname` (it said `sprk_name`).
+    // ── The display-name map: ONE source (task 097 round 9) ─────────────────────────────────────────────────
+    // The primary display-name attribute of every regarding target any writer names. It lives HERE, in the shared
+    // library, because the Spaarke.Dataverse analysis stager needs it and cannot reference the BFF; the BFF's
+    // RegardingNameFields.PrimaryNameField DELEGATES here (its own copy had drifted from this one). Every value is
+    // live-verified (spaarkedev1 EntityDefinitions; unified-access-control-r2 task 161 note §2) and pinned by
+    // RegardingNameFieldsTests: sprk_organization's name is sprk_organizationname (sprk_name does not exist there).
+    // sprk_communication is a NAME-ONLY entry — RegardingNameFields.EntitySetName deliberately has no set for it.
 
-    /// <summary>Primary display-name attribute for a regarding target (ADR-024 sprk_regardingrecordname source).</summary>
+    /// <summary>Primary display-name attribute for a regarding target (ADR-024 sprk_regardingrecordname source), or null.</summary>
     public static string? GetPrimaryNameField(string entityLogicalName) => entityLogicalName switch
     {
         "sprk_matter" => "sprk_mattername",
         "sprk_project" => "sprk_projectname",
         "sprk_invoice" => "sprk_name",
         "sprk_event" => "sprk_eventname",
+        // Verified live 2026-10-02 (spaarkedev1 describe, read-only): sprk_name NVARCHAR(850), e.g. "Email: <subject>".
+        "sprk_communication" => "sprk_name",
         "sprk_workassignment" => "sprk_name",
         "sprk_servicerequest" => "sprk_name",
         "sprk_budget" => "sprk_name",
+        "sprk_reportcard" => "sprk_name",
         "sprk_analysis" => "sprk_name",
         "sprk_organization" => "sprk_organizationname",
         "contact" => "fullname",
@@ -1495,30 +1484,24 @@ public static class RegardingRecordType
         _ => null,
     };
 
-    /// <summary>Web API entity set (collection) of a regarding target. Keys identical to <see cref="GetPrimaryNameField"/>.</summary>
-    public static string? GetEntitySetNameByLogicalName(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_matters",
-        "sprk_project" => "sprk_projects",
-        "sprk_invoice" => "sprk_invoices",
-        "sprk_event" => "sprk_events",
-        "sprk_workassignment" => "sprk_workassignments",
-        "sprk_servicerequest" => "sprk_servicerequests",
-        "sprk_budget" => "sprk_budgets",
-        "sprk_analysis" => "sprk_analysises",
-        "sprk_organization" => "sprk_organizations",
-        "contact" => "contacts",
-        "account" => "accounts",
-        _ => null,
-    };
+    // ── The reference NUMBER column: read from the catalog, never hard-coded (task 097 round 9) ──────────────
+    // Each sprk_recordtype_ref row names its type's number column in sprk_regardingrecordnumberfield (live spaarkedev1
+    // 2026-10-06: sprk_matternumber, sprk_projectnumber, sprk_invoicenumber, sprk_analysis_number, accountnumber,
+    // sprk_workassignmentnumber, sprk_budgetnumber, …; contact has none). The former hard-coded map covered matter and
+    // project only, so an event or analysis filed under an invoice, analysis, account, work assignment or budget was
+    // written with no number. Every writer that already reads the catalog row takes the column from it.
 
-    /// <summary>Reference-number attribute for a target entity (ADR-024 sprk_regardingrecordnumber source); null when none.</summary>
-    public static string? GetReferenceNumberField(string entityLogicalName) => entityLogicalName switch
-    {
-        "sprk_matter" => "sprk_matternumber",
-        "sprk_project" => "sprk_projectnumber",
-        _ => null,
-    };
+    /// <summary>The <c>sprk_recordtype_ref</c> column naming a type's reference-number attribute.</summary>
+    public const string RecordNumberFieldColumn = "sprk_regardingrecordnumberfield";
+
+    /// <summary>
+    /// The reference-number attribute a <c>sprk_recordtype_ref</c> row names, or null when the row is absent or names
+    /// none (the number is then left unset — never guessed).
+    /// </summary>
+    public static string? RecordNumberFieldOf(Microsoft.Xrm.Sdk.Entity? recordTypeRef) =>
+        recordTypeRef?.GetAttributeValue<string>(RecordNumberFieldColumn) is { } field && !string.IsNullOrWhiteSpace(field)
+            ? field.Trim()
+            : null;
 }
 
 /// <summary>

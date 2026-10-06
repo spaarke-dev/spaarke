@@ -520,8 +520,10 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         try
         {
+            // The catalog row first: it names the reference-number column (task 097 round 9 — never a hard-coded map).
+            var recordTypeRef = await QueryRecordTypeRefAsync(entityLogicalName, ct);
             var nameField = RegardingRecordType.GetPrimaryNameField(entityLogicalName);
-            var numberField = RegardingRecordType.GetReferenceNumberField(entityLogicalName);
+            var numberField = RegardingRecordType.RecordNumberFieldOf(recordTypeRef);
             if (nameField is not null || numberField is not null)
             {
                 try
@@ -540,7 +542,6 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 }
             }
 
-            var recordTypeRef = await QueryRecordTypeRefAsync(entityLogicalName, ct);
             if (recordTypeRef is not null)
             {
                 recordTypeRefId = recordTypeRef.Id;
@@ -3307,7 +3308,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
         var query = new QueryExpression("sprk_recordtype_ref")
         {
-            ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname"),
+            // The number column too (task 097 round 9): every writer that resolves the row takes its reference-number
+            // attribute from it (RegardingRecordType.RecordNumberFieldOf) instead of a hard-coded map.
+            ColumnSet = new ColumnSet("sprk_recordtype_refid", "sprk_recorddisplayname", RegardingRecordType.RecordNumberFieldColumn),
             TopCount = 1
         };
         query.Criteria.Conditions.Add(

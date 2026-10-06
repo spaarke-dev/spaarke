@@ -99,13 +99,34 @@ public class EventEndpointsAuthorizationContractTests
         // Owner decision B (task 097): "my events" is owner OR assigned contact OR created-by person — the created-by
         // branch is what keeps a team-owned (I-6) event the BFF created visible to the person who created it.
         captured[0].Mine!.CreatedByPersonId.Should().Be(CallerSystemUserId);
+        captured[0].Mine!.AssignedToContactId.Should().BeNull("this caller has no linked contact");
         captured[0].Status.Should().Be(EventStatusCode.Open, "the alias maps to the LIVE Open statuscode");
         (await response.Content.ReadFromJsonAsync<JsonObject>())!["totalCount"]!.GetValue<int>()
             .Should().Be(7, "TotalCount is the trimmed query's own count");
         host.Events.Verify(e => e.QueryEventsAsync(
             It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
             It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(),
-            It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<IReadOnlyCollection<int>?>(), It.IsAny<CancellationToken>()), Times.Never);    }
+
+    [Fact]
+    public async Task List_ACallerWithALinkedContact_ListsWhatIsAssignedToThatContact()
+    {
+        // Owner decision B's assigned branch at the ROUTE (task 097 round 9; review mutation M3): the contact the identity
+        // service links to the caller reaches the query — an event assigned to the caller's contact is theirs.
+        var linkedContact = Guid.Parse("c0c0c0c0-0097-4097-8097-000000000009");
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Identity.Setup(i => i.ResolveAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PersonIdentity(CallerSystemUserId, ContactId: linkedContact));
+        var captured = host.CaptureCallerScopedQuery(totalCount: 1);
+
+        var response = await host.SendAsync(new HttpRequestMessage(HttpMethod.Get, "/api/v1/events"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var mine = captured.Should().ContainSingle().Subject.Mine!;
+        mine.AssignedToContactId.Should().Be(linkedContact);
+        mine.OwnerUserId.Should().Be(CallerSystemUserId);
+        mine.CreatedByPersonId.Should().Be(CallerSystemUserId);
+
     }
 
     public static TheoryData<string> UnresolvedCallers => new()
@@ -396,6 +417,55 @@ public class EventEndpointsAuthorizationContractTests
         payload.Keys.Should().NotContain("sprk_RegardingRecordType@odata.bind", "this environment double has no record-type row for analysis");
     }
 
+    /// <summary>
+    /// Task 097 round 9: the regarding NUMBER column is the one the type's <c>sprk_recordtype_ref</c> row names
+    /// (<c>sprk_regardingrecordnumberfield</c>, live spaarkedev1 values below) — every type, not only matter/project.
+    /// </summary>
+    [Theory]
+    [InlineData(0, "sprk_project", "sprk_projects", "sprk_projectnumber", "PRJ-0097")]
+    [InlineData(1, "sprk_matter", "sprk_matters", "sprk_matternumber", "MAT-0097")]
+    [InlineData(2, "sprk_invoice", "sprk_invoices", "sprk_invoicenumber", "INV-0097")]
+    [InlineData(3, "sprk_analysis", "sprk_analysises", "sprk_analysis_number", "AN-0097")]
+    [InlineData(4, "account", "accounts", "accountnumber", "ACC-0097")]
+    [InlineData(6, "sprk_workassignment", "sprk_workassignments", "sprk_workassignmentnumber", "WA-0097")]
+    [InlineData(7, "sprk_budget", "sprk_budgets", "sprk_budgetnumber", "BUD-0097")]
+    public async Task Create_WritesTheRegardingNumber_FromTheColumnTheCatalogRowNames(
+        int type, string logicalName, string entitySet, string numberColumn, string number)
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var target = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant(entitySet, target, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync(logicalName, It.IsAny<CancellationToken>())).ReturnsAsync(entitySet);
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync(logicalName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = numberColumn });
+        host.Entities.Setup(e => e.RetrieveAsync(logicalName, target, It.Is<string[]>(c => c.Contains(numberColumn)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(logicalName, target) { [numberColumn] = number });
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Numbered", regardingRecordType = type, regardingRecordId = target }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle().Which.RegardingRecordNumber.Should().Be(number);
+    }
+
+    [Fact]
+    public async Task Create_ACatalogRowThatNamesNoNumberColumn_WritesNoNumber()
+    {
+        await using var host = await EventsAuthHost.StartAsync();
+        var contact = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant("contacts", contact, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("contact", It.IsAny<CancellationToken>())).ReturnsAsync("contacts");
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("contact", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid())); // live: contact names no number column
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Call", regardingRecordType = 5, regardingRecordId = contact }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle().Which.RegardingRecordNumber.Should().BeNull("never guessed");
+    }
     [Fact]
     public async Task Create_WithNoRegarding_NeedsOnlyThePrivilege()
     {

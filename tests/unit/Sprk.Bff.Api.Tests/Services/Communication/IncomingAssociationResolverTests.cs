@@ -449,6 +449,14 @@ public class IncomingAssociationResolverTests
         _dataverseServiceMock
             .Setup(d => d.RetrieveAsync("sprk_matter", matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(matterRecord);
+        // The number column comes from the type's sprk_recordtype_ref row (task 097 round 9), as live spaarkedev1 names it.
+        _dataverseServiceMock
+            .Setup(d => d.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_recordtype_ref", Guid.NewGuid())
+            {
+                ["sprk_recorddisplayname"] = "Matter",
+                ["sprk_regardingrecordnumberfield"] = "sprk_matternumber",
+            });
 
         _dataverseServiceMock
             .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
