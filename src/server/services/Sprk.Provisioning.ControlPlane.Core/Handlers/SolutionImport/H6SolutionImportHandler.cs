@@ -281,7 +281,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         {
             var diagnostic =
                 "Target Dataverse URL not present on ProvisioningRun.interStepState.dataverseEnvUrl. " +
-                "H5 (Dataverse env creation) MUST complete before H6 dispatches. " +
+                "H5 (Dataverse env adoption) MUST complete before H6 dispatches. " +
                 "Handler did NOT invoke Deploy-DataverseSolutions.ps1.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingDataverseUrl, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -514,7 +514,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     /// Maps <see cref="SolutionImportFailureKind"/> to the pair
     /// (rejectionCode, §4C failureClass). Exposed <c>internal</c> so tests
     /// can assert the mapping without depending on handler internals. Parity
-    /// with H5's <c>MapCreatorFailure</c> shape.
+    /// with the former H5 creator-failure mapping's shape.
     /// </summary>
     internal static (string RejectionCode, FailureClass Class) MapImporterFailure(
         SolutionImportFailureKind kind) => kind switch

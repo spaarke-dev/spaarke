@@ -8,7 +8,7 @@
 // ImportSolution / StageAndUpgrade actions + polling the importjobs entity,
 // instead of shelling out to scripts/Deploy-DataverseSolutions.ps1). Kept on
 // disk UNREGISTERED per the Wave G-2/G-3/G-4 retirement convention (parity
-// with PacAdminDataverseEnvCreator, AzCliKvSecretsWriter, etc.) — this class
+// with the former PacAdminDataverseEnvCreator, AzCliKvSecretsWriter, etc.) — this class
 // is a shell-out (pwsh + Deploy-DataverseSolutions.ps1) and Option D's entire
 // point is deleting the pwsh/az/pac dependency from the L2 runtime.
 // ClassifyOutput remains unit-tested (H6SolutionImportHandlerTests T26) as a
@@ -60,7 +60,7 @@
 //
 // CI COVERAGE:
 //   Not exercised by CI unit suite (pwsh + real pac CLI + real Dataverse —
-//   parity with ProvisionCustomerScriptBicepDeployRunner + PacAdminDataverseEnvCreator
+//   parity with ProvisionCustomerScriptBicepDeployRunner + the former PacAdminDataverseEnvCreator
 //   CI exclusion). Env-guarded smoke tests can be added when a dedicated
 //   dev-provisioning Dataverse env is available; for wave C4 the handler
 //   unit tests via stubs are the coverage.

@@ -114,6 +114,20 @@ public sealed class H1SubscriptionReadinessHandlerTests
     }
 
     [Fact]
+    public async Task T228_AListingFailure_HasItsOwnCode()
+    {
+        var probe = FakeProbe.AllPass();
+        probe.DedicationResult = new(false, "listing failed (PRQ-S-04)", null, ListingFailed: true);
+        var handler = NewHandler(new FakeRepository(BuildRun(tenancy: "SpaarkeOwned"), etag: "etag-1"), new FakeEnqueuer(), probe);
+
+        var failure = (await handler.HandleAsync(BuildEnvelope(), CancellationToken.None))
+            .Should().BeOfType<HandlerResult.Failure>().Subject;
+
+        failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.SubscriptionListingFailed);
+        probe.ProviderRegistrationCalls.Should().Be(0);
+    }
+
+    [Fact]
     public async Task T228_TheDedicationCheck_RunsOnEveryModel()
     {
         foreach (var tenancy in new[] { "SpaarkeOwned", "CustomerOwned" })

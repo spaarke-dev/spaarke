@@ -5,7 +5,7 @@
 // verifier). Loaded from the "SolutionImportOptions" configuration section
 // by Program.cs — runtime-configurable so the linux-x64 App Service publish
 // layout can be honored without recompiling. Parity with
-// DataverseEnvCreationOptions + AiSeedChainOptions.
+// DataverseEnvAdoptionOptions + AiSeedChainOptions.
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Handlers.Credentials;

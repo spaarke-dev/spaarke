@@ -7,6 +7,20 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — The customer's subscription and Dataverse environment are operator prerequisites (T228)
+
+`customer-provisioning-orchestration-r1` T228 (owner D4 / Q1; L2 identity = Owner per customer subscription, owner
+decision 2026-10-06).
+
+- **`.claude/constraints/provisioning.md`**: new binding section — the operator creates the customer's subscription and
+  Dataverse environment; intake requires `subscriptionId`, `containerTypeId` and `dataverseEnvUrl` for every model (no
+  shared or default subscription); the environment's domain must be `spaarke-{customerId}[-{environmentName}]`
+  (`DataverseEnvironmentUrlRule`); H1 refuses a subscription holding another customer's stamp; H5 adopts and never
+  creates; H10 runs before H6; Owner granted per customer subscription by the operator (PRQ-S-04).
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 1b-bis (subscriptionId + dataverseEnvUrl), the Step 1e
+  Model 1 hard stop removed, Step 1f records the real environment URL, Step 4.0 sends `dataverseEnvUrl` and never falls
+  back to `az account show`.
+
 ###### 2026-10-06 — One ROOT container per customer; H7 links the root business unit; secure-record setup is a runbook phase (T227g)
 
 `customer-provisioning-orchestration-r1` T227g (owner question: how do the Secure Record containers fit?).

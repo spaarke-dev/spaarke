@@ -156,6 +156,15 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - The BFF (`CacheModule`) and the L2 Worker (`DispatchModule`) authenticate with their user-assigned identity (`ManagedIdentity__ClientId`) over RESP3 whenever `Redis__Endpoint` is set, and **refuse to start** on a connection string without it outside Development/Testing — so a deployed BFF/Worker MUST carry `Redis__Endpoint` before it runs a T242+ build (per-env cut-over: task 242b, endpoint added first, connection string removed only after master carries T242).
 - H1 registers `Microsoft.Cache` by default. Managed Redis has no scale-down and HA is fixed at create — size up only on a measured memory metric.
 
+## Subscription + Dataverse environment are operator prerequisites (BINDING — owner D4 / Q1; T228)
+
+- The operator creates the customer's **own Azure subscription** and **Dataverse environment** before the run; L2 creates **neither** and **MUST NOT default** either — no shared subscription, no `az account show`, for any tenancy model (ADR-027). POST /api/runs requires `subscriptionId` (GUID), `containerTypeId` (GUID, G19) and `dataverseEnvUrl` for every model.
+- **The environment must be named for the customer**: domain `spaarke-{customerId}` or `spaarke-{customerId}-{environmentName}` — `DataverseEnvironmentUrlRule`, applied at POST /api/runs and again by H5. It is the guard against adopting another customer's environment (all Model 1 environments share Spaarke's tenant). Reject, never repair.
+- **H1 refuses a subscription that is not the customer's alone**: outside the run's tenant, or holding another `rg-spaarke-{otherId}-*` group (`SubscriptionDedication`) — before it writes anything.
+- **H5 adopts, never creates**: URL rule → `GET /WhoAmI` as the L2 Worker identity (401/403 → Resumable `worker-not-app-user`; the operator adds that identity as a System Administrator application user, PRQ-C-09).
+- **DAG**: H10 ← H3, H5 and H6 ← H10 — H6/H7 sign in as the BFF app registration, an application user only once H10 has registered it. H11 ← H10, H7.
+- **The L2 identity holds Owner on each customer subscription** (owner decision 2026-10-06 — customer.bicep writes role assignments): granted by the operator with `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep` at that subscription (PRQ-S-04). It is never deployed on the platform subscription, and L2 never grants itself access to a subscription.
+
 ## SPE: container type per model, container per customer — app-only isolation is in code (BINDING, owner D28 / T227b)
 
 - One container type per model (`Spaarke Model 1`), one ROOT container per customer (per Dataverse environment) — H8's; secure-record containers (one per secure project / matter / work assignment — `ProvisionProjectEndpoint`) and any further business-unit container (SPE admin plane) are created by the BFF at runtime, bound to their business unit and marked — never by provisioning (T227g). H8 grants each stamp's UAMI application `full` and its BFF app registration delegated `full` on the registration, as the owning app.

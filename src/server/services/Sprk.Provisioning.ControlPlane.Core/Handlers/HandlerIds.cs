@@ -69,7 +69,7 @@ public static class HandlerIds
     /// </summary>
     public const string H4b = "H4b";
 
-    /// <summary>H5 -- Dataverse environment creation.</summary>
+    /// <summary>H5 -- adopt the customer's Dataverse environment (the operator creates it; T228).</summary>
     public const string H5 = "H5";
 
     /// <summary>H6 -- Dataverse solution import (9 solutions, dependency-ordered).</summary>

@@ -703,8 +703,12 @@ public static class RunsEndpoints
             run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = IntakeParameterCatalog.DefaultEnvironmentName;
         }
 
-        // T228: the canonical form (https://{host}/) — the one H5 compares against and hands to every later handler.
+        // T228: canonical forms — the URL H5 compares against and hands on (https://{host}/), and the two GUIDs in the
+        // bare lowercase "D" form ARM resource ids and the ContainerTypeOwners lookup expect (ADR-044). Guid.TryParse
+        // above also accepts braced / N-format / padded spellings.
         run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = normalizedDataverseEnvUrl;
+        run.Parameters.NonSecret[IntakeParameterCatalog.SubscriptionId] = subscriptionGuid.ToString("D");
+        run.Parameters.NonSecret[IntakeParameterCatalog.ContainerTypeId] = containerTypeGuid.ToString("D");
 
         try
         {

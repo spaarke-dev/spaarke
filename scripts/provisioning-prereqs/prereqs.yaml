@@ -31,8 +31,8 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 7
-last_updated: 2026-10-02
+manifest_version: 8
+last_updated: 2026-10-06
 author_task: customer-provisioning-orchestration-r1 / task 202
 # manifest_version 7 (2026-10-06, customer-provisioning-orchestration-r1 T227a): PRQ-C-05 RETIRED (Model 2 only,
 # out of scope per D-12; its check needed the customer's BFF app id, which H3 creates during the run, so no
@@ -171,35 +171,56 @@ prereqs:
     related_findings: [D-12, D-13]
 
   # ============================================================================
-  # ONCE-PER-SUBSCRIPTION (fresh Azure sub, before first customer stamp)
+  # THE CUSTOMER'S SUBSCRIPTION (T228: one subscription per customer, created by the operator — so these are
+  # once_per_customer and read {stampSubscriptionId}, never the operator's current `az account`. Like every
+  # once_per_customer entry they are not run by skill Step 0.5 (the subscription is known only after intake);
+  # L2 enforces what matters server-side: H1 (tenant, one-customer, providers), H2a (Owner).)
   # ============================================================================
+
+  - id: PRQ-S-00
+    name: The customer's own Azure subscription exists and holds no other customer's stamp (the operator creates it)
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run (its id is the intake value subscriptionId)
+    owner: Spaarke platform admin (Model 1 — in Spaarke's tenant); the customer's admin (Model 2)
+    consequence_of_absence: "POST /api/runs refuses a run without subscriptionId (400 subscription-id-required) — for every model; nothing defaults or shares a subscription (ADR-027, T228). H1 refuses a subscription outside the run's tenant (subready-subscription-unreachable) or one already holding another customer's rg-spaarke-* resource group (subready-subscription-not-dedicated)."
+    check_recipe:
+      cli: |
+        state=$(az account show --subscription {stampSubscriptionId} --query state -o tsv) || exit 1
+        [ -z "$state" ] && exit 1
+        [ "$state" = "Enabled" ] || exit 1
+        others=$(az group list --subscription {stampSubscriptionId} --query "[?starts_with(name,'rg-spaarke-') && !starts_with(name,'rg-spaarke-{customerId}-')].name" -o tsv) || exit 1
+        [ -n "$others" ] && { echo "$others"; exit 1; }
+        echo ok
+      expect: "`ok` — the subscription is Enabled and holds no rg-spaarke-* resource group other than this customer's"
+    remediation: "Create a NEW subscription for the customer (Model 1: under Spaarke's billing account, in Spaarke's tenant), place it in the customer-subscriptions management group (ADR-027), grant PRQ-S-04, and enter its id as `subscriptionId` at intake. Never reuse another customer's subscription or the platform subscription."
+    related_findings: [T228, ADR-027, G3]
 
   - id: PRQ-S-01
     name: Azure subscription billing-agreement type known
-    scope: once_per_subscription
+    scope: once_per_customer
     frequency: once per sub
     owner: Spaarke platform admin
     consequence_of_absence: Cost-envelope estimation unreliable; support-plan expectations wrong.
     check_recipe:
-      cli: az account show --query "subscriptionPolicies" -o json
+      cli: az account show --subscription {stampSubscriptionId} --query "subscriptionPolicies" -o json
       expect: JSON with `quotaId` populated (starts with `MSDN_`, `EnterpriseAgreement_`, `PayAsYouGo_`, `MicrosoftCustomerAgreement_`)
     remediation: Recorded in `provisioning-runs/{customerId}-{runId}/intake.md`. Informational.
 
   - id: PRQ-S-02
     name: Azure subscription has a Support Plan (Basic or better)
-    scope: once_per_subscription
+    scope: once_per_customer
     frequency: once per sub
     owner: Spaarke platform admin (or customer for CustomerOwned Model 2)
     consequence_of_absence: F9 — auto-support-ticket path unavailable when quota bump denied.
     check_recipe:
-      cli: az rest --method get --url "https://management.azure.com/providers/Microsoft.Support/supportTickets?api-version=2020-04-01" -o none
+      cli: az rest --method get --url "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.Support/supportTickets?api-version=2020-04-01" -o none
       expect: HTTP 200; HTTP 403 = no plan
     remediation: Azure Portal → Help + Support → Support plans → Purchase Basic minimum.
     related_findings: [F9]
 
   - id: PRQ-S-03
     name: Resource-provider registration for required namespaces
-    scope: once_per_subscription
+    scope: once_per_customer
     frequency: once per sub (fresh subs)
     owner: Spaarke platform admin
     consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success. Microsoft.Cache is for Azure Managed Redis (Microsoft.Cache/redisEnterprise), which every customer stamp deploys (task 242); L2 handler H1 registers it by default.
@@ -208,32 +229,35 @@ prereqs:
         for ns in Microsoft.Web Microsoft.Storage Microsoft.KeyVault Microsoft.CognitiveServices Microsoft.Search \
                   Microsoft.ServiceBus Microsoft.Cache Microsoft.DocumentDB Microsoft.OperationalInsights \
                   Microsoft.Insights Microsoft.ManagedIdentity Microsoft.ContainerRegistry; do
-          echo "$ns=$(az provider show --namespace $ns --query registrationState -o tsv)"
+          echo "$ns=$(az provider show --namespace $ns --subscription {stampSubscriptionId} --query registrationState -o tsv)"
         done
       expect: every namespace prints `Registered`
     remediation: '`az provider register --namespace <ns>` then poll every 30s for 5 min. If still `NotRegistered`, try `az rest --method post ...?force=true`; if still failing, register via Azure Portal (some fresh subs require silent auth flow).'
     related_findings: [F6]
 
   - id: PRQ-S-04
-    name: L2 UAMI has Subscription Contributor on target sub
-    scope: once_per_subscription
-    frequency: once per sub, per L2 UAMI
-    owner: Spaarke platform admin
-    consequence_of_absence: H2a ArmDeploymentRunner 403s on sub-scope deployment.
+    name: L2 control-plane UAMI has Owner on the customer's subscription
+    scope: once_per_customer
+    frequency: once per customer subscription (owner decision 2026-10-06, T228)
+    owner: Spaarke platform admin (an Owner of the customer's subscription)
+    consequence_of_absence: "H1 cannot list the subscription's resource groups or register resource providers; H2a cannot create rg-spaarke-{customerId}-{env} or deploy customer.bicep — which writes role assignments, so Contributor is not enough."
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{subId}" --query "[?roleDefinitionName=='Contributor']" -o tsv
-      expect: non-empty
-    remediation: '`az role assignment create --assignee {l2UamiPrincipalId} --scope /subscriptions/{subId} --role Contributor`.'
-    related_findings: [audit-gap-02-l2-uami-contributor]
+      cli: |
+        r=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{stampSubscriptionId}" --query "[?roleDefinitionName=='Owner'].id" -o tsv) || exit 1
+        [ -z "$r" ] && exit 1
+        echo ok
+      expect: '`ok`'
+    remediation: '`az deployment sub create --subscription {stampSubscriptionId} --location westus2 --template-file infrastructure/bicep/modules/controlplane-subscription-rbac.bicep --parameters principalId={l2UamiPrincipalId}` (idempotent). L2 never grants itself access to a subscription.'
+    related_findings: [audit-gap-02-l2-uami-contributor, T228]
 
   - id: PRQ-S-05
     name: Operator has Owner or Contributor + User Access Administrator on target sub
-    scope: once_per_subscription
+    scope: once_per_customer
     frequency: per operator
     owner: sub owner
     consequence_of_absence: Operator's own KV data-plane bootstrap (F15/F18) via `az rest --method put` returns 403.
     check_recipe:
-      cli: az role assignment list --assignee $(az ad signed-in-user show --query id -o tsv) --scope "/subscriptions/{subId}" --query "[].roleDefinitionName" -o tsv
+      cli: az role assignment list --assignee $(az ad signed-in-user show --query id -o tsv) --scope "/subscriptions/{stampSubscriptionId}" --query "[].roleDefinitionName" -o tsv
       expect: contains `Owner` OR (`Contributor` + `User Access Administrator`)
     remediation: Grant via Azure Portal → Subscription → Access control (IAM). Operator runs `/provision-environment` under their own AAD identity per NFR-11.
     related_findings: [F15, F18, NFR-11]
@@ -484,22 +508,26 @@ prereqs:
     check_recipe:
       cli: |
         az rest --method post \
-          --url "https://management.azure.com/subscriptions/{sub}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" \
+          --url "https://management.azure.com/subscriptions/{stampSubscriptionId}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" \
           --body '{"name":"{sbName}","type":"Microsoft.ServiceBus/namespaces"}'
       expect: '`{"nameAvailable": true}`'
     remediation: 'Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace).'
     related_findings: [F10]
 
   - id: PRQ-C-04
-    name: Dataverse env-creation rate quota available (~4/hr per tenant)
+    name: 'RETIRED — Dataverse environment-creation rate quota'
     scope: once_per_customer
-    frequency: per run (Step 2 preflight)
-    owner: Spaarke platform admin
-    consequence_of_absence: H5 fails with rate-limit error; run blocks until quota window resets.
-    check_recipe:
-      cli: pac admin quota --query "[?type=='environmentCreation'].{used:current, limit:cap}" -o json
-      expect: '`used < limit`'
-    remediation: Wait for quota window; no bump path.
+    status: retired
+    retired_on: 2026-10-06
+    retired_by: customer-provisioning-orchestration-r1 T228 (owner D4 / Q1)
+    frequency: n/a — retired
+    owner: n/a — retired
+    consequence_of_absence: |
+      None. L2 no longer creates Dataverse environments — the operator does (PRQ-C-09) — so the creation-rate window
+      never limits a run. H0's DataverseEnvCreationRate probe was removed with environment creation.
+    remediation: |
+      Nothing to do.
+    related_findings: [T228]
 
   - id: PRQ-C-05
     name: 'RETIRED — customer admin consent for the customer BFF app registration (Model 2 only)'
@@ -556,3 +584,30 @@ prereqs:
       expect: '`MailUniversalSecurityGroup`, and its members are exactly the mailboxes Spaarke may read and send from (including communicationDefaultMailbox)'
     remediation: '`New-DistributionGroup -Name "Spaarke-AppAccess-{customerId}" -Type Security -Members <mailboxes>` in Exchange Online PowerShell, then enter its email address or object id as `exchangePolicyScopeGroupId` at intake. Membership is the customer''s access decision — which mailboxes the app may use — so L2 never creates or edits it (owner decision 2026-10-01, T245c).'
     related_findings: [T245c, T4]
+
+  - id: PRQ-C-09
+    name: The customer's Dataverse environment exists (the operator creates it) and the L2 Worker identity is its System Administrator application user
+    scope: once_per_customer
+    frequency: once per customer, BEFORE the run (its URL is the intake value dataverseEnvUrl)
+    owner: Spaarke platform admin (Power Platform admin of the stamp's tenant — Spaarke's for Model 1)
+    consequence_of_absence: "POST /api/runs refuses a run without dataverseEnvUrl, or one whose domain is not spaarke-{customerId} / spaarke-{customerId}-{environmentName} (400 dataverse-env-url-invalid — the guard against adopting another customer's environment). H5 fails Resumable worker-not-app-user when the L2 Worker identity cannot call WhoAmI, env-health-check-failed when the environment does not answer. L2 never creates an environment (T228)."
+    check_recipe:
+      cli: |
+        res=$(echo "{dvUrl}" | sed 's#/$##')
+        n=$(az rest --method get --resource "$res" --url "$res/api/data/v9.2/systemusers?\$filter=applicationid eq {l2UamiClientId} and isdisabled eq false&\$select=systemuserid" --query "length(value)" -o tsv) || exit 1
+        [ -z "$n" ] && exit 1
+        [ "$n" = "1" ] || exit 1
+        echo ok
+      expect: '`ok` — one enabled application user for the L2 Worker identity; confirm in the Power Platform admin center that it holds System Administrator'
+    remediation: |
+      1. Power Platform admin center → Environments → New, in the stamp's tenant: name and URL `spaarke-{customerId}`
+         (→ https://spaarke-{customerId}.crm[N].dynamics.com/ — the domain POST /api/runs and H5 require), type Production
+         (Sandbox for a trial), the customer's region, Dataverse ON. `pac admin create --domain` silently appends a digit
+         when the domain is taken (spaarke-{customerId}0) — check the URL and use spaarke-{customerId}-{environmentName}
+         instead; any other domain is refused.
+      2. Add the L2 Worker managed identity as an application user with the System Administrator role:
+         `pac admin assign-user --environment {dvUrl} --user {l2UamiClientId} --role "System Administrator" --application-user`
+         (or the environment → Settings → Users + permissions → Application users → New app user).
+      3. Enter the environment URL as `dataverseEnvUrl` at intake. After the run, set up secure records per
+         docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md (deployment guide §7.11).
+    related_findings: [T228, D4, Q1]

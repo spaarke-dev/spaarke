@@ -330,7 +330,7 @@ $constants = Get-Content $constantsPath -Raw | ConvertFrom-Yaml
 
 # --- Derive runtime tokens (per PLX-01..07 substitution strategy) ---
 $graphAppId       = $constants.microsoft_constants.graphAppId
-$subId            = az account show --query id -o tsv
+$subId            = az account show --query id -o tsv   # the operator's current subscription — once_per_env / once_per_tenant checks only; Step 2.5 rebinds it to the customer's (T228)
 $l2UamiName       = $constants.name_templates.l2UamiName -replace '\{env\}', $env
 $platformRg       = $constants.name_templates.platformResourceGroup -replace '\{env\}', $env
 $l2UamiJson       = az identity show -g $platformRg -n $l2UamiName -o json | ConvertFrom-Json
@@ -602,7 +602,8 @@ if ($BatchIntakeFile) {
   $env            = $environment                # alias — Step 0.5a fail-fast + Step 0c URL selector read $env
   $profile        = $intake.profile
   $environmentId  = $intake.environmentId       # may be null → 1f auto-creates
-  $subscriptionId = $intake.subscriptionId      # ISH-02 — REQUIRED for Model2 (validated in schema allOf); optional for Model1
+  $subscriptionId = $intake.subscriptionId      # T228 — REQUIRED for every model: the customer's OWN subscription (PRQ-S-00)
+  $dataverseEnvUrl = $intake.dataverseEnvUrl    # T228 — REQUIRED: the Dataverse environment the operator created (PRQ-C-09)
   $region         = $intake.region              # optional platform region (default westus2)
   $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
   $tier           = $intake.tier                # optional
@@ -663,6 +664,7 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "controlPlaneEnv": "dev",
   "profile": "spaarke-hosted-model2",
   "subscriptionId": "00000000-0000-0000-0000-000000000000",
+  "dataverseEnvUrl": "https://spaarke-acme.crm.dynamics.com/",
   "region": "westus2",
   "tier": "dedicated",
   "estimatedMonthlyUsd": 900,
@@ -786,6 +788,29 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
 - The customer's Entra tenant ID (Model 2: their tenant; Model 1: Spaarke's shared tenant)
 - Do NOT default; do NOT fall back to `az account show` — the operator MUST supply this explicitly. This enforces the §4D I1 tenant-isolation invariant (FR-28).
 
+#### 1b-bis. `subscriptionId` and `dataverseEnvUrl` (required for every model — T228)
+
+The operator creates both BEFORE the run; L2 creates neither and nothing defaults them (owner D4 / Q1; ADR-027).
+
+- `subscriptionId` — the customer's OWN Azure subscription (PRQ-S-00), with the L2 identity granted **Owner** on it
+  (PRQ-S-04 — `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Never another customer's, never the
+  platform subscription, never `az account show`. H1 refuses a subscription in another tenant or one holding another
+  customer's `rg-spaarke-*` group.
+- `dataverseEnvUrl` — the environment the operator created (PRQ-C-09), e.g. `https://spaarke-acme.crm.dynamics.com/`.
+  Its domain MUST be `spaarke-{customerId}` or `spaarke-{customerId}-{environmentName}` — POST /api/runs and H5 refuse
+  anything else (the guard against adopting another customer's environment). The L2 Worker identity must be its System
+  Administrator application user, or H5 stops with `worker-not-app-user`.
+
+Reject a blank or malformed value here, before Step 2:
+
+```powershell
+if (-not ($subscriptionId -as [guid])) { Write-Error "❌ subscriptionId must be the GUID of the customer's own subscription (PRQ-S-00)."; exit 1 }
+if ($dataverseEnvUrl -notmatch "^https://spaarke-$customerId(-[a-z]+)?\.crm[0-9]*\.dynamics\.com/?$") {
+  Write-Error "❌ dataverseEnvUrl must be https://spaarke-$customerId[-{environmentName}].crm[N].dynamics.com/ — the environment the operator created (PRQ-C-09)."
+  exit 1
+}
+```
+
 #### 1c. `tenancyModel` (required)
 
 Choice:
@@ -793,8 +818,8 @@ Choice:
 > 🔴 **AMENDED 2026-09-28 (owner decision D-12).** Both models are **dedicated stamps** — dedicated
 > Dataverse environment, dedicated Azure resources, and **one Azure subscription per customer**. They differ
 > **only** in which **Azure tenant** owns that subscription. The shared trial/SMB tier is **RETIRED** (it was
-> documented and partly built in Bicep but **never implemented in the engine** — `H5DataverseEnvCreationHandler`
-> creates a Dataverse environment unconditionally). The BFF **Entra app registration is per customer in both
+> documented and partly built in Bicep but **never implemented in the engine**, which always made one Dataverse
+> environment per run — since T228 H5 *adopts* the one the operator created). The BFF **Entra app registration is per customer in both
 > models** (D-13, BINDING).
 >
 > ⚠️ **Literals (T223/T224):** L2 and `intake.schema.json` accept exactly `Model1` | `Model2`
@@ -802,10 +827,9 @@ Choice:
 > `spaarke-hosted-model2` and `Model2` ↔ `customer-owned-model2` (task 225b); any other pair is a 400
 > `tenancy-profile-invalid`.
 
-- `Model1` — Spaarke-hosted dedicated stamp (Spaarke's tenant); profile `spaarke-hosted-model2`. L2 accepts it
-  at intake, but H2a still **fails closed** for Model 1 (`ArmDeploymentRunner`: "Model 1 runs are not
-  deployable yet") until **T228** (one subscription per customer). Do not provision a Model 1 run until T228
-  lands.
+- `Model1` — Spaarke-hosted dedicated stamp (Spaarke's tenant); profile `spaarke-hosted-model2`. Deployable since
+  **T228**: the customer's own subscription (PRQ-S-00 + PRQ-S-04) and Dataverse environment (PRQ-C-09) exist first
+  (Step 1b-bis), and H2a deploys the same `customer` template as Model 2.
 - `Model2` — customer-hosted dedicated stamp (customer's tenant); profile `customer-owned-model2`; Azure
   Lighthouse required. Out of scope for the current project (owner, 2026-09-30).
 
@@ -854,15 +878,6 @@ if ($tenancyModel -cnotin @('Model1', 'Model2')) {
 $requiredProfile = @{ 'Model1' = 'spaarke-hosted-model2'; 'Model2' = 'customer-owned-model2' }[$tenancyModel]
 if ($profile -ne $requiredProfile) {
   Write-Error "❌ tenancyModel '$tenancyModel' pairs only with profile '$requiredProfile' (received '$profile'). L2 returns 400 tenancy-profile-invalid."
-  # HARD STOP — do not proceed to Step 2
-  exit 1
-}
-# TEMPORARY (T225b → removed by T228): L2 accepts Model1 at intake, but a Model 1 run has no per-customer
-# subscription yet (intake still exempts Model 1 from subscriptionId and Step 4.0 would fill in the operator's
-# current subscription) and H2a fails closed. Stop here so H0–H1 never act on a subscription that is not the
-# customer's own (ADR-027).
-if ($tenancyModel -ceq 'Model1') {
-  Write-Error "❌ Model 1 runs are blocked until task T228 (one subscription per customer, ADR-027). H2a would fail closed anyway; nothing has been sent to L2."
   # HARD STOP — do not proceed to Step 2
   exit 1
 }
@@ -994,7 +1009,7 @@ $placeholderPayload = @{
     # --- Required fields (NOT NULL per live schema) ---
     sprk_name             = $displayName                                # T237: the customer's full name (1a-bis; defaults to customerId) — recorded once next to the id
     sprk_environmenttype  = $envType                                    # Choice: enum int per environment
-    sprk_dataverseurl     = "https://placeholder-$customerId.crm.dynamics.com"  # H5 promotes this to the real URL when it creates the customer's Dataverse env
+    sprk_dataverseurl     = $dataverseEnvUrl                            # T228: the environment the operator created (Step 1b-bis) — H5 adopts it
     sprk_isactive         = $true
     sprk_isdefault        = $false
     # --- r1 registry extension (task 023 v3.3 columns) ---
@@ -1018,7 +1033,7 @@ if ($displayName -match '[;=]') {
   $displayName = $customerId
 }
 $environmentId = pac data create --entity sprk_dataverseenvironment `
-  --attributes "sprk_name=$displayName;sprk_environmenttype=$envType;sprk_dataverseurl=https://placeholder-$customerId.crm.dynamics.com;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
+  --attributes "sprk_name=$displayName;sprk_environmenttype=$envType;sprk_dataverseurl=$dataverseEnvUrl;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
@@ -1074,6 +1089,8 @@ INTAKE SUMMARY
   tenancyModel:    Model2
   controlPlaneEnv: dev
   profile:         customer-owned-model2
+  subscriptionId:  9f1c...  (the customer's own — PRQ-S-00)
+  dataverseEnvUrl: https://spaarke-acme.crm.dynamics.com/  (operator-created — PRQ-C-09)
   environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
   identityPreset:  B2BGuest
   users:           3 entries          (names/emails are NOT printed or written to intake.md)
@@ -1165,6 +1182,13 @@ If Step 2 client-side validation FAILS, present the failure + escalation instruc
 ---
 
 ### Step 2.5: Fresh-Sub Deployment Feasibility Check (NEW — customer-provisioning-orchestration-r1 lessons 2026-08-22)
+
+> **T228**: every check below runs against the **customer's own subscription** (intake `subscriptionId`), never the
+> operator's current `az account`: Step 0.5b's `$subId` is rebound here.
+>
+> ```powershell
+> $subId = $subscriptionId   # T228 — the customer's subscription (Step 1b-bis); F3–F6 / F10 below read $subId
+> ```
 
 **When to run**: Target Azure subscription was created within the last 90 days, OR this is the FIRST Bicep deploy attempt against this subscription in this region. Fresh subs have gotchas Microsoft has quietly introduced since 2024-2025 that break naive "just deploy" flows. These checks run OPERATOR-SIDE (in this skill) before invoking L2 H0, because L2 doesn't have the visibility (or the mandate) to modify region defaults or Bicep params.
 
@@ -1301,12 +1325,12 @@ RUN PLAN
     H3        KV secret bootstrap
     H4        canonical secret population (per-tenant KV; literal values)
     H4b       bulk App Service app-settings from canonical manifest (~80-160 settings in ONE batch → ONE restart; F20/F20a; task 201)
-    H5        Dataverse environment creation (20-min timeout for Model 2)
+    H5        adopt the operator's Dataverse environment (URL rule + WhoAmI as the Worker identity; never creates — T228)
+    H10       Dataverse application users + Graph parity (T228: before H6, which signs in as the BFF app it registers)
     H6        Dataverse solutions import (8 solutions, dependency-ordered)
     H7        env-var writes to customer env
-    H8        SPE container-type creation (empirically near-instant, 25h fallback ceiling; H8.a re-verifies)
+    H8        SPE root container in the model's container type (create or reuse; bound + marked; T227e)
     H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4 + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)
-    H10       Dataverse App User creation (UAMI-based)
     H11       user provisioning — identityPreset + users from Step 1e-bis (every run, both models)
     H12a      AI seed chain (playbooks + embeddings)
     H12b      playbook consumers seed
@@ -1367,27 +1391,14 @@ Per Wave 0 Decision 1 (`tenantId` flows via `nonSecretParameters`) + Decision 6 
 ```powershell
 $intakeFileSha256 = if ($BatchIntakeFile) { (Get-FileHash -Path $BatchIntakeFile -Algorithm SHA256).Hash } else { $null }
 
-# --- ISH-02 subscriptionId flow (Wave 0 Decision 6 + Step-2-body-construction, SESSION 16) ---
-# Model2: intake.subscriptionId is REQUIRED (per intake.schema.json allOf constraint).
-# Model1: intake.subscriptionId is OPTIONAL; when omitted the skill auto-defaults to the
-# Spaarke shared subscription for the target env (looked up from spaarke-constants.yaml or
-# az account context — env-specific).
-# (Literals are Model1 | Model2 since T223/T224; this test used to compare 'Model2Dedicated',
-# which never matched, so the Model 2 hard stop below was dead.)
-if ($tenancyModel -eq 'Model2') {
-  if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-    Write-Error "[skill] Step 4.0 HARD STOP: Model2 run requires intake.subscriptionId (customer's own subscription per ADR-027 D4). Missing at dispatch → L2 returns 400 subscription-id-required. Correct the intake and rerun."
-    exit 1
-  }
-  $resolvedSubscriptionId = $subscriptionId
-} else {
-  # Model1: auto-default from az context if not supplied
-  $resolvedSubscriptionId = if ($subscriptionId) { $subscriptionId } else { az account show --query id -o tsv }
-  if ([string]::IsNullOrWhiteSpace($resolvedSubscriptionId)) {
-    Write-Error "[skill] Step 4.0 HARD STOP: Model1 run — no subscriptionId in intake and az account show returned empty. Run `az login` and retry."
-    exit 1
-  }
+# --- T228: the customer's own subscription and Dataverse environment — required for EVERY model ---
+# The operator created both (PRQ-S-00 / PRQ-C-09). NEVER default either — in particular never `az account show`, which
+# is the operator's current subscription, not the customer's (ISH-02 used to do exactly that for Model 1).
+if ([string]::IsNullOrWhiteSpace($subscriptionId) -or [string]::IsNullOrWhiteSpace($dataverseEnvUrl)) {
+  Write-Error "[skill] Step 4.0 HARD STOP: intake must carry subscriptionId AND dataverseEnvUrl (Step 1b-bis; T228). L2 returns 400 subscription-id-required / dataverse-env-url-invalid otherwise. Correct the intake and rerun."
+  exit 1
 }
+$resolvedSubscriptionId = $subscriptionId
 
 # --- openAiRegion → openAiLocation mapping (Bicep param name is openAiLocation, intake field is openAiRegion) ---
 $resolvedOpenAiLocation = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke default per operator memory reference_azure_fresh_sub_regional_gotchas
@@ -1399,7 +1410,8 @@ $body = @{
   profile       = $profile                # paired with tenancyModel per Step 1e: Model1 → spaarke-hosted-model2, Model2 → customer-owned-model2
   nonSecretParameters = @{
     tenantId                    = $tenantId              # I1 invariant per Wave 0 Decision 1
-    subscriptionId              = $resolvedSubscriptionId # ISH-02 — consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14
+    subscriptionId              = $resolvedSubscriptionId # T228 — the customer's own subscription; H1/H2a/H2b/H4/H4b/H8/H9/H13/H14
+    dataverseEnvUrl             = $dataverseEnvUrl        # T228 — the operator's environment; H5 adopts it (L2 stores the canonical https://{host}/)
     openAiLocation              = $resolvedOpenAiLocation # Bicep param name (openAiLocation), NOT openAiRegion; intake field renamed at the boundary
     confirmationAcknowledgment  = $confirmationPhrase     # verbatim "proceed with provisioning"
     intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
@@ -1683,7 +1695,7 @@ Interactive-mode sub-flows below assume a live operator; batch mode returns befo
 
   Handler: H0.5 consent-callback
   Reason:  The customer's BFF app-reg (created by H3) needs admin consent on the customer's
-           Entra tenant before H5 can create a Dataverse Application User.
+           Entra tenant before H10 can create a Dataverse Application User.
 
   ACTION FOR CUSTOMER ADMIN (send this URL to the customer — skill substitutes {tokens} before display):
     URL construction:

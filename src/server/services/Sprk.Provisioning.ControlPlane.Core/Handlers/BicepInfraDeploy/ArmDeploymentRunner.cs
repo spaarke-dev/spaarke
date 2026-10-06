@@ -164,7 +164,7 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             return new BicepDeployOutcome.Failure(
                 $"Resource-group ensure failed for '{resourceGroupName}' (HTTP {ex.Status}, " +
                 $"{ex.ErrorCode ?? "no-error-code"}): {ex.Message}. Remediation: verify the L2 " +
-                "control-plane UAMI has Contributor RBAC at the customer subscription scope.");
+                "control-plane UAMI has Owner on the customer subscription (prereqs.yaml PRQ-S-04, T228).");
         }
 
         // (3) Deploy the ARM JSON. Incremental mode — parity with `az
@@ -352,17 +352,12 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
         // this helper trusts an already-validated value. The `_` arm throws so a future enum member
         // surfaces as a loud InvalidOperationException rather than silently falling into a
         // `customer` template branch.
-        // Task 225a (D-12): the `model1-shared` stack is retired and CI no longer publishes it. Model 1
-        // FAILS CLOSED here rather than resolving `customer`. Task 225b converged H2b / H12c onto the
-        // stamp's own services, but until task 228 gives every Model 1 run its own subscription (intake
-        // still exempts Model 1 from subscriptionId), deploying `customer` for Model 1 would build a
-        // stamp in an arbitrary subscription (ADR-027). T228 replaces this arm with `customer`.
+        // D-12: both models deploy the same dedicated customer stamp (`customer` = customer.bicep). Task 225a retired the
+        // shared `model1-shared` stack; T228 made Model 1 deployable — POST /api/runs now requires the customer's own
+        // subscription for every model and H1 refuses one holding another customer's stamp (ADR-027).
         var templateKey = tenancyModel switch
         {
-            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => throw new InvalidOperationException(
-                "Model 1 runs are not deployable yet: the shared Model 1 stack was retired (task 225a, D-12) and the " +
-                "dedicated Model 1 path is completed by task 228 (one subscription per customer, ADR-027). Nothing " +
-                "has been deployed."),
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => "customer",
             Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => "customer",
             _ => throw new InvalidOperationException(
                 $"Unhandled TenancyModel '{tenancyModel}' in ArmDeploymentRunner.ResolveArmTemplateAsync. " +

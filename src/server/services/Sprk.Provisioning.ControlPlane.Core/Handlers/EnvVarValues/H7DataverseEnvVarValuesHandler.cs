@@ -267,7 +267,7 @@ public sealed class H7DataverseEnvVarValuesHandler : IProvisioningHandler
         if (string.IsNullOrWhiteSpace(state.DataverseEnvUrl))
         {
             return await FailMissingUpstreamAsync(run, etag, "dataverseEnvUrl",
-                "InterStepState.dataverseEnvUrl not present. H5 (Dataverse env creation) MUST complete before " +
+                "InterStepState.dataverseEnvUrl not present. H5 (Dataverse env adoption) MUST complete before " +
                 "H7 dispatches — H7 has no target environment to write to.", cancellationToken).ConfigureAwait(false);
         }
         if (string.IsNullOrWhiteSpace(state.OpenAiEndpoint))

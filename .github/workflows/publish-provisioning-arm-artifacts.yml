@@ -25,10 +25,9 @@
 # ResolveArmTemplateAsync -- since task 245b the ONE place that maps a
 # TenancyModel to a manifest template key; it is an exhaustive switch over the
 # typed enum (task 223), so a new enum member throws rather than defaulting):
-#   - infrastructure/bicep/customer.bicep -- the one template H2a deploys
-#     (TenancyModel.Model2; Model 1 fails closed at H2a until tasks 225b + 228
-#     put it on the same dedicated stamp -- D-12). stacks/model1-shared.bicep was
-#     retired by task 225a (2026-10-01).
+#   - infrastructure/bicep/customer.bicep -- the one template H2a deploys, for
+#     both tenancy models (the same dedicated stamp -- D-12; Model 1 since task 228).
+#     stacks/model1-shared.bicep was retired by task 225a (2026-10-01).
 #   The template composes exclusively local relative-path `module` references
 #   (infrastructure/bicep/modules/*.bicep) -- no `Microsoft.Resources/templateSpecs`
 #   / template-spec-by-id references in its module graph, so `az bicep build`

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7859057405814127405"
+      "templateHash": "10339792521466403144"
     }
   },
   "parameters": {
@@ -2377,73 +2377,6 @@
         "[subscriptionResourceId('Microsoft.Resources/resourceGroups', variables('resourceGroupName'))]",
         "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
       ]
-    },
-    {
-      "type": "Microsoft.Resources/deployments",
-      "apiVersion": "2025-04-01",
-      "name": "controlplane-subscription-rbac",
-      "location": "[deployment().location]",
-      "properties": {
-        "expressionEvaluationOptions": {
-          "scope": "inner"
-        },
-        "mode": "Incremental",
-        "parameters": {
-          "principalId": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
-          }
-        },
-        "template": {
-          "$schema": "https://schema.management.azure.com/schemas/2018-05-01/subscriptionDeploymentTemplate.json#",
-          "contentVersion": "1.0.0.0",
-          "metadata": {
-            "_generator": {
-              "name": "bicep",
-              "version": "0.46.1.21595",
-              "templateHash": "17238208266467465798"
-            }
-          },
-          "parameters": {
-            "principalId": {
-              "type": "string",
-              "defaultValue": "",
-              "metadata": {
-                "description": "Principal ID of the fleet-scoped control-plane UAMI (from modules/uami.bicep outputs) granted Contributor on this subscription. Pass empty to skip the grant (what-if isolation only -- a real deploy always needs it)."
-              }
-            }
-          },
-          "variables": {
-            "contributorRoleId": "b24988ac-6180-42a0-ab88-20f7382dd24c"
-          },
-          "resources": [
-            {
-              "condition": "[not(empty(parameters('principalId')))]",
-              "type": "Microsoft.Authorization/roleAssignments",
-              "apiVersion": "2022-04-01",
-              "name": "[guid(subscription().id, parameters('principalId'), variables('contributorRoleId'))]",
-              "properties": {
-                "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('contributorRoleId'))]",
-                "principalId": "[parameters('principalId')]",
-                "principalType": "ServicePrincipal",
-                "description": "L2 control-plane UAMI ensures customer RGs + runs subscription-scope ARM deployments (H2a ArmDeploymentRunner) -- Wave G-8 Batch 2, audit defect #2"
-              }
-            }
-          ],
-          "outputs": {
-            "subscriptionId": {
-              "type": "string",
-              "value": "[subscription().subscriptionId]"
-            },
-            "contributorRoleAssignmentName": {
-              "type": "string",
-              "value": "[if(not(empty(parameters('principalId'))), guid(subscription().id, parameters('principalId'), variables('contributorRoleId')), '')]"
-            }
-          }
-        }
-      },
-      "dependsOn": [
-        "[extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami')]"
-      ]
     }
   ],
   "outputs": {
@@ -2626,10 +2559,6 @@
     "acrLoginServer": {
       "type": "string",
       "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-acr'), '2025-04-01').outputs.loginServer.value]"
-    },
-    "subscriptionContributorRoleAssignmentName": {
-      "type": "string",
-      "value": "[reference(subscriptionResourceId('Microsoft.Resources/deployments', 'controlplane-subscription-rbac'), '2025-04-01').outputs.contributorRoleAssignmentName.value]"
     }
   }
 }

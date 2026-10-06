@@ -155,6 +155,10 @@ public interface ISubscriptionReadinessProbe
 /// the operator can resolve the missing precondition without further
 /// probing.
 /// </param>
+/// <param name="ListingFailed">
+/// T228: set by <see cref="ISubscriptionReadinessProbe.CheckSubscriptionDedicatedAsync"/> when the answer is unknown
+/// because the resource groups could not be listed (not because a foreign stamp was found).
+/// </param>
 /// <param name="Evidence">
 /// Arbitrary per-check evidence (raw ARM response body, retrieved
 /// registrationAssignment properties, etc.). Written to
@@ -165,4 +169,5 @@ public interface ISubscriptionReadinessProbe
 public sealed record SubscriptionReadinessCheckResult(
     bool Passed,
     string Diagnostic,
-    JsonElement? Evidence);
+    JsonElement? Evidence,
+    bool ListingFailed = false);

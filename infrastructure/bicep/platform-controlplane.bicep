@@ -65,12 +65,11 @@
 //                       defects #4+#10) -- hosts the task 114/115 Exchange
 //                       sidecar image; AcrPull to the shared UAMI, AcrPush
 //                       to the CI OIDC principal.
-//   11. Subscription RBAC: Contributor for the shared UAMI at the deploying
-//                       subscription's scope (Wave G-8 Batch 2 / audit
-//                       defect #2) -- H2a's ArmDeploymentRunner needs it for
-//                       customer RG-ensure + subscription-scope ARM deploys
-//                       (via modules/controlplane-subscription-rbac.bicep;
-//                       BCP120 forces the module split -- see its header).
+//   11. (Removed by T228) Subscription RBAC on THIS subscription: stamps never
+//                       deploy here (D-12, ADR-027). The L2 UAMI's Owner grant
+//                       on each CUSTOMER subscription is an operator prerequisite
+//                       (PRQ-S-04: modules/controlplane-subscription-rbac.bicep,
+//                       deployed at that subscription).
 //
 // DELIBERATELY OUT OF SCOPE
 //   - Service Bus:      Per ADR-036 (background-job infrastructure) the L2
@@ -678,29 +677,6 @@ module acr 'modules/controlplane-acr.bicep' = {
 }
 
 // ============================================================================
-// 11. SUBSCRIPTION-SCOPE RBAC -- Contributor for the shared control-plane
-//     UAMI (Wave G-8 Batch 2 / audit defect #2)
-//
-//    H2a's ArmDeploymentRunner requires Contributor at subscription scope
-//    for customer RG-ensure + subscription-scope ARM deployments (its own
-//    error guidance, ArmDeploymentRunner.cs:162, says to verify exactly this
-//    grant -- but nothing ever made it). Declared via a dedicated
-//    subscription-scope module rather than inline because the role
-//    assignment's guid() NAME must be calculable at deployment start and the
-//    UAMI principalId is a runtime module output here (BCP120) -- inside the
-//    module it is a param, which is legal. Covers the DEPLOYING subscription;
-//    Model 2 stamps in foreign customer subscriptions need their own grant
-//    (see module header).
-// ============================================================================
-
-module subscriptionRbac 'modules/controlplane-subscription-rbac.bicep' = {
-  name: 'controlplane-subscription-rbac'
-  params: {
-    principalId: uami.outputs.principalId
-  }
-}
-
-// ============================================================================
 // OUTPUTS - Consumed by:
 //   - Phase D deploy scripts (L2 app service URL + resource IDs)
 //   - H4 handler (KV name + UAMI resourceId for keyVaultReferenceIdentity PATCH)
@@ -788,8 +764,3 @@ output artifactsBlobUri string = artifactsStorage.outputs.blobUri
 output acrName string = acr.outputs.acrName
 output acrId string = acr.outputs.resourceId
 output acrLoginServer string = acr.outputs.loginServer
-
-// Subscription-scope Contributor for the control-plane UAMI (Wave G-8
-// Batch 2 / audit defect #2) -- consumed by deploy-script post-deploy
-// `az role assignment list` verification.
-output subscriptionContributorRoleAssignmentName string = subscriptionRbac.outputs.contributorRoleAssignmentName

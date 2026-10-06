@@ -125,7 +125,8 @@ public sealed class ArmSubscriptionReadinessProbe : ISubscriptionReadinessProbe
                 Diagnostic: $"Listing the resource groups of subscription '{subscriptionId}' failed ({ex.Status} {ex.ErrorCode}), " +
                             "so H1 cannot confirm it holds no other customer's stamp. The L2 identity needs Owner on the " +
                             "customer's subscription (prereqs.yaml PRQ-S-04). Nothing was written.",
-                Evidence: null);
+                Evidence: null,
+                ListingFailed: true);
         }
 
         var foreign = SubscriptionDedication.FindForeignStampGroups(names, customerId);
@@ -405,7 +406,7 @@ public sealed class ArmSubscriptionReadinessProbe : ISubscriptionReadinessProbe
                 $"'{subscriptionId}': " +
                 $"{string.Join(", ", failedProviders.Select(p => $"{p}={perProviderOutcome[p]}"))}. " +
                 "Remediation: escalate via `az provider register --namespace <ns>` under an elevated identity " +
-                "(the L2 UAMI must have Contributor RBAC on this subscription); investigate ARM if the " +
+                "(the L2 UAMI must have Owner on this subscription — PRQ-S-04); investigate ARM if the " +
                 "Registering state does not converge server-side. F6 verbatim from the 2026-08-27 pre-dispatch audit.",
             Evidence: evidence);
     }

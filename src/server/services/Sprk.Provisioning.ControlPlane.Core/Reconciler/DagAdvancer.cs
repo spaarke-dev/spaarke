@@ -95,7 +95,7 @@ public sealed class DagAdvancer : IDagAdvancer
     /// </summary>
     public const string HandlerH4b = HandlerIds.H4b;
 
-    /// <summary>Handler identifier for H5 Dataverse env creation.</summary>
+    /// <summary>Handler identifier for H5 Dataverse env adoption (T228: the operator creates the environment).</summary>
     public const string HandlerH5 = HandlerIds.H5;
 
     /// <summary>Handler identifier for H6 solution import.</summary>
@@ -156,7 +156,7 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH6] = new[] { HandlerH5, HandlerH3, HandlerH10 },       // T245a: + H3 — H6 reads InterStepState.BffAppRegId (H3 output). T228: + H10.
             [HandlerH7] = new[] { HandlerH6, HandlerH8, HandlerH9 },        // T245a: + H8 — H7 writes the SPE container id env var from InterStepState.SpeContainerId (H8 output). H8 hands the container off only once it is BOUND to its business unit (task 165, owner round 41 item 1). T245b: + H9 — sprk_BffApiBaseUrl is InterStepState.BffApiUrl (H9 output).
             // H5 too (unified-access-control-r2 task 165, owner round 35 item 1): H8 binds the container it creates to the
-            // customer environment's ROOT business unit, which exists only once H5 has created the environment — a container
+            // customer environment's ROOT business unit, known only once H5 has adopted the environment — a container
             // nobody can bind is never created. (T227e: H8 also reads that environment's recorded container.)
             [HandlerH8] = new[] { HandlerH3, HandlerH5 },                   // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 is a data edge (T227b): H8 grants H3's BffAppRegId (and H2a's MiClientId — H2a is upstream of H3) on the container-type registration before creating the container; it authenticates as the container type's OWNING app (SpeContainerOptions.ContainerTypeOwners), not as the BFF app.
             [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4).

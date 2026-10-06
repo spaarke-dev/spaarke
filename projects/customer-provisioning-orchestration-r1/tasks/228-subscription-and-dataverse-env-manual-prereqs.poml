@@ -4,7 +4,7 @@
     <title>Subscription + Dataverse environment become manual prerequisites: intake requires both (and containerTypeId); H1 proves the subscription is the customer's own; H5 adopts the operator's environment and never creates one; H10 runs before H6; Model 1 deploys the customer stamp</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T228 (D4, Q1, G3, G19)</phase>
     <gate>after 227g (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>L2 API intake + handlers H1/H5/H10 + DAG + ARM runner, Bicep RBAC, schema/prereqs, the operator skill, binding docs; security-relevant (subscription Owner grant, cross-customer adoption guards).</rigor-reason>
     <model-tier>opus</model-tier>
@@ -90,5 +90,53 @@
     <trigger>A live action would be required to verify (role assignment, environment creation) — ask the owner first.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 39). Owner decision during the task: the L2 identity holds OWNER on each customer
+    subscription (asked with the constrained RBAC-Administrator and operator-applies-RBAC alternatives; owner chose Owner).
+    - Intake (POST /api/runs + intake.schema.json): subscriptionId (GUID), containerTypeId (GUID, G19) and new
+      dataverseEnvUrl required for EVERY model — ISH-02's Model 1 exemption and the skill's `az account show` default are
+      gone. dataverseEnvUrl goes through Core/Models/DataverseEnvironmentUrlRule (https origin, {domain}.crm[N].dynamics.com,
+      domain spaarke-{customerId} or spaarke-{customerId}-{environmentName}; commercial cloud only) — the guard against
+      adopting another customer's environment; all three values stored canonically (URL https://{host}/, GUIDs "D").
+      Catalog: dataverseDisplayName + H0 rate keys removed.
+    - H1: CheckSubscriptionDedicatedAsync (ARM resource-group listing) + pure SubscriptionDedication — refuses a subscription
+      holding another rg-spaarke-{id}-{env} (incl. Spaarke's platform/shared/byok groups) before provider registration;
+      a listing failure has its own code (subready-subscription-listing-failed). The tenant check already existed.
+    - H5 → H5DataverseEnvAdoptionHandler (folder/namespace DataverseEnvCreation kept): URL rule + WhoAmI as the Worker
+      identity; new probe result AccessDenied (401/403) → worker-not-app-user naming PRQ-C-09. Removed: BapRestEnvironmentCreator,
+      IDataverseEnvCreator, PacAdminDataverseEnvCreator, H0's BapRestEnvironmentRateProbe (+ check name), scripts/preflight/
+      Test-DataverseEnvCreationRate.ps1 and their tests (none under a KEEP path). Options → DataverseEnvAdoptionOptions.
+    - DAG: H10 ← H3, H5; H6 ← H5, H3, H10; H11 ← H10, H7. DEVIATION from step 3 / AC4 ("H10 precedes H6 and H8"): H8 is
+      NOT made to wait for H10 — H8 (and H5) act as the L2 Worker identity, which the operator makes an application user
+      (PRQ-C-09); H10 registers the stamp's identities (BFF app registration + stamp UAMI), which only H6/H7 use. Adding the
+      edge would serialize H8 behind H10 for no data. (code-review F3 / adr-check W7 accepted this record.)
+    - ArmDeploymentRunner: Model 1 → `customer` (same template as Model 2).
+    - Bicep: modules/controlplane-subscription-rbac.bicep repurposed — Owner for the L2 UAMI at the customer subscription,
+      applied by the operator (PRQ-S-04); no longer deployed by platform-controlplane.bicep (+ output removed, JSON
+      recompiled). The live Contributor assignment on the platform subscription stays until an owner removes it.
+    - prereqs.yaml v8: PRQ-S-00 + PRQ-C-09 added, PRQ-S-04 → Owner, PRQ-C-04 retired; every PRQ-S-* is once_per_customer
+      against {stampSubscriptionId} (one subscription per customer), so skill Step 0.5 never checks the operator's ambient
+      subscription; H1/H2a enforce server-side. Skill: Step 1b-bis, Step 1e hard stop removed, Step 1f stores the real URL,
+      Step 2.5 rebinds $subId to the customer's, Step 4.0 sends dataverseEnvUrl. pac flags verified locally
+      (pac admin create --domain; assign-user --application-user takes the application id; a taken domain gets a digit
+      appended — the rule refuses it, documented).
+    - Docs: guide §2.3/§2.4/§3/§5/§5.1/§7.2/§7.4/§12, PROVISIONING-PREREQUISITES v6, inventory, constraints (new binding
+      section), DATAVERSE-WRITE-PATH unaffected, infrastructure/README, spec ADR Tensions (+2 ADR-027 rows: the Owner grant
+      as a documented exception with the rejected alternatives; management groups deferred → plan G36), plan G3/G19 closed,
+      CHANGELOG.
+    - Step 9.5: code-review 1 Critical (F1: PRQ-S-04's {stampSubscriptionId} unresolvable at Step 0.5 → fixed by the
+      once_per_customer re-scope) + warnings F2 (ambient subscription in skill checks — fixed), F4 (prereqs guide drift —
+      fixed), F5 (GUID canonicalization — fixed), F6 (tests — added: ARM-transport dedication tests, WhoAmI status mapping
+      via a credential seam); suggestions F7/F10/F12-F15 fixed, F8 (Lighthouse-before-dedication ordering, Model 2 only) and
+      F9 (H1 regex ignores env-less rg-spaarke-x; the prereq recipe is stricter, which is acceptable for an operator check)
+      and F11 (code name) accepted. adr-check: V1/V2 → ADR Tensions (path A, owner-decided / booked G36); W1 (Model 2 Owner
+      via Lighthouse) noted — Model 2 out of scope; W2/W3/W4/W8 fixed; W5/W9 accepted (IDataverseHealthProbe seam predates;
+      SecretClientKvWriter's default-subscription probe works once PRQ-S-04 grants Owner).
+    - Observation: scripts/provisioning-prereqs/validate-recipe-authoring.ps1 (advisory, not in CI) reports 24 pre-existing
+      recipes without an empty-result guard (26 before this task).
+    - Tests: ControlPlane 2178 / 0 failed (1 skip; the creation and rate-probe tests went with their code; new tests cover intake, the URL rule, H1, H5, the WhoAmI mapping and the DAG); ArchTests 831/831;
+      Worker + Api 0 warnings; bicep builds; prereqs validate OK. No BFF code changed.
+    - T186 live unknowns added: H5's WhoAmI as the Worker identity in an operator-created environment; H1's resource-group
+      listing under the Owner grant; H6 signing in as the BFF app registration right after H10.
+  </notes>
 </task>

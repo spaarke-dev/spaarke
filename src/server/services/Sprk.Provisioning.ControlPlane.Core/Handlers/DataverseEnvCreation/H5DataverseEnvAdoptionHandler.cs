@@ -147,7 +147,8 @@ public sealed class H5DataverseEnvAdoptionHandler : IProvisioningHandler
                 return await FailAsync(run, etag, DataverseEnvAdoptionRejectionCodes.WorkerNotAppUser,
                     $"The L2 Worker identity cannot use '{environmentUrl}': {denied.Diagnostic}. Add the Worker's managed " +
                     "identity to the environment as an application user with the System Administrator role " +
-                    "(prereqs.yaml PRQ-C-09), then resume. H5 never creates or changes an environment.",
+                    "(prereqs.yaml PRQ-C-09), then resume. (A 403 can also mean the environment is in administration mode " +
+                    "or disabled — check it in the Power Platform admin center.) H5 never creates or changes an environment.",
                     cancellationToken).ConfigureAwait(false);
 
             case DataverseHealthProbeResult.Unreachable unreachable:

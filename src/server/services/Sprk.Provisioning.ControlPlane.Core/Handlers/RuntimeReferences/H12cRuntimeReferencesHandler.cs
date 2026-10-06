@@ -234,7 +234,7 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
         {
             var diagnostic =
                 "Target Dataverse URL not present on ProvisioningRun.interStepState.dataverseEnvUrl. " +
-                "H5/H6 (Dataverse env creation + solution import) MUST complete before H12c dispatches.";
+                "H5/H6 (Dataverse env adoption + solution import) MUST complete before H12c dispatches.";
             return await FailAsync(run, etag, RuntimeReferencesRejectionCodes.MissingDataverseUrl, diagnostic, cancellationToken)
                 .ConfigureAwait(false);
         }

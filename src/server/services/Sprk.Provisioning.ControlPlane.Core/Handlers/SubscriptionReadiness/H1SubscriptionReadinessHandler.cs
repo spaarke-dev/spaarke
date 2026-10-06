@@ -358,11 +358,13 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
             _logger.LogWarning(
                 "H1 subscription readiness failed (dedication): runId={RunId} customerId={CustomerId} subscriptionId={SubscriptionId}",
                 envelope.RunId, envelope.CustomerId, subscriptionId);
+            var dedicationCode = dedicationResult.ListingFailed
+                ? SubscriptionReadinessRejectionCodes.SubscriptionListingFailed
+                : SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated;
             await MarkFailedAsync(
-                run, etag, SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated,
-                dedicationResult.Diagnostic, dedicationResult.Evidence, cancellationToken).ConfigureAwait(false);
-            return new HandlerResult.Failure(
-                FailureClass.Resumable, SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated, dedicationResult.Diagnostic);
+                run, etag, dedicationCode, dedicationResult.Diagnostic, dedicationResult.Evidence, cancellationToken)
+                .ConfigureAwait(false);
+            return new HandlerResult.Failure(FailureClass.Resumable, dedicationCode, dedicationResult.Diagnostic);
         }
 
         // (5.5) HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6:

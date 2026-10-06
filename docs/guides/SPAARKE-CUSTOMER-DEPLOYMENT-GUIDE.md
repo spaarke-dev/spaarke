@@ -146,10 +146,11 @@ Per design.md §4.3a.2, Claude Code + the operator use the **operator's own AAD 
 |---|---|---|
 | Customer ID | `acme` — the customerId standard: 3-8 lowercase letters and digits, starting with a letter ([naming convention](../architecture/AZURE-RESOURCE-NAMING-CONVENTION.md)) | Assigned once at customer intake; abbreviate longer names (`northwind` → `nwind`) |
 | Customer display name | "Acme Legal Services" | Customer intake |
-| Target subscription ID | `2ff9ee48-...` | Azure Portal > Subscriptions |
+| The customer's own subscription ID | `2ff9ee48-...` | **The operator creates it** (prereqs.yaml PRQ-S-00) and grants the L2 identity **Owner** on it (PRQ-S-04, `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep`). Required at intake for every model; nothing defaults it (T228) |
+| The customer's Dataverse environment URL | `https://spaarke-acme.crm.dynamics.com/` | **The operator creates it** (PRQ-C-09) with domain `spaarke-{customerId}` (or `spaarke-{customerId}-{environmentName}`) and adds the L2 Worker identity as a System Administrator application user. Required at intake (`dataverseEnvUrl`); H5 adopts it (T228) |
 | Target Entra tenant ID (`tid`) | `a221a95e-...` | Model 2: customer's tenant; Model 1: Spaarke tenant |
 | Azure region | `westus2` (default) | Customer intake / geo requirement |
-| Dataverse region | `unitedstates` (default) | Must match Azure region locality |
+| Dataverse region | `unitedstates` (default) | Chosen by the operator when creating the environment (PRQ-C-09); match the Azure region's locality |
 | Tenancy model | `Model1` (dedicated stamp hosted in Spaarke's tenant) or `Model2` (dedicated stamp in the customer's tenant). Exact case — `POST /api/runs` refuses any other value. | Per §3 selection criteria |
 | Deployment profile | Follows from the tenancy model: `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`. `POST /api/runs` refuses any other pair (`tenancy-profile-invalid`). The names predate the D-12 renumbering. `spaarke-hosted-model1-trial` is **retired** and refused as an unknown profile. | Per D15 |
 | Customer admin contact | Name, email, phone | For H0.5 consent flow (Model 2) |
@@ -160,7 +161,8 @@ Per H0 preflight (§7.1). Items surfaced **up front**, NOT counted as pipeline t
 
 - **Azure OpenAI regional TPM quota** — `az cognitiveservices` returns per-model per-region quota; lead time 1–3 days for quota bump
 - **Azure subscription vCPU quota** — verify per SKU per region
-- **Dataverse environment-creation rate** — ~4/hour per tenant typical (`pac admin quota`)
+- **The customer's subscription and Dataverse environment** — created by the operator before the run (PRQ-S-00, PRQ-S-04,
+  PRQ-C-09; T228). L2 creates neither — the former environment-creation rate limit no longer applies
 - **SPE container type + owning app** — one-time per container type, not per customer: [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) (owning app with a federated credential trusting the L2 Worker UAMI — no certificate, no secret; `Spaarke Model 1` exists since 2026-10-03). H0's `SpeOwnerCredential` check refuses the run until it is in place; there is no 24 h wait
 - **Exchange admin app** — one-time per tenant, not per customer: §4.2.1 (`Spaarke Exchange Admin`, a federated credential trusting the L2 Worker UAMI — no certificate, no secret — plus a narrowed Exchange role). H14a and H13 T4 report "not configured" until it is in place
 - **Customer admin consent (Model 2)** — one-time customer action captured by H0.5
@@ -190,8 +192,8 @@ az webapp list --query "[?name=='spaarke-bff-{customerId}-{env}']"
 > 🔴 **REWRITTEN 2026-09-28 — owner decisions D-12 + D-13.** This section previously defined **Model 1 as
 > a shared trial/SMB tier** sharing App Service Plan, Azure OpenAI and AI Search across customers. That tier
 > is **RETIRED**. It was documented, specified, funded and partly built in Bicep, but **never implemented in
-> the engine** — `H5DataverseEnvCreationHandler` creates a Dataverse environment **unconditionally**, keyed
-> `dvenv-{customerId}`. There has never been a code path in which two customers share an environment.
+> the engine** — H5 always made one Dataverse environment per customer, keyed `dvenv-{customerId}` (since T228 it
+> adopts the one the operator created). There has never been a code path in which two customers share an environment.
 
 Spaarke supports **two deployment models**. They differ on **one axis only: which Azure tenant owns the
 customer's subscription.** Everything else is the same.
@@ -272,9 +274,9 @@ upload in `publish-provisioning-arm-artifacts.yml` (its manifest schema requires
 `model1-shared` option of `deploy-infrastructure.yml`. ✅ `stacks/model2-full.{bicep,json}`,
 `stacks/{dev,staging,prod}.bicepparam`, `parameters/model2-customer-template.bicepparam` and
 `customer-deployment.bicepparam` were **deleted by task 249 (2026-10-02)** together with that workflow's what-if
-and deploy stages — `model2-full.bicep` deployed no live environment. H2a deploys `customer` for Model 2; for
-Model 1 it **fails closed** (`arm-template-unavailable`, nothing deployed) until T228 gives each Model 1 run its own
-subscription (T225b, 2026-10-02, converged the rest of the Model 1 code path).
+and deploy stages — `model2-full.bicep` deployed no live environment. H2a deploys `customer` for **both** models:
+T228 (2026-10-06) made Model 1 deployable once every run carries the customer's own subscription (T225b, 2026-10-02,
+converged the rest of the Model 1 code path).
 
 ### 3.3 Handler behaviour — what differs
 
@@ -291,7 +293,7 @@ platform OpenAI, H13 verifying `tenantId`-filter enforcement — described the r
 
 ✅ **Resolved** (T224 enum rename + T225b pairing): `Model1` maps to Spaarke-owned (no Lighthouse) and `Model2` to
 customer-owned (Lighthouse required), and intake pairs `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔
-`customer-owned-model2`. A Model 1 run still stops at H2a until T228 (one subscription per customer).
+`customer-owned-model2`. Since T228 a Model 1 run deploys like Model 2, into the customer's own subscription.
 
 ### 3.4 Invariants — what I1–I5 actually enforce
 
@@ -466,17 +468,17 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 |---|---|---|---|---|
 | **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
-| **H1** | Subscription readiness | ARM verification target sub is reachable | Lighthouse delegation (`CustomerOwned` only) | `subready-{customerId}` |
+| **H1** | Subscription readiness | ARM verification the customer's subscription is reachable **in the run's tenant** and holds **no other customer's** `rg-spaarke-*` resource group (T228, ADR-027 — checked before H1 registers resource providers); Lighthouse delegation (`CustomerOwned` only) | `subready-subscription-not-dedicated` / `-unreachable` are Resumable, nothing written | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
 | **H2b** | AI Search indexes | Provision the 7 canonical indexes (`files`, `discovery`, `records`, `rag-references`, `insights`, `session-files`, `invoices`) on the stamp's own AI Search service via the SDK (`SearchIndexClientProvisioner`, L2 identity), then verify them — same path for both models (T225b) | — | `aisearch-{customerId}-{indexVer}` — `indexVer` = content version of the schema set applied |
 | **H3** | Entra app registration | 🔴 **One BFF app-reg PER CUSTOMER, both models (D-13, BINDING)** — ~14 Graph + Dynamics permission grants (`GraphAppRoles.cs`); sign-in audience `AzureADMultipleOrgs` (enables Model 2 consent). ✅ Implemented by T222 (2026-09-29): the former `Model1Shared` branch is deleted; H3 creates one registration per customer, unconditionally. | Admin consent granted (Graph query) | `appreg-{customerId}-{tenantId}` |
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
-| **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
+| **H5** | Dataverse env **adoption** | Adopts the environment the **operator created** (intake `dataverseEnvUrl`; PRQ-C-09) — never creates one (T228). Checks the URL is this customer's (`spaarke-{customerId}[-{environmentName}]`, the rule POST /api/runs applies) and that `GET /WhoAmI` answers for the L2 Worker identity | `InterStepState.DataverseEnvUrl` = the canonical URL; `env-url-invalid` / `worker-not-app-user` / `env-health-check-failed` are Resumable | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`). First links the environment's **root business unit** to H8's container (`businessunit.sprk_containerid` — unified-access-control-r2 task 076's non-secure default); a root unit already naming another container → Resumable `root-business-unit-container-conflict` naming both, never overwritten (task 227g) | Client startup validates no hardcoded URL fallbacks; the root unit's container reads back | `envvars-{customerId}-{configVer}` |
 | **H8** | SPE container | Creates ONE customer container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s). **Binds the container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1), so it needs **H5**. Before creating, grants the customer's BFF identities on the container-type registration (stamp UAMI application `full`, BFF app delegated `full` — task 227b). **Records what it created at once and RESUMES with it** (rounds 41 + 49): a recorded container is never created again, and one whose activation failed is re-activated. A create whose answer was lost is QuarantineRequired `spe-container-creation-in-doubt`: never repeated, never auto-adopted (§7.5). **A later run reuses the customer's existing container** — the one the environment records in `sprk_SharePointEmbeddedContainerId` — and never removes it; the run's record and the environment naming different containers stops the run naming both (task 227e). After the bind it writes the `spaarkeCustomerId` marker the BFF recognises its containers by (T227d) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
-| **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
+| **H10** | Dataverse App User + Graph app-role parity | Runs right after H3 + H5 and **before H6** (T228 — H6 and H7 sign in as the BFF app registration it makes an application user). Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
@@ -489,13 +491,17 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 Authoritative source: `DagAdvancer.HandlerDependencies` (a handler is ready when every handler listed for it has
 completed). As of task 227c:
 
-Task 165 (rounds 35, 41) carries two of these edges: **H8 <- H5** (H8 binds the container to the environment's root business unit, which H5 creates) and **H7 <- H8** (H7 writes H8's container, handed off only once BOUND).
+T228 moved **H10** to right after H3 + H5 and made **H6** wait for it: H6 and H7 sign in to the customer
+environment as the BFF app registration, which is an application user there only once H10 has registered it. H5 and
+H8 act as the L2 Worker identity, which the operator makes an application user (PRQ-C-09).
+
+Task 165 (rounds 35, 41) carries two of these edges: **H8 <- H5** (H8 binds the container to the environment's root business unit, known once H5 has adopted the environment) and **H7 <- H8** (H7 writes H8's container, handed off only once BOUND).
 ```
 H1   <- H0                 H2a  <- H1                 H2b  <- H2a
 H4   <- H2a                H5   <- H2a                H3   <- H4
-H4b  <- H4, H3, H5, H8     H6   <- H5, H3             H8   <- H3, H5
-H9   <- H3, H4b            H7   <- H6, H8, H9         H10  <- H7
-H11  <- H10                H12a <- H11                H12b <- H11
+H4b  <- H4, H3, H5, H8     H6   <- H5, H3, H10        H8   <- H3, H5
+H9   <- H3, H4b            H7   <- H6, H8, H9         H10  <- H3, H5
+H11  <- H10, H7            H12a <- H11                H12b <- H11
 H12c <- H12a, H12b, H2a    H14  <- H12c, H9           H13  <- H14
 ```
 
@@ -863,11 +869,13 @@ Failure diagnostic surfaces to operator; run does not start until resolved.
 
 ### 7.2 Phase 2 — Subscription & Bicep Infra (H1, H2a, H2b)
 
-**H1** verifies target subscription is reachable + Lighthouse delegation (`CustomerOwned` only).
+**H1** verifies the customer's subscription is reachable in the run's tenant and holds no other customer's stamp
+(`rg-spaarke-{otherId}-*`; ADR-027, T228), registers the resource providers, and checks Lighthouse delegation
+(`CustomerOwned` only).
 
 **H2a** deploys the per-customer Bicep stack — **the same stack in both models** (D-12):
 - `customer.bicep` — 15 resources per §7.2 of design.md, into the customer's own subscription + resource group
-- `model1-shared.bicep` was deleted by task 225a (§3.2); until T225b + T228, H2a **refuses** Model 1 runs (fails closed) rather than deploy `customer.bicep` into a non-dedicated subscription
+- `model1-shared.bicep` was deleted by task 225a (§3.2); since T228 Model 1 deploys `customer.bicep` too, into the subscription the operator created for the customer
 
 Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + report on drift (per FR-34).
 
@@ -908,7 +916,9 @@ Without it every Type-2 first sign-in is denied `sdap.access.deny.workforce_acct
 
 ### 7.4 Phase 4 — Dataverse Environment (H5, H6, H7)
 
-**H5** creates the Dataverse env (interim: `pac admin create-environment`; target: TF Power Platform provider per D14).
+**H5** adopts the Dataverse environment the operator created (PRQ-C-09) — it never creates one (owner D4 / Q1;
+T228). It refuses a URL not named for this customer and stops `worker-not-app-user` until the L2 Worker identity is a
+System Administrator application user there. **H10** follows (before H6 — §5.1).
 
 **H6** imports 8 managed solutions via Package Deployer with dependency ordering per `$SolutionImportOrder` in `scripts/Deploy-DataverseSolutions.ps1`:
 - **Tier 1**: `SpaarkeCore`
@@ -1235,11 +1245,18 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
 # H4 KV secret population is performed inside Provision-Customer.ps1 in the interim path
 # When Phase H canonical catalog manifest lands, seeder invocation is `scripts/canonical-secret-catalog/Seed-Secrets.ps1`
 
-# Phase 4 — Dataverse
-pac admin create-environment `
+# Phase 4 — Dataverse. The OPERATOR creates the environment in every path (prereqs.yaml PRQ-C-09; L2's H5 only adopts
+# it — T228). Its domain MUST be spaarke-{customerId} (→ https://spaarke-acme.crm.dynamics.com/), the name POST /api/runs
+# and H5 require. If the domain is taken, Dataverse silently appends a digit (spaarke-acme0) — check the URL it reports
+# and use spaarke-{customerId}-{environmentName} instead. Then add the L2 Worker identity (its application/client id) as a
+# System Administrator application user (PRQ-C-09).
+pac admin create `
     --name "spaarke-acme" `
+    --domain "spaarke-acme" `
     --region unitedstates `
     --type Sandbox
+pac admin assign-user --environment "https://spaarke-acme.crm.dynamics.com/" `
+    --user "<L2 control-plane UAMI client id>" --role "System Administrator" --application-user
 
 .\scripts\Deploy-DataverseSolutions.ps1 -EnvironmentUrl "<dv-org-url>"
 

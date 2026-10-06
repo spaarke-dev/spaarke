@@ -19,7 +19,7 @@
 //   Interface earns its keep — no NIH.
 //
 // DESIGN CHOICE (direct REST vs pac CLI shell-out):
-//   Unlike H5 (pac admin create-environment) and H6 (pac solution import),
+//   Unlike H6 (pac solution import),
 //   H7's reference implementation (scripts/Provision-Customer.ps1 Step 8) is
 //   ALREADY a set of direct Dataverse Web API REST calls (Invoke-RestMethod
 //   against environmentvariabledefinitions + environmentvariablevalues), not

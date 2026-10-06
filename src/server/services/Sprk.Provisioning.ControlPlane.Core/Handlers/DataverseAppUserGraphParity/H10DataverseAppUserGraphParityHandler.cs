@@ -62,7 +62,7 @@
 //   ├────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId (§4D I1)                  │ Resumable                 │
 //   │ Missing bffAppRegId/miClientId/miObjectId/  │ Resumable (upstream       │
-//   │ dataverseEnvUrl (H3/H2a/H5-H6 not done yet) │ handler hasn't run yet)   │
+//   │ dataverseEnvUrl (H3/H2a/H5 not done yet)    │ handler hasn't run yet)   │
 //   │ Run not found in Cosmos partition          │ Resumable                 │
 //   │ H10 escalation gate (null AppRoleId)       │ Resumable (no write yet)  │
 //   │ BFF/UAMI App User creation call failed     │ Resumable (idempotent op) │
@@ -271,7 +271,7 @@ public sealed class H10DataverseAppUserGraphParityHandler : IProvisioningHandler
         if (string.IsNullOrWhiteSpace(interStep.DataverseEnvUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H10Rejections.MissingDataverseEnvUrl,
-                "InterStepState.dataverseEnvUrl is not populated — H5/H6 (Dataverse env) must complete before H10.",
+                "InterStepState.dataverseEnvUrl is not populated — H5 (Dataverse env adoption) must complete before H10.",
                 cancellationToken).ConfigureAwait(false);
         }
 

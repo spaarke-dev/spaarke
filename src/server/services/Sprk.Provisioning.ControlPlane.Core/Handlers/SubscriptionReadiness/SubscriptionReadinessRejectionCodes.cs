@@ -73,10 +73,16 @@ public static class SubscriptionReadinessRejectionCodes
     public const string SubscriptionUnreachable = "subready-subscription-unreachable";
 
     /// <summary>
-    /// T228 (ADR-027): the subscription already holds another Spaarke stamp's resource group (or could not be listed).
+    /// T228 (ADR-027): the subscription already holds another Spaarke stamp's resource group.
     /// Resumable; nothing was written. The operator corrects the run's subscription.
     /// </summary>
     public const string SubscriptionNotDedicated = "subready-subscription-not-dedicated";
+
+    /// <summary>
+    /// T228: the subscription's resource groups could not be listed, so whether it is dedicated is unknown — usually the
+    /// L2 identity's Owner grant (prereqs.yaml PRQ-S-04) is missing. Resumable; nothing was written.
+    /// </summary>
+    public const string SubscriptionListingFailed = "subready-subscription-listing-failed";
 
     /// <summary>
     /// CustomerOwned tenancy — Lighthouse delegation from the customer tenant

@@ -8,6 +8,10 @@
 // `spaarke-{customerId}-{environmentName}` (AZURE-RESOURCE-NAMING-CONVENTION.md § Dataverse Environments). A label is
 // matched whole, so another customer's id can never pass — `spaarke-acme` is not `spaarke-acmex`.
 //
+// Commercial cloud only (`*.crm[N].dynamics.com`): Model 1 lives in Spaarke's commercial tenant. Sovereign clouds
+// (crm.microsoftdynamics.us, crm.appsplatform.us, crm.dynamics.cn) are refused — supporting them (Model 2) means
+// changing this rule.
+//
 // ONE rule, applied at POST /api/runs (reject before anything is created) and again by H5 (reject a run document that
 // predates the rule). Reject, never repair: the operator fixes the environment's name or the intake value.
 // ---------------------------------------------------------------------------

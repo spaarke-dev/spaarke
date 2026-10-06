@@ -92,7 +92,7 @@
     "dvUrl": {
       "source": "runtime-context",
       "shape": "Customer Dataverse URL",
-      "populatedBy": "Runtime — per-customer sprk_dataverseenvironment row"
+      "populatedBy": "intake dataverseEnvUrl — the environment the operator created (PRQ-C-09), canonical https://{host}/ with a trailing slash (T228)"
     },
     "adminDvUrl": {
       "source": "constants-per-env-template",
@@ -103,7 +103,7 @@
       "source": "intake",
       "shape": "Azure subscription GUID — the customer stamp's own subscription",
       "populatedBy": "intake.schema.json subscriptionId (ADR-027: one subscription per customer)",
-      "note": "Used by PRQ-E-05 (once_per_customer, an H2a postcondition) — documented for operators, not substituted by Step 0.5b."
+      "note": "Used by PRQ-S-00 / PRQ-S-04 and PRQ-E-05 (once_per_customer) — documented for operators, not substituted by Step 0.5b."
     },
     "stampEnvironment": {
       "source": "intake",

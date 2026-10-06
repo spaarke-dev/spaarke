@@ -38,7 +38,7 @@
       "source": "runtime-az",
       "shape": "Azure subscription GUID",
       "populatedBy": "az account show --query id -o tsv",
-      "note": "Aliased to {sub} at substitution time. For Model 2 dedicated stamps intake.schema.json.subscriptionId is the operator-supplied override; Model 1 shared trials read the operator's default subscription."
+      "note": "Aliased to {sub} at substitution time. The operator's current az subscription — used only by once_per_env / once_per_tenant checks. A customer's stamp subscription is {stampSubscriptionId} (intake subscriptionId, required for every model — T228)."
     },
     "sub": {
       "source": "runtime-az",
@@ -109,7 +109,7 @@
     "dvUrl": {
       "source": "runtime-context",
       "shape": "Customer Dataverse environment URL",
-      "populatedBy": "Runtime — read from customer sprk_dataverseenvironment row post-Step 1f",
+      "populatedBy": "intake dataverseEnvUrl — the environment the operator created (PRQ-C-09), canonical https://{host}/ with a trailing slash (T228)",
       "note": "Only appears in per-customer once_per_customer scoped prereqs (deferred to H0 server-side per EXEC-10)."
     },
     "adminDvUrl": {
@@ -122,7 +122,7 @@
       "source": "intake",
       "shape": "Azure subscription GUID — the customer stamp's own subscription",
       "populatedBy": "intake.schema.json subscriptionId (ADR-027: one subscription per customer)",
-      "note": "Used by PRQ-E-05 (once_per_customer, an H2a postcondition) — documented for operators, not substituted by Step 0.5b."
+      "note": "Used by PRQ-S-00 / PRQ-S-04 and PRQ-E-05 (once_per_customer) — documented for operators, not substituted by Step 0.5b."
     },
     "stampEnvironment": {
       "source": "intake",

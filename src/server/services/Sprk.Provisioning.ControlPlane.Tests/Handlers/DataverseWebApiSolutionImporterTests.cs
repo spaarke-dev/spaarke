@@ -11,7 +11,7 @@
 // extend, don't duplicate, per CLAUDE.md §11) for the artifact-manifest /
 // solution-ZIP blob surface. Polling-loop timing tests use TimeProvider.System
 // with tiny real TimeSpans — same convention as BapRestEnvironmentCreatorTests
-// (task 140) / H5DataverseEnvCreationHandlerTests T13.
+// (task 140, removed by T228) / the former H5 creation-handler tests.
 //
 // COVERAGE (maps to POML acceptance criteria):
 //   T1  Happy path — 3-tier stub catalog, all fresh installs -> ImportSolution

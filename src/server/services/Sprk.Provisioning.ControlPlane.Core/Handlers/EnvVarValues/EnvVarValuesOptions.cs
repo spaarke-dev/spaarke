@@ -49,7 +49,7 @@ public sealed class EnvVarValuesOptions
     /// for solution import (<c>pac auth create --clientSecret</c>), because
     /// the MI-Dataverse App User (H10) has not yet been created at H7's point
     /// in the DAG (H10 runs AFTER H7 per design.md §4.1 handler catalog row:
-    /// "H5 → H6 (solutions) → H7 → H10 (app-user, needs H6 solutions) → H11").
+    /// "H5 → H6 (solutions) → H7 → H10 → H11"; T228 moved H10 to right after H3 + H5, before H6 — H6/H7 sign in as the BFF app registration H10 makes an application user).
     /// As of task 142 (Wave G-4), <c>modules/controlplane-worker-app-service.bicep</c>
     /// wires this UNCONDITIONALLY as a Key Vault app-setting reference
     /// (<c>EnvVarValues__ClientSecret</c> -&gt; <c>@Microsoft.KeyVault(VaultName=…;SecretName=BFF-API-ClientSecret)</c>)

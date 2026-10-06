@@ -208,8 +208,8 @@ builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 //
 // ADR Tension citations for PR description (per CLAUDE.md §6.5):
 //   - ADR-027: no longer an exception (amended 2026-09-28 — one subscription per customer
-//     in both models). Model 2 deploys customer.bicep; Model 1 fails closed at H2a until
-//     tasks 225b + 228 (task 225a retired stacks/model1-shared.bicep). See project spec.md § ADR Tensions.
+//     in both models). Both models deploy customer.bicep into the customer's own subscription (Model 1 since
+//     task 228; task 225a retired stacks/model1-shared.bicep). See project spec.md § ADR Tensions.
 //   - ADR-028 UAMI outbound: ArmDeploymentRunner / ArmKeyVaultRefProbe /
 //     ArmWhatIfDriftDetector all use DefaultAzureCredential pinned to the L2
 //     UAMI (via the shared TokenCredential singleton) — no account keys, no
@@ -665,7 +665,7 @@ builder.Services.AddScoped<H6SolutionImportHandler>();
 // client (BFF app-reg client-credentials via Azure.Identity.ClientSecretCredential),
 // the SAME identity + pattern H6 uses — the MI-Dataverse App User (H10) has
 // not yet been created at H7's point in the DAG (H10 runs AFTER H7 per
-// design.md §4.1: "H5 → H6 (solutions) → H7 → H10 (app-user) → H11").
+// design.md §4.1 order "H5 → H6 → H7 → H10 → H11"; since T228 H10 runs right after H3 + H5, before H6 (DagAdvancer).
 //
 // NAMED HttpClient (task 103 fix, applied 2026-08-19 per g1-task-103 report):
 // DataverseWebApiEnvVarValuesWriter takes IHttpClientFactory (not HttpClient)
