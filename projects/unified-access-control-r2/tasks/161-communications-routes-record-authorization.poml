@@ -4,7 +4,7 @@
     <title>Communications routes authorize the exact record they act on: send and send-bulk, template render, archive, suggest-associations, confirm-affinity, status, record threads, ad-hoc create-task, proposal dismiss and create-task/apply, and account verify check the caller's OWN Dataverse rights before any app-only read or write (route authorization sweep 2026-10-02, owner round 9)</title>
     <phase>Session 27 — route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on live, unconditionally mapped BFF routes (tags bff-api, auth, security). Closes two critical disclosures (any document's file bytes emailed to any address; any column of any record rendered into a template) plus app-only writes onto records the caller cannot see.</rigor-reason>
     <model-tier>opus</model-tier>
