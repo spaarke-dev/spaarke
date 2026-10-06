@@ -16,6 +16,9 @@
 // FLOW (per topology doc §6):
 //   1. Read tenantId + containerTypeId from run parameters; owning app from SpeContainerOptions
 //   2. Idempotency check (spe-{customerId}) — durable no-op if already done
+//   2b. Task 227b (G9): ISpeContainerProvisioner.EnsureGrantsAsync — as the owning app, ensure the
+//       container-type registration grants the stamp UAMI (application full) and the customer BFF app
+//       registration (delegated full); GET-then-PUT/PATCH, so a re-run writes nothing
 //   3. Call ISpeContainerProvisioner.ProvisionAsync (CREATE + ACTIVATE)
 //   4. Call ISpeContainerVerifier.VerifyAsync (app-only GET) — 404 signals
 //      24h SPE replication lag → RunStatus.WaitingOnGate
@@ -25,7 +28,8 @@
 //
 // DELETED FROM H8-A (pre-rewrite):
 //   - Container-TYPE creation (retired to operator prereq per §R5)
-//   - Container-type registration + owning-app permission grant (also §R5)
+//   - Container-type registration + owning-app permission grant (also §R5). The CONSUMING apps' grants
+//     (the customer's BFF identities) came back in task 227b — step 2b — as the owning app, app-only.
 //   - KV write of SPE-ContainerTypeId per customer (containerTypeId now comes
 //     from constants, not per-customer KV; H4 no longer pre-creates that slot)
 //   - sharePointDomain + subscriptionId + upgradeMode parameter guards (not
@@ -58,6 +62,9 @@
 //   │ Missing tenantId / containerTypeId, or no  │ Resumable                │
 //   │ owner configured for the container type    │ (external precondition — │
 //   │                                             │ operator fixes + resumes)│
+//   │ Grant identity missing (MiClientId /       │ Resumable                │
+//   │ BffAppRegId), or a refused / faulted       │ (nothing created; a grant│
+//   │ container-type grant (task 227b)           │ is re-checked on resume) │
 //   │ Run not found in Cosmos partition          │ Resumable                │
 //   │ Provisioner CreateFailure                  │ Resumable                │
 //   │ Provisioner infra fault (no side effect)   │ Resumable                │
@@ -246,6 +253,51 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
+        // (5b) Task 227b (G9): the customer's BFF reaches SPE as two identities — app-only Graph calls as the stamp
+        //      UAMI (Graph__ManagedIdentity__ClientId) and OBO calls as its own app registration — and SPE admits an
+        //      app only through a grant on the container-type registration (topology §3A). Only the owning app may
+        //      write that registration, so H8 ensures both grants before creating the container. Missing ids or a
+        //      refused grant stop here, before anything is created (Resumable).
+        var uamiClientId = run.InterStepState.MiClientId;
+        var bffAppId = run.InterStepState.BffAppRegId;
+        if (string.IsNullOrWhiteSpace(uamiClientId) || string.IsNullOrWhiteSpace(bffAppId))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.GrantIdentityMissing,
+                $"H8 grants the customer's BFF identities on container type '{containerTypeId}' but " +
+                $"{(string.IsNullOrWhiteSpace(uamiClientId) ? "InterStepState.MiClientId (H2a)" : "InterStepState.BffAppRegId (H3)")} " +
+                "is empty — re-run the producing handler, then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        SpeContainerTypeGrantOutcome grantOutcome;
+        try
+        {
+            grantOutcome = await _provisioner.EnsureGrantsAsync(
+                new SpeContainerTypeGrantRequest(tenantId, containerTypeId, owner.OwnerAppId,
+                    BuildGrants(uamiClientId.Trim(), bffAppId.Trim())),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 container-type grant infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerTypeGrantInfraFault,
+                $"Ensuring the container-type grants failed: {ex.GetType().Name}: {ex.Message}. No container was created — Resumable.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (grantOutcome is SpeContainerTypeGrantOutcome.Failure grantFailure)
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerTypeGrantFailed,
+                $"Container-type grant for app '{grantFailure.AppId}' failed: {grantFailure.Diagnostic} The owning app " +
+                $"'{owner.OwnerAppId}' needs FileStorageContainerTypeReg.Selected (admin-consented) and must own container type " +
+                $"'{containerTypeId}'. No container was created — fix, then resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
         // (6) Invoke the provisioner (CREATE + ACTIVATE per topology doc §6).
         //     Infra faults (thrown) are Resumable (no confirmed external side
         //     effect); CreateFailure is Resumable; ActivateFailure is
@@ -378,6 +430,18 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
         return $"spe-{customerId}";
     }
+
+    /// <summary>
+    /// The grants a customer stamp needs on the container-type registration (task 227b): the stamp UAMI for app-only
+    /// calls (application <c>full</c>) and the BFF app registration for OBO calls (delegated <c>full</c>). Each
+    /// identity gets only the token kind it presents. Mirrors the full/full grants dev's BFF identities hold, split by
+    /// token kind; least-privilege trimming below <c>full</c> needs a BFF call-site audit and is out of scope.
+    /// </summary>
+    internal static IReadOnlyList<SpeContainerTypeGrant> BuildGrants(string uamiClientId, string bffAppId) =>
+    [
+        new SpeContainerTypeGrant(uamiClientId, ApplicationPermissions: ["full"], DelegatedPermissions: []),
+        new SpeContainerTypeGrant(bffAppId, ApplicationPermissions: [], DelegatedPermissions: ["full"]),
+    ];
 
     private static bool TryGetNonEmpty(
         IDictionary<string, string> parameters,

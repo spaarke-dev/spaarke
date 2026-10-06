@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — SPE app-only isolation is in code (T227b, owner D28)
+
+`customer-provisioning-orchestration-r1` T227b.
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section — one container type per model, one container per
+  customer; an app-only grant reaches every container of the type, so app-only SPE calls must target only the stamp's
+  own container(s), enforced in code (T227d). A container type per customer was rejected by the owner.
+
 ###### 2026-10-06 — No shared BFF app registration in the provisioning skill (T227a, plan G2)
 
 `customer-provisioning-orchestration-r1` T227a.

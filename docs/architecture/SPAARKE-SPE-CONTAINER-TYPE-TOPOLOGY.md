@@ -247,9 +247,19 @@ this does **and does not** say: Model 1 customers share a *container-type regist
 settings baseline. They do **not** share a container, a BFF, or any Azure resource — those are dedicated
 per customer in both models (D-12).
 
+> 🔴 **App-only access is NOT isolated by the platform (owner D28, 2026-10-06).** Each Model 1 stamp's UAMI holds
+> application `full` on the shared registration (H8, T227b), and Microsoft documents that an app-only token reaches
+> **every container of the type** — there is no per-container app scoping (Learn, *Configure authentication and
+> authorization*, 2026-08-24). Delegated (OBO) access is isolated by container membership. The owner chose one container
+> type per model and one container per customer (per Dataverse environment), with app-only isolation **enforced in the
+> BFF's code and tests (T227d)**: an app-only SPE call may only target the stamp's own container(s).
+
 Grant the BFF app what it needs on the relevant registration; **do not make it an owner.** The per-app
 grant API is v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{appId}`
-(`PATCH` to update, `DELETE` to remove), called as the owning app; per-customer BFF grants are T227 (G9).
+(`PATCH` to update, `DELETE` to remove), called as the owning app. **H8 owns the per-customer grants (T227b):**
+before creating the customer's container it ensures two — the **stamp UAMI** with application `full` (the BFF's
+app-only Graph calls run as the UAMI, `Graph__ManagedIdentity__ClientId`) and the **BFF app registration** with
+delegated `full` (its OBO calls). A grant naming the app registration does not cover the UAMI, and vice versa.
 
 ### Owning-app credential — managed-identity federated credential (task 248, 2026-10-03)
 

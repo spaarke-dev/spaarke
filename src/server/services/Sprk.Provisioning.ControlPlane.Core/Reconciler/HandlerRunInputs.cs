@@ -187,6 +187,9 @@ public static class HandlerRunInputs
                 // Also selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners — T245b).
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake("speContainerDisplayName", required: false),
+                // T227b: H8 grants these two on the container-type registration before creating the container.
+                RunInput.Output(nameof(InterStepState.MiClientId)),
+                RunInput.Output(nameof(InterStepState.BffAppRegId)),
             ],
             [HandlerIds.H9] =
             [

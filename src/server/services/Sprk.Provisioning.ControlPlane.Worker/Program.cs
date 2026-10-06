@@ -740,7 +740,8 @@ builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 //   - ISpeContainerProvisioner -> GraphContainerProvisioner: POST
 //     /storage/fileStorage/containers (CREATE) + POST /storage/fileStorage/
 //     containers/{id}/activate (ACTIVATE) under Microsoft.Graph 6.5.0, app-only
-//     as the container type's owning app.
+//     as the container type's owning app; first it ensures the customer BFF
+//     identities' grants on the container-type registration (task 227b).
 //     Container CREATION is app-only-capable per topology doc §6 (unlike
 //     container-TYPE creation per §R5 which requires delegated).
 //   - ISpeContainerVerifier -> GraphAppOnlyContainerVerifier: single GET

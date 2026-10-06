@@ -54,6 +54,16 @@
 //   AC-17 Provisioner request carries all required inputs (tenant-scoped,
 //         never hardcoded; containerTypeId from run parameters, owning app
 //         from SpeContainerOptions.ContainerTypeOwners).
+//   AC-18 Task 227b (G9): before creating the container, H8 ensures two
+//         container-type grants as the owning app — stamp UAMI application
+//         full, BFF app registration delegated full.
+//   AC-19 Missing MiClientId / BffAppRegId -> Resumable GrantIdentityMissing,
+//         no Graph call at all.
+//   AC-20 Refused grant -> Resumable ContainerTypeGrantFailed naming the app;
+//         grant infra fault -> Resumable ContainerTypeGrantInfraFault; no
+//         container created either way.
+// The GET-then-PUT/PATCH semantics (a re-run writes nothing) are covered by
+// GraphContainerProvisionerGrantTests against the real Graph SDK.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -76,6 +86,8 @@ public sealed class H8SpeContainerHandlerTests
     private const string OwningAppId = "77777777-8888-9999-aaaa-bbbbbbbbbbbb";
     private const string ContainerTypeId = "cccccccc-dddd-eeee-ffff-000000000001";
     private const string ContainerId = "b!aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    private const string UamiClientId = "55555555-0000-0000-0000-0000000000a1";
+    private const string BffAppId = "99999999-0000-0000-0000-00000000bf00";
 
     // ---------- AC-1 happy path ----------
 
@@ -303,6 +315,7 @@ public sealed class H8SpeContainerHandlerTests
         ((HandlerResult.Success)result).IdempotencyKey.Should().Be(expectedKey);
         repo.LastWrittenRun.Should().BeNull("idempotent no-op does not mutate state");
         provisioner.CallCount.Should().Be(0);
+        provisioner.GrantCallCount.Should().Be(0, "a completed H8 does not touch the registration again");
         verifier.CallCount.Should().Be(0);
     }
 
@@ -470,6 +483,89 @@ public sealed class H8SpeContainerHandlerTests
         provisioner.LastRequest!.ContainerTypeId.Should().Be(ContainerTypeId);
     }
 
+    // ---------- AC-18..AC-20 container-type grants (task 227b) ----------
+
+    [Fact]
+    public async Task AC18_EnsuresBothGrantsAsTheOwningApp_BeforeCreatingTheContainer()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-18");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        provisioner.Calls.Should().Equal("grants", "provision");
+        var request = provisioner.LastGrantRequest!;
+        request.TenantId.Should().Be(TenantId);
+        request.ContainerTypeId.Should().Be(ContainerTypeId);
+        request.OwningAppId.Should().Be(OwningAppId, "only the owning app may change its container type's registration");
+        request.Grants.Should().HaveCount(2);
+        request.Grants.Should().ContainSingle(g => g.AppId == UamiClientId).Which.Should().Match<SpeContainerTypeGrant>(g =>
+            g.ApplicationPermissions.SequenceEqual(new[] { "full" }) && g.DelegatedPermissions.Count == 0,
+            "the BFF's app-only Graph calls run as the stamp UAMI");
+        request.Grants.Should().ContainSingle(g => g.AppId == BffAppId).Which.Should().Match<SpeContainerTypeGrant>(g =>
+            g.DelegatedPermissions.SequenceEqual(new[] { "full" }) && g.ApplicationPermissions.Count == 0,
+            "the BFF's OBO calls run as its own app registration");
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task AC19_MissingGrantIdentity_FailsResumable_BeforeAnyGraphCall(bool missingUami, bool missingBffApp)
+    {
+        var run = BuildRun();
+        if (missingUami) run.InterStepState.MiClientId = null;
+        if (missingBffApp) run.InterStepState.BffAppRegId = " ";
+        var repo = new FakeRepository(run, etag: "etag-19");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.GrantIdentityMissing);
+        failure.Diagnostic.Should().Contain(missingUami ? "MiClientId" : "BffAppRegId");
+        provisioner.Calls.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AC20_RefusedGrant_FailsResumable_NamingTheApp_NoContainerCreated()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-20");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.GrantOutcome = new SpeContainerTypeGrantOutcome.Failure(BffAppId, "Graph PUT ... failed with HTTP 403: accessDenied.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerTypeGrantFailed);
+        failure.Diagnostic.Should().Contain(BffAppId).And.Contain("FileStorageContainerTypeReg.Selected");
+        provisioner.Calls.Should().Equal("grants");
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public async Task AC20_GrantInfraFault_FailsResumable_NoContainerCreated()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-20b");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.GrantThrows = new TimeoutException("Container-type grant GET exceeded 00:01:00.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerTypeGrantInfraFault);
+        provisioner.Calls.Should().Equal("grants");
+    }
+
     // ---------- helpers ----------
 
     private static H8SpeContainerHandler BuildHandler(
@@ -518,7 +614,8 @@ public sealed class H8SpeContainerHandlerTests
         };
         run.Parameters.NonSecret[H8SpeContainerHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H8SpeContainerHandler.ContainerTypeIdParameterKey] = ContainerTypeId;
-        run.InterStepState.BffAppRegId = "99999999-0000-0000-0000-00000000bf00";   // customer BFF app — NOT the SPE owner
+        run.InterStepState.BffAppRegId = BffAppId;   // customer BFF app — NOT the SPE owner
+        run.InterStepState.MiClientId = UamiClientId;   // stamp UAMI (H2a) — granted on the container type (T227b)
         return run;
     }
 
@@ -559,6 +656,11 @@ public sealed class H8SpeContainerHandlerTests
         private readonly Exception? _throwOnCall;
         public int CallCount { get; private set; }
         public SpeContainerProvisionRequest? LastRequest { get; private set; }
+        public int GrantCallCount { get; private set; }
+        public SpeContainerTypeGrantRequest? LastGrantRequest { get; private set; }
+        public List<string> Calls { get; } = new();
+        public SpeContainerTypeGrantOutcome GrantOutcome { get; set; } = new SpeContainerTypeGrantOutcome.Success([]);
+        public Exception? GrantThrows { get; set; }
 
         private FakeProvisioner(SpeContainerProvisionOutcome? outcome, Exception? throwOnCall)
         {
@@ -583,8 +685,19 @@ public sealed class H8SpeContainerHandlerTests
         {
             CallCount++;
             LastRequest = request;
+            Calls.Add("provision");
             if (_throwOnCall is not null) throw _throwOnCall;
             return Task.FromResult(_outcome!);
+        }
+
+        public Task<SpeContainerTypeGrantOutcome> EnsureGrantsAsync(
+            SpeContainerTypeGrantRequest request, CancellationToken ct)
+        {
+            GrantCallCount++;
+            LastGrantRequest = request;
+            Calls.Add("grants");
+            if (GrantThrows is not null) throw GrantThrows;
+            return Task.FromResult(GrantOutcome);
         }
     }
 

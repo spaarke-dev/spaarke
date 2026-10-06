@@ -340,9 +340,9 @@ owning anything (topology doc §3A "How a BFF gets container access without owni
   run: single-tenant, **no client secret**, with its own federated credential `spaarke-uami-trust` trusting the
   customer's BFF UAMI. This runbook does not create one; its name is `spaarke-bff-api-{customerId}`. There is no
   shared-tier BFF registration (D-12/D-13; the script path that created one was deleted by T227a).
-- The **grant** for each customer's BFF app on the registration is per customer. **T227b (G9) makes H8 own it** (for the
-  BFF app registration and the stamp UAMI) — until that lands, or to repair one by hand, use the v1.0 per-app grant API,
-  as the owning app:
+- The **grants** for each customer are made by **H8** (T227b), as the owning app, before it creates the customer's
+  container: the stamp UAMI gets application `full`, the BFF app registration delegated `full`. To inspect or repair
+  one by hand, use the v1.0 per-app grant API, as the owning app:
   ```http
   PUT https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{bffAppId}
   Authorization: Bearer <owning-app token>
@@ -350,13 +350,13 @@ owning anything (topology doc §3A "How a BFF gets container access without owni
 
   {
     "delegatedPermissions": ["full"],
-    "applicationPermissions": ["full"]
+    "applicationPermissions": ["none"]
   }
   ```
   `201 Created` on success. Do not put `appId` in the body (it is in the URL). `PATCH` on the same URL updates an
   existing grant; `DELETE` removes it; `GET .../applicationPermissionGrants` lists them. Grants can take up to one
-  hour to propagate. Unlike the whole-registration PUT in Step 5, this touches only that app's grant. Choose the
-  permission set the BFF actually needs; `full` mirrors the owning app. Source:
+  hour to propagate. Unlike the whole-registration PUT in Step 5, this touches only that app's grant. H8 grants each
+  identity only the token kind it presents (UAMI: `applicationPermissions`; BFF app: `delegatedPermissions`). Source:
   [Learn — Create fileStorageContainerTypeAppPermissionGrant](https://learn.microsoft.com/en-us/graph/api/filestoragecontainertyperegistration-post-applicationpermissiongrants?view=graph-rest-1.0).
 - The BFF's own SPE admin surface (`SpeAdminGraphService`) still signs in as owning apps with Key Vault client secrets
   (ADR-028 exception E-1); moving it to MI-FIC is **T250**. Until T250 there is no secret-based

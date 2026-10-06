@@ -42,6 +42,51 @@ public interface ISpeContainerProvisioner
     Task<SpeContainerProvisionOutcome> ProvisionAsync(
         SpeContainerProvisionRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Task 227b (G9): ensures each grant exists on the container type's registration, as the owning app —
+    /// GET the grant, then create it (Graph v1.0 create is PUT) when missing or PATCH it when its permissions
+    /// differ; nothing is written when it already matches. Domain failures do NOT throw; infra faults (token
+    /// exchange, transport, timeout) MAY throw.
+    /// </summary>
+    Task<SpeContainerTypeGrantOutcome> EnsureGrantsAsync(
+        SpeContainerTypeGrantRequest request,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// One <c>applicationPermissionGrants</c> entry on a container-type registration (task 227b). Permission names
+/// are Graph's <c>fileStorageContainerTypeAppPermission</c> values (e.g. <c>full</c>); an empty list means none.
+/// </summary>
+/// <param name="AppId">The app (client) id the grant is for — the stamp UAMI or the customer BFF app registration.</param>
+/// <param name="ApplicationPermissions">Permissions for app-only tokens issued to <paramref name="AppId"/>.</param>
+/// <param name="DelegatedPermissions">Permissions for delegated (OBO) tokens issued to <paramref name="AppId"/>.</param>
+public sealed record SpeContainerTypeGrant(
+    string AppId,
+    IReadOnlyList<string> ApplicationPermissions,
+    IReadOnlyList<string> DelegatedPermissions);
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.EnsureGrantsAsync"/>.</summary>
+/// <param name="TenantId">Customer Entra tenant id (§4D I5 — explicit, never default).</param>
+/// <param name="ContainerTypeId">The container type whose registration carries the grants.</param>
+/// <param name="OwningAppId">The container type's owning app — the only app allowed to change its registration (FileStorageContainerTypeReg.Selected).</param>
+/// <param name="Grants">The grants to ensure, in order.</param>
+public sealed record SpeContainerTypeGrantRequest(
+    string TenantId,
+    string ContainerTypeId,
+    string OwningAppId,
+    IReadOnlyList<SpeContainerTypeGrant> Grants);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.EnsureGrantsAsync"/>.</summary>
+public abstract record SpeContainerTypeGrantOutcome
+{
+    private SpeContainerTypeGrantOutcome() { }
+
+    /// <summary>Every grant is in place. <paramref name="WrittenAppIds"/> lists those created or updated by this call.</summary>
+    public sealed record Success(IReadOnlyList<string> WrittenAppIds) : SpeContainerTypeGrantOutcome;
+
+    /// <summary>Graph refused to read or write the grant for <paramref name="AppId"/>; later grants were not attempted.</summary>
+    public sealed record Failure(string AppId, string Diagnostic) : SpeContainerTypeGrantOutcome;
 }
 
 /// <summary>

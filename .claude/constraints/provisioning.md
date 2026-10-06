@@ -156,6 +156,12 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - The BFF (`CacheModule`) and the L2 Worker (`DispatchModule`) authenticate with their user-assigned identity (`ManagedIdentity__ClientId`) over RESP3 whenever `Redis__Endpoint` is set, and **refuse to start** on a connection string without it outside Development/Testing — so a deployed BFF/Worker MUST carry `Redis__Endpoint` before it runs a T242+ build (per-env cut-over: task 242b, endpoint added first, connection string removed only after master carries T242).
 - H1 registers `Microsoft.Cache` by default. Managed Redis has no scale-down and HA is fixed at create — size up only on a measured memory metric.
 
+## SPE: container type per model, container per customer — app-only isolation is in code (BINDING, owner D28 / T227b)
+
+- One container type per model (`Spaarke Model 1`), one container per customer (per Dataverse environment). H8 grants each stamp's UAMI application `full` and its BFF app registration delegated `full` on the registration, as the owning app.
+- An app-only token reaches **every** container of the type (Microsoft, no per-container app scoping). So the BFF **MUST** target only its own stamp's container(s) on app-only SPE calls — enforced by code and tests (T227d). **MUST NOT** add an app-only SPE call whose container or drive id comes from a caller-supplied value without that check.
+- Do **not** propose a container type per customer as the fix: the owner rejected it (25-per-tenant cap, 5 used, standard types undeletable).
+
 ## Stamp resources are keyless (BINDING, task 244 / owner D13)
 
 - **MUST** keep local/key auth disabled on the stamp's AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB and SignalR (`disableLocalAuth: true`; AI Search with no `authOptions`), Storage (`allowSharedKeyAccess: false` — the module default since T244) and Redis (rule above). A new keyed resource ships the same way (Content Safety did, T246: its endpoint is a plain app setting, `AiSafety__ContentSafety__Endpoint`, and the BFF refuses to start outside Development/Testing without it — never a fallback to a shared or dev account). Documented exclusions (in the test file): App Insights ingestion, and ACS (setting unverified on its pinned API).

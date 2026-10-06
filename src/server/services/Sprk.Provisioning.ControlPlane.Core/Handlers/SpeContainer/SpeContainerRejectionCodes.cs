@@ -69,6 +69,21 @@ public static class SpeContainerRejectionCodes
     /// </summary>
     public const string ProvisioningFailed = "spe-provisioning-failed";
 
+    /// <summary>
+    /// Task 227b: <c>InterStepState.BffAppRegId</c> (H3) or <c>InterStepState.MiClientId</c> (H2a) is empty, so H8
+    /// cannot grant the customer's BFF identities on the container type. Resumable — nothing was written.
+    /// </summary>
+    public const string GrantIdentityMissing = "spe-grant-identity-missing";
+
+    /// <summary>
+    /// Task 227b: Graph refused to read or write a grant on the container-type registration (the diagnostic names
+    /// the app id). Resumable — no container was created; a grant already written is kept and re-checked on resume.
+    /// </summary>
+    public const string ContainerTypeGrantFailed = "spe-container-type-grant-failed";
+
+    /// <summary>Task 227b: infrastructure fault (token exchange, transport, timeout) while ensuring the grants — Resumable.</summary>
+    public const string ContainerTypeGrantInfraFault = "spe-container-type-grant-infra-fault";
+
     /// <summary>Provisioner infrastructure fault (transport, timeout, unexpected exception) — Resumable, no external side effect confirmed.</summary>
     public const string ProvisioningInfraFault = "spe-provisioning-infra-fault";
 
