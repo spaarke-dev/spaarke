@@ -106,5 +106,7 @@
     - Step 9.5: code-review 0 critical, adr-check 0 violations; all 18 findings fixed (incl. ADR-010 W: dead
       SharePointEmbeddedOptions removed — Path C; Upload integration fixture sets the default container; pre-fill tests pin
       that uploads are never stored).
+    - BFF §10 publish size (fresh short-path worktrees, Compress-Archive Optimal, incl. PDBs): origin/master dc469d4a2 =
+      36.13 MB / 192 files; branch 031e1155b = 36.14 MB / 192 files (36.15 before T227f → T227f −0.01 MB). No package change.
   </notes>
 </task>

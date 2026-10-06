@@ -43,7 +43,7 @@
 | **Task** | **T228** — next in the plan order (no task POML yet: create it from the plan §7 T228 row with task-create, then task-execute). |
 | **Step** | 0 — not started. |
 | **Status** | pending. Owner items: W7; **dev rollout of T227d** — set `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (values in the 227d POML notes; live change, ask first). |
-| **Next Action** | Read the plan's §7 T228 row; create `tasks/228-*.poml` (task-create); run task-execute on it. |
+| **Next Action** | Read `notes/model1-dedicated-remediation-plan.md` §7 T228 row (+ D4, Q1, G3): intake requires `subscriptionId` + Dataverse env name/URL for Model 1 (drop shared-sub auto-inject + ISH-02 exemption), H1 SpaarkeOwned on the per-customer sub, L2 UAMI RBAC per customer subscription (replace the fleet-sub `controlplane-subscription-rbac.bicep` assumption — part of the manual prereq), H5 verify/adopt never create, `ArmDeploymentRunner` Model 1 arm → `customer`, `prereqs.yaml` + skill intake + runbook, remove skill Step 1e Model 1 hard stop. Create `tasks/228-*.poml` with task-create, then task-execute. Fresh session recommended (this one ran T227d/e/f + a master merge). |
 | **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a ✅ b ✅ c ✅ d ✅ e ✅ f ✅) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 ### T227f outcome (SESSION 38)
