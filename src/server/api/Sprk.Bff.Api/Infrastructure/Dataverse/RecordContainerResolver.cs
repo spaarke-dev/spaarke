@@ -2180,7 +2180,9 @@ public sealed partial class RecordContainerResolver
         // user and the business unit is ambiguous. Asking for one would silently pick a winner.
         var query = new QueryExpression(SystemUserEntity)
         {
-            ColumnSet = new ColumnSet(BusinessUnitLookupColumn),
+            // Task 171 (adversarial finding 2): the eligibility columns ride on the same read.
+            ColumnSet = new ColumnSet(
+                BusinessUnitLookupColumn, "domainname", "isdisabled", "accessmode", "applicationid", "sprk_isexternal"),
             TopCount = 2,
             Criteria = new FilterExpression
             {
@@ -2241,6 +2243,25 @@ public sealed partial class RecordContainerResolver
                 detail: "Your Dataverse user has no business unit, so the storage location for this "
                         + "content cannot be determined. Ask an administrator to check your user record.",
                 statusCode: 409);
+        }
+
+        // Task 171 (owner round 70, adversarial finding 2): content with no record is written APP-ONLY into the acting
+        // user's BUSINESS-UNIT container, whose writers are exactly the round-70 population — an enabled, internal
+        // person (blank sprk_isexternal is internal, round 67). The same rule SpeContainerMembershipSync keeps the
+        // container's standing writers by; anyone else would be writing into a container they are not a member of.
+        if (!Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync.IsStandingEligible(rows[0]))
+        {
+            _logger.LogWarning(
+                "[SECURE-CONTAINER] The Dataverse user for caller oid {Oid} is not an enabled internal person (disabled, "
+                + "not a person, or flagged external); record-less content is refused.",
+                oid);
+
+            throw new SdapProblemException(
+                code: "acting_user_not_eligible",
+                title: "Cannot store content without a record",
+                detail: "Content that is not attached to a record is stored in your business unit's shared container, "
+                        + "which only enabled internal users may write to. Attach the content to a record you have access to.",
+                statusCode: 403);
         }
 
         var container = await ReadBusinessUnitContainerAsync(buId, ct).ConfigureAwait(false);

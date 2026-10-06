@@ -109,6 +109,10 @@ public static class OBOEndpoints
             var (ok, err) = ValidatePathForOBO(path);
             if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
 
+            // Task 171 (adversarial finding 1): resolved BEFORE any Dataverse or Graph call — a replace is refused
+            // without looking at the container, so the refusal says nothing about which names exist there.
+            var conflict = ResolveConflictBehavior(req);
+
             try
             {
                 logger.LogInformation(
@@ -176,7 +180,7 @@ public static class OBOEndpoints
                 // decided, and the container came from that same record — so the BFF writes as itself.
                 var item = await GraphCallScope.Run(
                     () => speFileStore.UploadSmallAsync(
-                        driveId, path, req.Body, ResolveConflictBehavior(req), ct),
+                        driveId, path, req.Body, conflict, ct),
                     "upload.small");
 
                 logger.LogInformation("Record-keyed upload successful - DriveItemId: {ItemId}", item?.Id);
@@ -273,6 +277,10 @@ public static class OBOEndpoints
             var (ok, err) = ValidatePathForOBO(path);
             if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
 
+            // Task 171 (adversarial finding 1): resolved BEFORE any Dataverse or Graph call — a replace is refused
+            // without looking at the container, so the refusal says nothing about which names exist there.
+            var conflict = ResolveConflictBehavior(req);
+
             try
             {
                 var callerOid = CallerResolution.ResolveObjectId(ctx.User);
@@ -309,7 +317,7 @@ public static class OBOEndpoints
                 // content follows one rule on every surface.
                 var item = await GraphCallScope.Run(
                     () => speFileStore.UploadSmallAsync(
-                        driveId, path, req.Body, ResolveConflictBehavior(req), ct),
+                        driveId, path, req.Body, conflict, ct),
                     "upload.small");
 
                 logger.LogInformation("Record-less upload successful - DriveItemId: {ItemId}", item?.Id);
@@ -386,8 +394,13 @@ public static class OBOEndpoints
             {
                 return TypedResults.ValidationProblem(new Dictionary<string, string[]>
                 {
-                    ["conflictBehavior"] = new[] { "conflictBehavior must be one of: fail, replace, rename" }
+                    ["conflictBehavior"] = new[] { "conflictBehavior must be one of: fail, rename" }
                 });
+            }
+
+            if (behavior == ConflictBehavior.Replace)
+            {
+                throw ReplaceRefused();
             }
 
             try
@@ -585,24 +598,40 @@ public static class OBOEndpoints
     /// followed by a confusing error. With <c>fail</c>, Graph returns 409 and the existing file is
     /// untouched.</para>
     ///
-    /// <para>Clients that have ASKED the user what to do pass their choice back explicitly:
-    /// <c>?conflictBehavior=rename</c> (keep both — Graph stores under a non-colliding name) or
-    /// <c>?conflictBehavior=replace</c> (save as a new version — SharePoint retains the prior content
-    /// as a version, so it stays recoverable). There is no separate "replace and discard" value: at the
-    /// Graph level that is the same call as <c>replace</c>, and a user who genuinely wants the old
-    /// document gone deletes it and uploads fresh.</para>
+    /// <para>Clients that have ASKED the user what to do pass <c>?conflictBehavior=rename</c> (keep both —
+    /// Graph stores under a non-colliding name). Anything else — absent or unrecognised — is <c>fail</c>.</para>
     ///
-    /// <para>Unrecognised values fall back to <c>replace</c> via
-    /// <c>ConflictBehaviorExtensions.ParseConflictBehavior</c>, so this only reads the parameter when
-    /// it is actually present — an absent parameter must mean <c>fail</c>, not the parser's default.</para>
+    /// <para>🔴 <b><c>replace</c> is REFUSED (409 <c>upload_replace_not_supported</c>) — unified-access-control-r2
+    /// task 171, adversarial finding 1.</b> These uploads now write APP-ONLY, and the decision behind them is
+    /// AssociateContent on the record the bytes are filed under — not Write on whatever file already holds that name.
+    /// Containers are shared (a business unit's) and the upload root is flat, so a replace by name would let a caller
+    /// with AssociateContent on record B overwrite record A's file. Under OBO, SPE's own write check on the existing
+    /// item stood in the way; under the broker nothing does. Replacing an existing document's content is a VERSION
+    /// SAVE of that document, which authorizes Write on it (the Office add-in's version save, Compose saves, Office
+    /// itself under the caller's own role). There is no web "upload as a new version" route — a known limit, recorded
+    /// in the task-171 note. The refusal is decided before any Graph or Dataverse call, so it reveals
+    /// nothing about the container.</para>
     /// </remarks>
     private static ConflictBehavior ResolveConflictBehavior(HttpRequest req)
     {
-        var raw = req.Query["conflictBehavior"].ToString();
-        return string.IsNullOrWhiteSpace(raw)
-            ? ConflictBehavior.Fail
-            : ConflictBehaviorExtensions.ParseConflictBehavior(raw);
+        var raw = req.Query["conflictBehavior"].ToString().Trim();
+        if (raw.Equals("replace", StringComparison.OrdinalIgnoreCase))
+        {
+            throw ReplaceRefused();
+        }
+
+        return raw.Equals("rename", StringComparison.OrdinalIgnoreCase) ? ConflictBehavior.Rename : ConflictBehavior.Fail;
     }
+
+    /// <summary>The refusal of <c>conflictBehavior=replace</c> on an app-only upload route (task 171 finding 1).</summary>
+    internal const string ReplaceRefusedCode = "upload_replace_not_supported";
+
+    private static SdapProblemException ReplaceRefused() => new(
+        code: ReplaceRefusedCode,
+        title: "Replacing a file on upload is not supported",
+        detail: "Uploading never replaces an existing file. Upload it under a new name (conflictBehavior=rename), or open the "
+                + "existing document (Word, the Office add-in or Compose) and save your changes there as a new version.",
+        statusCode: StatusCodes.Status409Conflict);
 
     private static (bool ok, string? error) ValidatePathForOBO(string path)
     {

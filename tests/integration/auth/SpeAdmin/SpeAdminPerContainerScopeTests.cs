@@ -621,6 +621,51 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // Container-role grant markers are server-owned (task 171, adversarial finding 7)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Theory]
+    [InlineData("SprkStd0123456789abcdef0123456789abcdef")]
+    [InlineData("SprkJit0123456789abcdef0123456789abcdef")]
+    [InlineData(" sprkjitANYTHING ")]
+    public async Task CustomProperties_ThatWouldWriteAGrantMarker_Are403_AndNothingIsPatched(string name)
+    {
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.PutAsJsonAsync(
+                Url("/api/spe/containers/{c}/customproperties", "c-own"),
+                new { properties = new[] { new { name, value = "perm-forged", isSearchable = false } } }),
+            HttpStatusCode.Forbidden);
+
+        problem["reasonCode"].GetString().Should().Be("spe.admin.deny.container_grant_marker_server_owned",
+            "a forged marker would make a hand-granted role removable by the sync, and a deleted one would strand a grant");
+        _fixture.Graph.AllRequests.Should().NotContain(r => r.Method == "PATCH");
+    }
+
+    [Fact]
+    public async Task CustomProperties_GrantMarkers_AreNeverShown()
+    {
+        var properties =
+            "{\"" + SpeContainerBusinessUnitStamp.PropertyName + "\":{\"value\":\"" + UnitA + "\",\"isSearchable\":false},"
+            + "\"SprkStd0123456789abcdef0123456789abcdef\":{\"value\":\"perm-1\",\"isSearchable\":false},"
+            + "\"SprkJitfedcba9876543210fedcba9876543210\":{\"value\":\"perm-2\",\"isSearchable\":false},"
+            + "\"Region\":{\"value\":\"EU\",\"isSearchable\":true}}";
+        _fixture.Graph.StubGet($"{ContainersPath}/c-marked",
+            "{\"id\":\"c-marked\",\"displayName\":\"Marked\",\"containerTypeId\":\"" + TypeT
+            + "\",\"status\":\"active\",\"customProperties\":" + properties + "}");
+        using var client = Admin();
+
+        var response = await client.GetAsync(Url("/api/spe/containers/{c}/customproperties", "c-marked"));
+
+        var raw = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, raw);
+        raw.Should().Contain("Region");
+        raw.Should().NotContain("SprkStd", "the grant markers are server-owned and never shown");
+        raw.Should().NotContain("SprkJit");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // Containers are stamped at creation (owner round 20 item 1)
     // ─────────────────────────────────────────────────────────────────────────
 

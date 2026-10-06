@@ -74,7 +74,9 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
      (owner rounds 69 + 70) this step is redundant and kept only as a head start: viewing, uploading, Compose and AI
      run app-only behind Dataverse and need no container role at all, and `SpeContainerMembershipSyncJob` adds every
      enabled internal user of a business unit as a writer on that unit's container within ~5 minutes (Office edit).
-     The sync never removes the role Step 8 granted (it removes only roles it created); expiry still revokes it.*
+     Step 8 grants through the same MARKED standing grant the sync uses (adversarial finding 6, 2026-10-06), so the sync
+     reconciles it like any other standing writer — removed when the user is disabled, flagged external or moves to a unit
+     that does not map to the container. A user who already holds a role is left as they are. Expiry still revokes.*
    - Step 9: Send welcome email to applicant's work email
 
 8. **Record is updated** to status `Provisioned` with demo username, Entra object ID, provisioned date, and expiration date (default: 14 days).

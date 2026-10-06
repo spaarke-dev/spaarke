@@ -30,6 +30,9 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 public class FileAccessBrokerIdentityTests : IClassFixture<FileAccessBrokerTestFixture>
 {
     private const string DocumentId = "17130000-0000-4000-8000-000000000001";
+
+    /// <summary>A document whose row names a drive the pointer check refuses (not a container this document may use).</summary>
+    private const string RoguePointerDocumentId = FileAccessBrokerTestFixture.RoguePointerDocumentId;
     private readonly FileAccessBrokerTestFixture _fixture;
 
     public FileAccessBrokerIdentityTests(FileAccessBrokerTestFixture fixture)
@@ -70,6 +73,32 @@ public class FileAccessBrokerIdentityTests : IClassFixture<FileAccessBrokerTestF
         _fixture.AppOnlyCalls.Should().BeEmpty("the gate runs before any SPE call, and an app-only call would bypass SPE entirely");
     }
 
+    [Theory(DisplayName = "Task 171 (finding 5): a read route whose row pointer the check REFUSES answers 409 document_storage_unverified and makes NO Graph call")]
+    [InlineData("GET", "preview-url")]
+    [InlineData("GET", "preview")]
+    [InlineData("GET", "content")]
+    [InlineData("GET", "view-url")]
+    [InlineData("GET", "office")]
+    [InlineData("GET", "open-links")]
+    [InlineData("GET", "versions")]
+    [InlineData("GET", "versions/v-1/content")]
+    [InlineData("POST", "share-link")]
+    public async Task ReadRoute_PointerRefused_Is409_AndMakesNoGraphCall(string method, string route)
+    {
+        // The caller is fully entitled on the ROW — so the only thing standing between a rogue pointer and an app-only
+        // read of someone else's file is the pointer check. Removing it from any route must fail this test.
+        using var client = _fixture.CreateClientWithRights("ReadAccess,WriteAccess,ShareAccess");
+        var url = $"/api/documents/{RoguePointerDocumentId}/{route}";
+
+        var response = method == "POST" ? await client.PostAsync(url, content: null) : await client.GetAsync(url);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, body);
+        body.Should().Contain("document_storage_unverified");
+        _fixture.AppOnlyCalls.Should().BeEmpty(
+            "the application's identity reaches every container of the type, so an unverified pointer is never followed");
+    }
+
     [Fact(DisplayName = "Task 171: share-link mints its link APP-ONLY, and only for a caller holding Share")]
     public async Task ShareLink_IsMintedAppOnly_OnlyForAShareHolder()
     {
@@ -93,7 +122,11 @@ public sealed class FileAccessBrokerTestFixture : DocumentDestroyAuthorizationTe
     /// <summary>Every app-only facade call, as "kind:drive/item".</summary>
     public ConcurrentQueue<string> AppOnlyCalls { get; } = new();
 
-    public static string DriveFor(string documentId) => $"b!drive-{documentId}";
+    /// <summary>The document whose row points at a container the pointer check refuses (finding 5).</summary>
+    public const string RoguePointerDocumentId = "17130000-0000-4000-8000-0000000000ff";
+
+    public static string DriveFor(string documentId)
+        => documentId == RoguePointerDocumentId ? "b!rogue-drive-other-container" : $"b!drive-{documentId}";
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -144,6 +177,20 @@ public sealed class FileAccessBrokerTestFixture : DocumentDestroyAuthorizationTe
             return Task.FromResult<SpeDriveItemSummary?>(new SpeDriveItemSummary(
                 itemId, "Brief.docx", 3, "https://contoso.sharepoint.com/contentstorage/x/_layouts/15/Doc.aspx?sourcedoc=1",
                 null, "application/vnd.openxmlformats-officedocument.wordprocessingml.document", null, null, null));
+        }
+
+        public override Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+            string driveId, string itemId, CancellationToken ct = default)
+        {
+            _calls.Enqueue($"versions:{driveId}/{itemId}");
+            return Task.FromResult<IReadOnlyList<VersionInfoDto>?>(Array.Empty<VersionInfoDto>());
+        }
+
+        public override Task<Stream?> DownloadFileVersionAsync(
+            string driveId, string itemId, string versionId, CancellationToken ct = default)
+        {
+            _calls.Enqueue($"version:{driveId}/{itemId}/{versionId}");
+            return Task.FromResult<Stream?>(new MemoryStream([1]));
         }
 
         public override Task<string?> CreateSharingLinkAsync(

@@ -11,9 +11,10 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// <summary>
 /// What an Office edit-open may expect: whether the caller can edit the file in Office, and why.
 /// </summary>
-/// <param name="CanEdit">The caller holds (or was just granted) a writer role, or the container is a business-unit
-/// container whose internal users are standing writers.</param>
-/// <param name="Role">"standing" (business-unit container), "member" (already held a role), "writer-jit" (granted now),
+/// <param name="CanEdit">The caller holds (or was just granted) an editing role, or is a standing writer of this
+/// business-unit container (an enabled internal person whose own business unit maps to it).</param>
+/// <param name="Role">"standing" (a standing writer of this business-unit container), "member" (already held an editing
+/// role), "writer-jit" (granted now),
 /// "member-read-only" (already holds a role that cannot edit — e.g. a hand-granted reader), "none" (secure container, no
 /// Write on its record, or an external user on a Restricted record), or "unknown" (the container could not be
 /// classified).</param>
@@ -69,8 +70,11 @@ public class OfficeEditAccessService
     /// <c>edit_access_unavailable</c>) when a Write holder's grant could not be made — never a URL that cannot work
     /// for a caller entitled to it, and never a grant that could not be recorded.
     /// </summary>
+    /// <param name="describeSharedContainer">When <see langword="false"/> (the caller only needs the grant side — e.g.
+    /// <c>/open-links</c>, which returns no edit verdict), a SHARED container is answered <c>not-evaluated</c> without
+    /// reading anything: nothing is ever granted there, so the reads would buy nothing.</param>
     public virtual async Task<OfficeEditAccess> PrepareAsync(
-        Guid documentId, string driveId, HttpContext httpContext, CancellationToken ct = default)
+        Guid documentId, string driveId, HttpContext httpContext, CancellationToken ct = default, bool describeSharedContainer = true)
     {
         OwningSecureRecord? secureOwner;
         try
@@ -85,13 +89,16 @@ public class OfficeEditAccessService
             return new OfficeEditAccess(false, "unknown");
         }
 
+        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+
         if (secureOwner is null)
         {
-            // A business-unit / environment container: internal users are standing writers (round 70).
-            return new OfficeEditAccess(true, "standing");
+            // A business-unit / environment container: nothing is granted here (round 70 — the sync keeps its
+            // standing writers). What is REPORTED must be true for this caller, though (adversarial finding 9).
+            return describeSharedContainer
+                ? await StandingAccessAsync(documentId, driveId, token, ct).ConfigureAwait(false)
+                : new OfficeEditAccess(false, "not-evaluated");
         }
-
-        var token = TokenHelper.ExtractBearerTokenOrNull(httpContext);
         if (!EntityAccessFilter.TryResolveEntitySet(secureOwner.EntityLogicalName, out var entitySet))
         {
             _logger.LogWarning(
@@ -162,6 +169,64 @@ public class OfficeEditAccessService
     /// </summary>
     protected virtual Task<OwningSecureRecord?> ResolveSecureOwnerAsync(string driveId, CancellationToken ct)
         => _containerResolver.ResolveOwningRecordAsync(driveId, ct);
+
+    /// <summary>
+    /// What a caller can do in Office on a SHARED (business-unit / environment) container — reported, never granted
+    /// (task 171, adversarial finding 9). <c>standing</c> only for a caller the sync keeps as a standing writer HERE: an
+    /// enabled internal person (<see cref="Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync.IsStandingEligible"/>)
+    /// whose own business unit's container is this one. Anyone else is answered from the container's actual roles
+    /// (one Graph read): an editing role → <c>member</c>; a reader → <c>member-read-only</c>; none → <c>none</c>. A fact
+    /// that cannot be read → <c>unknown</c> (never "can edit").
+    /// </summary>
+    private async Task<OfficeEditAccess> StandingAccessAsync(Guid documentId, string driveId, string? token, CancellationToken ct)
+    {
+        try
+        {
+            var systemUserId = await _probe.GetCallerSystemUserIdAsync(token, ct).ConfigureAwait(false);
+            if (systemUserId is not { } id)
+            {
+                return new OfficeEditAccess(false, "unknown");
+            }
+
+            var user = await _entities.RetrieveAsync("systemuser", id, StandingColumns, ct).ConfigureAwait(false);
+            if (user is null)
+            {
+                return new OfficeEditAccess(false, "unknown");
+            }
+
+            if (Sprk.Bff.Api.Services.Access.SpeContainerMembershipSync.IsStandingEligible(user)
+                && user.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("businessunitid") is { Id: var unitId })
+            {
+                var unit = await _entities.RetrieveAsync("businessunit", unitId, ["sprk_containerid"], ct).ConfigureAwait(false);
+                if (string.Equals(unit?.GetAttributeValue<string>("sprk_containerid")?.Trim(), driveId, StringComparison.Ordinal))
+                {
+                    return new OfficeEditAccess(true, "standing");
+                }
+            }
+
+            // Not a standing writer of THIS container (another unit's record, an external user, a hand-granted member):
+            // the container's own roles say what Office will allow.
+            var access = await _membership.ReadAccessAsync(driveId, ct).ConfigureAwait(false);
+            var held = access?.Roles.FirstOrDefault(r => r.IsFor(
+                user.GetAttributeValue<string>("domainname"), user.GetAttributeValue<Guid?>("azureactivedirectoryobjectid")));
+            return held is null
+                ? new OfficeEditAccess(false, "none")
+                : held.CanEdit ? new OfficeEditAccess(true, "member") : new OfficeEditAccess(false, "member-read-only");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "[OFFICE-EDIT] Document {DocumentId}: the caller's standing access could not be determined; reported as unknown.",
+                documentId);
+            return new OfficeEditAccess(false, "unknown");
+        }
+    }
+
+    private static readonly string[] StandingColumns =
+    [
+        "domainname", "azureactivedirectoryobjectid", "isdisabled", "accessmode", "applicationid", "sprk_isexternal",
+        "businessunitid",
+    ];
 
     private async Task<bool> IsRestrictedOrUnreadableAsync(OwningSecureRecord record, CancellationToken ct)
     {

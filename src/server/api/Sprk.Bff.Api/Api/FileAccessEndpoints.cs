@@ -774,7 +774,7 @@ public static class FileAccessEndpoints
             // 9. Edit access (owner round 70): just-in-time writer role on a SECURE container for a caller with Write on
             //    the secure record. A caller without Write gets the same pointers and no grant — SharePoint refuses
             //    them, and the in-app preview (broker) is their view path.
-            await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct);
+            await editAccess.PrepareAsync(docGuid, document.GraphDriveId!, context, ct, describeSharedContainer: false);
 
             // 10. Return response
             return TypedResults.Ok(new OpenLinksResponse(

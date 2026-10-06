@@ -8,11 +8,11 @@ namespace Spaarke.ArchTests;
 /// unified-access-control-r2 task 171 (owner rounds 69 + 70) — structural fitness functions for broker-only SPE bytes.
 /// </summary>
 /// <remarks>
-/// <para><b>Rule 1 — who may GRANT a user an SPE container role.</b> Exactly three types reference Graph's
-/// container-permission create: <c>SpeContainerMembershipService</c> (the marked grants: just-in-time Office edit on a
-/// secure container, and standing business-unit writers — round 70), <c>SpeAdminGraphService</c> (the SPE admin
-/// console's explicit, admin-gated permission route) and <c>DemoProvisioningService</c> (self-registration Step 8, left in
-/// place by owner round 69 (4)). A fourth caller is a new way for access to stop following Dataverse, so it fails here.</para>
+/// <para><b>Rule 1 — who may GRANT a user an SPE container role.</b> Exactly two types reference Graph's
+/// container-permission create: <c>SpeContainerMembershipService</c> (the MARKED grants: just-in-time Office edit on a
+/// secure container, standing business-unit writers — round 70 — and, since adversarial finding 6, self-registration
+/// Step 8, which now grants through it) and <c>SpeAdminGraphService</c> (the SPE admin console's explicit, admin-gated
+/// permission route). A third caller is a new way for access to stop following Dataverse, so it fails here.</para>
 /// <para><b>Rule 2 — who may still read or write SPE bytes AS THE USER.</b> Every record-backed byte path is app-only
 /// behind a Dataverse decision. The OBO byte members left on the facade serve only paths with no Dataverse record
 /// behind them (task 171 escalation trigger 2, reported to the owner): Compose "Path B" through
@@ -29,8 +29,8 @@ public class SpeBrokerOnlyByteIdentityGuardTests
     private static IEnumerable<(Type Caller, MethodBase CallerMethod, MethodBase Target)> References()
         => IlCallScan.MethodReferences(Bff.GetTypes());
 
-    [Fact(DisplayName = "Task 171: only the marked-grant service, the SPE admin console and self-registration Step 8 create SPE container permissions")]
-    public void OnlyThreeTypesCreateContainerPermissions()
+    [Fact(DisplayName = "Task 171: only the marked-grant service and the SPE admin console create SPE container permissions")]
+    public void OnlyTwoTypesCreateContainerPermissions()
     {
         var granters = References()
             .Where(r => r.Target.Name == "PostAsync"
@@ -44,10 +44,9 @@ public class SpeBrokerOnlyByteIdentityGuardTests
             granters.SequenceEqual(new[] {
                 "Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService",
                 "Sprk.Bff.Api.Infrastructure.Graph.SpeAdminGraphService",
-                "Sprk.Bff.Api.Services.Registration.DemoProvisioningService",
             }.OrderBy(n => n, StringComparer.Ordinal)),
-            "a user is granted an SPE container role only by the marked JIT / standing grants (round 69 / 70), the admin "
-            + "console, or self-registration Step 8 — anything else lets access drift from Dataverse" + " Found: " + string.Join(", ", granters));
+            "a user is granted an SPE container role only by the marked JIT / standing grants (round 69 / 70 — self-"
+            + "registration Step 8 included) or the admin console — anything else lets access drift from Dataverse" + " Found: " + string.Join(", ", granters));
     }
 
     /// <summary>The OBO byte members of the facade (task 171 left exactly these).</summary>

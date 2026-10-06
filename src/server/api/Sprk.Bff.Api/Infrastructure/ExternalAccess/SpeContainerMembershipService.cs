@@ -374,7 +374,8 @@ public class SpeContainerMembershipService
     //     secure record, granted on an Office edit-open by OfficeEditAccessService and removed by the same job.
     //
     // How a grant is told apart from a hand-granted or owner role (step 0, no Dataverse schema): the grant is POSTed
-    // with Graph's default conflict behaviour (fail), so a user who ALREADY holds a role answers 409 and is never
+    // as a plain POST (the container-permission API takes no conflict parameter; Graph answers 409 when the user already
+    // holds a role — pinned live by the task-171 gate D2), so a user who ALREADY holds a role answers 409 and is never
     // recorded — a role this code did not create is never removed. On 201 the permission id is recorded in ONE
     // container custom property per grant (<prefix><systemuserid:N> = <permission id>). If that record cannot be
     // written the permission is deleted again, so no unrecorded grant is ever left behind. Removal deletes only a
@@ -396,6 +397,19 @@ public class SpeContainerMembershipService
     /// so that is all its removal takes away.
     /// </summary>
     internal const string OnlyContainerScopedPrefer = "onlyRemoveContainerScopedPermission";
+
+    /// <summary>
+    /// Is <paramref name="propertyName"/> a grant marker (either prefix, case-insensitive)? The SPE admin custom-property
+    /// editor RESERVES these names (task 171, adversarial finding 7): a marker edited by hand would make a hand-granted
+    /// role removable — or make a marked grant unremovable — so no admin route may create, change, delete or show one.
+    /// </summary>
+    public static bool IsGrantMarkerName(string? propertyName)
+    {
+        var name = propertyName?.Trim();
+        return !string.IsNullOrEmpty(name)
+               && (name.StartsWith(StandingWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase)
+                   || name.StartsWith(JitWriterMarkerPrefix, StringComparison.OrdinalIgnoreCase));
+    }
 
     /// <summary>The marker key for <paramref name="systemUserId"/> under <paramref name="prefix"/>.</summary>
     public static string MarkerKey(string prefix, Guid systemUserId) => prefix + systemUserId.ToString("N");

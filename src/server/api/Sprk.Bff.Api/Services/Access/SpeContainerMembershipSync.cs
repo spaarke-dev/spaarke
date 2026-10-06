@@ -385,8 +385,19 @@ public class SpeContainerMembershipSync
 
         try
         {
-            var rights = await _rights.GetPrincipalRightsAsync(systemUserId, entitySet, recordId, ct).ConfigureAwait(false);
-            return rights.HasFlag(AccessRights.Write) ? Verdict.Keep : Verdict.Remove;
+            // Task 171 (adversarial finding 3): the STRICT read — only an answer about the holder's access may revoke. A
+            // request-level 403 (the application user missing prvActOnBehalfOfAnotherUser, which would 403 EVERY check)
+            // is UNKNOWN, so a misconfiguration keeps grants instead of revoking them all each pass.
+            var rights = await _rights.GetPrincipalRightsOrUnknownAsync(systemUserId, entitySet, recordId, ct).ConfigureAwait(false);
+            if (rights is null)
+            {
+                _logger.LogWarning(
+                    "[SPE-MEMBERSHIP-SYNC] Dataverse gave no access answer for JIT holder {SystemUserId} on {EntitySet}({RecordId}); "
+                    + "kept this run.", systemUserId, entitySet, recordId);
+                return Verdict.Unknown;
+            }
+
+            return rights.Value.HasFlag(AccessRights.Write) ? Verdict.Keep : Verdict.Remove;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

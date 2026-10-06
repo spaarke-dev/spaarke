@@ -168,14 +168,82 @@ public class OfficeEditAccessServiceTests
         result.Should().Be(new OfficeEditAccess(true, "writer-jit"));
     }
 
-    [Fact(DisplayName = "Task 171: a BUSINESS-UNIT container never gets a JIT grant — internal users there are standing writers")]
-    public async Task BusinessUnitContainer_NeverGrants()
+    private const string BuDrive = "b!business-unit-container";
+    private static readonly Guid CallerUnit = Guid.Parse("17100000-0000-4000-8000-000000000005");
+
+    /// <summary>The caller's user row with the standing-eligibility columns, and their unit's container.</summary>
+    private void CallerOnBusinessUnit(bool? external, string unitContainer)
     {
-        var result = await Build(secureOwner: null, AccessRights.Write)
-            .PrepareAsync(DocumentId, "b!business-unit-container", Http());
+        var user = new Entity("systemuser", SystemUserId)
+        {
+            ["domainname"] = Upn,
+            ["azureactivedirectoryobjectid"] = ObjectId,
+            ["isdisabled"] = false,
+            ["accessmode"] = new OptionSetValue(0),
+            ["businessunitid"] = new EntityReference("businessunit", CallerUnit),
+        };
+        if (external is not null) user["sprk_isexternal"] = external;
+        _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(user);
+        _entities.Setup(e => e.RetrieveAsync("businessunit", CallerUnit, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("businessunit", CallerUnit) { ["sprk_containerid"] = unitContainer });
+    }
+
+    [Fact(DisplayName = "Task 171: a BUSINESS-UNIT container never gets a JIT grant; a standing writer OF THIS CONTAINER is reported canEdit")]
+    public async Task BusinessUnitContainer_StandingWriterOfThisContainer_CanEdit_AndNothingIsGranted()
+    {
+        CallerOnBusinessUnit(external: null, unitContainer: BuDrive);
+
+        var result = await Build(secureOwner: null, AccessRights.Write).PrepareAsync(DocumentId, BuDrive, Http());
 
         result.Should().Be(new OfficeEditAccess(true, "standing"));
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never,
+            "a standing writer is answered from Dataverse alone");
+    }
+
+    [Theory(DisplayName = "Task 171 (finding 9): on a BUSINESS-UNIT container a caller who is NOT its standing writer and holds no role is reported canEdit=false")]
+    [InlineData(true, BuDrive)]                        // flagged external — never a standing writer
+    [InlineData(null, "b!another-units-container")]    // internal, but their unit maps to another container
+    public async Task BusinessUnitContainer_NotAStandingWriter_NoRole_CannotEdit(bool? external, string unitContainer)
+    {
+        CallerOnBusinessUnit(external, unitContainer);
+        _membership.Setup(m => m.ReadAccessAsync(BuDrive, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess([], RolesComplete: true, new Dictionary<string, string>()));
+
+        var result = await Build(secureOwner: null, AccessRights.Write).PrepareAsync(DocumentId, BuDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(false, "none"),
+            "canEdit reports what Office will allow — a caller with no role on the container cannot edit there");
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Task 171: the grant-only call (open-links) answers a BUSINESS-UNIT container without reading anything")]
+    public async Task BusinessUnitContainer_GrantOnly_ReadsNothing()
+    {
+        var result = await Build(secureOwner: null, AccessRights.Write)
+            .PrepareAsync(DocumentId, BuDrive, Http(), describeSharedContainer: false);
+
+        result.Should().Be(new OfficeEditAccess(false, "not-evaluated"));
         _membership.VerifyNoOtherCalls();
+        _entities.Verify(e => e.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()), Times.Never,
+            "nothing is granted on a shared container, so open-links must not pay for the report's reads");
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 9): on a BUSINESS-UNIT container a non-standing caller who HOLDS a writer role (hand-granted) is reported as a member")]
+    public async Task BusinessUnitContainer_HandGrantedWriter_CanEdit()
+    {
+        CallerOnBusinessUnit(external: null, unitContainer: "b!another-units-container");
+        _membership.Setup(m => m.ReadAccessAsync(BuDrive, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess(
+                [new Membership.ContainerUserRole("perm-h", ["writer"], Upn, ObjectId.ToString())],
+                RolesComplete: true, new Dictionary<string, string>()));
+
+        var result = await Build(secureOwner: null, AccessRights.Write).PrepareAsync(DocumentId, BuDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(true, "member"));
     }
 
     [Fact(DisplayName = "Task 171: a Write holder whose grant cannot be made gets 503 edit_access_unavailable — never a URL that cannot work")]

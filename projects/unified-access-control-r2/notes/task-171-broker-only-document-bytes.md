@@ -21,7 +21,7 @@ INFERRED = follows from verified behaviour but not stated.
 | c | Does an edit link obtained app-only work? | The `webUrl` / `ms-word:ofe|u|…` URL is only a pointer: the user's own Office session needs a file or container permission (INFERRED from the "user has permission" prerequisite). So the BFF can READ the `webUrl` app-only; the edit works only where the user holds a role (standing BU writer, or JIT on a secure container). | High (pointer) |
 | c′ | App-only preview for a non-member | Works — "anyone who accesses the URL acts as the caller with the caller's permissions". ⚠️ An app-only preview URL therefore carries the **BFF identity's** rights for whoever holds it; Microsoft recommends minting preview URLs with a read-only application identity. The external SPA already relies on app-only preview semantics for downloads; internal preview inherits the same property here. See Known limits / follow-up. | High. [driveitem-preview](https://learn.microsoft.com/en-us/graph/api/driveitem-preview?view=graph-rest-1.0) |
 | c″ | App-only `createLink` | Application permission is listed for SPE (`FileStorageContainer.Selected` + container-type permission); no standard-vs-trial restriction documented. | Medium. [createLink](https://learn.microsoft.com/en-us/graph/api/driveitem-createlink?view=graph-rest-1.0) |
-| d | Can a grant carry a marker so the removal pass can tell its own grants from hand-granted / owner roles? | **The permission object has no marker field** and Graph does not expose who granted it. **Container `customProperties`** are app-only writable string key/values (add/update/delete; `isSearchable` default false) — no size or count limit is documented. Ownership rule built from verified behaviour: grant with `@microsoft.graph.conflictBehavior=fail`; a **409** means the user already held a role (never ours — never record, never remove); on **201** record one custom property per grant. **No new Dataverse column or table is needed** — escalation trigger 3 does not fire. | Medium (no documented cap). [post-customproperty](https://learn.microsoft.com/en-us/graph/api/filestoragecontainer-post-customproperty?view=graph-rest-1.0), [permission](https://learn.microsoft.com/en-us/graph/api/resources/permission?view=graph-rest-beta) |
+| d | Can a grant carry a marker so the removal pass can tell its own grants from hand-granted / owner roles? | **The permission object has no marker field** and Graph does not expose who granted it. **Container `customProperties`** are app-only writable string key/values (add/update/delete; `isSearchable` default false) — no size or count limit is documented. Ownership rule: grant with a PLAIN `POST …/permissions` — the container-permission API takes no conflict parameter, and the code sends none (corrected 2026-10-06, adversarial finding 11: an earlier draft of this row said `@microsoft.graph.conflictBehavior=fail`). The rule relies on Graph answering **409** when the user already holds a role on the container (never ours — never record, never remove); on **201** record one custom property per grant. The 409 is pinned by live check **D2** (hand-granted members are left untouched, with no `SprkStd…` marker). **No new Dataverse column or table is needed** — escalation trigger 3 does not fire. | Medium (no documented cap). [post-customproperty](https://learn.microsoft.com/en-us/graph/api/filestoragecontainer-post-customproperty?view=graph-rest-1.0), [permission](https://learn.microsoft.com/en-us/graph/api/resources/permission?view=graph-rest-beta) |
 | e | App-only list/add/remove for a sync job; limits | List/add/delete all work app-only with `FileStorageContainer.Selected` + the container-type permission (`full` held by the BFF MI on 8a6ce34c, per the topology doc's 2026-10-04 verified state). No member cap documented. 5 RU per permission op; 3,000 RU/min per container, 12,000 RU/min per app per tenant → ~600 permission ops/min/container. B2B guests can be members unless tenant guest sharing is off. | VERIFIED. [limits](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/plan/limits-calling-patterns) |
 | f | Can the BFF identity (MI) read a file a USER uploaded OBO? (the 2026-06-08 "writer-identity matching" pattern says no) | **Yes, today.** The pattern predates the MI's registration on the container type; the topology doc records (2026-10-04, read-only probe) that the BFF MI holds `full` app-only + delegated on 8a6ce34c, and task 166's migration read **367 user-uploaded documents app-only** and moved them. `/api/documents/{id}/download` (app-only) works for user-uploaded files on dev. The pattern file `.claude/patterns/auth/spe-writer-identity-matching.md` is stale — see the `.claude` text in the final report. | High (dev evidence) |
 
@@ -193,10 +193,19 @@ container, 0 members):
 1. `POST /api/admin/jobs/spe-container-membership-sync/trigger` (SystemAdmin), or wait ≤5 min.
 2. `GET /api/admin/jobs/spe-container-membership-sync/status` shows `jit.removed ≥ 1`; PS's permission list no longer has
    U; the `SprkJit…` property is gone; hand-granted / owner roles on every container unchanged.
+   If instead `jit.unknown ≥ 1` and App Insights logs "403 with error code X — not an access answer": record X. That is
+   how Dataverse answers an unshared user's impersonated RetrievePrincipalAccess; if X is an access denial, add it to
+   `RetrievePrincipalRightsOrUnknownAsync` (finding 3). A `CannotActOnBehalfOfAnotherUser` (0x8004A110) there means the
+   BFF application user lacks the Delegate privilege — fix the role, not the code.
 3. With U's Word session still open: record how long saves keep working after removal (expected: the next AutoSave fails
    within minutes; the open copy stays readable) — the observed residual window for owner amendment 8.
 
 **D. Standing writers (amendment 6 (i)–(iii))**
+0. **The 409 the marker rule depends on (finding 11).** Before the first run, with the deployed BFF, trigger an edit-open
+   (`GET /api/documents/{doc}/office` on a SECURE document) for a user who ALREADY holds a writer role on that container
+   (hand-add one first if none): App Insights shows the permission POST answered **409**, `role` = `member`, and the
+   container gains NO `SprkJit…` property and the user's role is unchanged. If Graph instead answers 2xx (re-granting or
+   changing the role), STOP — the "a role we did not create is never recorded" rule does not hold and must be redesigned.
 1. Before the first run record BU1 container b!vzGD…'s roles (Ralph owner, Eyal writer, testuser1 writer — hand-granted).
 2. Trigger the job: `standing.granted` = enabled internal person users of BU1 (and of every other unit with a stamped
    container) who held no role; Ralph / Eyal / testuser1 untouched (no marker).
@@ -224,6 +233,15 @@ document for parity. AI re-index is not triggered by a desktop save on either co
 internal user flagged `sprk_isexternal = true` Write on it (if Dataverse allows): `/office` → `canEdit: false`, no
 permission added on PS's container.
 
+**J. Adversarial-round checks (2026-10-06)**
+1. Upload with `?conflictBehavior=replace` (record-keyed PUT, `upload-session`, `/me/files`) → **409**
+   `upload_replace_not_supported`, nothing written; the DocumentUploadWizard offers only "Keep both" on a collision.
+2. `/api/obo/me/files/x.txt` as a user flagged `sprk_isexternal = true` (or disabled) → **403** `acting_user_not_eligible`.
+3. SPE admin: `GET …/containers/{BU1}/customproperties` shows no `SprkStd…`/`SprkJit…`; a PUT naming one → **403**
+   `spe.admin.deny.container_grant_marker_server_owned`.
+4. Self-registration of a demo user: the container gains `SprkStd<systemuserid>` = the new permission id.
+5. `/office` on a BU document by a user of ANOTHER unit with no role → `canEdit: false`, `role: none`.
+
 **I. Error text (acceptance 7)** — a remaining OBO 403 (e.g. Compose Path B on a container U has no role on) reads
 "SharePoint Embedded denied access to this container or item: …", never "api identity lacks required container-type
 permission".
@@ -249,7 +267,60 @@ permission".
   injection; ADR-028 A4 no `.WithClientSecret`; ADR-036/052 `AddScheduledJob`; ADR-002 no plugin, no Dataverse write;
   ADR-038 no banned test shapes added).
 
+### Adversarial verification round (2026-10-06) — fix-then-ship
+
+| # | Change |
+|---|---|
+| 1 | App-only uploads (record-keyed PUT, `upload-session`, `/me/files`) never REPLACE: `conflictBehavior=replace` → 409 `upload_replace_not_supported`, decided before any Dataverse/Graph call; unknown values → `fail` (`ConflictBehaviorExtensions` default too). SdapClient: `UploadReplaceNotSupportedError` (a refused replace is not re-offered as a collision); DocumentUploadWizard offers only "Keep both". Oracle reasoning + the missing web version-upload route: known limits below. |
+| 2 | `ResolveForActingUserAsync` (record-less: `/me/files`, Compose matter-less create-on-save, Office no-record save) refuses 403 `acting_user_not_eligible` unless `SpeContainerMembershipSync.IsStandingEligible` (enabled internal person; blank `sprk_isexternal` = internal). |
+| 3 | JIT removal uses `RetrievePrincipalRightsOrUnknownAsync`: 403 counts as "no rights" only for `0x80040220`; 404 = cannot read; any other 403 (incl. `CannotActOnBehalfOfAnotherUser` 0x8004A110) or unreadable → UNKNOWN → kept + logged. Pinned at the wire (`DataverseRecordShareWireTests`). |
+| 5 | Pointer-refusal route tests for preview-url, preview, content, view-url, office, open-links, versions, version content, share-link: 409 `document_storage_unverified`, zero Graph calls. Seed-verified: removing `/content`'s pointer check failed exactly that case. |
+| 6 | Self-registration Step 8 grants through `GrantMarkedWriterAsync` (standing marker) — reconciled by the sync; the granter arch guard is now TWO types. |
+| 7 | `SprkStd…`/`SprkJit…` custom properties are reserved in the SPE admin editor: hidden from GET/PUT responses; any PUT naming one → 403 `spe.admin.deny.container_grant_marker_server_owned`. |
+| 9 | `/office` on a shared container reports `canEdit` only for a standing writer OF THAT container (eligible + own unit maps to it) or a caller holding an editing role; `/open-links` (grant side only) skips those reads. |
+| 11 | Note and code comment now both say: plain POST, relies on Graph's 409 for an existing member — pinned by live check D0. |
+
+Verification: full BFF suite **18,123 passed, 0 failed, 54 skipped (18,177)**; ArchTests **809/809**; BFF
+`-warnaserror` build clean; SdapClient jest 18/18 + tsc clean; DocumentUploadWizard tsc — only environmental errors
+(unbuilt shared packages), none in the changed files. Publish size: **source-only** (no package added). Deploy: BFF +
+the DocumentUploadWizard code page (an old wizard's "Save as new version" now gets the 409 and re-shows its collision
+prompt until the user picks "Keep both").
+
 ## Known limits (owner round 56 classes d–f, plus recorded trade-offs)
+
+- **(adversarial round, finding 8 — recorded, no code)** Grants NO pass revisits:
+  (i) a business unit RE-STAMPED to another container, or its stamp CLEARED — the standing pass walks containers that
+  are stamped TODAY, so the old container's `SprkStd…` grants are never visited again (they stay until removed by hand
+  or the container is retired);
+  (ii) JIT grants on a secure record that is DELETED (or un-secured — the existing (e) row below) — the removal pass
+  lists live secure records only;
+  (iii) a grant whose marker write AND its undo both failed — logged `Critical` ("UNRECORDED writer permission … an
+  operator must remove it"); nothing can tell it from a hand-granted role afterwards.
+  Operator remedy for all three: the SPE admin console's permission list for the container.
+- **(finding 1 — reasoning) The name-existence oracle.** Replace is refused BEFORE any Graph call, so that answer says
+  nothing. The default `fail` still answers 409 when a same-named file exists in the destination folder, which tells
+  the caller one bit: "a file of this name exists in this container". Today's container-member behaviour already gave
+  that and more: a member lists the container. Who can ask now: a caller with AssociateContent on SOME record whose
+  container this is — on a secure container, a person entitled to that record's documents; on a business-unit
+  container, in practice its own standing writers (who can list it in Office anyway) plus anyone sharing a record of
+  that unit. The residual — a user of another unit learning that a file NAME exists in a unit container they share one
+  record of — is name-only (no content, no metadata, no id), and avoiding it would mean server-generated upload names,
+  which changes the flat-path contract (`SpeUploadPathIsFlatGuardTests`) and the duplicate-file UX. Recorded, not built.
+- **(finding 1)** There is no web "upload this file as a new version of document X" route. Replace-on-upload was the
+  only way to do that from the upload wizard, and it is now refused; a new version comes from Word / the Office add-in /
+  Compose. A Write-gated `POST /api/documents/{id}/versions` would be new surface — an owner call.
+- **(finding 2)** The round-70 eligibility now gates EVERY record-less write — `/me/files`, Compose matter-less
+  create-on-save AND the Office add-in's no-record save — because it lives in `ResolveForActingUserAsync`, the one rule
+  all three share. A disabled / external / non-person caller gets `403 acting_user_not_eligible` on all three.
+- **(finding 3)** `RetrievePrincipalRightsOrUnknownAsync` counts a 403 as "no rights" only for Dataverse's access-check
+  denial code `0x80040220` and a 404 as "cannot read". Whether an unshared user's impersonated `RetrievePrincipalAccess`
+  answers 200-with-no-Write, 403/0x80040220 or 404 is not documented — live check **C2** shows which. If it is some other
+  403 code, JIT grants are kept (logged UNKNOWN each pass) until that code is added. The deny-side callers of the
+  lenient read (NoAccess enforcement, secure-designation removal) keep their mapping — reading a fault as "no rights"
+  DENIES there, which is safe.
+- **(finding 6)** Self-registration targets `environment.DataverseUrl`. When that is NOT the BFF's own Dataverse, the
+  `SprkStd…` marker names a systemuser the BFF's sync cannot see; if the container is also not stamped on one of the
+  BFF's business units the grant is never visited (same as before — but now at least marked).
 
 - **(trade-off, owner question pending)** App-only writes make SharePoint's "Modified by" / the SPE version author the
   Spaarke app. The person is on the Dataverse row for creates (`createdby` / `sprk_createdbyperson`); there is no existing

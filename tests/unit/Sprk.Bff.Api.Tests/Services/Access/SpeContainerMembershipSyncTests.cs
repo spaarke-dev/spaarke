@@ -268,7 +268,7 @@ public class SpeContainerMembershipSyncTests
     {
         SecureContainerWithJitGrant(Alice);
         Holder(Alice);
-        _rights.Setup(r => r.GetPrincipalRightsAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
+        _rights.Setup(r => r.GetPrincipalRightsOrUnknownAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.Read);
 
         var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
@@ -282,7 +282,7 @@ public class SpeContainerMembershipSyncTests
     {
         SecureContainerWithJitGrant(Alice);
         Holder(Alice);
-        _rights.Setup(r => r.GetPrincipalRightsAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
+        _rights.Setup(r => r.GetPrincipalRightsOrUnknownAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.Read | AccessRights.Write);
 
         var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
@@ -300,7 +300,7 @@ public class SpeContainerMembershipSyncTests
         await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
 
         RemovalVerified(SecureContainer, Alice, Membership.JitWriterMarkerPrefix, Times.Once());
-        _rights.Verify(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _rights.Verify(r => r.GetPrincipalRightsOrUnknownAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact(DisplayName = "Task 171: a JIT grant on a RESTRICTED record held by a user flagged external is removed (round 67)")]
@@ -308,7 +308,7 @@ public class SpeContainerMembershipSyncTests
     {
         SecureContainerWithJitGrant(Alice, restricted: true);
         Holder(Alice, external: true);
-        _rights.Setup(r => r.GetPrincipalRightsAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
+        _rights.Setup(r => r.GetPrincipalRightsOrUnknownAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
             .ReturnsAsync(AccessRights.Write);
 
         await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
@@ -321,13 +321,29 @@ public class SpeContainerMembershipSyncTests
     {
         SecureContainerWithJitGrant(Alice);
         Holder(Alice);
-        _rights.Setup(r => r.GetPrincipalRightsAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
+        _rights.Setup(r => r.GetPrincipalRightsOrUnknownAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new HttpRequestException("throttled"));
 
         var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
 
         RemovalVerified(SecureContainer, Alice, Membership.JitWriterMarkerPrefix, Times.Never());
         result.Unknown.Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 171 (finding 3): a rights read that is NOT an access answer (e.g. the app user lacks prvActOnBehalfOfAnotherUser) removes NOTHING")]
+    public async Task Jit_NoAccessAnswer_RemovesNothing()
+    {
+        SecureContainerWithJitGrant(Alice);
+        Holder(Alice);
+        _rights.Setup(r => r.GetPrincipalRightsOrUnknownAsync(Alice, "sprk_projects", SecureProject, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AccessRights?)null);
+
+        var result = await Sut().RemoveRevokedJitGrantsAsync(CancellationToken.None);
+
+        RemovalVerified(SecureContainer, Alice, Membership.JitWriterMarkerPrefix, Times.Never());
+        result.Unknown.Should().Be(1);
+        _rights.Verify(r => r.GetPrincipalRightsAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never,
+            "the lenient read maps EVERY 403 to 'no rights' — safe for a deny, destructive for a revoke");
     }
 
     [Fact(DisplayName = "Task 171: a secure container with no JIT markers is only looked at, never read for roles")]
