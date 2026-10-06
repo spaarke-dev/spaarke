@@ -14,7 +14,6 @@ import {
   setupCodePageThemeListener,
   AppErrorBoundary,
   AppInsightsService,
-  getXrm,
 } from "@spaarke/ui-components";
 
 // ai-spaarke-ai-workspace-UI-r1 brittleness Phase D (2026-06-09):
@@ -29,6 +28,7 @@ if (_appInsightsKey) {
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
 import { DailyBriefingApp } from "@spaarke/daily-briefing-components/components";
+import { openPlaybookLibrary } from "@spaarke/daily-briefing-components/utils";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
 
@@ -83,32 +83,9 @@ function Root() {
    * returns silently — the surface-level cue is left to host UX (Toaster
    * would be a future enhancement).
    */
-  const handleBrowsePlaybooks = React.useCallback(() => {
-    // Shared cross-frame walker (task 081 / C-8).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = getXrm('navigation') ?? null;
-    const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
-      xrm?.Navigation?.navigateTo;
-    if (typeof navigateTo !== "function") {
-      console.warn("[DailyBriefing] Xrm.Navigation unavailable — cannot open Playbook Library.");
-      return;
-    }
-    navigateTo(
-      {
-        pageType: "webresource",
-        webresourceName: "sprk_playbooklibrary",
-        data: "",
-      },
-      {
-        target: 2,
-        width: { value: 85, unit: "%" },
-        height: { value: 85, unit: "%" },
-        title: "Playbook Library",
-      }
-    ).catch((err: unknown) => {
-      console.warn("[DailyBriefing] Playbook Library navigation rejected:", err);
-    });
-  }, []);
+  // Shared opener (task 081 round 4, review F6): this called a DETACHED
+  // `navigateTo` (unbound `this`), which the real Xrm.Navigation rejects.
+  const handleBrowsePlaybooks = React.useCallback(() => openPlaybookLibrary("[DailyBriefing]"), []);
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
