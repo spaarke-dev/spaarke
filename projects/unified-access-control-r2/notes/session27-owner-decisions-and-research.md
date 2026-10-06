@@ -1022,6 +1022,27 @@ The owner, verbatim: "it is important that we address issues that impact the qua
    - **Why accepted (round 56):** it takes two consecutive write failures on the same row, it is bounded to the record's own former sharees, and it is logged with the row id. Option A would amend round 22, add a marker principal and a standing live invariant (a memberless team in every environment). That is a fix bigger than the problem.
    - **Recorded:** as a known limit in 148's note, the PR description, and the deployment guide's residual-risk section (the operator's manual revoke). No code change.
 
+## Round 67 (2026-10-06). BINDING. OWNER decision. Task 114 (external licensed users) rescoped with Restricted.
+
+Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" reading. The flag stays and is load-bearing for Restricted.
+
+1. **What Restricted means.** A Restricted record (`sprk_accesspermission` = Restricted 100000002) is for internal use only. *Internal* = a licensed system user who is **not** flagged `sprk_isexternal = true`. Contact-based access never reaches a Restricted record, even an internal person's work contact. This is already the behaviour: `RootRecordFlags.RemovesContactSourcedAccess`.
+2. **Sharing rule** ("+ User" `/share-user` and Assigned-To auto-grants, task 142's materializer; ONE rule in `ClassifyEligibility`):
+
+   | Record | `sprk_isexternal` false or blank | `sprk_isexternal` true |
+   |---|---|---|
+   | Not Restricted | share | share (2026-09-18 ruling) |
+   | Restricted | share | **refuse** |
+
+   The standard Share dialog can only share with licensed users anyway, so the BFF adds no licence check: enabled + person + the table above.
+3. **Blank = not external, everywhere** (owner: "sprk_isexternal means they're external"). `SystemUserIdentityResolver.IsExternalAsync` (internal-only messages) changes to match: blank is internal, not fail-closed external. One-off data step per environment: set B2B guests (`#EXT#` in the user name) to `sprk_isexternal = true`, with a dry-run listing first; nothing else is changed.
+4. **Becoming Restricted removes existing shares held by users with `sprk_isexternal = true`.** No other shares are removed.
+5. **The standard (OOB) Share dialog on Restricted records:**
+   - **(a) Primary:** hide the OOB Share command on Restricted records with a ribbon rule, so sharing goes through Manage Access "+ User", which applies the rule.
+   - **(b) and (c) Backups**, "if they don't create too much work; unlikely these scenarios will arise":
+     - (b) the reconciliation job removes a share held by a user flagged external on a Restricted record;
+     - (c) Manage Access shows such a share as "External user — no access" until it is removed.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.
