@@ -502,6 +502,74 @@ public class PlaybookRouteAuthorizationContractTests
     }
 
     // =========================================================================================
+    // POST /api/ai/playbooks and /{id}/clone — the new row is OWNED by the caller (dev gate D-G6-2, 2026-10-06)
+    // =========================================================================================
+
+    [Fact]
+    public async Task Create_OwnsTheNewPlaybookByTheCallersSystemUserId_NotTheEntraOid()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var systemUserId = Guid.NewGuid();
+        host.Probe.SystemUserId = systemUserId;
+        host.CreateIsValid();
+        host.Playbooks.Setup(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((SavePlaybookRequest r, Guid owner, CancellationToken _) =>
+                new PlaybookResponse { Id = Guid.NewGuid(), Name = r.Name, OwnerId = owner });
+
+        var response = await host.SendAsync(CreatePlaybook());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        host.Playbooks.Verify(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), systemUserId, It.IsAny<CancellationToken>()), Times.Once());
+        host.Playbooks.Verify(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), Guid.Parse(CallerOid), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Create_UnresolvableSystemUserId_Is403_AndNothingIsCreated()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        host.Probe.SystemUserId = null;
+        host.CreateIsValid();
+
+        var response = await host.SendAsync(CreatePlaybook());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Playbooks.Verify(p => p.CreatePlaybookAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Clone_OwnsTheCloneByTheCallersSystemUserId_NotTheEntraOid()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        var systemUserId = Guid.NewGuid();
+        host.Probe.SystemUserId = systemUserId;
+        var sourceId = Guid.NewGuid();
+        host.PublicPlaybook(sourceId);
+        host.Playbooks.Setup(p => p.ClonePlaybookAsync(sourceId, It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid _, Guid owner, string? name, CancellationToken _) =>
+                new PlaybookResponse { Id = Guid.NewGuid(), Name = name ?? "Copy", OwnerId = owner });
+
+        var response = await host.SendAsync(Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{sourceId}/clone", CallerOid));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created, await response.Content.ReadAsStringAsync());
+        host.Playbooks.Verify(p => p.ClonePlaybookAsync(sourceId, systemUserId, It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Once());
+        host.Playbooks.Verify(p => p.ClonePlaybookAsync(It.IsAny<Guid>(), Guid.Parse(CallerOid), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    [Fact]
+    public async Task Clone_UnresolvableSystemUserId_Is403_AndNothingIsCloned()
+    {
+        await using var host = await PlaybookAuthHost.StartAsync();
+        host.Probe.SystemUserId = null;
+        var sourceId = Guid.NewGuid();
+        host.PublicPlaybook(sourceId);
+
+        var response = await host.SendAsync(Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{sourceId}/clone", CallerOid));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        host.Playbooks.Verify(p => p.ClonePlaybookAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never());
+    }
+
+    // =========================================================================================
     // Playbook parameters on execute and agent run-playbook — the shared policy (owner round 16 item 3, task 164 r1)
     // =========================================================================================
 
@@ -762,6 +830,13 @@ public class PlaybookRouteAuthorizationContractTests
     private static HttpRequestMessage Get(string path, string callerOid = CallerOid) =>
         Authenticated(HttpMethod.Get, path, callerOid);
 
+    private static HttpRequestMessage CreatePlaybook()
+    {
+        var request = Authenticated(HttpMethod.Post, "/api/ai/playbooks/", CallerOid);
+        request.Content = JsonContent.Create(new { name = "UAC gate playbook", actionIds = new[] { Guid.NewGuid() } });
+        return request;
+    }
+
     private static HttpRequestMessage Execute(Guid playbookId, params Guid[] documentIds)
     {
         var request = Authenticated(HttpMethod.Post, $"/api/ai/playbooks/{playbookId}/execute", CallerOid);
@@ -994,6 +1069,11 @@ public class PlaybookRouteAuthorizationContractTests
         }
 
         public Task<HttpResponseMessage> SendAsync(HttpRequestMessage request) => _client!.SendAsync(request);
+
+        /// <summary>The create body passes the service's own validation.</summary>
+        public void CreateIsValid() =>
+            Playbooks.Setup(p => p.ValidateAsync(It.IsAny<SavePlaybookRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(PlaybookValidationResult.Success());
 
         public void PublicPlaybook(Guid id) => Playbook(id, isPublic: true);
 
