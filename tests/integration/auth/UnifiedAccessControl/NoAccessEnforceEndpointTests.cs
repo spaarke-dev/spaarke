@@ -63,7 +63,7 @@ public class NoAccessEnforceEndpointTests : IClassFixture<NoAccessEnforceTestFix
     private Guid ActiveEntryTheCallerCanWrite(int stateCode = 0)
     {
         var entry = H.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author, stateCode: stateCode);
-        _fixture.WritableEntries[entry] = true;
+        _fixture.CallerHoldsEntryWritePrivilege = true;
         return entry;
     }
 
@@ -86,8 +86,10 @@ public class NoAccessEnforceEndpointTests : IClassFixture<NoAccessEnforceTestFix
             .Which.GetProperty("systemUserId").GetGuid().Should().Be(Walled);
         body.GetProperty("complete").GetBoolean().Should().BeTrue();
         H.Shares.MaskOf(Project, SecureProject, DataversePrincipalRef.User(Walled)).Should().BeNull();
-        _fixture.ProbedTargets.Should().Contain((NoAccessEnforceEndpoint.EntrySet, entry),
-            "the filter checked the caller's Write on the ENTRY row");
+        _fixture.ProbedPrivileges.Should().Contain(NoAccessEnforceEndpoint.EntryWritePrivilege,
+            "the filter checked the caller's Write on the entry through the table privilege (organization-owned table)");
+        _fixture.ProbedTargets.Should().NotContain(t => t.EntitySet == NoAccessEnforceEndpoint.EntrySet,
+            "Dataverse refuses RetrievePrincipalAccess on an organization-owned table (400 0x80040800), so the entry is never probed per record");
         H.Cache.Removed.Should().Contain(r => r.Tenant == WorkspaceTestConstants.TestTenantId
                                               && r.Id == $"{Walled:D}:{Project}",
             "the walled user's root-set cache is cleared under the caller's tenant — the namespace their reads use");
@@ -105,7 +107,7 @@ public class NoAccessEnforceEndpointTests : IClassFixture<NoAccessEnforceTestFix
     }
 
     [Fact]
-    public async Task Enforce_AnAbsentEntry_AndAnEntryTheCallerCannotWrite_AreTheSameFilter403_WithNoWrites()
+    public async Task Enforce_ByACallerWithoutTheEntryWritePrivilege_AnAbsentAndAnExistingEntry_AreTheSameFilter403_WithNoWrites()
     {
         var unwritable = H.Store.AddEntry(subjectUser: Walled, objectRecord: (Project, SecureProject), modifiedBy: Author);
         var client = _fixture.CreateAuthenticatedClient();
@@ -121,6 +123,19 @@ public class NoAccessEnforceEndpointTests : IClassFixture<NoAccessEnforceTestFix
         d.GetProperty("reasonCode").GetString().Should().Be(DelegationRuleFilter.DenyWriteRequired);
         a.GetProperty("detail").GetString().Should().Be(d.GetProperty("detail").GetString(),
             "an absent entry is indistinguishable from one the caller cannot write (enumeration-safe)");
+        H.Shares.Writes.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Enforce_ByACallerWithTheEntryWritePrivilege_AnAbsentEntry_IsTheHandlers404_WithNoWrites()
+    {
+        // The privilege is table-wide, so its holder may already read the table: the handler's own 404 discloses nothing.
+        _fixture.CallerHoldsEntryWritePrivilege = true;
+
+        var response = await _fixture.CreateAuthenticatedClient().PostAsJsonAsync(Route, new { entryId = Guid.NewGuid() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, await response.Content.ReadAsStringAsync());
+        (await BodyOf(response)).GetProperty("reasonCode").GetString().Should().Be(NoAccessEnforceEndpoint.EntryNotFoundReasonCode);
         H.Shares.Writes.Should().BeEmpty();
     }
 
@@ -213,15 +228,18 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
 {
     internal Harness Harness { get; private set; } = new();
 
-    /// <summary>Entries the caller holds Write on. Any other id answers None — Dataverse's answer for an absent row.</summary>
-    public ConcurrentDictionary<Guid, bool> WritableEntries { get; } = new();
+    /// <summary>Whether the caller holds the entry table's Write privilege — Write on every row of the organization-owned table.</summary>
+    public bool CallerHoldsEntryWritePrivilege { get; set; }
+
+    public ConcurrentBag<string> ProbedPrivileges { get; } = new();
 
     public ConcurrentBag<(string EntitySet, Guid RecordId)> ProbedTargets { get; } = new();
 
     public void Reset()
     {
         Harness = new Harness();
-        WritableEntries.Clear();
+        CallerHoldsEntryWritePrivilege = false;
+        ProbedPrivileges.Clear();
         ProbedTargets.Clear();
     }
 
@@ -281,8 +299,14 @@ public sealed class NoAccessEnforceTestFixture : WorkspaceTestFixture
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {
             _fixture.ProbedTargets.Add((entitySet, recordId));
-            var canWrite = entitySet == NoAccessEnforceEndpoint.EntrySet && _fixture.WritableEntries.ContainsKey(recordId);
-            return Task.FromResult(canWrite ? AccessRights.Read | AccessRights.Write : AccessRights.None);
+            return Task.FromResult(AccessRights.None);
+        }
+
+        public override Task<bool> CallerHoldsPrivilegeAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            _fixture.ProbedPrivileges.Add(privilegeName);
+            return Task.FromResult(privilegeName == NoAccessEnforceEndpoint.EntryWritePrivilege && _fixture.CallerHoldsEntryWritePrivilege);
         }
     }
 }
