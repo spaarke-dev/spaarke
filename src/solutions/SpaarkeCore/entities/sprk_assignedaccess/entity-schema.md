@@ -46,7 +46,7 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 | `sprk_subjectteam` | Lookup → `team` | **Task 158 r1 (owner round 30).** On an inherited-share row: the TEAM a secure parent's share was passed on to. Nav prop `sprk_SubjectTeam`. Delete = RemoveLink. |
 | `sprk_externalrecordaccess` | Lookup → `sprk_externalrecordaccess` | The grant row the rule wrote, raised or found covering. Delete = RemoveLink. |
 | `sprk_state` | Choice (local) | `AssignedAccessState` — see below. |
-| `sprk_reason` | Text 100 | A stable code (`AssignedAccessReason`): why Skipped (`restricted`, `organization-on-secure`, `no-access`, `ineligible`, `link-unreadable`, …), how an assignment ended (`access-removed`, `kept-other-field`, `kept-modified`, `kept-adopted`, `kept-secure-record`, `prior-level-restored`, `prior-level-restored-lapsed` (the earlier level and date were put back, but that date has passed — no access restored; if the rule's renewal had kept the grant alive past it, the restore ENDED the access), `assignment-ended`), how a removal happened (`removed-by-operator`, `removed-out-of-band`, `removed-by-no-access`, `dismissed`), or what a raise replaced (`raised-from:100000000@2026-10-13` — the earlier level AND the date the subject's access ran until, both put back when the assignment ends, because the rule renews a raised grant while it is assigned; `raised-from-mask:1`). On an inherited-share row (task 158, rule 4) also `share-pending` (written ahead of its share), `covered-by-existing`, `kept-direct`, `kept-other-source`, `kept-last-reader`, `record-unsecured`. |
+| `sprk_reason` | Text 100 | A stable code (`AssignedAccessReason`): why Skipped (`restricted`, `organization-on-secure`, `no-access`, `ineligible`, `link-unreadable`, …), how an assignment ended (`access-removed`, `kept-other-field`, `kept-modified`, `kept-adopted`, `kept-secure-record`, `prior-level-restored`, `prior-level-restored-lapsed` (the earlier level and date were put back, but that date has passed — no access restored; if the rule's renewal had kept the grant alive past it, the restore ENDED the access), `assignment-ended`, `root-deleted` (owner round 71: the record was deleted — see "Verify live")), how a removal happened (`removed-by-operator`, `removed-out-of-band`, `removed-by-no-access`, `dismissed`), or what a raise replaced (`raised-from:100000000@2026-10-13` — the earlier level AND the date the subject's access ran until, both put back when the assignment ends, because the rule renews a raised grant while it is assigned; `raised-from-mask:1`). On an inherited-share row (task 158, rule 4) also `share-pending` (written ahead of its share), `covered-by-existing`, `kept-direct`, `kept-other-source`, `kept-last-reader`, `record-unsecured`. |
 | `sprk_grantedlevel` | Whole number | The grant level (`10000000x`) or share mask the BFF last wrote — compared to the live row to tell **unmodified** from modified. |
 | `sprk_grantedexpiry` | Date Only | The expiry the BFF last wrote (renewal per owner A5 updates it). |
 
@@ -124,8 +124,14 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 - Root relationships: only `sprk_project` takes `Delete = Cascade`. **Dataverse refused a second one** on dev
   (2026-10-06, 0x80047007 "sprk_assignedaccess is parented to sprk_project. Cannot create another parental relation
   with sprk_Matter"): a table may have one cascade-delete parent. So `sprk_matter` and `sprk_workassignment` use
-  `RemoveLink`. A deleted matter or work assignment leaves its ledger rows with the root cleared, and the job ignores
-  them because the root reads as not found.
+  `RemoveLink`. A deleted matter or work assignment leaves its ledger rows with the root cleared. The materializer
+  cannot visit them (no root), so `AssignedAccessReconciliationJob` retires them (owner round 71, 2026-10-06): it scans
+  live Assigned-To rows with every root lookup empty (`AssignedAccessStore.ScanRootlessLedgerRowsAsync`), reads the
+  record the row's `sprk_ledgerkey` names (`RootFromLedgerKey`), and only when that read answers "not found" writes
+  `sprk_state = Revoked`, `sprk_reason = root-deleted` (conditional on the row's version). A failed read, a record that
+  still exists, or a key naming no record leaves the row unchanged (counted in the run's `rootlessLedger` block; a
+  failed read makes the run partial). No access is changed — the grant row it names is ended by
+  `ExternalAccessReconciliationJob` rule R4. Inherited-share rows (task 158) are not part of this.
 - The privilege census in step (f) allows System Administrator / System Customizer for Create/Write/Delete, plus
   the Microsoft platform roles `Service Writer` / `Service Deleter`, which Dataverse grants on every new table. Those
   two pass only while every holder is an application user (no person, no team); the census reads the holders, and a
