@@ -14,7 +14,9 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// <param name="CanEdit">The caller holds (or was just granted) a writer role, or the container is a business-unit
 /// container whose internal users are standing writers.</param>
 /// <param name="Role">"standing" (business-unit container), "member" (already held a role), "writer-jit" (granted now),
-/// "none" (secure container, no Write on its record), or "unknown" (the container could not be classified).</param>
+/// "member-read-only" (already holds a role that cannot edit — e.g. a hand-granted reader), "none" (secure container, no
+/// Write on its record, or an external user on a Restricted record), or "unknown" (the container could not be
+/// classified).</param>
 public sealed record OfficeEditAccess(bool CanEdit, string Role);
 
 /// <summary>
@@ -109,22 +111,37 @@ public class OfficeEditAccessService
 
         var systemUserId = await _probe.GetCallerSystemUserIdAsync(token, ct).ConfigureAwait(false);
         var user = systemUserId is { } id
-            ? await _entities.RetrieveAsync("systemuser", id, ["domainname", "azureactivedirectoryobjectid"], ct).ConfigureAwait(false)
+            ? await _entities.RetrieveAsync("systemuser", id, ["domainname", "azureactivedirectoryobjectid", "sprk_isexternal"], ct).ConfigureAwait(false)
             : null;
         var upn = user?.GetAttributeValue<string>("domainname");
         var objectId = user?.GetAttributeValue<Guid?>("azureactivedirectoryobjectid");
-        if (systemUserId is null || string.IsNullOrWhiteSpace(upn))
+        if (user is null || systemUserId is null || string.IsNullOrWhiteSpace(upn))
         {
             throw Unavailable(documentId, "the caller's Dataverse user (and its sign-in name) could not be resolved");
+        }
+
+        // Round 67: a Restricted record admits no external user. SpeContainerMembershipSync removes exactly such a grant,
+        // so it is never made here (a record whose flag cannot be read gets no grant either — fail closed).
+        if (user.GetAttributeValue<bool?>("sprk_isexternal") == true
+            && await IsRestrictedOrUnreadableAsync(secureOwner, ct).ConfigureAwait(false))
+        {
+            _logger.LogInformation(
+                "[OFFICE-EDIT] Document {DocumentId}: an external caller on Restricted (or unreadable) {Entity} {RecordId}; no grant.",
+                documentId, secureOwner.EntityLogicalName, secureOwner.RecordId);
+            return new OfficeEditAccess(false, "none");
         }
 
         var access = await _membership.ReadAccessAsync(driveId, ct).ConfigureAwait(false)
                      ?? throw Unavailable(documentId, "the container could not be read");
 
-        if (access.Roles.Any(r => r.IsFor(upn, objectId)))
+        var held = access.Roles.FirstOrDefault(r => r.IsFor(upn, objectId));
+        if (held is not null)
         {
-            // Already a member (an earlier grant of ours, or a role someone else gave): reuse it.
-            return new OfficeEditAccess(true, "member");
+            // Already a member (an earlier grant of ours, or a role someone else gave): reuse it. A role is never changed
+            // here, so a read-only role (a hand-granted reader) stays read-only and the answer says so.
+            return held.CanEdit
+                ? new OfficeEditAccess(true, "member")
+                : new OfficeEditAccess(false, "member-read-only");
         }
 
         var outcome = await _membership.GrantMarkedWriterAsync(
@@ -145,6 +162,24 @@ public class OfficeEditAccessService
     /// </summary>
     protected virtual Task<OwningSecureRecord?> ResolveSecureOwnerAsync(string driveId, CancellationToken ct)
         => _containerResolver.ResolveOwningRecordAsync(driveId, ct);
+
+    private async Task<bool> IsRestrictedOrUnreadableAsync(OwningSecureRecord record, CancellationToken ct)
+    {
+        try
+        {
+            var row = await _entities.RetrieveAsync(record.EntityLogicalName, record.RecordId, ["sprk_accesspermission"], ct)
+                .ConfigureAwait(false);
+            return row is null
+                   || row.GetAttributeValue<Microsoft.Xrm.Sdk.OptionSetValue>("sprk_accesspermission")?.Value
+                       == ExternalParticipationService.AccessPermissionRestricted;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "[OFFICE-EDIT] {Entity} {RecordId}'s access permission could not be read.",
+                record.EntityLogicalName, record.RecordId);
+            return true;
+        }
+    }
 
     private SdapProblemException Unavailable(Guid documentId, string reason)
     {

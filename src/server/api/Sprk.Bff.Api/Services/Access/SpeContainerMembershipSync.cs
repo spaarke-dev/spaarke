@@ -45,7 +45,6 @@ public class SpeContainerMembershipSync
 
     private const int PageSize = 500;
     private const int MaxPages = 200;
-    private const int RestrictedAccessPermission = 100000002;
 
     private static readonly string[] UserColumns =
     [
@@ -134,8 +133,24 @@ public class SpeContainerMembershipSync
                 // Adds: an eligible user with no role at all. A user holding ANY role is left alone (never recorded).
                 foreach (var user in users.Where(IsStandingEligible))
                 {
-                    if (markers.ContainsKey(user.Id))
-                        continue;
+                    if (markers.TryGetValue(user.Id, out var markedPermission))
+                    {
+                        if (access.Roles.Any(r => string.Equals(r.PermissionId, markedPermission, StringComparison.Ordinal)))
+                            continue;
+
+                        // STALE marker: the grant it records is gone (an admin removed it, or Graph replaced it). Left
+                        // alone it would block this eligible user from ever being granted again — clear it (the role list is
+                        // complete, so RemoveMarkedGrantAsync only clears) and fall through to the add.
+                        var staleKey = SpeContainerMembershipService.MarkerKey(SpeContainerMembershipService.StandingWriterMarkerPrefix, user.Id);
+                        if (await _membership.RemoveMarkedGrantAsync(container, staleKey, markedPermission, access, ct).ConfigureAwait(false)
+                            != SpeContainerMembershipService.MarkedRemovalOutcome.MarkerCleared)
+                        {
+                            failed++;
+                            continue;
+                        }
+
+                        cleared++;
+                    }
 
                     var upn = user.GetAttributeValue<string>("domainname");
                     var oid = user.GetAttributeValue<Guid?>("azureactivedirectoryobjectid"); // a systemuser row
@@ -388,7 +403,7 @@ public class SpeContainerMembershipSync
         try
         {
             var row = await _dataverse.RetrieveAsync(entity, recordId, ["sprk_accesspermission"], ct).ConfigureAwait(false);
-            return row?.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value == RestrictedAccessPermission;
+            return row?.GetAttributeValue<OptionSetValue>("sprk_accesspermission")?.Value == ExternalParticipationService.AccessPermissionRestricted;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

@@ -124,7 +124,12 @@ pointer check before the app-only replace.
 the URL is returned: secure container (`RecordContainerResolver.ResolveOwningRecordAsync`) + Write on the secure record
 (`CallerRecordAccessProbe`, as the caller) → `SpeContainerMembershipService.GrantMarkedWriterAsync` (writer; 409 = already
 held → reuse; marker write failure → the grant is undone). No Write → no grant. A Write holder whose grant fails → 503
-`edit_access_unavailable`. `/office` now reports `canEdit` honestly instead of a hard-coded `true`.
+`edit_access_unavailable`. `/office` now reports `canEdit` honestly instead of a hard-coded `true`. Code review
+(2026-10-06) added: an external caller (`sprk_isexternal = true`) on a Restricted secure record — or one whose flag cannot
+be read — gets NO grant (the removal pass's round-67 rule, applied up front, so a grant is never made only to be removed
+five minutes later); a caller already holding a non-editing role is reported `canEdit=false`, `role="member-read-only"`.
+The standing pass self-heals a STALE marker (its permission removed outside this code): the marker is cleared and the
+eligible user granted again, instead of being blocked forever.
 
 **Step 5 + round 70 — one sync job** — `Services/Access/SpeContainerMembershipSync.cs` + `SpeContainerMembershipSyncJob.cs`
 (ADR-036 `IScheduledJob`, `*/5 * * * *`, enabled): (1) standing writers on every BU container; (2) removal of JIT grants on
@@ -215,9 +220,34 @@ app-only drive subscription for PS's container), then edit and save it in Word *
 `spe-doc-changed`) — the first live proof of the webhook leg; `versions` shows the desktop version. Repeat on a BU
 document for parity. AI re-index is not triggered by a desktop save on either container (expected, pre-existing).
 
+**B2. JIT refusal for external on Restricted** — set PS to Restricted (`sprk_accesspermission` = 100000002) and give an
+internal user flagged `sprk_isexternal = true` Write on it (if Dataverse allows): `/office` → `canEdit: false`, no
+permission added on PS's container.
+
 **I. Error text (acceptance 7)** — a remaining OBO 403 (e.g. Compose Path B on a container U has no role on) reads
 "SharePoint Embedded denied access to this container or item: …", never "api identity lacks required container-type
 permission".
+
+## Verification (branch `task/uac-r2-171`)
+
+- **Full BFF suite** (`tests/unit/Sprk.Bff.Api.Tests`, includes `tests/integration/**`) at `ef69cbe24`: **18,063 passed,
+  16 failed, 54 skipped (18,133)**. All 16 failures were in ONE file (`AnalysisEndpointsAuthorizationContractTests`, task
+  162): its host lacked the `RecordContainerResolver` that `AnalysisDocumentLoader` now needs. Fixed by registering the
+  permissive test resolver. Re-run of that file + every class touched by the code-review fixes
+  (`OfficeEditAccessServiceTests`, `SpeContainerMembershipSyncTests`, `ComposeDocumentAuthorizationFilterTests`,
+  `FileAccessBrokerIdentityTests`, `OfficeEndpointsContractTests`): **135 passed, 0 failed, 7 skipped**.
+- **ArchTests** (`tests/Spaarke.ArchTests`) after the review fixes: **809 / 809 passed**.
+- **Publish size** (root CLAUDE.md §10.4): fresh short-path worktrees, `dotnet publish -c Release`, zipped with PowerShell
+  `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` (the `Deploy-BffApi.ps1` method), PDBs included
+  (4 per side), **192 files on both sides**:
+  master `b977fc7a6` (`C:\p171m`) **36.13 MB** (37,887,025 B) vs branch `ef69cbe24` (`C:\p171b`) **36.15 MB**
+  (37,909,319 B) = **+0.02 MB** (+22,294 B). (Master itself is below the 45.42 MB recorded baseline — the baseline aged;
+  the delta is the measurement.) The later review fixes are source-only edits of a few dozen lines.
+- **CVE**: `dotnet list package --vulnerable --include-transitive` → no vulnerable packages (branch); no package changes.
+- **Step 9.5 gates**: code-review — 3 defects fixed (above), 2 performance items recorded below; adr-check — no
+  violations (ADR-007 Graph stays in `Infrastructure/*`; ADR-008 filters; ADR-010 concretes; ADR-013 no new AI-internal
+  injection; ADR-028 A4 no `.WithClientSecret`; ADR-036/052 `AddScheduledJob`; ADR-002 no plugin, no Dataverse write;
+  ADR-038 no banned test shapes added).
 
 ## Known limits (owner round 56 classes d–f, plus recorded trade-offs)
 
@@ -234,8 +264,15 @@ permission".
 - **(e)** The standing pass never removes a role it did not record, so a HAND-granted user later flagged external keeps
   that hand-granted role (amendment 6 (ii)'s "removed if already a member" holds for members this code added; it is the
   "never removes principals it did not grant" rule winning).
-- **(e)** A user who already holds a hand-granted READER role on a secure container gets no JIT writer (reused as
-  "member"); Office opens read-only for them.
+- **(e)** A user who already holds a hand-granted READER role on a secure container gets no JIT writer (a role is never
+  changed); `/office` now reports it honestly as `canEdit=false`, `role="member-read-only"` (code review, 2026-10-06).
+- **(perf, recorded)** ONE Graph app budget for every user. Broker-only means all SPE byte traffic counts against the BFF
+  app's 12,000 RU/min per tenant (step 0 (e)) instead of each user's own delegated budget. Throttling surfaces as the
+  existing 429 + Retry-After. Watch `429` rates after rollout; the escalation path is SPE's per-app limit raise, not code.
+- **(perf, recorded)** The JIT removal pass reads ONE container (markers only) per secure record every 5 minutes —
+  ~1 RU each, capped at 5,000 records (then TRUNCATED is reported). At a few hundred secure records this is noise; past
+  ~2,000 it is a meaningful share of the budget above. The fix then is an index of containers that hold JIT grants
+  (written at grant time) with the full sweep as a slower backstop — not built now (no evidence of that scale).
 - **(e)** Compose PDF-intake resume on a secure container: the derived .docx is still probed OBO (the derived item's row
   is not authorized separately), so the resume falls back to re-projecting the PDF. Fails toward "show the PDF again".
 - **(f)** A Read-only user cannot open a SECURE document in desktop Word, even read-only (a role is required; a JIT

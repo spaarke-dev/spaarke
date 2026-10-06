@@ -119,6 +119,43 @@ public class SpeContainerMembershipSyncTests
         result.Failed.Should().Be(0);
     }
 
+    [Fact(DisplayName = "Task 171: a STALE standing marker (its grant was removed outside this code) is cleared and the eligible user is granted again")]
+    public async Task Standing_StaleMarker_IsClearedAndTheUserRegranted()
+    {
+        _units.Add(new Entity("businessunit", Unit) { ["sprk_containerid"] = BuContainer });
+        _membership.Setup(m => m.ReadAccessAsync(BuContainer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess(
+                [],
+                RolesComplete: true,
+                new Dictionary<string, string> { [Membership.MarkerKey(Membership.StandingWriterMarkerPrefix, Alice)] = "perm-gone" }));
+        _membership.Setup(m => m.RemoveMarkedGrantAsync(
+                BuContainer, Membership.MarkerKey(Membership.StandingWriterMarkerPrefix, Alice), "perm-gone",
+                It.IsAny<Membership.ContainerAccess>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.MarkedRemovalOutcome.MarkerCleared);
+        _users.Add(User(Alice, Unit));
+
+        var result = await Sut().SyncStandingWritersAsync(CancellationToken.None);
+
+        RemovalVerified(BuContainer, Alice, Membership.StandingWriterMarkerPrefix, Times.Once());
+        GrantVerified(Alice, Times.Once());
+        result.MarkersCleared.Should().Be(1);
+        result.Granted.Should().Be(1);
+        result.Failed.Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 171: a standing marker whose grant still stands is left alone — no re-grant, no removal")]
+    public async Task Standing_LiveMarker_IsLeftAlone()
+    {
+        BusinessUnitContainer((Alice, "perm-a", ["writer"], Marked: true));
+        _users.Add(User(Alice, Unit));
+
+        var result = await Sut().SyncStandingWritersAsync(CancellationToken.None);
+
+        GrantVerified(Alice, Times.Never());
+        RemovalVerified(BuContainer, Alice, Membership.StandingWriterMarkerPrefix, Times.Never());
+        result.Failed.Should().Be(0);
+    }
+
     [Fact(DisplayName = "Task 171: a user flagged external, a disabled user and an application user are never granted")]
     public async Task Standing_IneligibleUsers_AreNeverGranted()
     {

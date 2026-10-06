@@ -421,6 +421,11 @@ public class SpeContainerMembershipService
 
         /// <summary>Exactly one role, writer — the only shape a marked grant takes and the only one removal deletes.</summary>
         public bool IsPlainWriter => Roles.Count == 1 && string.Equals(Roles[0], WriterRole, StringComparison.OrdinalIgnoreCase);
+
+        /// <summary>Does the role let Office edit (writer, manager or owner — a reader cannot)?</summary>
+        public bool CanEdit => Roles.Any(r => r.Equals(WriterRole, StringComparison.OrdinalIgnoreCase)
+                                              || r.Equals("manager", StringComparison.OrdinalIgnoreCase)
+                                              || r.Equals("owner", StringComparison.OrdinalIgnoreCase));
     }
 
     /// <summary>

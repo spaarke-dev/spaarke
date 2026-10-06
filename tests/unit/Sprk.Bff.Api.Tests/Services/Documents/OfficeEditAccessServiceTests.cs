@@ -104,6 +104,70 @@ public class OfficeEditAccessServiceTests
             It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Fact(DisplayName = "Task 171: a caller who already holds a READ-ONLY role is told they cannot edit — the role is never changed")]
+    public async Task SecureContainer_CallerHoldsReader_IsReportedReadOnly()
+    {
+        _membership.Setup(m => m.ReadAccessAsync(SecureDrive, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess(
+                [new Membership.ContainerUserRole("perm-r", ["reader"], Upn, ObjectId.ToString())],
+                RolesComplete: true, new Dictionary<string, string>()));
+
+        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Write)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(false, "member-read-only"));
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory(DisplayName = "Task 171: an EXTERNAL Write holder on a Restricted (or unreadable) secure record gets no grant — the removal pass's rule, applied up front")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SecureContainer_ExternalCallerOnRestrictedRecord_GetsNoGrant(bool recordReadable)
+    {
+        _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("systemuser", SystemUserId)
+            {
+                ["domainname"] = Upn,
+                ["azureactivedirectoryobjectid"] = ObjectId,
+                ["sprk_isexternal"] = true,
+            });
+        var project = _entities.Setup(e => e.RetrieveAsync("sprk_project", ProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()));
+        if (recordReadable)
+            project.ReturnsAsync(new Entity("sprk_project", ProjectId) { ["sprk_accesspermission"] = new OptionSetValue(100000002) });
+        else
+            project.ThrowsAsync(new HttpRequestException("Dataverse unavailable"));
+
+        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Write)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Task 171: an EXTERNAL Write holder on a secure record that is NOT Restricted is granted as usual")]
+    public async Task SecureContainer_ExternalCallerOnUnrestrictedRecord_IsGranted()
+    {
+        _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("systemuser", SystemUserId)
+            {
+                ["domainname"] = Upn,
+                ["azureactivedirectoryobjectid"] = ObjectId,
+                ["sprk_isexternal"] = true,
+            });
+        _entities.Setup(e => e.RetrieveAsync("sprk_project", ProjectId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_project", ProjectId) { ["sprk_accesspermission"] = new OptionSetValue(100000000) });
+        _membership.Setup(m => m.GrantMarkedWriterAsync(
+                SecureDrive, Membership.JitWriterMarkerPrefix, SystemUserId, Upn, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.MarkedGrantOutcome.Granted);
+
+        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Write)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(true, "writer-jit"));
+    }
+
     [Fact(DisplayName = "Task 171: a BUSINESS-UNIT container never gets a JIT grant — internal users there are standing writers")]
     public async Task BusinessUnitContainer_NeverGrants()
     {
