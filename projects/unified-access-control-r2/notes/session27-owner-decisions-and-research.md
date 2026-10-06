@@ -1067,6 +1067,14 @@ Replaces the 2026-09-18 ruling's "the external flag is irrelevant to sharing" re
 5. **Make Secure on a record that already has documents** strands those documents for every OBO read path, until the broker-only document task lands. The owner chose NOT to add a temporary guard ("it just risks a regression and somehow missing the reversion later"). Recorded as a known risk.
 6. **Broker-only document gap (upload403 investigation):** a new task is ADDED to the front of batch 5. Its scope depends on the Office-edit option, which is pending.
 
+## Round 69 (2026-10-06). BINDING. OWNER decision. SPE document access: broker-only everywhere, with JIT Office edit. New task 171.
+
+1. **Broker-only for ALL containers** (environment/root, business-unit, per-record secure), for system users and contacts alike: the BFF checks Dataverse, then reads and writes bytes app-only. Access follows Dataverse privileges with no membership to manage. Owner: "this is critical otherwise SPE wouldn't work for any users!"
+2. **Office edit:** just-in-time permission for a system user with Write on the record (Dataverse decides, as the caller), the narrowest kind SPE supports. A reconciliation pass removes it when Write goes away. This is the ONE exception to the 2026-08-25 "no user is ever granted a container permission" rule.
+3. **Contacts** (external and workforce-contact) are included in broker-only and verified on secure containers. They never receive an SPE permission (SPE accepts only Entra members or guests), so a contact edits by downloading and uploading a new version.
+4. **Why not membership as the model:** a container member can open every file in that container directly through Office or SharePoint, whatever Dataverse says about the record the file belongs to. That cannot honour per-record privileges, even with one container per customer environment, and per-record secure containers would multiply the lists to keep in sync.
+5. **Task 171** owns it, first in batch 5. It escalates if Office edit needs a container-level role, because of the exposure on business-unit containers.
+
 ## Peer report: #1081 decided (word-add-in-r2, relayed by the owner 2026-10-02)
 
 - **Owner decision on #1081:** the dev root team "Spaarke" now holds Spaarke Basic User, verified live; Office creates owned by it work again. Root-BU users are a dev-only artifact. In production, users sit in the customer's child BU and the BFF app user sits in the customer BU, so **nothing is codified for the root team**. This matches round 5.

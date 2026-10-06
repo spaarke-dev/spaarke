@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="171" project="unified-access-control-r2">
+  <metadata>
+    <title>Broker-only document bytes: every internal upload and read of SPE content runs app-only after the BFF's own Dataverse check, and Office edit gets just-in-time container membership (owner round 69)</title>
+    <phase>Batch 5, first (owner round 69, 2026-10-06)</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-adjacent byte paths on many live BFF routes (tags bff-api, auth, security, spe). It changes WHICH identity reads and writes customer documents, and adds the only code path that grants a user an SPE container role.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting conversion over upload, read, versions, Compose and AI byte paths. It needs a platform research step (SPE file-level vs container-level permissions for Office edit) and a new grant/revoke lifecycle that must not open a second permission system. Security work; per the project's model rule.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Infrastructure/Graph/** (SpeFileStore and the operations classes), the shared byte paths every document route uses, and Infrastructure/ExternalAccess/SpeContainerMembershipService.cs. Run alone.</parallel-reason>
+    <deps>none (batch 4 deployed; #1319 deployed)</deps>
+    <tags>bff-api, auth, security, spe, graph, documents, testing</tags>
+    <estimated-effort>3-5 days</estimated-effort>
+    <origin>Batch-4 dev live gates 2026-10-06 (notes/batch4-live-gates-2026-10-06.md, section "upload403", defect U403-1). A creator's upload into its own newly provisioned secure project was a Graph 403. Owner round 69: "this is critical otherwise SPE wouldn't work for any users!"</origin>
+  </metadata>
+
+  <prompt>SharePoint Embedded only lets a DELEGATED (OBO) caller touch a container when that user holds a role on it. The owner's 2026-08-25 decision (SECURE-DOCUMENTS-BUILD-PLAN.md §1) is broker-only: no user is ever granted a container role; the BFF authorizes against Dataverse, then works with Graph as itself. The external-contact path does this already. The internal byte paths were never converted. They still call Graph as the user, so they work only on containers where someone hand-added the user (dev BU1: Ralph, Eyal, testuser1). They fail for everyone on every per-record secure container (created with no members, by design), for any user not hand-added to a business-unit container, and for documents that Make Secure has moved into a secure container. Convert every internal upload and read of document bytes to app-only, behind the authorization each route already has. Give Office "Edit in Word/Excel" the one exception the owner approved: just-in-time membership granted only to a user Dataverse says has Write, and removed when that Write goes away.</prompt>
+
+  <owner-decision date="2026-10-06" ref="notes/session27-owner-decisions-and-research.md, Round 69">
+    (1) Broker-only for ALL containers (environment/root, business-unit, per-record secure), so access follows Dataverse privileges for system users and contacts alike, with no membership to manage. (2) Office edit: just-in-time membership (option b): when a user with Write on the document's record (decided by Dataverse, as the caller) opens it for editing, the BFF grants that user the narrowest SPE permission that lets the Office session work; a reconciliation pass removes it when the user no longer has Write. (3) No temporary guard on Make Secure (known risk until this task lands). (4) The demo self-registration's Step 8 container grant becomes unnecessary once this lands; leave it in place unless step 0's research says it must change.
+  </owner-decision>
+
+  <goal>Every internal route that reads or writes document bytes in SPE authorizes the caller against Dataverse (the route's existing filter, unchanged or tightened, never loosened) and then calls Graph app-only. No route depends on a user holding a container role except Office edit. Office edit grants a just-in-time permission only to a user with Write on the record, and nobody keeps it after losing Write. A user who is not a member of any container can upload, preview, open, version, Compose and run AI over a document on any record they have the Dataverse rights for, including a secure record.</goal>
+
+  <background>
+**Evidence (dev, 2026-10-06).** testuser1, the creator of a freshly provisioned secure project: `POST /api/obo/records/sprk_project/{id}/upload-session` passed `RecordRouteAccessAuthorizationFilter` (Read, Write, Append, AppendTo, Share), and the secure container resolved correctly. The OBO exchange returned 200, then Graph `createUploadSession` on that container returned 403 "Access denied" (App Insights op `243a3efa312d120a500a6d36a68795c6`). The same user, route and code on a non-secure BU1 project returned 200; only the container differs. The BU1 container has 3 hand-granted roles. Secure containers have 0. The container type (8a6ce34c, "Spaarke PAYGO 1") is the same for all of them, and the BFF's registration on it is fine (the app-only create, stamp and permission list all succeed).
+
+**Byte paths that call Graph as the user** (from the investigation at master 891cfd9a3; re-verify each line before editing):
+- Upload: `OBOEndpoints.cs:169` (PUT small, `UploadSmallAsUserAsync`) and `:410` (upload-session, `CreateUploadSessionAsUserAsync`; `UploadSessionManager` has no app-only twin yet, `:625`).
+- Read: the `FileAccessEndpoints` routes preview-url, preview, content, office, open-links, view-url and share-link (`:330, :458, :522, :587, :665, :825, :907, :925`), and `DocumentVersionEndpoints :118, :175`.
+- Compose: `ComposeAnnotationEndpoints :143/:242`, `ComposeSyncEndpoints :266`, and the save's `ReplaceFileContentAsUserAsync`.
+- AI: `AnalysisDocumentLoader :137/:152`, `DocumentContextService :702`, `FileIndexingService :76`, `AiAuthorizationFilter :787`, `ChatDocumentEndpoints :1307`, `ChatWordExportEndpoints :179`.
+- Already app-only and working (the reference shapes): `/api/documents/{id}/download` and `/eml-render` (`DownloadFileAsync`), communication archive (`UploadSmallAsync`), `DocumentContainerRelocator`, and the contact broker `ExternalProjectDataEndpoints :365` (checks project access AND doc∈project, then streams app-only).
+
+**Membership code that exists:** `Infrastructure/ExternalAccess/SpeContainerMembershipService.cs` has `GrantMembershipAsync` (zero callers) and `RevokeMembershipAsync`. Scheduled jobs use ADR-036 `IScheduledJob` (for example `SecureChildShareReconciliationJob`, `NoAccessShareReconciliationJob`).
+  </background>
+
+  <constraints>
+    <constraint source="ADR-007">All Graph access goes through the existing SpeFileStore facade and its operations classes. No Microsoft.Graph types leak into endpoints.</constraint>
+    <constraint source="ADR-003 / WP-6">Fail closed. A route that cannot prove the caller's rights on the document's record denies. Converting a route to app-only must NEVER widen who can reach it: before switching a route, confirm its filter checks the caller's rights on the exact document or record (DocumentAuthorizationFilter / RecordRouteAccessAuthorizationFilter / the AI filters), and that the container and item are derived server-side from that record, never taken from the client. A route that takes a client-supplied drive or item id without tying it to an authorized record is fixed (tie it) or deleted (owner round 10 rule: no caller and not published → delete) before it goes app-only.</constraint>
+    <constraint source="ADR-028 A4">No new `.WithClientSecret(...)`. App-only uses the existing factory (`ForApp()`).</constraint>
+    <constraint source="owner round 69">Office edit is the ONLY path that grants a user an SPE permission. It grants only after Dataverse confirms Write on the document's record AS THE CALLER, grants the narrowest permission that works (file-level if SPE supports it for this, otherwise container-level), and every grant is removable by the reconciliation pass. No other code grants membership.</constraint>
+    <constraint source="CLAUDE.md §11">Reuse before adding: the app-only SpeFileStore methods, SpeContainerMembershipService, an existing IScheduledJob for the removal pass (extend one if its responsibility fits; a new job needs the three-question justification). No new Dataverse table or column unless step 0 proves the grant cannot be reconstructed from Graph's own permission list.</constraint>
+    <constraint source="CLAUDE.md §10">Placement justification, publish-size delta against a fresh master build (short paths, Compress-Archive), CVE check, and tests for every Services/ change.</constraint>
+    <constraint source="ADR-038">Tests: route-level and seam tests asserting the identity used (app-only after an allow), the deny cases unchanged, and the JIT grant/remove lifecycle. No Mock&lt;HttpMessageHandler&gt;, no DI-registration or ctor-null tests.</constraint>
+    <constraint source="owner round 69 (3)">Do not add a temporary guard to Make Secure.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Research before code (use the researcher subagent, Microsoft Learn first): (a) Can an app grant a NON-member user a FILE-level permission in an SPE container (driveItem invite / permissions) that lets Office for the web and desktop edit that file, under Spaarke's container type's sharing model (check whether it is `restrictive` or `open`; reading it needs the owning app, so if you cannot read it, say so and treat both cases)? (b) If not, what is the narrowest container role that allows editing, and how quickly does a removed role stop an open Office session? (c) Does the Office edit link (`/office`, `/open-links`) work for an app-only-minted link, or must it be the user's? Write the answers, with sources, into the task note before step 1. If only container-level membership works, see the escalation.</step>
+    <step order="1">Inventory: list every route and service that reads or writes SPE bytes as the user, AND every contact-plane byte route (external SPA, and Teams/workforce-contact), with its identity (start from the background list; grep `AsUser`, `ForUserAsync`, OBO byte calls in SpeFileStore and its operations classes). For each, record its authorization filter, how the container and item are derived, and its callers. Put the table in the task note.</step>
+    <step order="2">Uploads: switch `OBOEndpoints.cs:169` to app-only `UploadSmallAsync` and add the app-only `CreateUploadSessionAsync` twin for `:410`, keeping the record filter and the server-side container resolution.</step>
+    <step order="3">Reads, versions, Compose, AI: convert each in-scope byte call to app-only behind its existing authorization, applying the ADR-003 constraint per route. Office edit links are handled in step 4.</step>
+    <step order="4">Office edit, just-in-time: on an edit-open, check the caller's Write on the document's record (OBO, existing CallerRecordAccessProbe / DocumentAuthorizationFilter), grant the narrowest permission from step 0 via SpeContainerMembershipService (extend it for file-level if that is the answer), then return the edit link. Idempotent: an existing grant is reused. A user without Write gets a view-only open, never a grant.</step>
+    <step order="5">Removal pass: a scheduled reconciliation (extend an existing IScheduledJob where its responsibility fits) lists the user permissions this task grants (from Graph's own permission list; distinguish them from hand-granted and owner roles so an existing BU-container owner is never removed by mistake, for example by a marker in the grant's role or a naming convention that step 0 confirms is supported, otherwise escalate) and removes each one whose holder no longer has Write on the record. It fails closed toward removal only when Dataverse positively answers "no Write". An unknown answer leaves the grant and logs, so the job never revokes on a lookup failure loop, and it reports counts. Run interval: the project's usual few minutes.</step>
+    <step order="6">Fix the misleading 403 text (`GraphErrorTranslator.cs:133`, `ProblemDetailsHelper.cs:111`): pass through what SPE actually said (for example "SharePoint Embedded denied access to this container") instead of blaming the app's container-type registration.</step>
+    <step order="7">Docs: update SECURE-DOCUMENTS-BUILD-PLAN.md §1 with the Office-edit exception (round 69), the customer deployment guide (no per-user container step is needed; the JIT pass and its interval), and the self-registration guide's Step 8 note per step 0. Build, full affected test suites, publish size, CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 0 shows Office edit needs a CONTAINER-level role (no file-level option), STOP before step 4 and report it: on a business-unit container, a JIT member could open every document in that container through Office/SharePoint directly. Give the options (for example: JIT only on per-record secure containers and view-only edit elsewhere, or accept the exposure with a short removal interval), each with its cost. The owner decides.</trigger>
+    <trigger>If a byte route's authorization cannot be tied to an authorized record (a client-chosen drive or item id with no record behind it) and it has callers or is published, STOP for that route and report it, rather than converting it to app-only.</trigger>
+    <trigger>If the removal pass cannot tell JIT grants apart from hand-granted or owner roles without a new Dataverse column or table, STOP and present that cost before adding one.</trigger>
+  </escalation>
+
+  <justification>
+    <component name="app-only CreateUploadSessionAsync">Existing: UploadSessionManager has only the OBO variant. Extension: it is the app-only twin on the same class and the same ForApp() client, not a new service. Cost of doing nothing: no internal user can upload a large file to a secure record (verified 403).</component>
+    <component name="JIT Office-edit grant + removal pass">Existing: SpeContainerMembershipService.GrantMembershipAsync / RevokeMembershipAsync (zero callers) and the ADR-036 job pattern. Extension: call and extend those; the removal pass extends an existing reconciliation job where its responsibility fits. Cost of doing nothing: no user can edit a secure document in Office, and any business-unit container needs hand-added members for edit.</component>
+  </justification>
+
+  <acceptance-criteria>
+    <criterion testable="true">A non-admin user who is a member of NO container, holding the required Dataverse rights on a secure record, can: upload a small file, upload via an upload session, preview, get content, view versions, open in Compose and save, and run the AI paths on that record's documents. Live on dev, with the user's container-permission list read back empty.</criterion>
+    <criterion testable="true">The same user WITHOUT Dataverse rights on that record gets the routes' existing denial (403/404 as before, unchanged bodies) on every one of those routes, and no Graph call is made. Asserted by test and spot-checked live.</criterion>
+    <criterion testable="true">Every converted route calls Graph app-only only after its authorization allowed, and derives the container and item from the authorized record. Asserted by test per route family (upload, read, versions, Compose, AI).</criterion>
+    <criterion testable="true">Office edit: a user with Write on the record gets a working edit link and exactly one JIT permission of the narrowest kind step 0 established. A user with Read only gets a view-only open and no grant. A repeat edit-open reuses the grant.</criterion>
+    <criterion testable="true">Removal: after the user loses Write (unshare, No Access entry, record becomes Restricted for a user flagged external, user disabled), the next pass removes the JIT permission. Hand-granted and owner roles are never removed. A Dataverse lookup failure removes nothing and is logged. Asserted by test; one live removal demonstrated on dev.</criterion>
+    <criterion testable="true">No code path other than step 4 grants a user an SPE permission (grep plus an arch or guard test).</criterion>
+    <criterion testable="true">The 403 text no longer names the app's container-type permission for a membership denial.</criterion>
+    <criterion testable="true">Contact plane (owner round 69: "whether internal worker or external contacts"): a contact holding a grant on a SECURE record can upload, preview and download that record's documents through the external/Teams contact routes. Those routes are app-only after their grant check (verify each; convert any that are not). A contact with no grant is denied. Live on dev with the CIAM Test User or a workforce-contact token. Contacts never receive an SPE permission, JIT included (SPE accepts only Entra members or guests): Office edit for a contact is download plus upload of a new version, and the contact UI offers no in-browser edit.</criterion>
+    <criterion testable="true">Make Secure on a record with a document: after it moves the document, a non-member sharee can preview and download it (live on dev).</criterion>
+    <criterion testable="true">Docs updated per step 7. Publish size reported (both absolute sizes, the delta, the zip tool). No new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/** (byte routes, SpeFileStore and operations classes, SpeContainerMembershipService, one reconciliation job)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** and tests/integration/** per ADR-038 KEEP categories</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-171-broker-only-document-bytes.md (step 0 research, step 1 inventory, live gate)</output>
+    <output type="doc">SECURE-DOCUMENTS-BUILD-PLAN.md §1; docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md; docs/guides/SPAARKE-SELF-SERVICE-USER-REGISTRATION.md</output>
+  </outputs>
+</task>
