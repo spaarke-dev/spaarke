@@ -580,20 +580,26 @@ environments:
         []
 
   demo:
+    # Corrected 2026-10-05 (T242b) from the live subscription: this section named spaarke-bff-prod /
+    # rg-spaarke-platform-prod / sprk-platform-prod-kv, which no longer exist in any Spaarke subscription
+    # (that stack was decommissioned). Owner 2026-10-05: demo is the next environment used to test the
+    # provisioning orchestration.
     display_name: Demo
-    resource_group: rg-spaarke-platform-prod
+    azure_subscription_id: 2ff9ee48-6f1d-4664-865c-f11868dd1b50 # "Spaarke Demo Environment"
+    resource_group: rg-spaarke-demo
     location: westus2
     region: West US 2
-    keyvault: sprk-platform-prod-kv
-    keyvault_resource_group: rg-spaarke-platform-prod
+    keyvault: sprk-demo-kv
+    keyvault_resource_group: rg-spaarke-demo
 
     bff:
-      app_service_name: spaarke-bff-prod
-      app_service_url: https://api.spaarke.com
-      app_service_slot: staging
+      app_service_name: spaarke-bff-demo # Stopped since 2026-10-04 (needs .NET 10 + settings refresh, task 242c)
+      app_service_url: https://spaarke-bff-demo.azurewebsites.net
+      app_service_slot: null # no deployment slot exists
       app_registration_ref: app_registrations.bff_api # TBD: confirm if demo uses separate app reg
-      secrets:
-        api_client_secret: kv:API-CLIENT-SECRET
+      # Redis: Azure Managed Redis, Microsoft Entra only (T242b) — the BFF identity mi-bff-api-demo holds the access policy.
+      redis_endpoint: spaarke-bff-redis-demo.westus2.redis.azure.net:10000
+      secrets: {} # the former kv:API-CLIENT-SECRET does not exist in sprk-demo-kv (checked 2026-10-05)
 
     dataverse:
       env_url: https://spaarke-demo.crm.dynamics.com
@@ -604,7 +610,7 @@ environments:
         endpoint: https://spaarke-openai-demo.openai.azure.com/
         resource_name: spaarke-openai-demo
       ai_search:
-        resource_name: spaarke-search-demo
+        resource_name: spaarke-search-demo # NOT present in rg-spaarke-demo (checked 2026-10-05)
       document_intelligence:
         resource_name: spaarke-docintel-demo
 
