@@ -105,6 +105,19 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
     /// <summary>Every share the endpoint revoked, in order.</summary>
     public ConcurrentBag<RecordedShare> Revokes { get; } = new();
 
+    /// <summary>
+    /// The subset of <see cref="Revokes"/> sent AS the record's owning user (the seam's owner-aware revoke, for the owner's
+    /// own share) — what the production client stamps <c>MSCRMCallerID</c> for. Every other revoke is app-only.
+    /// </summary>
+    public ConcurrentBag<RecordedShare> RevokesAsOwner { get; } = new();
+
+    /// <summary>
+    /// Every revoke Dataverse REFUSED because it was the record's current owning user's own share sent app-only — HTTP 400
+    /// 0x80040223 "Only owner can revoke access to the owner" (live on dev 2026-10-06). The double applies that rule always,
+    /// as Dataverse does.
+    /// </summary>
+    public ConcurrentBag<RecordedShare> OwnerShareRevokesRefused { get; } = new();
+
     /// <summary>Every ModifyAccess the endpoint issued (task 133: an existing share set to exact rights, or restored).</summary>
     public ConcurrentBag<RecordedShare> Modifies { get; } = new();
 
@@ -665,6 +678,8 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         _updateSequence = 0;
         Grants.Clear();
         Revokes.Clear();
+        RevokesAsOwner.Clear();
+        OwnerShareRevokesRefused.Clear();
         Modifies.Clear();
         _shares.Clear();
         GrantToCurrentOwnerRefused = false;
@@ -1645,16 +1660,45 @@ public class ProvisionProjectTestFixture : WorkspaceTestFixture
         public Task RevokeAccessAsync(
             string entitySetName, Guid recordId, DataversePrincipalRef principal,
             CancellationToken ct = default)
+            => Revoke(entitySetName, recordId, principal, asOwner: false);
+
+        /// <summary>
+        /// The owner-aware revoke: sent as the principal exactly when the caller-named owner is that systemuser — the
+        /// production client's rule — and app-only otherwise.
+        /// </summary>
+        public Task RevokeAccessAsync(
+            string entitySetName, Guid recordId, DataversePrincipalRef principal, DataversePrincipalRef recordOwner,
+            CancellationToken ct = default)
+            => Revoke(entitySetName, recordId, principal,
+                asOwner: principal.Kind == DataversePrincipalKind.SystemUser && recordOwner == principal);
+
+        private Task Revoke(string entitySetName, Guid recordId, DataversePrincipalRef principal, bool asOwner)
         {
             // Checked BEFORE recording: `Revokes` means "shares that were actually removed".
             if (_fixture.FailRevokeForPrincipal == principal.Id)
                 throw new InvalidOperationException($"Seeded revoke failure for {principal.Id}.");
 
+            // Dataverse: the CURRENT owning user's own share is revoked only by that user (0x80040223), whoever asks.
+            if (!asOwner
+                && principal.Kind == DataversePrincipalKind.SystemUser
+                && _fixture.OwningUserOf(recordId) == principal.Id
+                && _fixture._shares.ContainsKey((recordId, principal)))
+            {
+                _fixture.OwnerShareRevokesRefused.Add(
+                    new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence()));
+                throw new HttpRequestException(
+                    "Dataverse 400 (0x80040223): Only owner can revoke access to the owner.", null,
+                    System.Net.HttpStatusCode.BadRequest);
+            }
+
             // Task 133 b2: accepted, not applied — the share stays, and only a read-back can tell.
             if (_fixture.RevokeNotAppliedFor == principal.Id)
                 return Task.CompletedTask;
 
-            _fixture.Revokes.Add(new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence()));
+            var revoked = new RecordedShare(entitySetName, recordId, principal, null, _fixture.NextSequence());
+            _fixture.Revokes.Add(revoked);
+            if (asOwner)
+                _fixture.RevokesAsOwner.Add(revoked);
             _fixture.OnRevoke?.Invoke(recordId, principal);
             _fixture._shares.TryRemove((recordId, principal), out _);
             return Task.CompletedTask;
