@@ -90,9 +90,11 @@ public sealed class H12cRuntimeReferencesHandlerTests
     [Fact]
     public void PinnedModelCatalog_MatchesADR020PinnedVersions()
     {
+        // Task 247: the models the stamp deployments run (versions pinned to openai.bicep — the template parity
+        // check is ArmTemplateInspectorTests.PinnedModelCatalog_MatchesTheCompiledCustomerTemplate).
         PinnedModelCatalog.Models.Should().HaveCount(3);
-        PinnedModelCatalog.Models.Should().ContainSingle(m => m.ModelId == "gpt-4o" && m.PinnedVersion == "2024-08-06" && m.Capability == ModelCapability.Chat);
-        PinnedModelCatalog.Models.Should().ContainSingle(m => m.ModelId == "gpt-4o-mini" && m.PinnedVersion == "2024-07-18" && m.Capability == ModelCapability.Chat);
+        PinnedModelCatalog.Models.Should().ContainSingle(m => m.ModelId == "gpt-4o" && m.PinnedVersion == "2024-11-20" && m.Capability == ModelCapability.Chat);
+        PinnedModelCatalog.Models.Should().ContainSingle(m => m.ModelId == "gpt-4.1-mini" && m.PinnedVersion == "2025-04-14" && m.Capability == ModelCapability.Chat);
         PinnedModelCatalog.Models.Should().ContainSingle(m => m.ModelId == "text-embedding-3-large" && m.PinnedVersion == "1" && m.Capability == ModelCapability.Embedding);
     }
 

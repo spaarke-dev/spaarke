@@ -564,84 +564,6 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
-    // ---------- HANDLER-13 openaiDeploymentSetPolicy auto-recompose (Wave 2 pre-dispatch remediation 2026-08-27) ----------
-
-    private sealed class StubOpenAiRecomposer : IOpenAiDeploymentSetRecomposer
-    {
-        private readonly OpenAiDeploymentSetRecomposeResult _result;
-        public int CallCount { get; private set; }
-        public OpenAiDeploymentSetRecomposeRequest? LastRequest { get; private set; }
-        public StubOpenAiRecomposer(OpenAiDeploymentSetRecomposeResult result) => _result = result;
-        public Task<OpenAiDeploymentSetRecomposeResult> RecomposeAsync(
-            OpenAiDeploymentSetRecomposeRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            LastRequest = request;
-            return Task.FromResult(_result);
-        }
-    }
-
-    [Fact]
-    public async Task Handler13_StrictPolicy_RecomposerNotInvoked()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h13-strict");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var recomposer = new StubOpenAiRecomposer(
-            new OpenAiDeploymentSetRecomposeResult(
-                Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences.PinnedModelCatalog.Models,
-                Array.Empty<string>(), string.Empty));
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), RealInspector(),
-            optionsOverride: new BicepInfraDeployOptions
-            {
-                OpenAiDeploymentSetPolicy = OpenAiDeploymentSetPolicy.Strict,
-            },
-            recomposer: recomposer);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        recomposer.CallCount.Should().Be(0, "Strict policy MUST NOT invoke the recomposer");
-    }
-
-    [Fact]
-    public async Task Handler13_AutoRecomposePolicy_RecomposerInvoked_ProceedsToRunner()
-    {
-        var run = BuildRun();
-        var repo = new FakeRepository(run, etag: "etag-h13-auto");
-        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
-        var recomposer = new StubOpenAiRecomposer(
-            new OpenAiDeploymentSetRecomposeResult(
-                Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences.PinnedModelCatalog.Models
-                    .Where(m => m.ModelId == "gpt-4o-mini")
-                    .ToArray(),
-                new[] { "gpt-4o", "text-embedding-3-large" },
-                "Dropped 2 zero-TPM models on fresh sub."));
-        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
-            new FakeUpgradeDriftDetector(), RealInspector(),
-            optionsOverride: new BicepInfraDeployOptions
-            {
-                OpenAiDeploymentSetPolicy = OpenAiDeploymentSetPolicy.AutoRecompose,
-            },
-            recomposer: recomposer);
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        result.Should().BeOfType<HandlerResult.Success>();
-        recomposer.CallCount.Should().Be(1, "AutoRecompose policy MUST invoke the recomposer");
-        recomposer.LastRequest!.FullPinnedSet.Should().HaveCount(3, "canonical 3-model set from ADR-020");
-        runner.CallCount.Should().Be(1, "runner MUST fire after successful recompose");
-    }
-
-    [Fact]
-    public void Handler13_OpenAiDeploymentSetPolicy_DefaultsToStrict()
-    {
-        var options = new BicepInfraDeployOptions();
-        options.OpenAiDeploymentSetPolicy.Should().Be(OpenAiDeploymentSetPolicy.Strict,
-            "default policy MUST preserve pre-Wave-2 behavior (deploy full model set)");
-    }
-
     // ---------- HANDLER-10 kvRefIdentity invalid detector (Wave 2 pre-dispatch remediation 2026-08-27) ----------
 
     [Fact]
@@ -979,8 +901,7 @@ public sealed class H2aBicepInfraDeployHandlerTests
         ArmTemplateInspector inspector,
         string? runNotesDir = null,
         FakeResourceNameAvailabilityProbe? nameProbe = null,
-        BicepInfraDeployOptions? optionsOverride = null,
-        IOpenAiDeploymentSetRecomposer? recomposer = null)
+        BicepInfraDeployOptions? optionsOverride = null)
     {
         var options = Options.Create(optionsOverride ?? new BicepInfraDeployOptions
         {
@@ -992,24 +913,8 @@ public sealed class H2aBicepInfraDeployHandlerTests
         // existing tests remain unaffected. HANDLER-05-specific tests supply
         // a Conflict-returning fake explicitly.
         var effectiveNameProbe = nameProbe ?? FakeResourceNameAvailabilityProbe.AllAvailable();
-        // HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): default
-        // to the live-production recomposer wired against a throw-if-called
-        // fake transport. Existing tests use the default
-        // OpenAiDeploymentSetPolicy = Strict which skips the recomposer, so
-        // the transport is never actually hit; if a regression accidentally
-        // invokes it under a Strict-policy test, the fake handler throws
-        // loudly rather than silently masking a broken code path.
-        var throwingArmClient = ArmSdkTestFakes.NewArmClient(
-            ArmSdkTestFakes.NewHandler(_ =>
-                throw new InvalidOperationException(
-                    "H2a Strict-policy test path invoked the OpenAI deployment-set " +
-                    "recomposer's ARM transport — Strict MUST skip the recomposer.")));
-        var effectiveRecomposer = recomposer ?? new ArmOpenAiDeploymentSetRecomposer(
-            throwingArmClient,
-            NullLogger<ArmOpenAiDeploymentSetRecomposer>.Instance);
         return new H2aBicepInfraDeployHandler(
-            repo, runner, probe, driftDetector, inspector, effectiveNameProbe,
-            effectiveRecomposer, options,
+            repo, runner, probe, driftDetector, inspector, effectiveNameProbe, options,
             NullLogger<H2aBicepInfraDeployHandler>.Instance);
     }
 

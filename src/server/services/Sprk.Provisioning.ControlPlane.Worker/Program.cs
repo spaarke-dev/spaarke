@@ -279,23 +279,6 @@ builder.Services.AddSingleton<IResourceNameAvailabilityProbe>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmResourceNameAvailabilityProbe>>();
     return new ArmResourceNameAvailabilityProbe(armClient, logger);
 });
-// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): OpenAI
-// deployment-set auto-recompose seam. Invoked only when
-// BicepInfraDeploy:OpenAiDeploymentSetPolicy = AutoRecompose. LIVE
-// production impl (2026-08-27 follow-on to scaffold commit 74197c02e) —
-// reads Azure.ResourceManager.CognitiveServices regional usage via the
-// shared UAMI-pinned TokenCredential singleton, drops zero-TPM pinned
-// models, and returns a preserved-set + operator-visible note. Factory
-// lambda parity with the sibling ARM collaborator registrations above
-// (HANDLER-05 name-availability, upgrade-drift-detector) — one per-
-// registration probe-local ArmClient, no shared ArmClient DI singleton.
-builder.Services.AddSingleton<IOpenAiDeploymentSetRecomposer>(sp =>
-{
-    var credential = sp.GetRequiredService<TokenCredential>();
-    var armClient = new Azure.ResourceManager.ArmClient(credential);
-    var logger = sp.GetRequiredService<ILogger<ArmOpenAiDeploymentSetRecomposer>>();
-    return new ArmOpenAiDeploymentSetRecomposer(armClient, logger);
-});
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams

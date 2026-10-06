@@ -87,6 +87,7 @@ public static class HandlerRunInputs
                 RunInput.Intake("rateWindowHours", required: false),
                 RunInput.Intake("rateLimit", required: false),
                 RunInput.Intake("openaiPinFreshnessMinDays", required: false),
+                RunInput.Intake("openAiLocation", required: false),   // T247: H0's OpenAI probes (else westus3)
                 RunInput.Intake("provisionedOn", required: false),
                 RunInput.Intake("currentBffVersion", required: false),
                 RunInput.Intake("currentSolutionVersion", required: false),

@@ -494,13 +494,13 @@ public sealed class H0PreflightHandlerTests
         const string subscriptionId = "22222222-3333-4444-5555-666666666666";
 
         var run = BuildRunWithTenant();
-        run.Parameters.NonSecret["region"] = region;
+        run.Parameters.NonSecret["openAiLocation"] = region;   // task 247: the probe reads the OpenAI region
         run.Parameters.NonSecret["subscriptionId"] = subscriptionId;
         var repo = new FakeRepository(run, etag: "etag-h03b");
         var enqueuer = new FakeEnqueuer();
 
         // Fake ARM transport returns a `Microsoft.CognitiveServices/models`
-        // page where the gpt-4o@2024-08-06 pin is scheduled to deprecate and
+        // page where the gpt-4o@2024-11-20 pin is scheduled to deprecate and
         // its lifecycleStatus is "Deprecating". Inference-deprecation date is
         // set far in the future (500 days) so the "window-expired" branch
         // does NOT also fire — the failure is unambiguously the deprecating
@@ -528,7 +528,7 @@ public sealed class H0PreflightHandlerTests
                         "publisher": "OpenAI",
                         "format": "OpenAI",
                         "name": "gpt-4o",
-                        "version": "2024-08-06",
+                        "version": "2024-11-20",
                         "skus": [],
                         "deprecation": { "inference": "{{farFutureIso}}" },
                         "lifecycleStatus": "Deprecating"
@@ -540,8 +540,8 @@ public sealed class H0PreflightHandlerTests
                       "model": {
                         "publisher": "OpenAI",
                         "format": "OpenAI",
-                        "name": "gpt-4o-mini",
-                        "version": "2024-07-18",
+                        "name": "gpt-4.1-mini",
+                        "version": "2025-04-14",
                         "skus": [],
                         "lifecycleStatus": "GenerallyAvailable"
                       }
@@ -599,7 +599,7 @@ public sealed class H0PreflightHandlerTests
         // pinned version that failed so the operator's remediation is
         // deterministic (F1 lesson: "F1 pin freshness probe" must tell the
         // operator WHICH pin to bump).
-        failure.Diagnostic.Should().Contain("gpt-4o@2024-08-06")
+        failure.Diagnostic.Should().Contain("gpt-4o@2024-11-20")
             .And.Contain("Deprecating");
 
         // Cosmos state — Failed + gate-state keyed by rejection code, with
@@ -613,7 +613,7 @@ public sealed class H0PreflightHandlerTests
         var evidence = repo.LastWrittenRun.GateStates["preflight-quota-openai-pin-stale"].Evidence;
         evidence.Should().NotBeNull("the H0 handler MUST persist the probe's headroom payload as gate-state evidence");
         var evidenceJson = evidence!.Value.GetRawText();
-        evidenceJson.Should().Contain("gpt-4o@2024-08-06",
+        evidenceJson.Should().Contain("gpt-4o@2024-11-20",
             "the per-pin breakdown must identify the specific failing pin by name + version");
         evidenceJson.Should().Contain("deprecating-status",
             "the machine-stable reason code must accompany the human-readable diagnostic");

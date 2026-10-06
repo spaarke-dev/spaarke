@@ -35,54 +35,40 @@ param disablePublicNetworkAccess bool = false
 param allowedIpRanges array = []
 
 @description('Model deployments to create. Capacity is in thousands of tokens per minute (TPM).')
-// SESSION 12 (2026-08-26) version-pin refresh — verified via
-//   az cognitiveservices model list --location westus3 --subscription <sub>
-// Reality in westus3 as of 2026-08-26:
-//   gpt-4o                  2024-05-13  Deprecating
-//   gpt-4o                  2024-08-06  Deprecating (previous pin)
-//   gpt-4o                  2024-11-20  Legacy       (bumped to — newest available)
-//   gpt-4o-mini             2024-07-18  Deprecating (ONLY version in westus3 — cannot bump)
-//   text-embedding-3-large  1           GenerallyAvailable (kept)
-// No GA gpt-4o / gpt-4o-mini exists in westus3 today; 2024-11-20 (Legacy) is the
-// least-bad gpt-4o pin. gpt-4o-mini stays at 2024-07-18 because westus3 offers
-// no newer version. Follow-on: migrate to gpt-4.1 / gpt-5.x family when frontier
-// TPM quota is granted (per MEMORY reference_azure_fresh_sub_openai_tier_gates).
+// Task 247 (owner 2026-10-06) — mirrored by PinnedModelCatalog.cs (L2), which H0 checks quota and model
+// availability against; ArmTemplateInspectorTests fails if the two differ. Change both together.
+//   - Deployment NAMES are what the BFF calls (hard-coded across its AI code) — keep them.
+//   - SKU DataZoneStandard: owner decision — prompts are processed inside the US data zone. Fresh
+//     subscriptions auto-grant it (westus3, read 2026-10-06: gpt-4o 300, gpt4.1-mini 2000,
+//     text-embedding-3-large 1000), while Standard gives gpt-4o 0.
+//   - `gpt-4o-mini` runs gpt-4.1-mini 2025-04-14: gpt-4o-mini 2024-07-18 is Deprecating in westus3, and
+//     Azure blocks NEW deployments of a Deprecating version (2026-08-22 stand-up, F1/O1). Same API shape.
+//   - gpt-4o 2024-11-20 and gpt-4.1-mini 2025-04-14 are Legacy and retire 2027-04-14; H0's freshness
+//     probe starts failing 90 days before — refresh the pins (here + PinnedModelCatalog) before then.
+//   - spaarke-gpt4o-mini (AIPU2-004 classification) removed: no BFF code reads ClassificationModelName.
+// ALWAYS check `az cognitiveservices model list --location <openAiLocation>` before changing a pin.
 param deployments array = [
   {
     name: 'gpt-4o'
     model: 'gpt-4o'
-    version: '2024-11-20' // SESSION 12: bumped from 2024-08-06 (Deprecating) to 2024-11-20 (Legacy, newest in westus3)
+    version: '2024-11-20'
+    sku: 'DataZoneStandard'
     capacity: 150
   }
   {
     name: 'gpt-4o-mini'
-    model: 'gpt-4o-mini'
-    version: '2024-07-18' // SESSION 12: retained — ONLY gpt-4o-mini version available in westus3 (Deprecating). See follow-on above.
+    model: 'gpt-4.1-mini'
+    version: '2025-04-14'
+    sku: 'DataZoneStandard'
     capacity: 200 // Minimum 200 TPM for beta scale (~200 analyses/day)
-  }
-  {
-    // spaarke-gpt4o-mini: dedicated classification deployment (AIPU2-004)
-    // Separate from gpt-4o-mini to isolate Layer 2 classification workloads
-    // (capability routing, safety pre-checks, feedback triage) from
-    // general-purpose mini usage. Prevents workload mixing per Microsoft
-    // recommendation for stable TPM accounting.
-    // Use cases: ~600-token classification prompts, session summarization
-    //            (~4000 token inputs), intent routing, feedback triage.
-    // 30K TPM is sufficient for classification workload at dev scale.
-    name: 'spaarke-gpt4o-mini'
-    model: 'gpt-4o-mini'
-    version: '2024-07-18' // SESSION 12: retained — ONLY gpt-4o-mini version available in westus3 (Deprecating).
-    capacity: 30
   }
   {
     name: 'text-embedding-3-large'
     model: 'text-embedding-3-large'
-    version: '1' // SESSION 12: verified GenerallyAvailable in westus3 — kept.
+    version: '1'
+    sku: 'DataZoneStandard'
     capacity: 350
   }
-  // NOTE: text-embedding-3-small has been removed (deprecated).
-  // Migration to text-embedding-3-large (3072 dims) is complete.
-  // See docs/guides/AI-EMBEDDING-STRATEGY.md for rationale.
 ]
 
 @description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this OpenAI account. Task 030 canonical target per ADR-028: the BFF acquires Azure OpenAI tokens via `DefaultAzureCredential` pinned to the UAMI (`AZURE_CLIENT_ID` app-setting). Local auth is disabled on this account (task 244), so this grant is the only route the stamp BFF has into it; the ADR-028 E-2 API-key fallback applies to the shared dev account, not to stamps. Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal.')

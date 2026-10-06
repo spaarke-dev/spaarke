@@ -294,9 +294,10 @@ public sealed class H12cRuntimeReferencesHandler : IProvisioningHandler
             return new HandlerResult.Success(idempotencyKey);
         }
 
-        // (8) Build the 3-model ADR-020 catalog projection + invoke the writer.
-        var deployments = PinnedModelCatalog.Models
-            .Select(m => new ModelDeploymentReference(m.ModelId, m.Capability, endpoint, meteringDescription))
+        // (8) One row per stamp deployment, keyed by deployment NAME (what callers address — task 247:
+        //     the `gpt-4o-mini` deployment runs model gpt-4.1-mini) + invoke the writer.
+        var deployments = PinnedModelCatalog.Deployments
+            .Select(d => new ModelDeploymentReference(d.Name, d.Capability, endpoint, meteringDescription))
             .ToList();
 
         ModelDeploymentReferenceWriteOutcome outcome;

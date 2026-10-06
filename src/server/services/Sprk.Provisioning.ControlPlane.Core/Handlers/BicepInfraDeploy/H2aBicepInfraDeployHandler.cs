@@ -144,7 +144,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     private readonly IUpgradeDriftDetector _driftDetector;
     private readonly ArmTemplateInspector _templateInspector;
     private readonly IResourceNameAvailabilityProbe _nameAvailabilityProbe;
-    private readonly IOpenAiDeploymentSetRecomposer _openaiRecomposer;
     private readonly BicepInfraDeployOptions _options;
     private readonly ILogger<H2aBicepInfraDeployHandler> _logger;
 
@@ -162,7 +161,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         IUpgradeDriftDetector driftDetector,
         ArmTemplateInspector templateInspector,
         IResourceNameAvailabilityProbe nameAvailabilityProbe,
-        IOpenAiDeploymentSetRecomposer openaiRecomposer,
         IOptions<BicepInfraDeployOptions> options,
         ILogger<H2aBicepInfraDeployHandler> logger)
     {
@@ -172,7 +170,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(driftDetector);
         ArgumentNullException.ThrowIfNull(templateInspector);
         ArgumentNullException.ThrowIfNull(nameAvailabilityProbe);
-        ArgumentNullException.ThrowIfNull(openaiRecomposer);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -182,7 +179,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         _driftDetector = driftDetector;
         _templateInspector = templateInspector;
         _nameAvailabilityProbe = nameAvailabilityProbe;
-        _openaiRecomposer = openaiRecomposer;
         _options = options.Value;
         _logger = logger;
     }
@@ -471,45 +467,10 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
             }
         }
 
-        // (8.5) HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5:
-        //       OpenAI deployment-set auto-recompose. When configured to
-        //       AutoRecompose (opt-in), drop zero-TPM models from the deploy
-        //       set BEFORE the runner fires so a fresh-sub with only mini +
-        //       embedding TPM does not fail H2a on frontier-tier deploys.
-        //       Strict policy (default) skips the recomposer entirely,
-        //       matching pre-Wave-2 behavior. Any recomposer infra fault is
-        //       fail-safe — logged, then proceed with the full set.
-        if (_options.OpenAiDeploymentSetPolicy == OpenAiDeploymentSetPolicy.AutoRecompose)
-        {
-            try
-            {
-                var recomposeRequest = new OpenAiDeploymentSetRecomposeRequest(
-                    SubscriptionId: subscriptionId,
-                    Region: location,
-                    FullPinnedSet: PinnedModelCatalog.Models);
-                var recomposeResult = await _openaiRecomposer
-                    .RecomposeAsync(recomposeRequest, cancellationToken).ConfigureAwait(false);
-                if (recomposeResult.DroppedModelIds.Count > 0)
-                {
-                    _logger.LogWarning(
-                        "H2a OpenAI deployment-set auto-recomposed: runId={RunId} customerId={CustomerId} " +
-                        "droppedModels={Dropped} preservedCount={PreservedCount} note={Note}",
-                        envelope.RunId, envelope.CustomerId,
-                        string.Join(",", recomposeResult.DroppedModelIds),
-                        recomposeResult.PreservedSet.Count,
-                        recomposeResult.OperatorNote);
-                }
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                // Fail-safe — log + proceed with the full deploy set. The
-                // ARM deploy itself will surface real TPM-zero failures if any.
-                _logger.LogWarning(ex,
-                    "H2a OpenAI deployment-set recomposer infra fault (proceeding with full set): " +
-                    "runId={RunId} customerId={CustomerId}",
-                    envelope.RunId, envelope.CustomerId);
-            }
-        }
+        // (8.5) Task 247 (owner 2026-10-06): the OpenAI deployment set is NOT recomposed here. Every
+        //       deployment in it is one the BFF calls by name, so dropping one would deploy a stamp that
+        //       fails at runtime. A subscription without the quota or model availability the set needs
+        //       fails H0 (azure-openai-tpm-headroom / openai-pin-freshness) before anything is deployed.
 
         // (9) Invoke the deploy runner. This is the long-running (10–20 min)
         //     step per FR-22 / R20 — the reconciler owns keeping the ambient

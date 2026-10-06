@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "7400174533689753051"
+      "templateHash": "16895129151186069652"
     }
   },
   "parameters": {
@@ -1691,7 +1691,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "12146549191795670766"
+              "templateHash": "12723083481412494360"
             }
           },
           "parameters": {
@@ -1736,24 +1736,21 @@
                   "name": "gpt-4o",
                   "model": "gpt-4o",
                   "version": "2024-11-20",
+                  "sku": "DataZoneStandard",
                   "capacity": 150
                 },
                 {
                   "name": "gpt-4o-mini",
-                  "model": "gpt-4o-mini",
-                  "version": "2024-07-18",
+                  "model": "gpt-4.1-mini",
+                  "version": "2025-04-14",
+                  "sku": "DataZoneStandard",
                   "capacity": 200
-                },
-                {
-                  "name": "spaarke-gpt4o-mini",
-                  "model": "gpt-4o-mini",
-                  "version": "2024-07-18",
-                  "capacity": 30
                 },
                 {
                   "name": "text-embedding-3-large",
                   "model": "text-embedding-3-large",
                   "version": "1",
+                  "sku": "DataZoneStandard",
                   "capacity": 350
                 }
               ],
