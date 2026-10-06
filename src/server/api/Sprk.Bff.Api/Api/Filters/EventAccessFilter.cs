@@ -168,6 +168,19 @@ public sealed class EventAccessFilter
     internal async ValueTask<object?> AuthorizeCreatePrivilegeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
+
+        // Round 7 (R5): the CallerResolution contract, before anything is asked of Dataverse — a caller with no
+        // resolvable oid is unauthenticated for this purpose (401), the FinanceAuthorizationFilter order. Without this
+        // the probe's fail-closed "no privilege" made the handler's 401 unreachable and reported it as a 403.
+        if (string.IsNullOrEmpty(Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ResolveObjectId(httpContext.User)))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
         bool holds;
         try
         {

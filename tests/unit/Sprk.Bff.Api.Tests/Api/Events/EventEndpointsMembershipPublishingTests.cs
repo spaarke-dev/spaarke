@@ -168,54 +168,47 @@ public class EventEndpointsMembershipPublishingTests
         site.EventService.Verify(s => s.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()),
             Times.Once);
     }
-    // ── ADR-034 A3: the owner event names the row's REAL owner, read back from the row ───────────────────────
+    // ── ADR-034 A3: the owner event names the row's REAL owner — since round 6 the I-6 team the create wrote ─────
+    // Task 097 round 7 (R2): the create sets ownerid to the team RecordOwnershipResolver returned, so the event is
+    // published with that team as the known owner (the POST /api/v1/documents shape) and the row is NOT read back.
+    // The former "row owned by the BFF application user publishes nothing" and "human-owned row" cases described an
+    // app-only create that set no owner; that create no longer exists (an unresolved team now refuses — see
+    // CreateEvent_OwnerTeamUnresolved_IsRefused_NeverAppOwned).
 
     [Fact]
-    public async Task CreateEvent_RowOwnedByTheBffApplicationUser_PublishesNothing()
+    public async Task CreateEvent_PublishesTheI6Team_AsTheKnownOwner_WithoutReadingTheRowBack()
     {
-        var site = new Site(linkedContact: ActingUsersContactId,
-            rowOwner: new EntityReference("systemuser", OwnerEventTestKit.ApplicationUserId));
+        var site = new Site(linkedContact: ActingUsersContactId);
 
         var result = await site.RunAsync();
 
         StatusOf(result).Should().Be(StatusCodes.Status201Created);
-        site.Publisher.Published.Should().BeEmpty("an application user is not a person — reconciliation applies the same rule");
-    }
-
-    [Fact]
-    public async Task CreateEvent_TeamOwnedRow_PublishesTheTeam_ReadBackFromTheRowItCreated()
-    {
-        var site = new Site(linkedContact: ActingUsersContactId,
-            rowOwner: new EntityReference("team", OwnerEventTestKit.TeamId));
-
-        await site.RunAsync();
-
         var evt = site.Publisher.Published.Should().ContainSingle().Subject;
         evt.EntityLogicalName.Should().Be("sprk_event");
         evt.EntityRecordId.Should().Be(EventId, "the event is for the row this create wrote");
         evt.PersonIdType.Should().Be(PersonIdentityType.Team);
-        evt.PersonId.Should().Be(OwnerEventTestKit.TeamId);
+        evt.PersonId.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId,
+            "the team the create wrote as ownerid — the key MembershipReconciliationJob builds for this row");
+        evt.PersonId.Should().NotBe(OwnerEventTestKit.CallerOid, "never the caller's AAD oid");
         evt.SourceField.Should().Be("ownerid");
         evt.MutationType.Should().Be(MembershipMutationType.Added);
         evt.CorrelationId.Should().Be(Site.TraceId);
-        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_event", EventId, It.Is<string[]>(c => c.Contains("ownerid")), It.IsAny<CancellationToken>()),
-            Times.Once, "the create sets no owner, so the owner is read back from the row it wrote");
+        site.Dataverse.Verify(d => d.RetrieveAsync("sprk_event", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the owner is known — it is what the create wrote");
     }
 
     [Fact]
-    public async Task CreateEvent_HumanUserOwnedRow_PublishesTheSystemUserId_NeverTheCallersOid()
+    public async Task CreateEvent_TheOwnerPublishedIsTheOwnerWritten()
     {
-        var site = new Site(linkedContact: ActingUsersContactId,
-            rowOwner: new EntityReference("systemuser", OwnerEventTestKit.HumanUserId));
+        var site = new Site(linkedContact: ActingUsersContactId);
+        var team = Guid.Parse("97097097-0007-4000-8000-0000000000a2");
+        site.Ownership.TeamId = team;
 
         await site.RunAsync();
 
-        var evt = site.Publisher.Published.Should().ContainSingle().Subject;
-        evt.PersonIdType.Should().Be(PersonIdentityType.User);
-        evt.PersonId.Should().Be(OwnerEventTestKit.HumanUserId, "a Dataverse systemuserid — never the AAD oid");
-        evt.PersonId.Should().NotBe(OwnerEventTestKit.CallerOid);
+        site.Created!.OwnerTeamId.Should().Be(team);
+        site.Publisher.Published.Should().ContainSingle().Which.PersonId.Should().Be(team);
     }
-
     [Fact]
     public async Task CreateEvent_PublisherThrows_TheCreateStillSucceeds()
     {
@@ -223,7 +216,7 @@ public class EventEndpointsMembershipPublishingTests
         throwing.Setup(p => p.PublishAsync(It.IsAny<MembershipChangedEvent>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("transport"));
         var site = new Site(linkedContact: ActingUsersContactId,
-            rowOwner: new EntityReference("team", OwnerEventTestKit.TeamId), publisher: throwing.Object);
+            publisher: throwing.Object);
 
         var result = await site.RunAsync();
 
@@ -267,7 +260,8 @@ public class EventEndpointsMembershipPublishingTests
             else
                 audit.ReturnsAsync(Guid.NewGuid());
 
-            Dataverse = OwnerEventTestKit.Dataverse(rowOwner ?? new EntityReference("systemuser", OwnerEventTestKit.ApplicationUserId));
+            // Round 7 (R2): the row's owner is the I-6 team the create wrote (never the application user any more).
+            Dataverse = OwnerEventTestKit.Dataverse(rowOwner ?? new EntityReference("team", Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId));
 
             CallerResolver.Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(_callerResolved

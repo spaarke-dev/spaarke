@@ -316,6 +316,50 @@ public class EventRouteAuthorizationTests
         probed.Should().BeEmpty();
     }
 
+    // ── Round 7 (R5): POST's 401 is reachable through the real route ──────────────────────────────────────────
+
+    [Fact]
+    public async Task Create_AuthenticatedCallerWithNoOid_Is401_BeforeAnyPrivilegeOrParentProbe()
+    {
+        using var factory = new EventAccessTestWebAppFactory(withoutOid: true);
+        factory.Grant("sprk_matters", MatterId, AccessRights.AppendTo);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/events",
+            new ApiCreateEventRequest("zz-097", RegardingRecordId: MatterId, RegardingRecordType: RegardingRecordType.Matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        factory.PrivilegesAsked.Should().BeEmpty("no identity → nothing is asked of Dataverse");
+        factory.Probed.Should().BeEmpty();
+        factory.Events.Invocations.Should().BeEmpty();
+    }
+
+    // ── Round 7 (R4): a FAULTED caller lookup is retryable (503), not "your account does not match" (403) ─────
+
+    [Fact]
+    public async Task List_CallerLookupFaulted_Is503_AndNothingIsQueried()
+    {
+        using var factory = new EventAccessTestWebAppFactory(callerLookupFaults: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.GetAsync("/api/v1/events");
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        factory.Events.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Create_CallerLookupFaulted_Is503_AndNothingIsWritten()
+    {
+        using var factory = new EventAccessTestWebAppFactory(callerLookupFaults: true);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/events", new ApiCreateEventRequest("zz-097 standalone"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        factory.Events.Invocations.Should().BeEmpty();
+    }
+
     // ── Round 6 (review F6): the list follows the CallerResolution contract ───────────────────────────────────
 
     [Fact]
@@ -351,10 +395,16 @@ public class EventRouteAuthorizationTests
         private readonly Guid? _callerSystemUser;
         private readonly bool _holdsCreatePrivilege;
 
-        public EventAccessTestWebAppFactory(bool callerResolves = true, bool holdsCreatePrivilege = true)
+        private readonly bool _callerLookupFaults;
+        private readonly bool _withoutOid;
+
+        public EventAccessTestWebAppFactory(
+            bool callerResolves = true, bool holdsCreatePrivilege = true, bool callerLookupFaults = false, bool withoutOid = false)
         {
             _callerSystemUser = callerResolves ? CallerSystemUserId : null;
             _holdsCreatePrivilege = holdsCreatePrivilege;
+            _callerLookupFaults = callerLookupFaults;
+            _withoutOid = withoutOid;
         }
 
         public Mock<IEventDataverseService> Events { get; } = new(MockBehavior.Loose);
@@ -384,9 +434,11 @@ public class EventRouteAuthorizationTests
                 // Round 6 (review F6): list and create resolve the caller through the ONE injectable resolver.
                 var callers = new Mock<ICallerSystemUserResolver>(MockBehavior.Strict);
                 callers.Setup(c => c.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(_callerSystemUser is { } id
-                        ? CallerSystemUserResolution.Resolved(id.ToString("D"))
-                        : CallerSystemUserResolution.Unresolved("no-matching-systemuser"));
+                    .ReturnsAsync(_callerLookupFaults
+                        ? CallerSystemUserResolution.Unresolved("lookup-failed")
+                        : _callerSystemUser is { } id
+                            ? CallerSystemUserResolution.Resolved(id.ToString("D"))
+                            : CallerSystemUserResolution.Unresolved("no-matching-systemuser"));
                 services.RemoveAll<ICallerSystemUserResolver>();
                 services.AddSingleton(callers.Object);
 
@@ -399,10 +451,35 @@ public class EventRouteAuthorizationTests
                 services.RemoveAll<CoreAncestorResolver>();
                 services.AddSingleton(CoreAncestorResolverFixtures.Inert());
 
+                if (_withoutOid)
+                {
+                    // An AUTHENTICATED principal that carries no oid (passes RequireAuthorization, fails CallerResolution).
+                    services.AddAuthentication().AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, NoOidAuthHandler>("NoOid", _ => { });
+                    services.PostConfigure<Microsoft.AspNetCore.Authentication.AuthenticationOptions>(o =>
+                    {
+                        o.DefaultAuthenticateScheme = "NoOid";
+                        o.DefaultChallengeScheme = "NoOid";
+                    });
+                }
+
                 services.RemoveAll<CallerRecordAccessProbe>();
                 services.AddSingleton<CallerRecordAccessProbe>(new GrantTableProbe(_grants, Probed, PrivilegesAsked, _holdsCreatePrivilege));
             });
         }
+    }
+
+    private sealed class NoOidAuthHandler(
+        Microsoft.Extensions.Options.IOptionsMonitor<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions> options,
+        Microsoft.Extensions.Logging.ILoggerFactory logger,
+        System.Text.Encodings.Web.UrlEncoder encoder)
+        : Microsoft.AspNetCore.Authentication.AuthenticationHandler<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>(options, logger, encoder)
+    {
+        protected override Task<Microsoft.AspNetCore.Authentication.AuthenticateResult> HandleAuthenticateAsync() =>
+            Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.Success(
+                new Microsoft.AspNetCore.Authentication.AuthenticationTicket(
+                    new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                        new[] { new System.Security.Claims.Claim("name", "no-oid caller") }, "NoOid")),
+                    "NoOid")));
     }
 
     private sealed class GrantTableProbe(

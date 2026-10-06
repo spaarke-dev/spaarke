@@ -613,6 +613,8 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// (<see cref="RegardingRecordType.BuildRecordUrl"/>, the one server-side owner of that format) and the entity
     /// logical name — all written together, a missing name/number written as null so no stale value survives. On
     /// update EVERY other live regarding navigation property (all 14) is cleared, so exactly one REGARDING lookup is set;
+    /// the FR-26 core-ancestor stamps written after the clear may then populate a second (matter/project) lookup ON
+    /// PURPOSE (registry I-1) — an inheritance edge for the BFF's own access evaluator, not a second regarding parent.
     /// </summary>
     /// <exception cref="InvalidOperationException">A regarding type was requested but not resolved — the caller must
     /// resolve first; an unresolved type is never written (it would leave the old type bound).</exception>

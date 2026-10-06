@@ -268,8 +268,10 @@ public static class EventEndpoints
                 return caller.Refusal;
             var systemUserId = caller.SystemUserId;
 
-            // "Mine": owned by the caller OR assigned to the caller's linked contact (BFF-created events are owned by
-            // the BFF application user and name their person in sprk_assignedto — task 152 S1).
+            // "Mine": owned by the caller OR assigned to the caller's linked contact. BFF-created events are owned by a
+            // business-unit TEAM (I-6, round 6), never by the person, so the person is found through sprk_assignedto
+            // (task 152 S1). Known gap: a caller with no linked contact does not see their own BFF-created events here
+            // (needs sprk_createdbyperson — UAC-r2 task 146).
             Guid? linkedContact = null;
             try
             {
@@ -518,17 +520,16 @@ public static class EventEndpoints
                 eventId, request.Subject);
 
             // R3 task 082 — FR-2P2.6 + Q2 fire-and-forget membership event, describing the row's REAL owner
-            // (UAC-r2 task 152, ADR-034 A3). The create runs on the app-only IEventDataverseService and sets no owner,
-            // so the owner is read back: today that is the BFF application user, which is not a person — no event is
-            // published, exactly as reconciliation records no junction row for it. (Before task 152 this published
-            // the caller's AAD oid under a comment claiming Dataverse defaulted the owner to the OBO caller; it never
-            // did.) When MembershipEventPublisherOptions.Enabled=false (default), the Null peer logs + returns.
+            // (UAC-r2 task 152, ADR-034 A3): the create set ownerid to the I-6 team resolved above, so the event is
+            // PersonIdType=Team, PersonId=that team — the key MembershipReconciliationJob builds for this row (the
+            // POST /api/v1/documents shape). When MembershipEventPublisherOptions.Enabled=false (default), the Null
+            // peer logs + returns.
             _ = MembershipOwnerEvents.PublishOwnerAddedAsync(
                 membershipEventPublisher,
                 genericEntityService,
                 "sprk_event",
                 eventId,
-                knownOwner: null,
+                new Microsoft.Xrm.Sdk.EntityReference("team", ownerTeamId.Value),
                 httpContext.TraceIdentifier,
                 logger,
                 ct);
@@ -850,14 +851,17 @@ public static class EventEndpoints
         return null;
     }
 
+    /// <summary><see cref="Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolver"/>'s reason for a FAULTED lookup.</summary>
+    internal const string CallerLookupFailedReason = "lookup-failed";
+
     /// <summary>The caller's systemuser, or the refusal to return instead (round 6, review F6).</summary>
     internal readonly record struct CallerOutcome(Guid SystemUserId, IResult? Refusal);
 
     /// <summary>
     /// The CallerResolution contract (<see cref="CallerResolution.ResolveObjectId"/> — FinanceAuthorizationFilter,
     /// CreateDocumentAsync): a caller with NO resolvable <c>oid</c> is unauthenticated for this purpose → <b>401</b>;
-    /// an <c>oid</c> that maps to no Dataverse systemuser (or a lookup that fails) → <b>403</b>, fail closed — never an
-    /// app-only fallback. The systemuser comes from the one injectable resolver (<see cref="Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver"/>),
+    /// an <c>oid</c> that maps to no Dataverse systemuser → <b>403</b>; a lookup that FAULTED → <b>503</b> (retryable) —
+    /// fail closed either way, never an app-only fallback. The systemuser comes from the one injectable resolver (<see cref="Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver"/>),
     /// used by both the list and the create.
     /// </summary>
     internal static async Task<CallerOutcome> ResolveCallerAsync(
@@ -880,6 +884,19 @@ public static class EventEndpoints
         if (resolution.IsResolved && Guid.TryParse(resolution.SystemUserId, out var systemUserId) && systemUserId != Guid.Empty)
         {
             return new CallerOutcome(systemUserId, null);
+        }
+
+        // Round 7 (R4): a FAULTED lookup is not the answer "you are no Dataverse user". It is retryable — 503 — the same
+        // answer-versus-fault split RecordOwnershipResolver makes (a throttled read must not become a refusal that tells
+        // the user to fix their account). Still fail closed: nothing is read or written.
+        if (resolution.UnresolvedReason == CallerLookupFailedReason)
+        {
+            logger.LogWarning("[EVENTS] The caller's systemuser lookup faulted; answering 503 to {Purpose}.", purpose);
+            return new CallerOutcome(Guid.Empty, Results.Problem(
+                statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "Service Unavailable",
+                detail: "Your account could not be checked right now. Try again shortly.",
+                type: "https://tools.ietf.org/html/rfc9110#section-15.6.4"));
         }
 
         logger.LogWarning("[EVENTS] Caller does not resolve to a systemuser ({Reason}); refusing to {Purpose} (fail closed).",
