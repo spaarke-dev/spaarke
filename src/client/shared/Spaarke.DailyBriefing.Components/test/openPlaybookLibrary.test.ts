@@ -4,10 +4,15 @@
  *
  * The standalone Code Page (`src/solutions/DailyBriefing/src/main.tsx`) used
  * to detach `navigateTo` into a local and call it unbound; the real
- * `Xrm.Navigation.navigateTo` depends on its receiver. The stub below rejects
- * an unbound call, as the platform does.
+ * `Xrm.Navigation.navigateTo` depends on its receiver (the platform rejects an
+ * unbound call). The stub below RECORDS its receiver rather than rejecting, so
+ * a regression fails on the `mock.contexts` assertion, not as an unhandled
+ * rejection (round 6, review R5-7).
  */
+import * as fs from 'fs';
+import * as path from 'path';
 import * as React from 'react';
+import * as ts from 'typescript';
 import { openPlaybookLibrary } from '../src/utils/openPlaybookLibrary';
 import { browsePlaybooks } from '../../../../solutions/DailyBriefing/src/browsePlaybooks';
 
@@ -25,10 +30,7 @@ function registrationBrowseHandler(): () => void {
 
 function makeXrm() {
   const Navigation = {
-    navigateTo: jest.fn(function (this: unknown, ..._args: unknown[]) {
-      if (this !== Navigation) return Promise.reject(new Error('navigateTo called unbound'));
-      return Promise.resolve(undefined);
-    }),
+    navigateTo: jest.fn((..._args: unknown[]) => Promise.resolve(undefined)),
   };
   return { WebApi: {}, Navigation };
 }
@@ -40,7 +42,7 @@ describe('openPlaybookLibrary', () => {
     Object.defineProperty(window, 'parent', { value: originalParent, writable: true, configurable: true });
   });
 
-  it('calls Xrm.Navigation.navigateTo as a method with the Playbook Library page', async () => {
+  it('calls Xrm.Navigation.navigateTo as a method with the Playbook Library page', () => {
     const xrm = makeXrm();
     (window as unknown as { Xrm: unknown }).Xrm = xrm;
     openPlaybookLibrary('[test]');
@@ -50,7 +52,6 @@ describe('openPlaybookLibrary', () => {
       pageType: 'webresource',
       webresourceName: 'sprk_playbooklibrary',
     });
-    await expect(xrm.Navigation.navigateTo.mock.results[0].value).resolves.toBeUndefined();
   });
 
   it('uses the parent frame when the window has no Xrm that can navigate', () => {
@@ -75,13 +76,58 @@ describe('openPlaybookLibrary', () => {
   it.each([
     ['standalone Code Page (browsePlaybooks)', () => browsePlaybooks()],
     ['embedded registration (onBrowsePlaybooks)', () => registrationBrowseHandler()()],
-  ])('%s calls Xrm.Navigation.navigateTo as a method', async (_host, invoke) => {
+  ])('%s calls Xrm.Navigation.navigateTo as a method', (_host, invoke) => {
     const xrm = makeXrm();
     (window as unknown as { Xrm: unknown }).Xrm = xrm;
     invoke();
     expect(xrm.Navigation.navigateTo).toHaveBeenCalledTimes(1);
     expect(xrm.Navigation.navigateTo.mock.contexts[0]).toBe(xrm.Navigation);
     expect(xrm.Navigation.navigateTo.mock.calls[0][0]).toMatchObject({ webresourceName: 'sprk_playbooklibrary' });
-    await expect(xrm.Navigation.navigateTo.mock.results[0].value).resolves.toBeUndefined();
+  });
+
+  // The Code Page wires that handler (round 6, review R5-7). `main.tsx` cannot be
+  // imported under jest, so its JSX is read with the TypeScript parser: the
+  // `DailyBriefingApp` element's `onBrowsePlaybooks` must be the identifier
+  // imported as `browsePlaybooks` from './browsePlaybooks'.
+  it('the Daily Briefing Code Page passes browsePlaybooks as onBrowsePlaybooks', () => {
+    const file = path.resolve(__dirname, '../../../../solutions/DailyBriefing/src/main.tsx');
+    const sf = ts.createSourceFile(
+      file,
+      fs.readFileSync(file, 'utf8'),
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+
+    const imported = new Set<string>();
+    const handlers: string[] = [];
+    const visit = (n: ts.Node): void => {
+      if (
+        ts.isImportDeclaration(n) &&
+        (n.moduleSpecifier as ts.StringLiteral).text === './browsePlaybooks' &&
+        n.importClause?.namedBindings &&
+        ts.isNamedImports(n.importClause.namedBindings)
+      ) {
+        for (const el of n.importClause.namedBindings.elements)
+          if ((el.propertyName ?? el.name).text === 'browsePlaybooks') imported.add(el.name.text);
+      }
+      if (
+        (ts.isJsxSelfClosingElement(n) || ts.isJsxOpeningElement(n)) &&
+        n.tagName.getText(sf) === 'DailyBriefingApp'
+      ) {
+        for (const attr of n.attributes.properties) {
+          if (ts.isJsxAttribute(attr) && attr.name.getText(sf) === 'onBrowsePlaybooks') {
+            const e =
+              attr.initializer && ts.isJsxExpression(attr.initializer) ? attr.initializer.expression : undefined;
+            handlers.push(e && ts.isIdentifier(e) ? e.text : `(not an identifier: ${e?.getText(sf)})`);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(sf);
+
+    expect(handlers).toHaveLength(1);
+    expect(imported.has(handlers[0])).toBe(true);
   });
 });
