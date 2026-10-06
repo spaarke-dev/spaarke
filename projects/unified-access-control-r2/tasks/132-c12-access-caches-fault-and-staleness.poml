@@ -4,7 +4,7 @@
     <title>C12 — access caches store fault-derived results and nothing invalidates them on BU/team/owner change: stop caching faults, add BFF write-path invalidation, shorten identity/membership TTLs, delete the dead roles/teams keys, and put the residual staleness in front of the owner</title>
     <phase>Register-driven (authored 2026-09-30, session 27; verified defect C12 from session 26)</phase>
     <gate>blocked until 131 and 109 are merged</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes across four caches (external grants, identity, membership, access snapshots) plus a shared-library type in Spaarke.Dataverse; tags bff-api/auth/security/testing.</rigor-reason>
     <model-tier>opus</model-tier>

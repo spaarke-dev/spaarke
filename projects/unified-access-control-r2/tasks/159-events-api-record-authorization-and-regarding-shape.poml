@@ -4,7 +4,7 @@
     <title>Events API (#1098): every /api/v1/events route authorizes the caller on the exact event or regarding record before any Dataverse read or write (the list is trimmed to what the caller can read), and the event regarding write/read shape is repaired so sprk_regardingrecordtype is written and read as a lookup, never an integer</title>
     <phase>Session 27 — route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable; serialize with 146 on EventEndpoints.cs and DataverseWebApiService.cs (whichever lands second rebases onto the first)</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on eight live, unconditionally mapped BFF routes (tags bff-api, auth, security), plus a Dataverse write-shape repair. Closes 6 critical and 2 high sweep findings: a tenant-wide event read, and app-only writes on any event, including events under secure matters and projects.</rigor-reason>
     <model-tier>opus</model-tier>

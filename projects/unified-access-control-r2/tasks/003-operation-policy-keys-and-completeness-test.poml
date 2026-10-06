@@ -4,7 +4,7 @@
     <title>FR-03: Register missing OperationAccessPolicy keys + call-site completeness test</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-001</gate>
-    <status>pending</status>
+    <status>completed</status>
     <status-note>RE-OPENED 2026-09-30 (owner Q7 approval, session 27), for its A-20 finance claim ONLY. The four policy keys and the completeness gate shipped here are correct and stay. But A-20's user-visible outcome, "finance endpoints resolve instead of always denying", is still false for GET /api/finance/matters/{matterId}/summary, which returns 403 for every caller. FinanceAuthorizationFilter passes the MATTER id into the document-only access data source, so the answer is always None. That is defect C8 (summary half). The completing work is task 130. See the amendments block.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs on an authorization path (Spaarke.Core/Auth) and adds tests — FULL per root CLAUDE.md §8 (auth tag + TEST-MODIFYING override).</rigor-reason>

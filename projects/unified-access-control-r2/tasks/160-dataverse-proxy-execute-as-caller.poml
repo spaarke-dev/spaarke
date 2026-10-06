@@ -4,7 +4,7 @@
     <title>Run the Dataverse proxy routes AS THE CALLER: POST /api/dataverse/fetch and GET /api/dataverse/record/{entityLogicalName}/{id} stop reading app-only, so Dataverse row security, business-unit scope, sharing and field-level security apply (route sweep findings #9 and #10, both critical)</title>
     <phase>Session 27 — route authorization sweep (owner round 9, 2026-10-03)</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs change on two live, unconditionally mapped BFF routes (Program.cs:264-265). Tags bff-api, auth, security. Closes an org-wide row and column disclosure to any signed-in workforce user.</rigor-reason>
     <model-tier>opus</model-tier>
