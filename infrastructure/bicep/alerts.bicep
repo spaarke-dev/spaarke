@@ -7,17 +7,15 @@
 // they are queryable via `az monitor metrics alert list` and
 // `az monitor scheduled-query list`.
 //
-// Four alerts (mirroring docs §8 Alert Definitions FR-17 source of truth + FR-11 rotation):
+// Three alerts (mirroring docs §8 Alert Definitions FR-17 source of truth):
 //   1. Hit-rate < 80% over 15 min     (scheduledQueryRule, App Insights)
 //   2. Redis call latency > 100 ms over 5 min (scheduledQueryRule, App Insights) — the AVERAGE of the
 //      cache.redis_call_duration_ms histogram: App Insights stores it pre-aggregated (sum/count/min/max),
 //      so a true P95 is not available there. (It queried cache.redis_p95_ms, which nothing emits, until
 //      2026-10-05 — the alert could never fire.)
 //   3. Memory > 80% of SKU over 15 min (metricAlert, Azure Managed Redis platform metric)
-//   4. RedisKeyRotation success absent >100 days (scheduledQueryRule, App Insights) — FR-11.
-//      OPT-IN (deployLegacyRotationAlert, default false; T242b review 2026-10-05): every Spaarke cache is
-//      Azure Managed Redis with access keys disabled, so no rotation event ever arrives and the alert would
-//      fire for ever. Turn it on only for a legacy key-based cache that Rotate-RedisKey.ps1 rotates.
+//   (A fourth, missed-key-rotation alert was removed 2026-10-05 with the Redis key-rotation tooling, T242b:
+//    Azure Managed Redis has access keys disabled, so there is nothing to rotate.)
 //
 // Alert 3 targets `Microsoft.Cache/redisEnterprise` (Azure Managed Redis — ADR-009 as amended by T242:
 // every Spaarke Redis is Managed Redis). It targeted the retired `Microsoft.Cache/Redis` type until T242b.
@@ -63,13 +61,6 @@ param p95LatencyMsThreshold int = 100
 @maxValue(100)
 param memoryPercentThreshold int = 80
 
-@description('Deploy alert 4 (missed key rotation). Only for a LEGACY key-based Azure Cache for Redis rotated by scripts/Rotate-RedisKey.ps1; Azure Managed Redis caches (every Spaarke cache since T242) have no keys.')
-param deployLegacyRotationAlert bool = false
-
-@description('Missed-rotation alert threshold in days. Fires if no RedisKeyRotation success custom event for any env in this window. Default 100 per FR-11 (90-day rotation cadence + 10-day grace).')
-@minValue(1)
-param missedRotationDays int = 100
-
 @description('Tags propagated to all alert resources.')
 param tags object = {
   environment: environment
@@ -87,8 +78,6 @@ var alertNamePrefix = 'redis-cache'
 // module callable from any RG context (mirrors the redis.bicep output pattern).
 var redisCacheResourceId = resourceId('Microsoft.Cache/redisEnterprise', redisCacheName)
 
-// Alert 4 is opt-in: Azure Managed Redis has no keys, so it applies only to a legacy key-based cache.
-var deployMissedRotationAlert = deployLegacyRotationAlert
 var appInsightsResourceId = resourceId('Microsoft.Insights/components', appInsightsName)
 
 // KQL — hit rate below threshold (mirrors docs §8 Alert 1 KQL, threshold parameterized).
@@ -117,18 +106,6 @@ customMetrics
 | extend op = tostring(customDimensions.op)
 | summarize avg_ms = sum(valueSum) / sum(valueCount) by bin(timestamp, 5m), op
 | where avg_ms > ${P95_THRESHOLD_MS}
-'''
-
-// KQL — RedisKeyRotation success absent >N days per env (FR-11).
-// Fires when any env's last_success is older than the threshold, OR when an env has never recorded success (isnull).
-// NOTE: detection of envs that have NEVER recorded success requires the env tuple to appear in the row set;
-// since `customEvents` only yields rows for recorded events, "never recorded" is only detectable when at least one
-// stale row exists for that env. This matches FR-11 intent: detect rotation regression, not bootstrap-state absence.
-var missedRotationKql = '''
-customEvents
-| where name == 'RedisKeyRotation' and customDimensions.outcome == 'success'
-| summarize last_success = max(timestamp) by tostring(customDimensions.environment)
-| where last_success < ago(${MISSED_ROTATION_DAYS}d) or isnull(last_success)
 '''
 
 // =====================================================
@@ -253,54 +230,9 @@ resource memoryAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 }
 
 // =====================================================
-// ALERT 4 — RedisKeyRotation success absent >100 days (scheduled-query rule on App Insights) — FR-11
-// =====================================================
-
-resource missedRotationAlert 'Microsoft.Insights/scheduledQueryRules@2023-03-15-preview' = if (deployMissedRotationAlert) {
-  name: '${alertNamePrefix}-rotation-missed-${environment}'
-  location: location
-  tags: tags
-  properties: {
-    description: 'No RedisKeyRotation success custom event recorded in App Insights for >${missedRotationDays} days for one or more envs — automation likely silently failing (workflow disabled, SP expired, script broken). Investigate the Theme B rotation workflow. FR-11 of spaarke-redis-cache-remediation-r2.'
-    severity: alertSeverity
-    enabled: true
-    evaluationFrequency: 'P1D'
-    windowSize: 'P1D'
-    scopes: [
-      appInsightsResourceId
-    ]
-    criteria: {
-      allOf: [
-        {
-          query: replace(missedRotationKql, '\${MISSED_ROTATION_DAYS}', string(missedRotationDays))
-          timeAggregation: 'Count'
-          operator: 'GreaterThan'
-          threshold: 0
-          failingPeriods: {
-            numberOfEvaluationPeriods: 1
-            minFailingPeriodsToAlert: 1
-          }
-        }
-      ]
-    }
-    actions: {
-      actionGroups: [
-        actionGroupResourceId
-      ]
-    }
-    // Azure constraint: stateful (autoMitigate=true) scheduled-query rules cannot
-    // run at frequency >12h. Since this alert evaluates daily (P1D) and we want
-    // it to stay fired until manually resolved (a missed rotation is a sustained
-    // condition, not a transient blip), autoMitigate must be false here.
-    autoMitigate: false
-  }
-}
-
-// =====================================================
 // OUTPUTS
 // =====================================================
 
 output hitRateAlertId string = hitRateAlert.id
 output p95LatencyAlertId string = p95LatencyAlert.id
 output memoryAlertId string = memoryAlert.id
-output missedRotationAlertId string = deployMissedRotationAlert ? missedRotationAlert.id : ''

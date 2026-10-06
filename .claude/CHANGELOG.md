@@ -7,6 +7,16 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-05 — Redis key-rotation tooling removed (T242b, owner)
+
+`customer-provisioning-orchestration-r1` T242b.
+
+- **`.claude/skills/ci-cd/SKILL.md`**: the `redis-key-rotation.yml` row is removed. The workflow,
+  `scripts/Rotate-RedisKey.ps1` and the missed-rotation alert are deleted: every Spaarke Redis is Azure Managed
+  Redis with access keys disabled (ADR-009 as amended by T242), so there is nothing to rotate; the tooling
+  wrote a Redis key to Key Vault, which ADR-009 forbids; and every scheduled run had failed since 2026-07-01.
+
+---
 ###### 2026-10-05 — ADR-009: the latency alert is the average BFF-observed call latency (T242b, owner §6.5 Path B)
 
 `customer-provisioning-orchestration-r1` T242b Step 9.5 review.

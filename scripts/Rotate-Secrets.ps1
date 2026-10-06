@@ -14,8 +14,7 @@
 
     Redis is not rotated here (task 242, owner D12/D13): every Spaarke Redis is Azure Managed Redis with
     access keys disabled, reached with a managed identity — there is no key or connection string to rotate.
-    The legacy per-environment Azure Cache for Redis key rotation (scripts/Rotate-RedisKey.ps1) no longer
-    targets dev (task 242b, 2026-10-05); its staging/prod entries remain until those caches move.
+    The separate Redis key-rotation script and workflow were removed in task 242b (2026-10-05).
 
     The script follows a safe rotation pattern:
       1. Regenerate the credential at the source (Azure resource)
