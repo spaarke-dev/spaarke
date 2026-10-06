@@ -1,15 +1,15 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-10-06 ~17:30 UTC (checkpoint #17). Supersedes #16. Read Quick Recovery first.
+> **Last Updated**: 2026-10-06 ~20:15 UTC (checkpoint #18). Supersedes #17. Read Quick Recovery first.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 4 + route sweep: merged (`d254d7166`, #1312) and DEPLOYED TO DEV. Follow-up #1314 merged (`891cfd9a3`) and BFF redeployed to dev. 161 ✅. Now: remaining live gates, then batch 5 |
-| **Step** | #1314 re-check passed as testuser1: template render 200; email-as-documents archive 200 (created doc `0a909e4e-a6c1-f111-a05a-7c1e520a989f`; second call `alreadyArchived:true`, no duplicate). New pre-existing defect filed: #1317 (insert-template returns raw XSLT for Dynamics-editor templates; email-r5 origin, not UAC scope) |
+| **Task** | Batch-4 dev live gates + hotfixes; batch 5 started with task 171 (broker-only SPE bytes). 116/168 tasks complete |
+| **Step** | Hotfixes deployed to dev: #1319 (No Access lookup filters + event create 500), #1320 (No Access enforce privilege), #1322 (owner's own share revoked as owner); BFF at master b977fc7a6. Gate groups G1-G7 done (results: notes/batch4-live-gates-2026-10-06.md). Completed today: 003, 132, 133, 148, 149, 156, 158, 159, 160, 167. RUNNING (Agent tool, background): gates-g6 (163-166/168/169 API gates), exec171 (task 171 executor, worktree C:\wt171, branch task/uac-r2-171), fmpush (field-mapping push lookup fix D-G6-3, worktree C:\wtM, branch fix/uac-r2-field-mapping-push-lookups) |
 | **Status** | in-progress |
-| **Next Action** | (1) Delete branch `fix/uac-r2-deploy-script-fixes` once its legacy `Build & Test (Debug)` check finishes (`gh pr checks 1314 \| grep -c pending` = 0), then `git worktree remove C:/wtF`. (2) Remaining live gates per task note, as testuser1@spaarke.com (token: `AZURE_CONFIG_DIR=C:/tmp/az-uac-child az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`; helpers in scratchpad `gate161.py`/`recheck1314.py`). Mark tasks ✅ as gates pass; 150's UI tests are by hand with the owner. (3) Batch 5 (round 59 order: 154, 113/114/105/101, 064, 153/067, 099, 036, 090); owner decisions needed for 114 licence proxy and 036 ADR-034 amendment. Terminology: say "save the email as documents" (archive route), not "Save to SharePoint" (owner, 2026-10-06). |
+| **Next Action** | (1) When fmpush reports: review diff, open PR, merge on Router green, deploy (C:\wtR fresh master; Deploy-BffApi.ps1 dev), re-run 166 (e)+ and 12. (2) When gates-g6 reports: record results into the gate note, mark tasks whose gates all passed. (3) When exec171 reports: review, PR, merge, deploy, run its post-deploy live checklist. (4) Owner pending: is SPE 'Modified by = BFF app' acceptable for app-only writes (171); G146-3 alert setting (admin user id); 137 WritesEnabled; 18 empty test SPE containers to delete (round 68 list + G7's 3; operator step, no BFF delete route). (5) Owner screen session (~2.5-3h): CIAM (136/037/039, 137 obs, 140, 157), workforce sign-in (141 G-8), wizards/forms (047, 142 G-7, 147 G147-4/6, 150 G-10+UI, 168 (h), 169, 163/164/166 UI), BU1 SPE admin for 165 leaf gates, a second non-admin login. (6) Then batch 5 rest: 154, 113/114 (round 67 rescope)/105/101, 064, 153/067, 099, 036 (ADR-034 path B pending owner). Owner decisions today: rounds 67 (114 Restricted/isexternal), 68 (gate findings), 69-70 (broker-only + standing BU membership + JIT secure edit; Office/Word desktop system-user only). |
 
 ### This session (2026-10-06), done
 - **PR #1312 merged** (`d254d7166`, squash; Router + Tier 1 green; legacy SDAP CI also green afterwards).
