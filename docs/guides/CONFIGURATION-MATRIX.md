@@ -77,7 +77,6 @@
 | `AllowedHosts` | (root) | `*` | appsettings | Host filtering |
 | `TENANT_ID` | (root) | -- | Env Var / appsettings | Azure AD Tenant ID |
 | `API_APP_ID` | (root) | -- | Env Var / appsettings | BFF API app registration client ID |
-| `DEFAULT_CT_ID` | (root) | -- | Env Var / appsettings | Default SPE container type ID |
 
 ### Azure AD / Authentication (`AzureAd`)
 

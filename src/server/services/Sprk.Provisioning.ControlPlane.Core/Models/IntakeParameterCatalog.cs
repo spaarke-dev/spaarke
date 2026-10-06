@@ -114,7 +114,7 @@ public static class IntakeParameterCatalog
         new("estimatedMonthlyUsd", "H0 cost-envelope input."),
         new("costEnvelopePolicy", "H0 cost-envelope policy (abortOnOverrun | warnAndProceed)."),
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
-        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). H4 (SPE-ContainerTypeId secret), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
+        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange ApplicationAccessPolicy — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),

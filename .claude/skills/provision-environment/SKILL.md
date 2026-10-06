@@ -1408,7 +1408,7 @@ $body = @{
     estimatedMonthlyUsd         = if ($null -ne $estimatedMonthlyUsd) { [string]$estimatedMonthlyUsd } else { $null }   # COMP-10 gate input; a STRING — nonSecretParameters is a string map, and a JSON number fails request binding (400 before CreateRun runs; found 2026-10-01 T245c review). null → H0 log-only skips
     costEnvelopePolicy          = $script:BatchCostEnvelopePolicy  # COMP-10 gate policy (Bucket A HIGH#8 SESSION 18); default 'abortOnOverrun' in batch loader. Interactive mode leaves $script:BatchCostEnvelopePolicy null → H0 treats null as abortOnOverrun-equivalent per its default branch.
     operatorUpn                 = $operatorUpn
-    containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4 writes SPE-ContainerTypeId from it; H8 creates the container with it. Missing → both fail (T226, 2026-09-30: was read but never sent)
+    containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4b writes SharePointEmbedded__ContainerTypeId from it; H8 finds or creates the customer's container in it. Missing → both fail (T226, 2026-09-30: was read but never sent)
     # T245c (Step 1e-bis) — required; L2 refuses the run with the handler's own code when a rule is broken
     identityPreset              = $identityPreset         # H11 — userprov-missing/invalid-identity-preset
     usersJson                   = (ConvertTo-Json -InputObject @($users) -Compress -Depth 4)   # H11 — always a JSON array (do NOT add -AsArray: it double-nests)

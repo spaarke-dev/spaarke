@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "818648987108958966"
+      "templateHash": "9428926323124642200"
     }
   },
   "parameters": {
@@ -3838,7 +3838,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9104462299996660782"
+              "templateHash": "3857118508981622311"
             }
           },
           "parameters": {
@@ -4138,26 +4138,6 @@
               }
             },
             {
-              "condition": "[contains(parameters('secretValues'), 'SPE-ContainerTypeId')]",
-              "type": "Microsoft.KeyVault/vaults/secrets",
-              "apiVersion": "2023-07-01",
-              "name": "[format('{0}/{1}', parameters('keyVaultName'), 'SPE-ContainerTypeId')]",
-              "properties": {
-                "value": "[parameters('secretValues')['SPE-ContainerTypeId']]",
-                "attributes": {
-                  "enabled": true
-                },
-                "contentType": "from-topology-constants"
-              },
-              "tags": {
-                "canonicalName": "SPE-ContainerTypeId",
-                "category": "spe",
-                "rotation": "N/A",
-                "neverDelete": "false",
-                "managedBy": "canonical-secret-catalog-generator"
-              }
-            },
-            {
               "condition": "[contains(parameters('secretValues'), 'TenantId')]",
               "type": "Microsoft.KeyVault/vaults/secrets",
               "apiVersion": "2023-07-01",
@@ -4198,7 +4178,6 @@
                 "DocumentIntelligence-Endpoint",
                 "Email-WebhookSecret",
                 "Email-WebhookSigningKey",
-                "SPE-ContainerTypeId",
                 "TenantId"
               ]
             }

@@ -7,6 +7,17 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — H8 reuses the customer's container; unread SPE-ContainerTypeId retired (T227e)
+
+`customer-provisioning-orchestration-r1` T227e.
+
+- **`.claude/constraints/provisioning.md`** (SPE section): H8 finds before it creates (run state, then the type's
+  containers by H8's name/description + `spaarkeCustomerId` marker); two candidates stop the run; never rename the
+  customer's container.
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `from-topology-constants` retired with its only
+  entry (`SPE-ContainerTypeId`, unread); the reader now refuses it.
+- **`.claude/skills/provision-environment/SKILL.md`**: the `containerTypeId` comment names its real readers (H4b setting, H8).
+
 ###### 2026-10-06 — App-only SPE calls go through the ownership guard (T227d, owner D28/D29)
 
 `customer-provisioning-orchestration-r1` T227d.

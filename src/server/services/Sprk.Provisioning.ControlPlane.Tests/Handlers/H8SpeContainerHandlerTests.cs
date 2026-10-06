@@ -62,8 +62,20 @@
 //   AC-20 Refused grant -> Resumable ContainerTypeGrantFailed naming the app;
 //         grant infra fault -> Resumable ContainerTypeGrantInfraFault; no
 //         container created either way.
+//   AC-21 Task 227e: a re-run after ReplicationPending reuses the container
+//         the first attempt created (InterStepState.SpeContainerId) — no second.
+//   AC-22 A later run (empty InterStepState) finds the customer's container
+//         by lookup and reuses it — nothing created.
+//   AC-23 Two containers are the customer's -> Resumable
+//         DuplicateCustomerContainers naming both; nothing created or chosen.
+//   AC-24 Lookup without a verdict / lookup fault -> Resumable; nothing created.
+//   AC-25 A reused container still inactive is activated; refusal ->
+//         QuarantineRequired.
+//   AC-26 Marker refused / faulted -> Resumable; container id kept for resume.
+//   AC-27 The container is marked spaarkeCustomerId = customerId after verification.
 // The GET-then-PUT/PATCH semantics (a re-run writes nothing) are covered by
-// GraphContainerProvisionerGrantTests against the real Graph SDK.
+// GraphContainerProvisionerGrantTests against the real Graph SDK; the lookup, marker
+// and activation calls by GraphContainerProvisionerReuseTests.
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
@@ -288,6 +300,7 @@ public sealed class H8SpeContainerHandlerTests
         // NOT recorded as a CompletedPhase — H8 has not finished; a resume
         // must re-execute HandleAsync in full.
         repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
+        provisioner.Calls.Should().NotContain("marker", "the marker is written after verification (T227e)");
     }
 
     // ---------- AC-9 idempotency ----------
@@ -469,9 +482,9 @@ public sealed class H8SpeContainerHandlerTests
     }
 
     [Fact]
-    public async Task AC17_ProvisionerRequest_ContainerTypeIdIsTrimmed_LikeH4sVaultWrite()
+    public async Task AC17_ProvisionerRequest_ContainerTypeIdIsTrimmed()
     {
-        // T226: H4 writes the trimmed id to SPE-ContainerTypeId; Graph must receive the same id.
+        // The intake id is operator-maintained text (spaarke-constants.yaml); Graph must receive it trimmed.
         var run = BuildRun();
         run.Parameters.NonSecret[H8SpeContainerHandler.ContainerTypeIdParameterKey] = $"  {ContainerTypeId}\n";
         var repo = new FakeRepository(run, etag: "etag-17b");
@@ -495,7 +508,7 @@ public sealed class H8SpeContainerHandlerTests
 
         await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
-        provisioner.Calls.Should().Equal("grants", "provision");
+        provisioner.Calls.Should().Equal("grants", "lookup", "provision", "marker");
         var request = provisioner.LastGrantRequest!;
         request.TenantId.Should().Be(TenantId);
         request.ContainerTypeId.Should().Be(ContainerTypeId);
@@ -564,6 +577,225 @@ public sealed class H8SpeContainerHandlerTests
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerTypeGrantInfraFault);
         provisioner.Calls.Should().Equal("grants");
+    }
+
+    // ---------- AC-21..AC-27 find-before-create + marker (task 227e) ----------
+
+    [Fact]
+    public async Task AC21_ReRunAfterReplicationPending_ReusesTheRunsContainer_CreatesNoSecond()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-21");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var verifier = FakeVerifier.Sequence(
+            new SpeContainerVerificationResult.ReplicationPending("404 — replicating"),
+            new SpeContainerVerificationResult.Verified("active"));
+        var handler = BuildHandler(repo, provisioner, verifier);
+
+        var first = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.WaitingOnGate);
+        var second = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        first.Should().BeOfType<HandlerResult.Success>();
+        second.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(1, "the re-run reuses the container the first attempt created");
+        provisioner.Calls.Should().Equal("grants", "lookup", "provision", "grants", "marker");
+        verifier.LastRequest!.ContainerId.Should().Be(ContainerId);
+        provisioner.LastMarkerRequest!.ContainerId.Should().Be(ContainerId);
+        repo.LastWrittenRun.Status.Should().Be(RunStatus.Running);
+        repo.LastWrittenRun.InterStepState.SpeContainerId.Should().Be(ContainerId);
+        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == "H8");
+    }
+
+    [Fact]
+    public async Task AC22_LaterRun_FindsTheCustomersContainer_ReusesIt_CreatesNothing()
+    {
+        const string existing = "b!existing-customer-container";
+        var run = BuildRun();   // a new run: nothing in InterStepState
+        var repo = new FakeRepository(run, etag: "etag-22");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.LookupOutcome = new SpeContainerLookupOutcome.Found(
+            [new SpeContainerMatch(existing, "Spaarke Container - acme", Marker: CustomerId)]);
+        var verifier = FakeVerifier.Verified("active");
+        var handler = BuildHandler(repo, provisioner, verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.CallCount.Should().Be(0, "the customer already has a container");
+        provisioner.Calls.Should().Equal("grants", "lookup", "marker");
+        provisioner.LastLookupRequest.Should().Be(new SpeContainerLookupRequest(
+            TenantId, ContainerTypeId, OwningAppId, CustomerId, "Spaarke Container - acme",
+            H8SpeContainerHandler.BuildContainerDescription(CustomerId)));
+        verifier.LastRequest!.ContainerId.Should().Be(existing);
+        provisioner.LastMarkerRequest.Should().Be(new SpeContainerMarkerRequest(TenantId, OwningAppId, existing, CustomerId));
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(existing, "H4b keeps the BFF on the same container");
+        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == "H8");
+    }
+
+    [Fact]
+    public async Task AC23_TwoContainersAreTheCustomers_FailsResumable_NamingBoth_CreatesNothing()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-23");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.LookupOutcome = new SpeContainerLookupOutcome.Found(
+        [
+            new SpeContainerMatch("b!first", "Spaarke Container - acme", Marker: CustomerId),
+            new SpeContainerMatch("b!second", "Spaarke Container - acme", Marker: null),
+        ]);
+        var verifier = FakeVerifier.Verified("active");
+        var handler = BuildHandler(repo, provisioner, verifier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.DuplicateCustomerContainers);
+        failure.Diagnostic.Should().Contain("b!first").And.Contain("b!second").And.Contain("never picks one");
+        provisioner.Calls.Should().Equal("grants", "lookup");
+        verifier.CallCount.Should().Be(0);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().BeNullOrEmpty("neither container is chosen");
+        repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AC24_LookupWithoutAVerdict_FailsResumable_CreatesNothing()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-24");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.LookupOutcome = new SpeContainerLookupOutcome.Failure("Graph GET /storage/fileStorage/containers failed with HTTP 403.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerLookupFailed);
+        failure.Diagnostic.Should().Contain("HTTP 403");
+        provisioner.CallCount.Should().Be(0, "no verdict is not 'none found'");
+    }
+
+    [Fact]
+    public async Task AC24_LookupInfraFault_FailsResumable_CreatesNothing()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-24b");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.LookupThrows = new TimeoutException("The containers listing exceeded 00:01:00.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerLookupInfraFault);
+        provisioner.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AC25_ReusedContainerStillInactive_IsActivated_ThenCompletes()
+    {
+        var run = BuildRun();
+        run.InterStepState.SpeContainerId = ContainerId;   // an earlier attempt's activation failed (AC-3)
+        var repo = new FakeRepository(run, etag: "etag-25");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("Inactive"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        provisioner.Calls.Should().Equal("grants", "activate", "marker");
+        provisioner.LastActivationRequest.Should().Be(new SpeContainerActivationRequest(TenantId, OwningAppId, ContainerId));
+        repo.LastWrittenRun!.GateStates[SpeContainerGates.T6Verified].Evidence!.Value
+            .GetProperty("verifiedStatus").GetString().Should().Be("active");
+    }
+
+    [Fact]
+    public async Task AC25_ReusedContainerActivationRefused_FailsQuarantineRequired()
+    {
+        var run = BuildRun();
+        run.InterStepState.SpeContainerId = ContainerId;
+        var repo = new FakeRepository(run, etag: "etag-25b");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.ActivateOutcome = new SpeContainerProvisionOutcome.ActivateFailure(ContainerId, "activate failed with ODataError 500");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("inactive"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerActivationFailed);
+        provisioner.Calls.Should().NotContain("marker");
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(ContainerId);
+    }
+
+    [Fact]
+    public async Task AC25_ReusedContainerActivationFaults_FailsQuarantineRequired_KeepsTheContainer()
+    {
+        var run = BuildRun();
+        run.InterStepState.SpeContainerId = ContainerId;
+        var repo = new FakeRepository(run, etag: "etag-25c");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.ActivateThrows = new TimeoutException("Activating container exceeded 00:01:00.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("inactive"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired, "its activation status is unknown");
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerActivationInfraFault);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(ContainerId);
+    }
+
+    [Fact]
+    public async Task AC26_MarkerRefused_FailsResumable_KeepsTheContainerForResume()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-26");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.MarkerOutcome = new SpeContainerMarkerOutcome.Failure("Graph PATCH .../customProperties failed with HTTP 403.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerMarkerFailed);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(ContainerId, "a resume reuses it (AC-21 path)");
+        repo.LastWrittenRun.CompletedPhases.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task AC26_MarkerInfraFault_FailsResumable_KeepsTheContainerForResume()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-26b");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        provisioner.MarkerThrows = new TimeoutException("The marker write exceeded 00:01:00.");
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SpeContainerRejectionCodes.ContainerMarkerInfraFault);
+        repo.LastWrittenRun!.InterStepState.SpeContainerId.Should().Be(ContainerId);
+    }
+
+    [Fact]
+    public async Task AC27_NewContainer_IsMarkedForTheCustomer_AfterVerification()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-27");
+        var provisioner = FakeProvisioner.Success(ContainerId);
+        var handler = BuildHandler(repo, provisioner, FakeVerifier.Verified("active"));
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        provisioner.LastMarkerRequest.Should().Be(new SpeContainerMarkerRequest(TenantId, OwningAppId, ContainerId, CustomerId),
+            "the customer's BFF recognises its containers by spaarkeCustomerId = Customer__Id (T227d)");
     }
 
     // ---------- helpers ----------
@@ -661,6 +893,15 @@ public sealed class H8SpeContainerHandlerTests
         public List<string> Calls { get; } = new();
         public SpeContainerTypeGrantOutcome GrantOutcome { get; set; } = new SpeContainerTypeGrantOutcome.Success([]);
         public Exception? GrantThrows { get; set; }
+        public SpeContainerLookupOutcome LookupOutcome { get; set; } = new SpeContainerLookupOutcome.Found([]);
+        public Exception? LookupThrows { get; set; }
+        public SpeContainerLookupRequest? LastLookupRequest { get; private set; }
+        public SpeContainerProvisionOutcome? ActivateOutcome { get; set; }
+        public Exception? ActivateThrows { get; set; }
+        public SpeContainerActivationRequest? LastActivationRequest { get; private set; }
+        public SpeContainerMarkerOutcome MarkerOutcome { get; set; } = new SpeContainerMarkerOutcome.Success(Written: true);
+        public Exception? MarkerThrows { get; set; }
+        public SpeContainerMarkerRequest? LastMarkerRequest { get; private set; }
 
         private FakeProvisioner(SpeContainerProvisionOutcome? outcome, Exception? throwOnCall)
         {
@@ -699,10 +940,39 @@ public sealed class H8SpeContainerHandlerTests
             if (GrantThrows is not null) throw GrantThrows;
             return Task.FromResult(GrantOutcome);
         }
+
+        public Task<SpeContainerLookupOutcome> FindCustomerContainersAsync(
+            SpeContainerLookupRequest request, CancellationToken ct)
+        {
+            LastLookupRequest = request;
+            Calls.Add("lookup");
+            if (LookupThrows is not null) throw LookupThrows;
+            return Task.FromResult(LookupOutcome);
+        }
+
+        public Task<SpeContainerProvisionOutcome> ActivateAsync(
+            SpeContainerActivationRequest request, CancellationToken ct)
+        {
+            LastActivationRequest = request;
+            Calls.Add("activate");
+            if (ActivateThrows is not null) throw ActivateThrows;
+            return Task.FromResult(ActivateOutcome ?? new SpeContainerProvisionOutcome.Success(
+                new SpeContainerProvisionOutputs(request.ContainerId)));
+        }
+
+        public Task<SpeContainerMarkerOutcome> EnsureCustomerMarkerAsync(
+            SpeContainerMarkerRequest request, CancellationToken ct)
+        {
+            LastMarkerRequest = request;
+            Calls.Add("marker");
+            if (MarkerThrows is not null) throw MarkerThrows;
+            return Task.FromResult(MarkerOutcome);
+        }
     }
 
     private sealed class FakeVerifier : ISpeContainerVerifier
     {
+        private readonly Queue<SpeContainerVerificationResult> _sequence = new();
         private readonly SpeContainerVerificationResult? _result;
         private readonly Exception? _throwOnCall;
         public int CallCount { get; private set; }
@@ -725,13 +995,21 @@ public sealed class H8SpeContainerHandlerTests
 
         public static FakeVerifier Throws(Exception ex) => new(null, ex);
 
+        /// <summary>Answers each call with the next result — one handler invocation per result.</summary>
+        public static FakeVerifier Sequence(params SpeContainerVerificationResult[] results)
+        {
+            var verifier = new FakeVerifier(null, null);
+            foreach (var result in results) verifier._sequence.Enqueue(result);
+            return verifier;
+        }
+
         public Task<SpeContainerVerificationResult> VerifyAsync(
             SpeContainerVerificationRequest request, CancellationToken ct)
         {
             CallCount++;
             LastRequest = request;
             if (_throwOnCall is not null) throw _throwOnCall;
-            return Task.FromResult(_result!);
+            return Task.FromResult(_sequence.Count > 0 ? _sequence.Dequeue() : _result!);
         }
     }
 }

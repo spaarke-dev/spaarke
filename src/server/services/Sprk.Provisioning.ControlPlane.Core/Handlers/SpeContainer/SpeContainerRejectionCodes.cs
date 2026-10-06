@@ -84,6 +84,32 @@ public static class SpeContainerRejectionCodes
     /// <summary>Task 227b: infrastructure fault (token exchange, transport, timeout) while ensuring the grants — Resumable.</summary>
     public const string ContainerTypeGrantInfraFault = "spe-container-type-grant-infra-fault";
 
+    /// <summary>
+    /// Task 227e: the lookup for the customer's existing container got no verdict (Graph refused the listing or a
+    /// candidate's custom properties, or the listing did not finish). Nothing was created — Resumable.
+    /// </summary>
+    public const string ContainerLookupFailed = "spe-container-lookup-failed";
+
+    /// <summary>Task 227e: infrastructure fault (token exchange, transport, timeout) during the lookup — Resumable, nothing created.</summary>
+    public const string ContainerLookupInfraFault = "spe-container-lookup-infra-fault";
+
+    /// <summary>
+    /// Task 227e: more than one container of the type is this customer's (same display name, this customer's marker
+    /// or none). H8 never picks one: the diagnostic names them all and the operator decides (delete or rename the
+    /// extra one, or set its marker) before resuming. Nothing was created — Resumable.
+    /// </summary>
+    public const string DuplicateCustomerContainers = "spe-duplicate-customer-containers";
+
+    /// <summary>
+    /// Task 227e: the customer's container exists and is verified, but its <c>spaarkeCustomerId</c> marker could not
+    /// be confirmed or written (Graph refused, or the container is marked for another customer — then it is left
+    /// untouched). The container id is kept on the run, so a resume reuses it — Resumable.
+    /// </summary>
+    public const string ContainerMarkerFailed = "spe-container-marker-failed";
+
+    /// <summary>Task 227e: infrastructure fault while confirming / writing the marker — Resumable (the container id is kept).</summary>
+    public const string ContainerMarkerInfraFault = "spe-container-marker-infra-fault";
+
     /// <summary>Provisioner infrastructure fault (transport, timeout, unexpected exception) — Resumable, no external side effect confirmed.</summary>
     public const string ProvisioningInfraFault = "spe-provisioning-infra-fault";
 

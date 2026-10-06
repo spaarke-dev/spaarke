@@ -122,7 +122,6 @@ $settings = @(
     "Dataverse__EnvironmentUrl=$DataverseEnvUrl",
     "Dataverse__ServiceUrl=$DataverseEnvUrl",
     "Dataverse__TenantId=$(Format-KvRef 'TenantId')",
-    "DEFAULT_CT_ID=$(Format-KvRef 'SPE-ContainerTypeId')",
     "DocumentIntelligence__AiSearchEndpoint=$(Format-KvRef 'AiSearch-Endpoint')",
     "DocumentIntelligence__DocIntelEndpoint=$(Format-KvRef 'DocumentIntelligence-Endpoint')",
     "DocumentIntelligence__Enabled=true",

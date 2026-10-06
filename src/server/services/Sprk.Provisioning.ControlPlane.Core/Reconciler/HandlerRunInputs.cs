@@ -124,7 +124,6 @@ public static class HandlerRunInputs
             [HandlerIds.H4] =
             [
                 Tenant, Subscription,
-                RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake(IntakeParameterCatalog.CommunicationDefaultMailbox),   // T245c: KV Communication-DefaultMailbox
                 RunInput.Intake("provisionedOn", required: false),
                 RunInput.Intake("rotate", required: false),
@@ -191,6 +190,8 @@ public static class HandlerRunInputs
                 // T227b: H8 grants these two on the container-type registration before creating the container.
                 RunInput.Output(nameof(InterStepState.MiClientId)),
                 RunInput.Output(nameof(InterStepState.BffAppRegId)),
+                // T227e: H8's own earlier write — a WaitingOnGate re-run or a resume reuses that container, never re-creates.
+                RunInput.Output(nameof(InterStepState.SpeContainerId), required: false),
             ],
             [HandlerIds.H9] =
             [

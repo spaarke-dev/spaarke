@@ -73,7 +73,6 @@ $settings = @(
     # --- Core Identity ---
     "TENANT_ID=$(KVRef 'TenantId')",
     "API_APP_ID=$(KVRef 'BFF-API-ClientId')",
-    "DEFAULT_CT_ID=$(KVRef 'SPE-ContainerTypeId')",
 
     # --- Credential selection (ADR-028 A4 — the BFF identity is secret-free) ---
     # The BFF authenticates as a confidential client using a Managed-Identity-issued federated

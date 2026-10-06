@@ -474,7 +474,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
 | **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
-| **H8** | SPE root container | Creates the customer's container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s) | Container GET succeeds; container ID persisted | `spe-{customerId}` |
+| **H8** | SPE root container | Finds the customer's container in the pre-existing container type, or creates one when there is none (task 227e — never a second: two candidates stop the run, naming both), then activates and verifies it and writes the `spaarkeCustomerId` marker, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s) | Container GET succeeds; container ID persisted | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
 | **H11** | User provisioning | Per identity preset (`B2BGuest` or `NativeAccount`) via r1 registration flow | B2B: consent-verification gate | `users-{customerId}` |
@@ -865,13 +865,24 @@ import — the script never customises a managed component (ADR-027); it then on
 
 ### 7.5 Phase 5 — SharePoint Embedded (H8)
 
-**H8** creates, activates and verifies the customer's root container inside the pre-existing container type (the
+**H8** finds or creates, activates and verifies the customer's root container inside the pre-existing container type (the
 container type itself is created once by the operator — [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md)).
+**One container per customer, ever** (task 227e): H8 reuses the run's own container on a re-run (e.g. after the
+replication wait), and otherwise looks among the type's containers for one named as H8 names it
+(`speContainerDisplayName`, default `Spaarke Container - {customerId}`) or described as H8 describes it
+(`SPE container for customer {customerId} — created by L2 H8 handler.`) that carries this customer's
+`spaarkeCustomerId` marker — or no marker and H8's description for this customer (a display name alone proves nothing:
+it is operator intake). One → reused; two or more → the run stops Resumable naming them all (the operator decides);
+none → created. **Do not rename the customer's container or change its description** — a later run would not find it
+and would create a new one, and H4b would then point the BFF at that empty container. If an operator deletes the
+container a failed run recorded, clear the run's `InterStepState.SpeContainerId` before resuming (otherwise the run
+waits on the replication gate). H8 then writes the marker `spaarkeCustomerId` =
+customer id (the BFF recognises its containers by it — T227d).
 **T6 fix**: H8 uses an app-only token as the container type's **owning app**, obtained through the Worker UAMI's
 federated identity credential on that app (task 248) — no certificate or secret is involved. Delegated tokens produce
 `public client not allowed` 403s.
 
-Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId`) AND KV secret (`customer-{customerId}-spe-container-id`) — enables I4 invariant enforcement.
+Container ID persisted to the Dataverse env-var (`sprk_SharePointEmbeddedContainerId`, H7) and to the BFF as plain settings (`EmailProcessing__DefaultContainerId`, `Communication__ArchiveContainerId`, H4b — T227c) — enables I4 invariant enforcement.
 
 **Lead-time**: none per customer. The container type and its owning app are a one-time setup; H0's `SpeOwnerCredential`
 check confirms the owner entry, the owning-app token and the registration before any resource is created.

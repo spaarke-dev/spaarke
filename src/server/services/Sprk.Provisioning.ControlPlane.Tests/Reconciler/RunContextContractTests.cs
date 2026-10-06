@@ -598,7 +598,7 @@ public sealed class RunContextContractTests
     /// <summary>
     /// Rule (g). H4 runs after H2a (Bicep) and before H3. A secret is reachable when customer.bicep
     /// actually writes it (from-bicep-output AND in <paramref name="bicepWrittenNames"/>), H4 generates
-    /// it, H4 takes it from an intake value it maps (from-topology-constants / from-intake-parameter),
+    /// it, H4 takes it from an intake value it maps (from-intake-parameter),
     /// or H3 writes it itself and H4 skips it. Anything else has no producer — it is a gap, named with
     /// its pinned owner (or UNOWNED). customer.bicep writing a name the manifest does not label
     /// from-bicep-output is a problem (the two disagree about who writes it).
@@ -625,7 +625,6 @@ public sealed class RunContextContractTests
                 case KvSecretValueSource.FromBicepOutput when bicepWrittenNames.Contains(entry.CanonicalName):
                 case KvSecretValueSource.Generated:
                     break;
-                case KvSecretValueSource.FromTopologyConstants:
                 case KvSecretValueSource.FromIntakeParameter:
                     if (!intakeValueParameterKeys.TryGetValue(entry.CanonicalName, out var intakeKey)
                         || !IntakeParameterCatalog.IsKnown(intakeKey))

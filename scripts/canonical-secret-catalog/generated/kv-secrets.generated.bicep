@@ -335,26 +335,6 @@ resource kv_email_WebhookSigningKey 'Microsoft.KeyVault/vaults/secrets@2023-07-0
   }
 }
 
-// SPE-ContainerTypeId — SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
-resource kv_sPE_ContainerTypeId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'SPE-ContainerTypeId')) {
-  parent: keyVault
-  name: 'SPE-ContainerTypeId'
-  properties: {
-    value: secretValues['SPE-ContainerTypeId']
-    attributes: {
-      enabled: true
-    }
-    contentType: 'from-topology-constants'
-  }
-  tags: {
-    canonicalName: 'SPE-ContainerTypeId'
-    category: 'spe'
-    rotation: 'N/A'
-    neverDelete: 'false'
-    managedBy: 'canonical-secret-catalog-generator'
-  }
-}
-
 // TenantId — Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
 resource kv_tenantId 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (contains(secretValues, 'TenantId')) {
   parent: keyVault
@@ -396,6 +376,5 @@ output canonicalSecretNames array = [
   'DocumentIntelligence-Endpoint'
   'Email-WebhookSecret'
   'Email-WebhookSigningKey'
-  'SPE-ContainerTypeId'
   'TenantId'
 ]

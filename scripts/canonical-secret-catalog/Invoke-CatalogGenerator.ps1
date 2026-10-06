@@ -133,12 +133,12 @@ $script:RequiredSecretFields = @(
     'never_delete', 'exception_note', 'aliases', 'value_source', 'app_settings', 'tags'
 )
 # 'from-shared-service' (task 200 H4-shared) retired T226 (2026-09-30); 'from-topology-constants'
-# (task 214, SPE-ContainerTypeId) accepted from T226 — H4 writes it from the run's non-secret parameter.
+# (task 214, SPE-ContainerTypeId) retired with that secret by T227e (2026-10-06) — nothing read it.
 # Task 245a (G25): 'from-intake-parameter' (H4 writes a non-secret intake value, e.g. TenantId) and
 # 'written-by-h3' (H3 commits it to the vault itself, after H4 — H4 skips it). Task 225b (owner D18,
 # 2026-10-02) removed task 245b's platform-vault copy source with the vendor keys that used it.
 # The C# reader (FileKvSecretManifest.TryMapValueSource) accepts exactly this set.
-$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-topology-constants', 'from-intake-parameter', 'written-by-h3', 'generated')
+$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-intake-parameter', 'written-by-h3', 'generated')
 
 # Task 201 — per_env_settings schema (H4b BulkAppSettings handler).
 # Optional top-level list; when present, each entry MUST carry these fields.
@@ -731,8 +731,8 @@ Write-Host ''
 
         # Emit either an unconditional seed (for from-existing-kv - never
         # overwrite live value; require -SeedPlaceholders explicitly for
-        # placeholder creation), a from-topology-constants marker (NO
-        # placeholder — H4 writes it from the run parameter), or a conditional
+        # placeholder creation), a SKIP marker for values written at run time
+        # (NO placeholder — it would be served as a real value), or a conditional
         # placeholder seed for the other value_sources.
         if ($source -eq 'from-existing-kv') {
             [void]$sb.Append("if (`$SeedPlaceholders -and -not `$SkipExisting) {`n")
@@ -740,11 +740,6 @@ Write-Host ''
             [void]$sb.Append("} else {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-value-source-is-existing-kv' -Description '$($purpose -replace "'","''") [BINDING never-delete: skip in seed]' -Category '$category'`n")
             [void]$sb.Append("}`n")
-        } elseif ($source -eq 'from-topology-constants') {
-            # Topology constant (e.g. SPE-ContainerTypeId from spaarke-constants.yaml per_env_constants):
-            # written by H4 at run time from the run's non-secret parameter. No placeholder — a placeholder
-            # would be served to the BFF as a real container-type id.
-            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray`n")
         } elseif ($source -eq 'from-intake-parameter') {
             # Task 245a: a non-secret intake value (e.g. TenantId) written by H4 at run time. No
             # placeholder — it would be served to the BFF as a real value.

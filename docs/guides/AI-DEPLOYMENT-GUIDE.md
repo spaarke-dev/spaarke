@@ -974,7 +974,6 @@ curl https://{api-url}/healthz
 | Setting | Value | Description |
 |---------|-------|-------------|
 | `SharePointEmbedded__ContainerTypeId` | (configured) | SPE Container Type ID |
-| `DEFAULT_CT_ID` | (configured) | Default Container Type |
 
 ### AI Services (Legacy Ai__ namespace)
 

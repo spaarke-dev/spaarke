@@ -41,14 +41,24 @@
 // per topology doc §6 IS app-only-capable — unlike CONTAINER-TYPE-CREATION
 // per §R5, which requires delegated. The distinction is critical.
 //
+// TASK 227e — REUSE: FindCustomerContainersAsync lists the type's containers (the call the T6 probe proved
+// live as the owning app), keeps those named as H8 names the customer's container, and reads each one's
+// `spaarkeCustomerId` custom property (GET ?$select=id,customProperties): another customer's marker excludes it.
+// EnsureCustomerMarkerAsync writes that marker (PATCH .../customProperties — not settable at create) when absent;
+// ActivateAsync activates a reused container an earlier attempt left inactive.
+//
 // TESTS: ProvisionAsync (CREATE + ACTIVATE) has no unit test here (H8SpeContainerHandlerTests
-// substitutes a fake ISpeContainerProvisioner). EnsureGrantsAsync (task 227b) is tested by
+// substitutes a fake ISpeContainerProvisioner). The task-227e calls are tested by GraphContainerProvisionerReuseTests,
+// and EnsureGrantsAsync (task 227b) by
 // GraphContainerProvisionerGrantTests — the real Graph SDK against a scripted HttpMessageHandler
 // through SpeConfidentialClientGraphFactory's internal seam. The owning-app credential itself is
 // unit-tested via SpeConfidentialClientGraphFactoryTests.cs.
 // -----------------------------------------------------------------------------
 
+using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Kiota.Abstractions;
@@ -59,6 +69,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 /// <inheritdoc cref="ISpeContainerProvisioner"/>
 public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
 {
+    /// <summary>Upper bound on listing pages followed by <see cref="FindCustomerContainersAsync"/> (defends against a nextLink loop).</summary>
+    internal const int MaxListingPages = 100;
+
     private readonly SpeConfidentialClientGraphFactory _graphFactory;
     private readonly SpeContainerOptions _options;
     private readonly ILogger<GraphContainerProvisioner> _logger;
@@ -136,35 +149,319 @@ public sealed class GraphContainerProvisioner : ISpeContainerProvisioner
                 $"{ex.Error?.Code} {ex.Error?.Message ?? ex.Message} (customerId '{request.CustomerId}', " +
                 $"containerTypeId '{request.ContainerTypeId}').");
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // A timed-out create may still have created the container; H8 classifies the thrown fault, and its next
+            // attempt finds a container that did get created (task 227e lookup).
+            throw new TimeoutException($"The container create exceeded {_options.GraphRequestTimeout}.");
+        }
 
         // (2) Activate the container per topology doc §6 ("A container is not
         // usable until activated"). If this fails, we surface ActivateFailure
         // with the containerId so the handler classifies QuarantineRequired.
+        return await ActivateCoreAsync(graph, containerId, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpeContainerProvisionOutcome> ActivateAsync(
+        SpeContainerActivationRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerId);
+
+        using var graph = _graphFactory.CreateGraphClient(request.TenantId, request.OwningAppId);
+        return await ActivateCoreAsync(graph, request.ContainerId, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async Task<SpeContainerProvisionOutcome> ActivateCoreAsync(
+        GraphServiceClient graph, string containerId, CancellationToken cancellationToken)
+    {
         try
         {
             using var activateTimeout = LinkedTimeout(cancellationToken);
             await graph.Storage.FileStorage.Containers[containerId].Activate.PostAsync(
                 cancellationToken: activateTimeout.Token).ConfigureAwait(false);
 
-            _logger.LogInformation(
-                "H8-B container activated: containerId={ContainerId} customerId={CustomerId}",
-                containerId, request.CustomerId);
+            _logger.LogInformation("H8-B container activated: containerId={ContainerId}", containerId);
         }
         catch (ODataError ex)
         {
             _logger.LogError(ex,
-                "H8-B Graph container ACTIVATE ODataError: customerId={CustomerId} containerId={ContainerId} " +
-                "status={Status}",
-                request.CustomerId, containerId, ex.ResponseStatusCode);
+                "H8-B Graph container ACTIVATE ODataError: containerId={ContainerId} status={Status}",
+                containerId, ex.ResponseStatusCode);
             return new SpeContainerProvisionOutcome.ActivateFailure(
                 containerId,
                 $"Graph POST /storage/fileStorage/containers/{containerId}/activate failed with ODataError " +
-                $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. Container was " +
-                $"created but is unusable until activated (topology doc §6). QuarantineRequired.");
+                $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}. The container " +
+                $"exists but is unusable until activated (topology doc §6). QuarantineRequired.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Activating container '{containerId}' exceeded {_options.GraphRequestTimeout}.");
         }
 
         return new SpeContainerProvisionOutcome.Success(new SpeContainerProvisionOutputs(
             ContainerId: containerId));
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpeContainerLookupOutcome> FindCustomerContainersAsync(
+        SpeContainerLookupRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.DisplayName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.Description);
+
+        if (!Guid.TryParse(request.ContainerTypeId, out var containerTypeGuid))
+        {
+            // The id goes into an OData filter: only a GUID may reach it.
+            return new SpeContainerLookupOutcome.Failure(
+                $"Container type id '{request.ContainerTypeId}' is not a GUID — the listing was not attempted.");
+        }
+
+        using var graph = _graphFactory.CreateGraphClient(request.TenantId, request.OwningAppId);
+        var wantedName = request.DisplayName.Trim();
+        var wantedDescription = request.Description.Trim();
+
+        // (1) The container type's containers, by H8's display name — or by H8's description for this customer, which
+        //     survives a rename when the listing returns descriptions. The type is shared by every Model 1 stamp (D28),
+        //     so the listing holds other customers' containers too; only these candidates are read further.
+        var named = new List<FileStorageContainer>();
+        var listed = 0;
+        try
+        {
+            FileStorageContainerCollectionResponse? page;
+            using (var timeout = LinkedTimeout(cancellationToken))
+            {
+                page = await graph.Storage.FileStorage.Containers
+                    .GetAsync(rc => rc.QueryParameters.Filter = $"containerTypeId eq {containerTypeGuid}",
+                        cancellationToken: timeout.Token)
+                    .ConfigureAwait(false);
+            }
+            for (var pages = 1; page is not null; pages++)
+            {
+                foreach (var container in page.Value ?? [])
+                {
+                    listed++;
+                    if (!string.IsNullOrWhiteSpace(container.Id)
+                        && (string.Equals(container.DisplayName?.Trim(), wantedName, StringComparison.OrdinalIgnoreCase)
+                            || string.Equals(container.Description?.Trim(), wantedDescription, StringComparison.Ordinal)))
+                    {
+                        named.Add(container);
+                    }
+                }
+                if (string.IsNullOrEmpty(page.OdataNextLink))
+                {
+                    break;
+                }
+                if (pages >= MaxListingPages)
+                {
+                    return new SpeContainerLookupOutcome.Failure(
+                        $"The containers listing for container type '{request.ContainerTypeId}' still had more pages after " +
+                        $"{MaxListingPages} pages ({listed} containers) — no verdict on whether customer " +
+                        $"'{request.CustomerId}' already has a container, so none was created.");
+                }
+                using var nextTimeout = LinkedTimeout(cancellationToken);
+                page = await graph.Storage.FileStorage.Containers.WithUrl(page.OdataNextLink)
+                    .GetAsync(cancellationToken: nextTimeout.Token).ConfigureAwait(false);
+            }
+        }
+        catch (ODataError ex)
+        {
+            _logger.LogError(ex, "H8 container lookup: listing ODataError status={Status}", ex.ResponseStatusCode);
+            return new SpeContainerLookupOutcome.Failure(
+                $"Graph GET /storage/fileStorage/containers?$filter=containerTypeId eq {request.ContainerTypeId} failed " +
+                $"with HTTP {ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The containers listing exceeded {_options.GraphRequestTimeout}.");
+        }
+
+        // (2) Whose a candidate is. The marker decides when present: this customer's → match; another customer's →
+        //     never returned. With no marker (a container from before the marker, or one whose marker write never
+        //     happened) only H8's description for THIS customer proves it — a display name alone is operator-supplied
+        //     intake and could name another customer's unmarked container.
+        var matches = new List<SpeContainerMatch>();
+        foreach (var container in named)
+        {
+            ContainerOwnership ownership;
+            try
+            {
+                ownership = await ReadOwnershipAsync(graph, container.Id!, cancellationToken).ConfigureAwait(false);
+            }
+            catch (ODataError ex)
+            {
+                return new SpeContainerLookupOutcome.Failure(
+                    $"Reading container '{container.Id}' ('{container.DisplayName}') failed with HTTP " +
+                    $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message} — no verdict on " +
+                    "whether it is this customer's.");
+            }
+
+            if (ownership.MarkerUnreadable)
+            {
+                return new SpeContainerLookupOutcome.Failure(
+                    $"Container '{container.Id}' ('{container.DisplayName}') has a {SpeContainerMarker.PropertyName} custom " +
+                    "property H8 cannot read as a string — no verdict on whether it is this customer's.");
+            }
+
+            var mine = ownership.Marker is not null
+                ? string.Equals(ownership.Marker, request.CustomerId, StringComparison.Ordinal)
+                : string.Equals(ownership.Description?.Trim() ?? container.Description?.Trim(), wantedDescription, StringComparison.Ordinal);
+            if (!mine)
+            {
+                _logger.LogInformation(
+                    "H8 container lookup: candidate {ContainerId} is not customer {CustomerId}'s ({Reason}).",
+                    container.Id, request.CustomerId,
+                    ownership.Marker is not null ? "marked for a different customer" : "unmarked, and not H8's container for this customer");
+                continue;
+            }
+            matches.Add(new SpeContainerMatch(container.Id!, container.DisplayName ?? string.Empty, ownership.Marker));
+        }
+
+        _logger.LogInformation(
+            "H8 container lookup: containerTypeId={ContainerTypeId} listed={Listed} sameName={SameName} matches={Matches} " +
+            "customerId={CustomerId}", request.ContainerTypeId, listed, named.Count, matches.Count, request.CustomerId);
+        return new SpeContainerLookupOutcome.Found(matches);
+    }
+
+    /// <inheritdoc/>
+    public async Task<SpeContainerMarkerOutcome> EnsureCustomerMarkerAsync(
+        SpeContainerMarkerRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.OwningAppId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.ContainerId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
+
+        using var graph = _graphFactory.CreateGraphClient(request.TenantId, request.OwningAppId);
+
+        ContainerOwnership ownership;
+        try
+        {
+            ownership = await ReadOwnershipAsync(graph, request.ContainerId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ODataError ex)
+        {
+            return MarkerFailure("GET", request.ContainerId, ex);
+        }
+
+        if (ownership.MarkerUnreadable)
+        {
+            return new SpeContainerMarkerOutcome.Failure(
+                $"Container '{request.ContainerId}' has a {SpeContainerMarker.PropertyName} custom property H8 cannot read as " +
+                "a string; H8 wrote nothing. Inspect the container's custom properties, then resume.");
+        }
+
+        var marker = ownership.Marker;
+        if (marker is not null)
+        {
+            return string.Equals(marker, request.CustomerId, StringComparison.Ordinal)
+                ? new SpeContainerMarkerOutcome.Success(Written: false)
+                : new SpeContainerMarkerOutcome.Failure(
+                    $"Container '{request.ContainerId}' is marked for a different customer ({SpeContainerMarker.PropertyName}); " +
+                    $"H8 never takes over another customer's container and wrote nothing. The run's container id must be " +
+                    $"customer '{request.CustomerId}''s — check InterStepState.SpeContainerId.");
+        }
+
+        // Custom properties cannot be set in the create body; the sub-resource PATCH merges (other properties untouched).
+        var body = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            [SpeContainerMarker.PropertyName] = new Dictionary<string, object>
+            {
+                ["value"] = request.CustomerId,
+                ["isSearchable"] = false,
+            },
+        });
+        var patch = new RequestInformation
+        {
+            HttpMethod = Method.PATCH,
+            URI = new Uri($"{BaseUrl(graph)}/storage/fileStorage/containers/{Uri.EscapeDataString(request.ContainerId)}/customProperties"),
+        };
+        patch.Headers.Add("Accept", "application/json");
+        patch.SetStreamContent(new MemoryStream(Encoding.UTF8.GetBytes(body)), "application/json");
+
+        try
+        {
+            using var timeout = LinkedTimeout(cancellationToken);
+            await graph.RequestAdapter.SendNoContentAsync(patch, ODataErrorMapping, timeout.Token).ConfigureAwait(false);
+        }
+        catch (ODataError ex)
+        {
+            return MarkerFailure("PATCH", request.ContainerId, ex);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"The marker write on container '{request.ContainerId}' exceeded {_options.GraphRequestTimeout}.");
+        }
+
+        _logger.LogInformation(
+            "H8 marked container {ContainerId} as customer {CustomerId}'s ({Property}).",
+            request.ContainerId, request.CustomerId, SpeContainerMarker.PropertyName);
+        return new SpeContainerMarkerOutcome.Success(Written: true);
+    }
+
+    /// <summary>
+    /// What a container says about its owner: its <see cref="SpeContainerMarker.PropertyName"/> value (trimmed; null when
+    /// absent or blank), whether that property is present but not a readable string, and its description.
+    /// </summary>
+    private sealed record ContainerOwnership(string? Marker, bool MarkerUnreadable, string? Description);
+
+    private async Task<ContainerOwnership> ReadOwnershipAsync(GraphServiceClient graph, string containerId, CancellationToken cancellationToken)
+    {
+        FileStorageContainer? container;
+        try
+        {
+            // customProperties is not in the default GET payload — select it (T227d research).
+            using var timeout = LinkedTimeout(cancellationToken);
+            container = await graph.Storage.FileStorage.Containers[containerId]
+                .GetAsync(r => r.QueryParameters.Select = ["id", "description", "customProperties"], timeout.Token)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new TimeoutException($"Reading container '{containerId}' exceeded {_options.GraphRequestTimeout}.");
+        }
+
+        foreach (var entry in container?.CustomProperties?.AdditionalData ?? new Dictionary<string, object>())
+        {
+            if (!string.Equals(entry.Key.Trim(), SpeContainerMarker.PropertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            if (entry.Value is UntypedObject obj && obj.GetValue().TryGetValue("value", out var node) && node is UntypedString s)
+            {
+                var value = s.GetValue();
+                return new ContainerOwnership(string.IsNullOrWhiteSpace(value) ? null : value.Trim(), false, container?.Description);
+            }
+            return new ContainerOwnership(null, MarkerUnreadable: true, container?.Description);
+        }
+        return new ContainerOwnership(null, false, container?.Description);
+    }
+
+    private SpeContainerMarkerOutcome MarkerFailure(string verb, string containerId, ODataError ex)
+    {
+        _logger.LogError(ex, "H8 container marker {Verb} ODataError: containerId={ContainerId} status={Status}",
+            verb, containerId, ex.ResponseStatusCode);
+        return new SpeContainerMarkerOutcome.Failure(
+            $"Graph {verb} /storage/fileStorage/containers/{containerId}/customProperties failed with HTTP " +
+            $"{ex.ResponseStatusCode}: {ex.Error?.Code} {ex.Error?.Message ?? ex.Message}.");
+    }
+
+    private static string BaseUrl(GraphServiceClient graph)
+    {
+        var baseUrl = graph.RequestAdapter?.BaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl) ? "https://graph.microsoft.com/v1.0" : baseUrl.TrimEnd('/');
     }
 
     /// <inheritdoc/>

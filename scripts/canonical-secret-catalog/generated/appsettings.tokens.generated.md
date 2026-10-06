@@ -37,7 +37,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
-| `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
 | `TenantId` | identity | N/A | - | from-intake-parameter |
 
 ## Per-secret detail
@@ -278,20 +277,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - BFF: Email:WebhookSigningKey
 - **App-setting keys**:
   - `Email__WebhookSigningKey`
-
-### `SPE-ContainerTypeId`
-
-- **Category**: spe
-- **Purpose**: SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-topology-constants
-- **Tags**: public, spe, topology-scoped
-- **Exception note**: SEMANTICS CHANGED 2026-08-30 (task 214, H8-B rewrite): value is topology-scoped (once per tier from spaarke-constants.yaml), not per-customer + populated by H8. Retirement of prior H8 write-here behavior driven by topology doc §R5 empirical verification. See task 214 POML + docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md.
-- **Consumers**:
-  - BFF: DEFAULT_CT_ID / SharePointEmbedded:ContainerTypeId
-- **App-setting keys**:
-  - `DEFAULT_CT_ID`
 
 ### `TenantId`
 

@@ -770,16 +770,13 @@ module bffRuntimeRbac 'modules/bff-runtime-rbac.bicep' = {
 //   Redis-ConnectionString (T242: Azure Managed Redis with access keys disabled — the BFF
 //     connects with the UAMI using the plain Redis__Endpoint app setting).
 //
-// Deliberately OMITTED (5) -- never fabricated; each has a documented reason +
+// Deliberately OMITTED (2) -- never fabricated; each has a documented reason +
 // recommended resolution path (honest-signal discipline, root CLAUDE.md §6.5):
-//   SPE-ContainerTypeId
-//     -> topology-scoped (one container type per Spaarke tier), not a customer
-//        resource. manifest value_source = from-topology-constants: H4 writes it
-//        from the run's containerTypeId parameter (the /provision-environment skill
-//        reads it from spaarke-constants.yaml).
-//   (T227c / G18: SPE-DefaultContainerId and SPE-CommunicationArchiveContainerId
-//    left the catalog — the customer's container is created at runtime by H8 and
-//    reaches the BFF as plain app settings H4b writes from H8's output.)
+//   (No SPE secrets remain. T227c / G18: SPE-DefaultContainerId and
+//    SPE-CommunicationArchiveContainerId left the catalog — the customer's container is
+//    created at runtime by H8 and reaches the BFF as plain app settings H4b writes from
+//    H8's output. T227e: SPE-ContainerTypeId left too — nothing read it; the BFF reads
+//    the container type as the plain H4b setting SharePointEmbedded__ContainerTypeId.)
 //   BFF-API-ClientId, BFF-API-Audience
 //     -> H3 creates the per-customer BFF app-registration at RUNTIME and writes
 //        ClientId/Audience to this vault itself (manifest value_source

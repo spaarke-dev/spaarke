@@ -19,9 +19,14 @@
 //   2b. Task 227b (G9): ISpeContainerProvisioner.EnsureGrantsAsync — as the owning app, ensure the
 //       container-type registration grants the stamp UAMI (application full) and the customer BFF app
 //       registration (delegated full); GET-then-PUT/PATCH, so a re-run writes nothing
-//   3. Call ISpeContainerProvisioner.ProvisionAsync (CREATE + ACTIVATE)
+//   3. Task 227e — FIND before creating: this run's InterStepState.SpeContainerId (a WaitingOnGate re-run or
+//      a resume), else ISpeContainerProvisioner.FindCustomerContainersAsync (the type's containers with H8's
+//      display name whose spaarkeCustomerId marker is this customer's or absent). One → reuse; two or more →
+//      Resumable naming all; none → ISpeContainerProvisioner.ProvisionAsync (CREATE + ACTIVATE)
 //   4. Call ISpeContainerVerifier.VerifyAsync (app-only GET) — 404 signals
-//      24h SPE replication lag → RunStatus.WaitingOnGate
+//      24h SPE replication lag → RunStatus.WaitingOnGate; a reused container still inactive is activated
+//   4b. Task 227e: EnsureCustomerMarkerAsync — the spaarkeCustomerId marker the customer's BFF recognises its
+//      containers by (T227d); GET first, written only when absent
 //   5. Persist container GUID to InterStepState.SpeContainerId — H7 reads this
 //      to write Dataverse env-var sprk_SharePointEmbeddedContainerId
 //   6. Mark H8 CompletedPhase + Verified gate + Running (reconciler observes)
@@ -66,6 +71,13 @@
 //   │ BffAppRegId), or a refused / faulted       │ (nothing created; a grant│
 //   │ container-type grant (task 227b)           │ is re-checked on resume) │
 //   │ Run not found in Cosmos partition          │ Resumable                │
+//   │ Lookup refused / unfinished / faulted      │ Resumable (nothing made) │
+//   │ (task 227e)                                │                          │
+//   │ Two or more containers are the customer's  │ Resumable — names them;  │
+//   │ (task 227e)                                │ H8 never picks one       │
+//   │ Marker refused / faulted, or the container │ Resumable (container id  │
+//   │ is marked for another customer (227e)      │ kept; resume reuses it)  │
+//   │ Reused container's activation fails (227e) │ QuarantineRequired       │
 //   │ Provisioner CreateFailure                  │ Resumable                │
 //   │ Provisioner infra fault (no side effect)   │ Resumable                │
 //   │ Provisioner outputs incomplete             │ Resumable                │
@@ -83,8 +95,12 @@
 // IDEMPOTENCY (unchanged from H8-A): key is <c>spe-{customerId}</c>. Level-3
 // (handler-body durable dedup): scans ProvisioningRun.CompletedPhases for
 // (Phase=="H8", IdempotencyKey==<key>). Match → Success no-op BEFORE any
-// external side effect. Enforces "one container per customer, never re-create"
-// (topology doc §6: containers are cheap but the customer's container = data).
+// external side effect. That is per RUN; "one container per customer, never re-create"
+// (topology doc §6: containers are cheap but the customer's container = data) across re-runs and later runs is
+// step 3's find-before-create (task 227e). Its key is the display name, so a container renamed after creation (or
+// a run given a different speContainerDisplayName) is not found and a new one is created — the marker cannot be
+// the key: the stamp's secure-record containers carry it too, and reading every container's custom properties
+// across the shared type costs one Graph call per container.
 //
 // PLACEMENT JUSTIFICATION (CLAUDE.md §10):
 //   H8 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
@@ -175,7 +191,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
 
         var stopwatch = Stopwatch.StartNew();
         _logger.LogInformation(
-            "H8-B SPE container CREATION starting: runId={RunId} customerId={CustomerId}",
+            "H8-B SPE container find-or-create starting: runId={RunId} customerId={CustomerId}",
             envelope.RunId, envelope.CustomerId);
 
         // (1) Load the ProvisioningRun. §4D I3: partition-key predicate
@@ -217,7 +233,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 "has not completed SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md OR SKILL payload construction was bypassed.",
                 cancellationToken).ConfigureAwait(false);
         }
-        // T226: H4 writes the trimmed value to the vault (BuildIntakeValues); Graph gets the same id.
+        // The intake id is operator-maintained text (spaarke-constants.yaml); Graph gets it trimmed.
         containerTypeId = containerTypeId.Trim();
         // (3) Owning app (task 245b) — L2 configuration keyed by the container type: the owning app the
         //     container type is bound to (topology R1). Not the customer BFF app: the BFF app is a
@@ -236,7 +252,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         var displayName = TryGetNonEmpty(parameters, DisplayNameParameterKey, out var displayNameRaw)
             ? displayNameRaw
             : $"{_options.DefaultDisplayNamePrefix} - {envelope.CustomerId}";
-        var description = $"SPE container for customer {envelope.CustomerId} — created by L2 H8 handler.";
+        var description = BuildContainerDescription(envelope.CustomerId);
 
         // (4) Idempotency key — customerId-only (version-independent; one
         //     container per customer, never re-created).
@@ -298,70 +314,23 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (6) Invoke the provisioner (CREATE + ACTIVATE per topology doc §6).
-        //     Infra faults (thrown) are Resumable (no confirmed external side
-        //     effect); CreateFailure is Resumable; ActivateFailure is
-        //     QuarantineRequired (container exists but not activated).
-        SpeContainerProvisionOutcome provisionOutcome;
-        try
+        // (6) Task 227e — find the customer's container, or create one when there is none (FindOrCreateContainerAsync).
+        var (containerId, findOrCreateFailure) = await FindOrCreateContainerAsync(
+            run, etag, envelope, tenantId, containerTypeId, owner.OwnerAppId, displayName, description, cancellationToken)
+            .ConfigureAwait(false);
+        if (findOrCreateFailure is not null)
         {
-            var provisionRequest = new SpeContainerProvisionRequest(
-                CustomerId: envelope.CustomerId,
-                TenantId: tenantId,
-                ContainerTypeId: containerTypeId,
-                OwningAppId: owner.OwnerAppId,
-                DisplayName: displayName,
-                Description: description);
-            provisionOutcome = await _provisioner.ProvisionAsync(provisionRequest, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex,
-                "H8-B provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerRejectionCodes.ProvisioningInfraFault,
-                $"SPE container provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "No confirmed external side effect — Resumable.",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        if (provisionOutcome is SpeContainerProvisionOutcome.CreateFailure createFailure)
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerRejectionCodes.ProvisioningFailed, createFailure.Diagnostic, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        if (provisionOutcome is SpeContainerProvisionOutcome.ActivateFailure activateFailure)
-        {
-            // Container was created but activation failed — QuarantineRequired.
-            // Persist the created-but-not-activated containerId to InterStepState
-            // for audit/cleanup visibility.
-            run.InterStepState.SpeContainerId = activateFailure.ContainerId;
-            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                SpeContainerRejectionCodes.ContainerActivationFailed, activateFailure.Diagnostic, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        var outputs = ((SpeContainerProvisionOutcome.Success)provisionOutcome).Outputs;
-        if (string.IsNullOrWhiteSpace(outputs.ContainerId))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                SpeContainerRejectionCodes.ProvisioningOutputsIncomplete,
-                "SPE container provisioner returned incomplete outputs — ContainerId is blank.",
-                cancellationToken).ConfigureAwait(false);
+            return findOrCreateFailure;
         }
 
         // (7) Post-condition: verify the container is readable via a FRESH
-        //     app-only token. Container now EXISTS + is ACTIVATED — any
-        //     non-transient failure past this point is QuarantineRequired.
+        //     app-only token. Container now EXISTS — any non-transient failure
+        //     past this point is QuarantineRequired.
         SpeContainerVerificationResult verifyResult;
         try
         {
             var verifyRequest = new SpeContainerVerificationRequest(
-                ContainerId: outputs.ContainerId,
+                ContainerId: containerId,
                 OwningAppId: owner.OwnerAppId,
                 TenantId: tenantId);
             verifyResult = await _verifier.VerifyAsync(verifyRequest, cancellationToken).ConfigureAwait(false);
@@ -370,20 +339,20 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         {
             _logger.LogError(ex,
                 "H8-B verifier infrastructure fault: runId={RunId} customerId={CustomerId} containerId={ContainerId}",
-                envelope.RunId, envelope.CustomerId, outputs.ContainerId);
-            // Persist the created container-id so a later resume doesn't lose it.
-            run.InterStepState.SpeContainerId = outputs.ContainerId;
+                envelope.RunId, envelope.CustomerId, containerId);
+            // Persist the container id so a later resume reuses it instead of creating another.
+            run.InterStepState.SpeContainerId = containerId;
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 SpeContainerRejectionCodes.VerificationInfraFault,
                 $"Post-creation app-only GET verification infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                $"Container '{outputs.ContainerId}' was created + activated but its readability via app-only " +
+                $"Container '{containerId}' exists but its readability via app-only " +
                 "token could not be confirmed — QuarantineRequired.",
                 cancellationToken).ConfigureAwait(false);
         }
 
         if (verifyResult is SpeContainerVerificationResult.NotVerified notVerified)
         {
-            run.InterStepState.SpeContainerId = outputs.ContainerId;
+            run.InterStepState.SpeContainerId = containerId;
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 SpeContainerRejectionCodes.ContainerGetVerificationFailed, notVerified.Diagnostic, cancellationToken)
                 .ConfigureAwait(false);
@@ -393,31 +362,251 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         // SPE container-type replication window is a RUN-LEVEL external
         // blocker, not a handler defect. The container DOES exist + is
         // activated (real, durable side effects) — persist its ID so a later
-        // resume does not need to re-derive it — but do NOT record a
-        // CompletedPhase (H8 has not finished; a later resume re-runs
-        // HandleAsync in full).
+        // resume reuses it (6a) — but do NOT record a CompletedPhase (H8 has not
+        // finished; a later resume re-runs HandleAsync in full).
         if (verifyResult is SpeContainerVerificationResult.ReplicationPending pending)
         {
-            return await MarkWaitingOnGateAsync(run, etag, outputs, pending.Diagnostic, cancellationToken)
+            return await MarkWaitingOnGateAsync(run, etag, containerId, pending.Diagnostic, cancellationToken)
                 .ConfigureAwait(false);
         }
 
-        var verified = (SpeContainerVerificationResult.Verified)verifyResult;
+        var verifiedStatus = ((SpeContainerVerificationResult.Verified)verifyResult).Status;
+
+        // (7c) Task 227e: a reused container can still be inactive — an earlier attempt created it and its activation
+        //      failed. SPE deletes an inactive container after 24 hours and it holds no files until activated, so
+        //      activate it now; a refusal is QuarantineRequired, as for a fresh container (6b).
+        if (string.Equals(verifiedStatus, "inactive", StringComparison.OrdinalIgnoreCase))
+        {
+            run.InterStepState.SpeContainerId = containerId;
+            SpeContainerProvisionOutcome activation;
+            try
+            {
+                activation = await _provisioner.ActivateAsync(
+                    new SpeContainerActivationRequest(tenantId, owner.OwnerAppId, containerId), cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H8 activation of a reused container faulted: runId={RunId} containerId={ContainerId}",
+                    envelope.RunId, containerId);
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    SpeContainerRejectionCodes.ContainerActivationInfraFault,
+                    $"Activating inactive container '{containerId}' failed: {ex.GetType().Name}: {ex.Message}. " +
+                    "Its activation status is unknown — QuarantineRequired.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (activation is SpeContainerProvisionOutcome.ActivateFailure reusedActivateFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    SpeContainerRejectionCodes.ContainerActivationFailed, reusedActivateFailure.Diagnostic, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            verifiedStatus = "active";
+        }
+
+        // (7d) Task 227e: the marker the customer's BFF recognises its containers by (T227d — custom property
+        //      spaarkeCustomerId = Customer__Id = this customerId). Custom properties cannot be set at create, and a
+        //      just-created container may still be replicating, so it is written here, after verification. GET first;
+        //      a re-run writes nothing. The container id stays on the run, so a resume reuses it (6a).
+        SpeContainerMarkerOutcome markerOutcome;
+        try
+        {
+            markerOutcome = await _provisioner.EnsureCustomerMarkerAsync(
+                new SpeContainerMarkerRequest(tenantId, owner.OwnerAppId, containerId, envelope.CustomerId),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H8 container marker infrastructure fault: runId={RunId} containerId={ContainerId}",
+                envelope.RunId, containerId);
+            run.InterStepState.SpeContainerId = containerId;
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerMarkerInfraFault,
+                $"Confirming the {SpeContainerMarker.PropertyName} marker on container '{containerId}' failed: " +
+                $"{ex.GetType().Name}: {ex.Message}. The container is kept on the run; resume reuses it.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        if (markerOutcome is SpeContainerMarkerOutcome.Failure markerFailure)
+        {
+            run.InterStepState.SpeContainerId = containerId;
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SpeContainerRejectionCodes.ContainerMarkerFailed,
+                $"{markerFailure.Diagnostic} The container is kept on the run; resume reuses it.",
+                cancellationToken).ConfigureAwait(false);
+        }
 
         // (8) Advance Cosmos state — write InterStepState.SpeContainerId (the
         //     durable handoff H7 will read to materialize the real Dataverse
         //     env-var), the Verified gate, and the CompletedPhase entry.
         stopwatch.Stop();
         _logger.LogInformation(
-            "H8-B SPE container CREATION succeeded: runId={RunId} customerId={CustomerId} " +
+            "H8-B SPE container ready: runId={RunId} customerId={CustomerId} " +
             "containerId={ContainerId} containerTypeId={ContainerTypeId} verifiedStatus={Status} " +
-            "durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, outputs.ContainerId, containerTypeId,
-            verified.Status, stopwatch.ElapsedMilliseconds);
+            "markerWritten={MarkerWritten} durationMs={DurationMs}",
+            envelope.RunId, envelope.CustomerId, containerId, containerTypeId,
+            verifiedStatus, ((SpeContainerMarkerOutcome.Success)markerOutcome).Written, stopwatch.ElapsedMilliseconds);
 
-        return await MarkCompleteAsync(run, etag, idempotencyKey, outputs, verified, envelope, cancellationToken)
+        return await MarkCompleteAsync(run, etag, idempotencyKey, containerId, verifiedStatus, envelope, cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Step (6), task 227e — the customer's container: this run's own earlier one, else the one already in the container
+    /// type, else a new one. Returns the container id, or the failure to return (state already written). Never picks one
+    /// of several and never creates when the lookup had no verdict.
+    /// </summary>
+    private async Task<(string ContainerId, HandlerResult? Failure)> FindOrCreateContainerAsync(
+        ProvisioningRun run,
+        string etag,
+        HandlerEnvelope envelope,
+        string tenantId,
+        string containerTypeId,
+        string ownerAppId,
+        string displayName,
+        string description,
+        CancellationToken cancellationToken)
+    {
+        // (6) Task 227e — FIND, then create only when there is nothing to find. The customer's container is data,
+        //     and H4b points the customer's BFF at H8's container (T227c): a second container would silently move
+        //     the customer to an empty one. Per-run idempotency (step 5) cannot see a container an earlier attempt
+        //     or an earlier run created, so H8 looks:
+        //       (a) this run's own earlier write — a WaitingOnGate re-run or a resume after a later failure. It is
+        //           trusted as is: a 404 on it reads as replication lag. An operator who deletes that container must
+        //           clear InterStepState.SpeContainerId before resuming, or the run waits on the gate;
+        //       (b) otherwise the container type's containers with H8's display name (or H8's description for this
+        //           customer, when the listing carries it) that carry this customer's marker — or no marker and H8's
+        //           description for this customer (a container from before the marker). A later run of the same
+        //           customer lands here. Two or more → stop and name them all; never pick one.
+        string containerId;
+        var knownContainerId = run.InterStepState.SpeContainerId?.Trim();
+        if (!string.IsNullOrEmpty(knownContainerId))
+        {
+            containerId = knownContainerId;
+            _logger.LogInformation(
+                "H8 reusing this run's container: runId={RunId} customerId={CustomerId} containerId={ContainerId}",
+                envelope.RunId, envelope.CustomerId, containerId);
+        }
+        else
+        {
+            SpeContainerLookupOutcome lookup;
+            try
+            {
+                lookup = await _provisioner.FindCustomerContainersAsync(
+                    new SpeContainerLookupRequest(tenantId, containerTypeId, ownerAppId, envelope.CustomerId, displayName, description),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H8 container lookup infrastructure fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                return (string.Empty, await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerRejectionCodes.ContainerLookupInfraFault,
+                    $"Looking for customer '{envelope.CustomerId}''s existing container failed: {ex.GetType().Name}: {ex.Message}. " +
+                    "No container was created — Resumable.",
+                    cancellationToken).ConfigureAwait(false));
+            }
+
+            if (lookup is SpeContainerLookupOutcome.Failure lookupFailure)
+            {
+                return (string.Empty, await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerRejectionCodes.ContainerLookupFailed,
+                    $"{lookupFailure.Diagnostic} H8 creates a container only when it can tell the customer has none — " +
+                    "nothing was created. Fix, then resume.",
+                    cancellationToken).ConfigureAwait(false));
+            }
+
+            var matches = ((SpeContainerLookupOutcome.Found)lookup).Matches;
+            if (matches.Count > 1)
+            {
+                var named = string.Join("; ", matches.Select(m =>
+                    $"'{m.Id}' (displayName '{m.DisplayName}', {SpeContainerMarker.PropertyName} {(m.Marker is null ? "absent" : $"'{m.Marker}'")})"));
+                return (string.Empty, await FailAsync(run, etag, FailureClass.Resumable,
+                    SpeContainerRejectionCodes.DuplicateCustomerContainers,
+                    $"{matches.Count} containers of container type '{containerTypeId}' are customer '{envelope.CustomerId}''s " +
+                    $"(display name '{displayName}'): {named}. H8 never picks one and created nothing. Decide which holds the " +
+                    "customer's data — delete the other(s), or mark them for the customer they belong to — then resume.",
+                    cancellationToken).ConfigureAwait(false));
+            }
+
+            if (matches.Count == 1)
+            {
+                containerId = matches[0].Id;
+                _logger.LogInformation(
+                    "H8 reusing the customer's existing container: runId={RunId} customerId={CustomerId} " +
+                    "containerId={ContainerId} marker={Marker}",
+                    envelope.RunId, envelope.CustomerId, containerId, matches[0].Marker ?? "(absent)");
+            }
+            else
+            {
+                // (6b) Nothing to reuse: CREATE + ACTIVATE (topology doc §6). Infra faults (thrown) are Resumable (no
+                //      confirmed external side effect); CreateFailure is Resumable; ActivateFailure is
+                //      QuarantineRequired (container exists but not activated).
+                SpeContainerProvisionOutcome provisionOutcome;
+                try
+                {
+                    var provisionRequest = new SpeContainerProvisionRequest(
+                        CustomerId: envelope.CustomerId,
+                        TenantId: tenantId,
+                        ContainerTypeId: containerTypeId,
+                        OwningAppId: ownerAppId,
+                        DisplayName: displayName,
+                        Description: description);
+                    provisionOutcome = await _provisioner.ProvisionAsync(provisionRequest, cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    _logger.LogError(ex,
+                        "H8-B provisioner infrastructure fault: runId={RunId} customerId={CustomerId}",
+                        envelope.RunId, envelope.CustomerId);
+                    return (string.Empty, await FailAsync(run, etag, FailureClass.Resumable,
+                        SpeContainerRejectionCodes.ProvisioningInfraFault,
+                        $"SPE container provisioner infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                        "No confirmed external side effect — Resumable.",
+                        cancellationToken).ConfigureAwait(false));
+                }
+
+                if (provisionOutcome is SpeContainerProvisionOutcome.CreateFailure createFailure)
+                {
+                    return (string.Empty, await FailAsync(run, etag, FailureClass.Resumable,
+                        SpeContainerRejectionCodes.ProvisioningFailed, createFailure.Diagnostic, cancellationToken)
+                        .ConfigureAwait(false));
+                }
+
+                if (provisionOutcome is SpeContainerProvisionOutcome.ActivateFailure activateFailure)
+                {
+                    // Container was created but activation failed — QuarantineRequired. Persist the
+                    // created-but-not-activated containerId: audit/cleanup visibility, and a resume reuses it (6a).
+                    run.InterStepState.SpeContainerId = activateFailure.ContainerId;
+                    return (string.Empty, await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                        SpeContainerRejectionCodes.ContainerActivationFailed, activateFailure.Diagnostic, cancellationToken)
+                        .ConfigureAwait(false));
+                }
+
+                var outputs = ((SpeContainerProvisionOutcome.Success)provisionOutcome).Outputs;
+                if (string.IsNullOrWhiteSpace(outputs.ContainerId))
+                {
+                    return (string.Empty, await FailAsync(run, etag, FailureClass.Resumable,
+                        SpeContainerRejectionCodes.ProvisioningOutputsIncomplete,
+                        "SPE container provisioner returned incomplete outputs — ContainerId is blank.",
+                        cancellationToken).ConfigureAwait(false));
+                }
+                containerId = outputs.ContainerId;
+            }
+        }
+
+        return (containerId, null);
+    }
+
+    /// <summary>
+    /// The description H8 gives the customer's container. Customer-specific and unchanged since task 214, so it proves an
+    /// unmarked container is H8's container for this customer (task 227e) — a display name, operator intake, does not.
+    /// </summary>
+    internal static string BuildContainerDescription(string customerId)
+        => $"SPE container for customer {customerId} — created by L2 H8 handler.";
 
     /// <summary>
     /// Computes the deterministic H8 idempotency key: <c>spe-{customerId}</c>.
@@ -517,16 +706,16 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
     private async Task<HandlerResult> MarkWaitingOnGateAsync(
         ProvisioningRun run,
         string etag,
-        SpeContainerProvisionOutputs outputs,
+        string containerId,
         string diagnostic,
         CancellationToken cancellationToken)
     {
-        run.InterStepState.SpeContainerId = outputs.ContainerId;
+        run.InterStepState.SpeContainerId = containerId;
         run.GateStates[SpeContainerGates.T6Verified] = new GateEntry
         {
             Status = GateState.Pending,
             VerifierHandler = HandlerIdentifier,
-            Evidence = BuildEvidence(outputs.ContainerId, "replication-pending", verifiedViaAppOnlyToken: false),
+            Evidence = BuildEvidence(containerId, "replication-pending", verifiedViaAppOnlyToken: false),
         };
 
         run.Status = RunStatus.WaitingOnGate;
@@ -536,7 +725,7 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         _logger.LogInformation(
             "H8-B SPE container verification WaitingOnGate (24h replication lag): runId={RunId} " +
             "customerId={CustomerId} containerId={ContainerId} diagnostic={Diagnostic}",
-            run.RunId, run.CustomerId, outputs.ContainerId, diagnostic);
+            run.RunId, run.CustomerId, containerId, diagnostic);
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
@@ -564,8 +753,8 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
         ProvisioningRun run,
         string etag,
         string idempotencyKey,
-        SpeContainerProvisionOutputs outputs,
-        SpeContainerVerificationResult.Verified verified,
+        string containerId,
+        string verifiedStatus,
         HandlerEnvelope envelope,
         CancellationToken cancellationToken)
     {
@@ -574,13 +763,13 @@ public sealed class H8SpeContainerHandler : IProvisioningHandler
 
         // H7 (task 050, already landed) reads SpeContainerId as the source
         // value for Dataverse env-var sprk_SharePointEmbeddedContainerId.
-        run.InterStepState.SpeContainerId = outputs.ContainerId;
+        run.InterStepState.SpeContainerId = containerId;
         run.GateStates[SpeContainerGates.T6Verified] = new GateEntry
         {
             Status = GateState.Verified,
             VerifiedAt = completedAt,
             VerifierHandler = HandlerIdentifier,
-            Evidence = BuildEvidence(outputs.ContainerId, verified.Status, verifiedViaAppOnlyToken: true),
+            Evidence = BuildEvidence(containerId, verifiedStatus, verifiedViaAppOnlyToken: true),
         };
 
         run.Status = RunStatus.Running;

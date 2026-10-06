@@ -1443,7 +1443,7 @@ The BFF uses 26 `IOptions<T>` configuration classes registered via `Configuratio
 | `ScheduledRagIndexing` | Enabled, interval, limits, TenantId | No |
 | `GraphResilience` | Retry, circuit breaker, timeout settings | No |
 
-**Deploy-time tokens** (substituted by CI/CD): `#{TENANT_ID}#`, `#{API_APP_ID}#`, `#{DEFAULT_CT_ID}#`, `#{KEY_VAULT_URL}#`, `#{DATAVERSE_ORG_NAME}#`, `#{REDIS_INSTANCE_NAME}#`, `#{SERVICE_BUS_QUEUE_NAME}#`, `#{AI_SUMMARIZE_MODEL}#`, `#{AI_EMBEDDING_MODEL}#`, `#{AI_CHAT_MODEL_NAME}#`, `#{AI_SEARCH_INDEX_NAME}#`, `#{SHARED_KNOWLEDGE_INDEX_NAME}#`, `#{DEPLOYMENT_ENVIRONMENT}#`, `#{CUSTOMER_TENANT_ID}#`, `#{RECORD_MATCHING_ENABLED}#`, `#{ANALYSIS_ENABLED}#`, `#{MULTI_DOCUMENT_ENABLED}#`, `#{COPILOT_SSO_PROVIDER_APP_ID}#`, `#{COPILOT_AGENT_APP_ID}#`.
+**Deploy-time tokens** (substituted by CI/CD): `#{TENANT_ID}#`, `#{API_APP_ID}#`, `#{KEY_VAULT_URL}#`, `#{DATAVERSE_ORG_NAME}#`, `#{REDIS_INSTANCE_NAME}#`, `#{SERVICE_BUS_QUEUE_NAME}#`, `#{AI_SUMMARIZE_MODEL}#`, `#{AI_EMBEDDING_MODEL}#`, `#{AI_CHAT_MODEL_NAME}#`, `#{AI_SEARCH_INDEX_NAME}#`, `#{SHARED_KNOWLEDGE_INDEX_NAME}#`, `#{DEPLOYMENT_ENVIRONMENT}#`, `#{CUSTOMER_TENANT_ID}#`, `#{RECORD_MATCHING_ENABLED}#`, `#{ANALYSIS_ENABLED}#`, `#{MULTI_DOCUMENT_ENABLED}#`, `#{COPILOT_SSO_PROVIDER_APP_ID}#`, `#{COPILOT_AGENT_APP_ID}#`.
 
 H7 (environment variables) sets Dataverse env vars. H9 (BFF deploy) applies `appsettings.template.json` with token substitution + Key Vault references.
 
