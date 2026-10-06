@@ -11,10 +11,10 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Access;
-using Sprk.Bff.Api.Services.Identity;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Communication.Threads;
+using Sprk.Bff.Api.Services.Identity;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
 
@@ -378,7 +378,7 @@ public class CommunicationWorkspaceReadSeamTests
     }
 
     private static ThreadResolver CreateRealResolverWithMessagingStrategy(Mock<IGenericEntityService> entity) =>
-        new(new IThreadKeyStrategy[] { new MessagingThreadKeyStrategy(entity.Object) }, entity.Object, NullLogger<ThreadResolver>.Instance);
+        new(new IThreadKeyStrategy[] { new MessagingThreadKeyStrategy(entity.Object) }, entity.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<ThreadResolver>.Instance);
 
     [Fact]
     public async Task ResolveAndAssignThreadAsync_RealStrategySkipsWithRegarding_LadderCreatesRecordDefaultThenIdempotentlyJoins()

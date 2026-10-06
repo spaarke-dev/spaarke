@@ -185,6 +185,9 @@ public static class HandlerRunInputs
                 // Also selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners — T245b).
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
                 RunInput.Intake("speContainerDisplayName", required: false),
+                // unified-access-control-r2 task 165, owner round 35 item 1: the container is bound to this environment's
+                // ROOT business unit (read before anything is created) — H5 output; H8 depends on H5.
+                RunInput.Output(nameof(InterStepState.DataverseEnvUrl)),
             ],
             [HandlerIds.H9] =
             [

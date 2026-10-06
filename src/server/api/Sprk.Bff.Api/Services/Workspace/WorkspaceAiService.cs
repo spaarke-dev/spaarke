@@ -70,6 +70,20 @@ public sealed class WorkspaceAiService
         };
 
     /// <summary>
+    /// Whether <paramref name="entityType"/> is one this service summarizes (compared case-insensitively).
+    /// The single source of the four supported types — the route's authorization declaration
+    /// (<c>WorkspaceAiEndpoints.ResolveSummaryTargets</c>, unified-access-control-r2 task 163) asks this
+    /// rather than keeping a second list.
+    /// </summary>
+    internal static bool IsSupportedEntityType(string? entityType) =>
+        !string.IsNullOrWhiteSpace(entityType) && SupportedEntityTypes.Contains(entityType);
+
+    /// <summary>The 400 detail for an unsupported type — shared by the service and the route's declaration.</summary>
+    internal static string UnsupportedEntityTypeMessage(string? entityType) =>
+        $"Entity type '{entityType}' is not supported for AI summary. " +
+        $"Supported types: {string.Join(", ", SupportedEntityTypes)}.";
+
+    /// <summary>
     /// Initializes a new instance of <see cref="WorkspaceAiService"/>.
     /// </summary>
     public WorkspaceAiService(
@@ -126,16 +140,14 @@ public sealed class WorkspaceAiService
             request.EntityType,
             request.EntityId);
 
-        if (!SupportedEntityTypes.Contains(request.EntityType))
+        if (!IsSupportedEntityType(request.EntityType))
         {
             _logger.LogWarning(
                 "Unsupported entity type requested. EntityType={EntityType}, UserId={UserId}",
                 request.EntityType,
                 userId);
 
-            throw new InvalidOperationException(
-                $"Entity type '{request.EntityType}' is not supported for AI summary. " +
-                $"Supported types: {string.Join(", ", SupportedEntityTypes)}.");
+            throw new InvalidOperationException(UnsupportedEntityTypeMessage(request.EntityType));
         }
 
         // --- Fetch entity from Dataverse ---

@@ -307,3 +307,92 @@ public enum ExecutorType
     /// </summary>
     ReturnResponse = 143
 }
+
+/// <summary>
+/// Which <see cref="ExecutorType"/> values have a SIDE EFFECT: the node creates or updates a Dataverse row, writes
+/// to SPE or an index, enqueues a job, sends a message (email, Teams, notification, webhook), or delegates to an
+/// external agent runtime whose actions the BFF does not control. Every executor acts as the APP, so a caller who
+/// may only READ the documents must not be able to trigger one (unified-access-control-r2 task 162: POST
+/// /api/ai/analysis/execute requires Write on the documents for a playbook with such a node).
+/// </summary>
+/// <remarks>
+/// <para>A CLOSED classification: every enum value is in exactly one of the two tables, each with its reason, and
+/// <c>ExecutorSideEffectClassificationTests</c> fails on a value in neither or in both. A value missing from
+/// <see cref="ReadOnly"/> is treated as side-effecting (fail closed, ADR-003). Classified 2026-10-03 by reading each
+/// executor registered in <c>NodeExecutorRegistry</c> (AnalysisServicesModule.AddNodeExecutors and
+/// InsightsIngestModule); values with NO registered executor fail their node at dispatch, so they cannot act, and
+/// are classified by their declared purpose.</para>
+/// <para>Task 164 reuses this table for the chat and agent playbook routes. When a new executor is added, classify it
+/// here in the same change.</para>
+/// </remarks>
+public static class ExecutorSideEffects
+{
+    /// <summary>Side-effecting executor types, each with the reason.</summary>
+    public static readonly IReadOnlyDictionary<ExecutorType, string> SideEffecting = new Dictionary<ExecutorType, string>
+    {
+        [ExecutorType.CreateTask] = "CreateTaskNodeExecutor creates a Dataverse to-do (TaskActionCore)",
+        [ExecutorType.SendEmail] = "SendEmailNodeExecutor sends mail through Microsoft Graph",
+        [ExecutorType.UpdateRecord] = "UpdateRecordNodeExecutor updates a Dataverse row (UpdateRecordActionCore)",
+        [ExecutorType.CallWebhook] = "an outbound HTTP call to an external endpoint (no executor registered)",
+        [ExecutorType.SendTeamsMessage] = "a Teams message (no executor registered)",
+        [ExecutorType.DeliverToIndex] = "DeliverToIndexNodeExecutor submits a RAG indexing job",
+        [ExecutorType.CreateNotification] = "CreateNotificationNodeExecutor creates a Dataverse appnotification",
+        [ExecutorType.AgentService] = "AgentServiceNodeExecutor hands the run to an Azure AI Foundry agent whose tool actions the BFF does not control",
+        [ExecutorType.ObservationEmit] = "ObservationEmitterNodeExecutor upserts observations into the insights index and mirrors them to Dataverse",
+    };
+
+    /// <summary>Read-only executor types, each with the reason.</summary>
+    public static readonly IReadOnlyDictionary<ExecutorType, string> ReadOnly = new Dictionary<ExecutorType, string>
+    {
+        [ExecutorType.AiAnalysis] = "AiAnalysisNodeExecutor runs an analysis tool handler (Summary, DocumentClassifier, SemanticSearch, GenericAnalysis), none of which writes",
+        [ExecutorType.AiCompletion] = "AiCompletionNodeExecutor makes one prompt-only LLM call",
+        [ExecutorType.AiEmbedding] = "an embedding call (no executor registered)",
+        [ExecutorType.RuleEngine] = "rule evaluation (no executor registered)",
+        [ExecutorType.Calculation] = "computation (no executor registered)",
+        [ExecutorType.DataTransform] = "transformation (no executor registered)",
+        [ExecutorType.Condition] = "ConditionNodeExecutor evaluates a branch condition",
+        [ExecutorType.Parallel] = "control flow (no executor registered)",
+        [ExecutorType.Wait] = "control flow (no executor registered)",
+        [ExecutorType.Start] = "StartNodeExecutor binds the run payload into scope",
+        [ExecutorType.DeliverOutput] = "DeliverOutputNodeExecutor renders the run's output for the caller",
+        [ExecutorType.DeliverComposite] ="DeliverCompositeNodeExecutor composes upstream outputs into one section map",
+        [ExecutorType.QueryDataverse] = "QueryDataverseNodeExecutor runs a read query",
+        [ExecutorType.LookupUserMembership] = "LookupUserMembershipNodeExecutor reads the caller's memberships",
+        [ExecutorType.GroundingVerify] = "GroundingVerifyNode compares citations with source chunks",
+        [ExecutorType.LiveFact] = "LiveFactNode resolves a fact by reading",
+        [ExecutorType.IndexRetrieve] = "IndexRetrieveNode searches the insights index",
+        [ExecutorType.EvidenceSufficiency] = "EvidenceSufficiencyNode evaluates prior outputs",
+        [ExecutorType.DeclineToFind] = "DeclineToFindNode composes a structured decline",
+        [ExecutorType.ReturnInsightArtifact] = "ReturnInsightArtifactNode serializes upstream outputs",
+        [ExecutorType.Sanitization] = "SanitizerNodeExecutor cleans text in memory",
+        [ExecutorType.EntityNameValidator] = "EntityNameValidatorNodeExecutor scrubs LLM output in memory",
+        [ExecutorType.LoadKnowledge] = "LoadKnowledgeNodeExecutor binds configured templates into scope",
+        [ExecutorType.ReturnResponse] = "ReturnResponseNodeExecutor projects upstream outputs into the run's return value",
+    };
+
+    /// <summary>
+    /// True unless <paramref name="executorType"/> is classified read-only — so an unclassified value is treated as
+    /// side-effecting (fail closed).
+    /// </summary>
+    public static bool IsSideEffecting(ExecutorType executorType) => !ReadOnly.ContainsKey(executorType);
+
+    /// <summary>
+    /// THE "can a run write to the record a parameter names" rule (unified-access-control-r2 task 164, owner round 16
+    /// item 3): true when a node that can write — a side-effecting executor, or one with no executor type
+    /// (unclassifiable, fail closed) — references <paramref name="parameterName"/> anywhere in its ConfigJson
+    /// (<see cref="PlaybookParameterPolicy.ReferencesParameter"/>; e.g. <c>matter-health-single</c>'s UpdateRecord
+    /// <c>recordId: {{matterId}}</c>).
+    /// </summary>
+    /// <remarks>
+    /// Moved here unchanged from <c>PlaybookAuthorizationFilter.RecordParameterOperation</c> (which now delegates to it)
+    /// so the route filters (Api/Filters) and the Insights run guard (Services/Ai/Insights, task 163 — owner round 16
+    /// item 1, the subject's own key) apply ONE rule.
+    /// </remarks>
+    public static bool CanWriteThroughParameter(IReadOnlyCollection<PlaybookNodeDto> nodes, string parameterName)
+    {
+        ArgumentNullException.ThrowIfNull(nodes);
+
+        return nodes.Any(n => (n.SprkExecutortype is not { } executorType || IsSideEffecting(executorType))
+                              && PlaybookParameterPolicy.ReferencesParameter(n.ConfigJson, parameterName));
+    }
+}

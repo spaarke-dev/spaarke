@@ -798,6 +798,55 @@ public sealed class CommunicationThreadReadService
         return rows.Count > 0;
     }
 
+    /// <summary>
+    /// COMMUNICATION VISIBILITY for the per-record route gate (unified-access-control-r2 task 161): the caller's
+    /// impersonated top-1 read of <c>sprk_communication</c> <paramref name="communicationId"/>, THEN the shared
+    /// <see cref="ICommunicationAccessFilter"/> (internal-only + privilege rules) — the exact sequence
+    /// <see cref="GetUnreadCountAsync"/> applies to every row it counts. Returns the visible row (so a caller can
+    /// read <paramref name="additionalColumns"/> from the SAME impersonated answer, e.g. the typed regarding
+    /// lookups), or <c>null</c> when the row does not exist, is not readable by the caller, or the access filter
+    /// hides it — the three are deliberately indistinguishable.
+    /// </summary>
+    /// <remarks>
+    /// <para>Distinct from <see cref="CanCallerSeeMessageAsync"/>, which runs the impersonated read only and is
+    /// left unchanged (the message-deactivate route depends on it). This one adds the access filter, so an
+    /// internal-only message is not visible to an external caller here either.</para>
+    /// <para>Fail closed: an unresolved caller throws the 403 <c>THREAD_READ_FORBIDDEN</c>; an impersonated-query
+    /// fault propagates. There is no app-only fallback.</para>
+    /// </remarks>
+    /// <param name="communicationId">The <c>sprk_communication</c> id the route acts on.</param>
+    /// <param name="caller">The request principal.</param>
+    /// <param name="additionalColumns">Extra columns to select on the same read (OData names, e.g. <c>_sprk_regardingmatter_value</c>).</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<IReadOnlyDictionary<string, JsonElement>?> ReadVisibleCommunicationAsync(
+        Guid communicationId,
+        ClaimsPrincipal? caller,
+        IReadOnlyCollection<string>? additionalColumns,
+        CancellationToken ct)
+    {
+        var callerSystemUserId = await ResolveCallerOrThrowAsync(caller, ct);
+        if (communicationId == Guid.Empty)
+            return null;
+
+        var columns = new List<string> { PkField, InternalOnlyField, PrivilegeField };
+        if (additionalColumns is not null)
+        {
+            columns.AddRange(additionalColumns.Where(c => !string.IsNullOrWhiteSpace(c) && !columns.Contains(c, StringComparer.Ordinal)));
+        }
+
+        var odata = $"$select={string.Join(',', columns)}&$filter={PkField} eq {communicationId}&$top=1";
+        var rows = await _query.QueryAsync(CommunicationSet, odata, callerSystemUserId, ct);
+        if (rows.Count == 0)
+            return null;
+
+        var row = rows[0];
+        var isExternal = await _identityResolver.IsExternalAsync(callerSystemUserId, ct);
+        var context = new CommunicationAccessContext(CallerSystemUserId: callerSystemUserId, IsInternalUser: !isExternal);
+        var decision = _accessFilter.EvaluateMessage(context, ParseMessageRow(row).Entity);
+
+        return decision.IsVisible ? row : null;
+    }
+
     // ── attachments (single bulk query per read) ────────────────────────────────────────────────────
 
     private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<ThreadAttachmentRef>>> LoadAttachmentsAsync(

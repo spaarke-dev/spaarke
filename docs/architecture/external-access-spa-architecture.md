@@ -136,12 +136,17 @@ The Redis participation cache (ADR-009, 60s TTL) is invalidated on grant so a ne
 | `GET` | `/api/v1/external/projects/{id}/contacts` | Project participants |
 | `GET` | `/api/v1/external/projects/{id}/organizations` | Organizations linked to project contacts |
 | `PATCH` | `/api/v1/external/todos/{id}` | Update a to-do |
+| `POST` | `/api/v1/external/contact-grants` | **Contact-side Grant Access** (task 140): a Collaborate / Full Access contact grants ONE colleague of its own organization, at or below its own level (never org-wide); expiry today + 90, never beyond the caller's own grant. Gated by `ContactGrantorAuthorizationFilter`. |
+| `GET` | `/api/v1/external/contact-grants?recordType=&recordId=` | The grants the caller issued on a record |
+| `POST` | `/api/v1/external/contact-grants/revoke` | Revoke one grant the caller issued (uniform 404 for absent / not theirs) |
 
 > **Note**: The to-do routes replaced the former event-based routes (`smart-todo-decoupling-r3`, FR-29). The SPA consumes `sprk_todo`, not `sprk_event`.
 >
 > **Added 2026-08-21**: a module-host read-data seam is also mounted under this group at `/api/v1/external/api/dataverse/*` (`fetch`, `record`, `metadata`, `savedquery`, `savedqueries` — `Api/ExternalAccess/ExternalModuleDataEndpoints.cs`). It inherits the group's dual-scheme policy + caller-principal filter and record-scopes every read.
 
-**Management endpoints** (internal Corporate Workspace, workforce default scheme — `/api/v1/external-access`):
+> **Contact-side Grant Access (task 140, owner C4 / Q2).** The SPA's Contacts tab "Invite User" (Collaborate and Full Access) posts to `/api/v1/external/contact-grants` — the management group below cannot be reached with a CIAM token (workforce scheme + an OBO Write probe a contact can never answer). The dialog offers only levels at or below the caller's, shows the server's refusal messages verbatim, and reports narrowing; the tab lists the caller's issued grants with Revoke. A person who is not yet an active contact of the caller's organization is refused (no contact creation, no onboarding, no membership write). The issuer is recorded on `sprk_externalrecordaccess.sprk_grantedbycontact` (and, in the same write, its id as text in `sprk_grantedbycontactid`, which survives the contact's deletion so the reconciliation job can end an undated grant that outlived its issuer), and internal users see and can revoke those rows in Manage Access; an internal user who changes such a row takes it over, and the contact's own writes to a row it issued are conditional on the row's version (`If-Match`), so a take-over that lands mid-request wins and the contact gets 409 `managed_elsewhere` (the issued-grants list then re-reads). Rules and codes: [uac-access-control.md § Contact-Side Grant Access](uac-access-control.md#contact-side-grant-access--contacts-granting-colleagues-task-140-owner-c4--q1--q2).
+
+**Management endpoints** (internal Corporate Workspace, workforce default scheme — `/api/v1/external-access`; NOT callable from the external SPA):
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|

@@ -203,10 +203,22 @@ public class ReportingProfileManagerTests
         typeof(ReportingProfileManager).IsSealed.Should().BeTrue();
     }
 
-    [Fact]
-    public void ReportingEmbedService_IsSealed()
+    /// <summary>
+    /// unified-access-control-r2 task 166 r1: <see cref="ReportingEmbedService"/> is deliberately UNSEALED, with the
+    /// methods the reporting routes call made virtual — the permitted ADR-010 test seam the route contract tests
+    /// (ReportingCatalogBindingContractTests) substitute. It was sealed until then, which is why the endpoint tests had
+    /// to reach handlers by reflection.
+    /// </summary>
+    [Theory]
+    [InlineData(nameof(ReportingEmbedService.GetEmbedConfigAsync))]
+    // GetReportAsync was deleted by task 166 f1: no route calls it since the Save-As branch was removed (round 23 item 2).
+    [InlineData(nameof(ReportingEmbedService.CreateReportAsync))]
+    [InlineData(nameof(ReportingEmbedService.DeleteReportAsync))]
+    [InlineData(nameof(ReportingEmbedService.ExportReportAsync))]
+    public void ReportingEmbedService_RouteCalledMethods_AreVirtualTestSeams(string method)
     {
-        typeof(ReportingEmbedService).IsSealed.Should().BeTrue();
+        typeof(ReportingEmbedService).IsSealed.Should().BeFalse();
+        typeof(ReportingEmbedService).GetMethod(method)!.IsVirtual.Should().BeTrue();
     }
 
     [Fact]

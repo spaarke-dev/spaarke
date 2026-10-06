@@ -22,6 +22,8 @@
  * @see CreateEventWizard/__tests__/eventService.resolver.test.ts (sibling reference shape)
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { InvoiceService, _resetInvoiceServiceNavPropCacheForTests } from '../invoiceService';
 import { buildEmptyInvoiceForm, todayIsoDate } from '../formTypes';
@@ -242,7 +244,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -271,7 +273,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -289,7 +291,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -318,7 +320,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -342,7 +344,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -360,7 +362,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -380,7 +382,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -405,7 +407,7 @@ describe('InvoiceService.createInvoice', () => {
   describe('file dual-bind (FR-12 / design §5.8)', () => {
     it('binds an uploaded file to BOTH the new Invoice (primary) and the host Matter (additionalBinds)', async () => {
       const ds = makeDataService();
-      const authFetch = stubAuthenticatedFetch();
+      const authFetch = bffChildWriteFetch(ds, stubAuthenticatedFetch());
       const service = new InvoiceService(
         ds,
         authFetch,
@@ -435,7 +437,7 @@ describe('InvoiceService.createInvoice', () => {
 
     it('binds an uploaded file to the Invoice ONLY when no host association is supplied', async () => {
       const ds = makeDataService();
-      const authFetch = stubAuthenticatedFetch();
+      const authFetch = bffChildWriteFetch(ds, stubAuthenticatedFetch());
       const service = new InvoiceService(
         ds,
         authFetch,
@@ -463,7 +465,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,
@@ -476,8 +478,10 @@ describe('InvoiceService.createInvoice', () => {
       const docPayload = ds._captured['sprk_document']?.[0];
       expect(docPayload).toBeDefined();
       expect(docPayload!['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${NEW_INVOICE_GUID})`);
-      // 'drive-1' is what stubAuthenticatedFetch's upload response reports.
-      expect(docPayload!['sprk_graphdriveid']).toBe('drive-1');
+      // The SPE pointer is not the client's to write (unified-access-control-r2 task 166 f1): the row is created
+      // without it and the BFF attaches the uploaded file ('drive-1' is what stubAuthenticatedFetch's upload reports).
+      expect('sprk_graphdriveid' in docPayload!).toBe(false);
+      expect('sprk_graphitemid' in docPayload!).toBe(false);
     });
   });
 
@@ -489,7 +493,7 @@ describe('InvoiceService.createInvoice', () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         'host-resolved-container-1',
         undefined,
@@ -509,7 +513,7 @@ describe('InvoiceService.createInvoice', () => {
       (ds.createRecord as jest.Mock).mockRejectedValueOnce(new Error('Dataverse unavailable'));
       const service = new InvoiceService(
         ds,
-        stubAuthenticatedFetch(),
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
         'https://bff.example',
         undefined,
         undefined,

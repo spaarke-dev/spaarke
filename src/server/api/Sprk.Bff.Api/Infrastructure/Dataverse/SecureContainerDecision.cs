@@ -30,9 +30,11 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///
 /// <para><b>A non-secure record's own stamp is deliberately ignored.</b> Only the fallback is consulted for
 /// a non-secure record. Reading a non-secure record's <c>sprk_containerid</c> would silently redirect content
-/// for any record carrying a stale stamp — and stale stamps demonstrably exist, because the creation
-/// wizard's business-unit cascade writes that column today (which is what task 076 removes). Non-secure
-/// behaviour is unchanged by this task, on purpose.</para>
+/// for any record carrying a stale stamp — and stale stamps demonstrably exist: until task 076 the creation
+/// wizard's business-unit cascade wrote that column on every new record, and rows created before then still carry
+/// it. Since task 076 nothing but secure provisioning writes the column on a provisionable root (the creation
+/// services no longer stamp it; provisioning's own marker relies on that — see <c>ProvisionProjectEndpoint</c>,
+/// task 133). Non-secure behaviour is unchanged by this rule, on purpose.</para>
 ///
 /// <para><b>Drift</b>: the equivalent TypeScript decision is <c>decideContainer</c> in
 /// <c>src/client/shared/Spaarke.UI.Components/src/services/RecordContainerResolver.ts</c>. Both are pinned to

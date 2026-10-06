@@ -77,6 +77,13 @@ jest.mock(
   { virtual: true }
 );
 
+// UAC-r2 task 147 r1 (owner round 28 item 1): the memo CREATE goes through the BFF (G5). The boundary is the one
+// function that posts it; the create is asserted there, and Xrm.WebApi.createRecord must never be called.
+const mockCreateMemoThroughBff = jest.fn(async (_payload: Record<string, unknown>) => 'new-memo-id');
+jest.mock('../../services/memoWrites', () => ({
+  createMemoThroughBff: (...args: any[]) => (mockCreateMemoThroughBff as any)(...args),
+}));
+
 // Mock nav-prop discovery to return a plausible list without hitting fetch.
 jest.mock('../discoverMemoNavProps', () => ({
   discoverMemoNavProps: jest.fn(async () => [
@@ -223,6 +230,7 @@ function makeMemoRaw(
 
 describe('useSprkMemoRepository', () => {
   beforeEach(() => {
+    mockCreateMemoThroughBff.mockClear();
     jest.useRealTimers();
     mockApplyResolverFields.mockClear();
     (discoverMemoNavProps as jest.Mock).mockClear();
@@ -281,6 +289,67 @@ describe('useSprkMemoRepository', () => {
     harness.unmount();
   });
 
+  it('UAC-r2 task 147 r1: the creator shown is sprk_createdbyperson, else createdby', async () => {
+    const stub = installXrmStub();
+    stub.retrieveMultipleRecords.mockResolvedValueOnce({
+      entities: [
+        makeMemoRaw('m-bff', {
+          // Created through the BFF: createdby is the application, the person is sprk_createdbyperson.
+          createdby: { fullname: 'Spaarke BFF', systemuserid: 'app-user' },
+          _sprk_createdbyperson_value: 'person-1',
+          '_sprk_createdbyperson_value@OData.Community.Display.V1.FormattedValue': 'Pat Person',
+        }),
+        makeMemoRaw('m-old'),
+      ],
+    });
+    const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);
+    const [, query] = stub.retrieveMultipleRecords.mock.calls[0];
+    expect(query).toContain('_sprk_createdbyperson_value');
+    expect(harness.latest.memos.map(m => m.createdby)).toEqual([
+      { id: 'person-1', name: 'Pat Person' },
+      { id: 'user-1', name: 'Alice' },
+    ]);
+    harness.unmount();
+  });
+
+  it('UAC-r2 task 147 r1: before the creator-person column exists, the list falls back to the createdby query', async () => {
+    const stub = installXrmStub();
+    stub.retrieveMultipleRecords
+      .mockRejectedValueOnce(new Error("Could not find a property named '_sprk_createdbyperson_value' on type 'sprk_memo'."))
+      .mockResolvedValueOnce({ entities: [makeMemoRaw('m1')] });
+    const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);
+    expect(stub.retrieveMultipleRecords).toHaveBeenCalledTimes(2);
+    const [, retry] = stub.retrieveMultipleRecords.mock.calls[1];
+    expect(retry).not.toContain('sprk_createdbyperson');
+    expect(harness.latest.error).toBeNull();
+    expect(harness.latest.memos).toHaveLength(1);
+    harness.unmount();
+  });
+
+  it('UAC-r2 task 147 r1: any other list failure is NOT retried — it is the error state', async () => {
+    const stub = installXrmStub();
+    stub.retrieveMultipleRecords.mockRejectedValueOnce(new Error('Principal user is missing prvReadsprk_memo'));
+    const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);
+    expect(stub.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+    expect(harness.latest.error?.message).toContain('prvReadsprk_memo');
+    harness.unmount();
+  });
+
+  it('UAC-r2 task 147 r1: a BFF refusal of the create is the error state and no memo is focused', async () => {
+    installXrmStub();
+    mockCreateMemoThroughBff.mockRejectedValueOnce(
+      new Error('A record this memo is filed under was not found. The memo was not saved.')
+    );
+    const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);
+    let created: unknown = 'unset';
+    await act(async () => {
+      created = await harness.latest.createMemo();
+    });
+    expect(created).toBeNull();
+    expect(harness.latest.error?.message).toBe('A record this memo is filed under was not found. The memo was not saved.');
+    harness.unmount();
+  });
+
   it('flattens MemoRaw → Memo (createdby.fullname/systemuserid → {id,name})', async () => {
     const stub = installXrmStub();
     stub.retrieveMultipleRecords.mockResolvedValueOnce({
@@ -298,15 +367,15 @@ describe('useSprkMemoRepository', () => {
 
   // ─── Create ──────────────────────────────────────────────────────────────
 
-  it('createMemo calls applyResolverFields BEFORE createRecord', async () => {
-    const stub = installXrmStub();
+  it('createMemo calls applyResolverFields BEFORE the BFF create', async () => {
+    installXrmStub();
     const callOrder: string[] = [];
     mockApplyResolverFields.mockImplementationOnce(async () => {
       callOrder.push('applyResolverFields');
     });
-    stub.createRecord.mockImplementationOnce(async () => {
+    mockCreateMemoThroughBff.mockImplementationOnce(async () => {
       callOrder.push('createRecord');
-      return { id: 'new-memo-id' };
+      return 'new-memo-id';
     });
 
     const harness = await renderHook('sprk_matter', CANONICAL_MATTER_ID);
@@ -324,9 +393,11 @@ describe('useSprkMemoRepository', () => {
     await act(async () => {
       await harness.latest.createMemo();
     });
-    expect(stub.createRecord).toHaveBeenCalledTimes(1);
-    const [entityName, entity] = stub.createRecord.mock.calls[0];
-    expect(entityName).toBe('sprk_memo');
+    // UAC-r2 task 147 r1: through the BFF, never Xrm.WebApi.createRecord (which would make the user the owner).
+    expect(stub.createRecord).not.toHaveBeenCalled();
+    expect(mockCreateMemoThroughBff).toHaveBeenCalledTimes(1);
+    const [entity] = mockCreateMemoThroughBff.mock.calls[0] as [Record<string, any>];
+    expect(entity['ownerid@odata.bind']).toBeUndefined();
     expect(entity.sprk_name).toBe('Untitled');
     expect(entity.sprk_memobody).toBe('');
     // applyResolverFields (mocked) should have populated the entity-specific bind + resolver id.

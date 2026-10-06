@@ -42,6 +42,7 @@ public sealed class RunParameters
     /// hole that could accidentally carry a secret payload.
     /// </remarks>
     [JsonPropertyName("nonSecret")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<string>))] // keys persist verbatim (task 165)
     public IDictionary<string, string> NonSecret { get; set; }
         = new Dictionary<string, string>(StringComparer.Ordinal);
 
@@ -55,6 +56,7 @@ public sealed class RunParameters
     /// secret via Managed Identity at the moment of use.
     /// </summary>
     [JsonPropertyName("secrets")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<KeyVaultSecretRef>))] // keys persist verbatim (task 165)
     public IDictionary<string, KeyVaultSecretRef> Secrets { get; set; }
         = new Dictionary<string, KeyVaultSecretRef>(StringComparer.Ordinal);
 }

@@ -1,4 +1,5 @@
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Services.Access;
 
@@ -27,6 +28,13 @@ namespace Sprk.Bff.Api.Services.Access;
 /// <see cref="GetPrincipalAccessOrThrowAsync"/> is the complete answer or an exception. A caller that decides a
 /// WRITE from the current shares (the FR-29 "+ User" endpoints) must use it: "no share" and "the read failed" call
 /// for different writes, and the soft read cannot tell them apart.</para>
+///
+/// <para><b>Every write evicts the access caches it stales</b> (task 132; main-session round 55): not here — in the
+/// write itself. <see cref="DataverseWebApiService"/> notifies its <see cref="IRecordShareWriteObserver"/> (in the BFF,
+/// <see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator"/>, whose default member calls
+/// <see cref="Sprk.Bff.Api.Services.Ai.Membership.IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>) after
+/// every grant / modify / revoke it makes, whoever called it. A writer needs no eviction of its own, and this seam adds
+/// none (one eviction per write).</para>
 /// </remarks>
 public interface IDataverseRecordShareService
 {
@@ -64,13 +72,50 @@ public interface IDataverseRecordShareService
         string entityLogicalName,
         Guid recordId,
         CancellationToken ct = default);
+
+    /// <inheritdoc cref="DataverseWebApiService.RetrievePrincipalRightsAsync"/>
+    /// <remarks>Task 146 c1-r1 (owner round 13 item 8): the EFFECTIVE-rights read beside the share reads — the one question
+    /// a writer that impersonates a user (and holds no token of theirs) needs for F3. Shares say who was GRANTED access;
+    /// this says what the user can DO, roles and teams included.
+    /// <para>The default body FAULTS (never "no rights", never "all rights"), so a test double that predates this member
+    /// answers F3 as "could not be checked" — fail closed — without every double having to change.</para></remarks>
+    Task<AccessRights> GetPrincipalRightsAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => Task.FromException<AccessRights>(new NotSupportedException(
+            $"{GetType().Name} does not read a principal's effective rights."));
+
+    /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessForRecordsOrThrowAsync"/>
+    /// <remarks>unified-access-control-r2 task 149: the strict read for many records of one table, for the secure-child
+    /// share synchronizer. Every record asked about is in the answer, or the call throws.</remarks>
+    Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default);
 }
 
 /// <summary>
-/// Default <see cref="IDataverseRecordShareService"/> — a pass-through to the shared
-/// <see cref="DataverseWebApiService"/> POA primitives. Holds no state; safe as a singleton over the
-/// singleton <see cref="DataverseWebApiService"/>.
+/// Default <see cref="IDataverseRecordShareService"/> — a pass-through to the shared <see cref="DataverseWebApiService"/>
+/// POA primitives. Holds no state; safe as a singleton over the singleton <see cref="DataverseWebApiService"/>.
 /// </summary>
+/// <remarks>
+/// <para><b>It does not evict, on purpose</b> (unified-access-control-r2 task 132, main-session round 55). A grant, a
+/// rights change or a revoke changes who can read the record exactly as an owner change does, so the access caches must
+/// be evicted after each one. That eviction used to live here — which made it hold only for writes that came through
+/// this seam, and three verification rounds each found one more way around the seam. It now lives in the write itself:
+/// <see cref="DataverseWebApiService"/> notifies its <see cref="IRecordShareWriteObserver"/> (the BFF's
+/// <see cref="IMembershipCacheInvalidator"/>, whose default member calls
+/// <see cref="IMembershipCacheInvalidator.InvalidateRecordShareChangeAsync"/>) after every share write it makes, on
+/// every path, not bound to the caller's token, never changing the write's outcome. This seam adding an eviction of its
+/// own would evict twice per write.</para>
+///
+/// <para><b>What it is still for</b>: the ADR-010 testing seam and the one POA entry point every writer injects (task
+/// 060's consolidation, above). The build guard (<c>PoaShareClientSingletonGuardTests</c>) keeps it that way, and — as
+/// defence in depth behind the client's own notification — rejects a POA write that would bypass the client. Exactly
+/// what it checks, and what it does not, is listed in that guard's header; nothing here claims more.</para>
+/// </remarks>
 public sealed class DataverseRecordShareService : IDataverseRecordShareService
 {
     private readonly DataverseWebApiService _dataverse;
@@ -119,4 +164,18 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         Guid recordId,
         CancellationToken ct = default)
         => _dataverse.GetPrincipalAccessOrThrowAsync(entityLogicalName, recordId, ct);
+
+    /// <inheritdoc />
+    public Task<AccessRights> GetPrincipalRightsAsync(
+        Guid principalSystemUserId,
+        string entitySetName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => _dataverse.RetrievePrincipalRightsAsync(principalSystemUserId, entitySetName, recordId, ct);
+
+    public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DataversePrincipalAccess>>> GetPrincipalAccessForRecordsOrThrowAsync(
+        string entityLogicalName,
+        IReadOnlyCollection<Guid> recordIds,
+        CancellationToken ct = default)
+        => _dataverse.GetPrincipalAccessForRecordsOrThrowAsync(entityLogicalName, recordIds, ct);
 }

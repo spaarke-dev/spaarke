@@ -4,6 +4,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import { resolveCodePageTheme, setupCodePageThemeListener } from "@spaarke/ui-components";
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { createXrmDataService } from "@spaarke/ui-components/utils/adapters/xrmDataServiceAdapter";
+import { withBffChildWrites } from "@spaarke/ui-components/utils/adapters/bffChildWriteAdapter";
 import { createXrmNavigationService } from "@spaarke/ui-components/utils/adapters/xrmNavigationServiceAdapter";
 import { CreateTodoWizard } from "@spaarke/ui-components/components/CreateTodoWizard";
 import type { IDataService } from "@spaarke/ui-components/types/serviceInterfaces";
@@ -49,9 +50,11 @@ function wrapDataServiceForCreateBroadcast(inner: IDataService): IDataService {
     return inner;
   }
 
-  return {
-    ...inner,
-    createRecord: async (entityName, data) => {
+  // UAC-r2 task 147 r1c: the wrapper INHERITS from `inner` (Object.create) rather than spreading it, so a BFF-routed
+  // `inner` (withBffChildWrites, below) stays recognised as routed — `TodoService` then calls THIS createRecord instead
+  // of re-wrapping `inner` and sending the create to the BFF past the broadcast (which lost the cross-iframe refetch).
+  return Object.assign(Object.create(inner) as IDataService, {
+    createRecord: async (entityName: string, data: Record<string, unknown>) => {
       const result = await inner.createRecord(entityName, data);
       if (entityName === SPRK_TODO_ENTITY && result) {
         try {
@@ -73,7 +76,7 @@ function wrapDataServiceForCreateBroadcast(inner: IDataService): IDataService {
       }
       return result;
     },
-  };
+  });
 }
 
 function App() {
@@ -113,11 +116,31 @@ function App() {
 
   // R4 task 100 (W-2) — wrap the dataService so successful sprk_todo creates
   // broadcast on the shared BroadcastChannel for cross-iframe refetch wiring.
+  //
+  // UAC-r2 task 147 r1c (owner round 28 item 1): the to-do — and every other CHILD record the wizard creates — goes
+  // through the BFF (POST /api/v1/child-records/{table}, G5), which decides its owner. The broadcast wraps the BFF-routed
+  // service, so it fires after the BFF create. With no base URL (auth init failed) the service is "not connected": a
+  // child create is refused with a message, never sent to Xrm.WebApi.
   const dataService = React.useMemo(
-    () => wrapDataServiceForCreateBroadcast(createXrmDataService()),
-    [],
+    () =>
+      wrapDataServiceForCreateBroadcast(
+        withBffChildWrites(createXrmDataService(), authenticatedFetch, resolvedBffBaseUrl || undefined),
+      ),
+    [resolvedBffBaseUrl],
   );
   const navigationService = React.useMemo(() => createXrmNavigationService(), []);
+
+  // UAC-r2 task 147 r1c: a launch from a record (the parent-form "Create To Do" ribbon, and the secure-record subgrid's
+  // "New To Do" that replaces the platform "+ New" under a secure record — owner round 28 item 2) passes the record as
+  // entityType / entityId / recordName. The To Do opens filed under it (the launch contract's "launch record triple",
+  // TodoWizardDialog `initialRegarding`); the user may still change it. Absent → no pre-fill, as before.
+  const initialRegarding = React.useMemo(() => {
+    const entityType = (params.entityType ?? "").trim();
+    const entityId = (params.entityId ?? "").replace(/[{}]/g, "").toLowerCase();
+    return entityType && entityId
+      ? { entityType, recordId: entityId, recordName: params.recordName ?? "" }
+      : undefined;
+  }, [params]);
 
   // smart-todo-r5 UAT 2026-08-17 (item #1) — default "Assigned To" to the
   // current user's CONTACT. `sprk_todo.sprk_assignedto` targets the OOB
@@ -187,6 +210,7 @@ function App() {
         open={true}
         dataService={dataService}
         navigationService={navigationService}
+        initialRegarding={initialRegarding}
         embedded={true}
         onClose={handleClose}
         authenticatedFetch={authenticatedFetch}

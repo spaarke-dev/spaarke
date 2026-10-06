@@ -106,8 +106,10 @@ Slot URL: `https://spaarke-bff-dev-staging.azurewebsites.net`
 # 5a. health — MUST be 200 (net10 host started)
 curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev-staging.azurewebsites.net/healthz
 
-# 5c. MI -> Dataverse (proves the attached MI works on net10). Use a real doc id.
-curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev-staging.azurewebsites.net/healthz/dataverse/doc/<known-doc-id>
+# 5c. MI -> Dataverse (proves the attached MI works on net10). No record id needed.
+# (Was /healthz/dataverse/doc/<id>, an anonymous read of any document row — retired 2026-10-03 by
+#  unified-access-control-r2 task 166. /healthz/dataverse proves the same MI -> Dataverse path.)
+curl -s -o /dev/null -w "%{http_code}\n" https://spaarke-bff-dev-staging.azurewebsites.net/healthz/dataverse
 
 # 5d. watch logs for auth/Graph/EXO 403s and startup exceptions while smoking
 az webapp log tail -g rg-spaarke-dev -n spaarke-bff-dev --slot staging

@@ -111,10 +111,16 @@ public static class DocumentsBulkEndpoints
     /// buffering in memory.
     /// </para>
     /// </remarks>
+    /// <summary>uac-r2 task 166 r1: the per-document reason when a file pointer's container could not be verified.</summary>
+    internal const string DocumentStorageUnverifiedReason =
+        "Document storage could not be verified (the file is not in a container its record may use)";
+
     private static async Task<IResult> BulkDownload(
         [FromBody] BulkDownloadRequest request,
         IDocumentDataverseService dataverseService,
         SpeFileStore speFileStore,
+        // uac-r2 task 166 r1 (round 21 item 1b): each pointer's container is verified before the app-only download.
+        Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver containerResolver,
         ILogger<Program> logger,
         HttpContext httpContext,
         CancellationToken ct)
@@ -219,6 +225,14 @@ public static class DocumentsBulkEndpoints
                 if (string.IsNullOrWhiteSpace(driveId) || string.IsNullOrWhiteSpace(itemId))
                 {
                     failedItems.Add(new FailedItem(rawId, fileName, "Document has no file attached (missing SPE pointers)"));
+                    continue;
+                }
+
+                // uac-r2 task 166 r1 (owner round 21 item 1b): the bytes are read AS THE APPLICATION from the row's
+                // pointer, so the pointer must name a container this document may use. Refused per document.
+                if (!await containerResolver.IsDocumentPointerContainerAllowedAsync(rawId, driveId, itemId, ct))
+                {
+                    failedItems.Add(new FailedItem(rawId, fileName, DocumentStorageUnverifiedReason));
                     continue;
                 }
 

@@ -80,10 +80,15 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// entries written under an older shape may carry a silently different id set, and serving one is
     /// an authorization answer derived from a query nobody ran.
     /// </summary>
-    private const int CacheVersion = 1;
+    internal const int CacheVersion = 1;
 
-    /// <summary>5-minute TTL, matching the membership precedent (FR-1A.8).</summary>
-    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// 2-minute TTL (was 5), matching the membership cache — unified-access-control-r2 task 132, owner rounds 3 R3/R4
+    /// (access changes take effect in minutes, ≤ 5). It bounds an owner, team or business-unit change made OUTSIDE the
+    /// BFF; the BFF's own writes evict the entry (<c>IMembershipCacheInvalidator</c>: per user on a team change, for
+    /// every user of the entity type on a re-own). Faults are still never cached — this class has no catch on the read.
+    /// </summary>
+    internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(2);
 
     /// <summary>
     /// Row cap for a single impersonated read. Hitting it sets <see cref="RootIdSet.Truncated"/>;
@@ -125,6 +130,34 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
 
     /// <summary>The three root entity types this source can answer for.</summary>
     internal static IReadOnlyCollection<string> SupportedEntityTypes => (IReadOnlyCollection<string>)Bindings.Keys;
+
+    /// <summary>
+    /// Whether this source can hold a cached set for <paramref name="entityType"/> — only the three root types: any other
+    /// type is refused by <see cref="GetAsync"/> before the cache is touched. The eviction hook
+    /// (<c>IMembershipCacheInvalidator</c>, task 132) builds a root-set pattern only when this is true, so a child's
+    /// owner or share change never scans the key space for a key that cannot exist.
+    /// </summary>
+    internal static bool CachesEntityType(string entityType) => Bindings.ContainsKey(entityType);
+
+    /// <summary>
+    /// The root type whose entity SET is <paramref name="entitySetName"/> (<c>sprk_projects</c> → <c>sprk_project</c>), for
+    /// the share-change eviction, whose caller (a share write of <c>DataverseWebApiService</c>, through
+    /// <c>IRecordShareWriteObserver</c>) knows only the set. False for any non-root set.
+    /// </summary>
+    internal static bool TryGetEntityTypeForSet(string entitySetName, out string entityType)
+    {
+        foreach (var (type, binding) in Bindings)
+        {
+            if (string.Equals(binding.EntitySet, entitySetName?.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                entityType = type;
+                return true;
+            }
+        }
+
+        entityType = string.Empty;
+        return false;
+    }
 
     /// <inheritdoc />
     public async Task<RootIdSet> GetAsync(Guid systemUserId, string entityType, CancellationToken ct = default)
@@ -203,7 +236,14 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
             ?? "anonymous";
 
     /// <summary>The cache id of one user's set for one root type — shared by <see cref="GetAsync"/> and <see cref="InvalidateAsync"/>.</summary>
-    internal static string CacheId(Guid systemUserId, string entityType) => $"{systemUserId:D}:{entityType}";
+    internal static string CacheId(Guid systemUserId, string entityType) => CacheId(systemUserId.ToString("D"), entityType);
+
+    /// <summary>
+    /// The composition behind <see cref="CacheId(Guid, string)"/>, over segments — so the eviction patterns
+    /// (<c>IMembershipCacheInvalidator</c>, task 132) are built by the same code with the Redis glob <c>*</c> for the
+    /// segment they do not fix, and cannot drift from the key a read wrote.
+    /// </summary>
+    internal static string CacheId(string userSegment, string entityTypeSegment) => $"{userSegment}:{entityTypeSegment}";
 
     /// <summary>
     /// Removes <paramref name="systemUserId"/>'s cached set for <paramref name="entityType"/>, so the next read asks
@@ -217,14 +257,40 @@ public sealed class ImpersonatedRootSetSource : IImpersonatedRootSetSource
     /// tenant — the case for users of one Dataverse environment — that is the namespace the user's own requests wrote
     /// under; when they do not, the removal finds nothing and the entry lapses within <see cref="CacheTtl"/>.</para>
     /// </remarks>
-    internal static async Task InvalidateAsync(
+    internal static Task InvalidateAsync(
         ITenantCache cache, ClaimsPrincipal? caller, Guid systemUserId, string entityType, ILogger logger)
+        => InvalidateForTenantAsync(cache, CacheTenantFor(caller), systemUserId, entityType, logger);
+
+    /// <summary>
+    /// The tenant namespace a systemuser's OWN reads write their set under, when there is no caller to take it from
+    /// (task 143: the No Access reconciliation job). Systemusers sign in through the deployment's workforce tenant, so
+    /// that is <c>AzureAd:TenantId</c> (legacy <c>TENANT_ID</c>) — the value <see cref="CacheTenantFor"/> reads from
+    /// their tokens' <c>tid</c>. <c>null</c> when neither is configured: a caller must then NOT fall back to
+    /// <see cref="CacheTenantFor"/>(<c>null</c>) = "anonymous", a key no user's read ever wrote.
+    /// </summary>
+    internal static string? DeploymentCacheTenant(IConfiguration configuration)
+    {
+        var tenant = configuration["AzureAd:TenantId"];
+        if (string.IsNullOrWhiteSpace(tenant))
+        {
+            tenant = configuration["TENANT_ID"];
+        }
+
+        return string.IsNullOrWhiteSpace(tenant) ? null : tenant.Trim();
+    }
+
+    /// <summary>
+    /// <see cref="InvalidateAsync"/> with the tenant namespace named explicitly (task 143: the job, which has no
+    /// caller). Same non-fatal contract.
+    /// </summary>
+    internal static async Task InvalidateForTenantAsync(
+        ITenantCache cache, string tenantId, Guid systemUserId, string entityType, ILogger logger)
     {
         var cacheId = CacheId(systemUserId, entityType);
         try
         {
             await cache.RemoveAsync(
-                CacheTenantFor(caller), CacheResource, cacheId, CacheVersion, ct: CancellationToken.None).ConfigureAwait(false);
+                tenantId, CacheResource, cacheId, CacheVersion, ct: CancellationToken.None).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

@@ -429,9 +429,14 @@ function classifyAccessFailure(err: unknown): { kind: 'delegation' | 'unauthenti
  * `.would_lower_existing` (409 — the grant was capped at your level and the
  * person already holds more; also returned by `/share-user`) and
  * `.grantee_denied` (422 — the grantee is on the record's No Access list), plus
- * `/share-user`'s own `sdap.access.user_share.caller_cannot_grant`. Their
- * ProblemDetails `detail` is written for the person, so the modal shows it
- * verbatim instead of a generic "try again" — retrying would fail the same way. */
+ * `/share-user`'s own `sdap.access.user_share.caller_cannot_grant`. Task 142
+ * (owner round 13 item 4; round 18): `.no_access_unverifiable` (503 — whether
+ * the grantee is on the No Access list could not be checked, a read fault;
+ * nothing was granted). Their ProblemDetails `detail` is written for the
+ * person, so the modal shows it verbatim instead of a generic "try again": a
+ * policy refusal says why retrying would fail the same way, and the two 503s
+ * (`.policy_unreadable`, `.no_access_unverifiable`) say themselves that a retry
+ * may succeed. */
 const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.record_restricted',
   'sdap.access.grant.org_grant_direct_only_record',
@@ -439,8 +444,21 @@ const GRANT_POLICY_REASON_CODES = new Set([
   'sdap.access.grant.caller_cannot_grant',
   'sdap.access.grant.would_lower_existing',
   'sdap.access.grant.grantee_denied',
+  'sdap.access.grant.no_access_unverifiable',
   'sdap.access.user_share.caller_cannot_grant',
 ]);
+
+/** Task 149: `/share-user` or `/unshare-user` changed the share on the record itself, but not yet on every related
+ * record of a secure one. NOT a refusal: the share WAS written (or removed), so it counts as done and the server's
+ * sentence (how many related records, and that they complete automatically) is shown as a warning. */
+const USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE = 'sdap.access.user_share.children_incomplete';
+
+/** The server's sentence when `/share-user` wrote the share but some related records of a secure record are not yet
+ * updated (task 149), or `null` for any other outcome. */
+function childrenIncompleteDetail(err: unknown): string | null {
+  if (!(err instanceof AccessGrantModalApiError)) return null;
+  return err.reasonCode === USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE ? err.detail : null;
+}
 
 /** Task 139 (owner round 3, S5): `/unshare-user` refuses to remove the last
  * person who can open a secure record. Its `detail` says what to do instead. */
@@ -461,6 +479,66 @@ function grantPolicyRefusalDetail(err: unknown): string | null {
 interface IRevokeAccessResponseBody {
   speContainerOutcome?: SpeContainerRevokeOutcome;
   deactivatedCount?: number;
+  /** Task 142 (criterion 17): the read-time terms that still confer access when the revoked grant was an Assigned-To
+   * auto grant — for a contact `standing-grant` / `organization-standing-grant`, for an organization
+   * `organization-members-standing-grant`, or `unknown`. Absent when none. */
+  residualAccessTerms?: string[] | null;
+}
+
+/**
+ * One Assigned-To ledger entry (task 142) as `GET /api/v1/external-access/assigned-access` returns it — a suggestion
+ * waiting on a secure record (`PendingConfirmation`), the provenance of an automatic grant/share, or a declined/skipped
+ * entry. Read directly by this modal (entity-agnostic given {recordType, recordId}, like `/user-shares`).
+ */
+export interface IAssignedAccessEntry {
+  entryId: string;
+  sourceField: string;
+  /** The field's label, e.g. "Assigned Paralegal 1" — what the suggestion names. */
+  sourceFieldLabel: string;
+  subjectKind: 'contact' | 'organization';
+  subjectId: string;
+  subjectName?: string | null;
+  /** Set when the contact represents an internal user: Grant shares to this user instead of granting the contact. */
+  systemUserId?: string | null;
+  accessRecordId?: string | null;
+  state: string;
+  reason?: string | null;
+  /** The read-time terms that keep this contact on the record if its grant is removed (owner A2: they stay). */
+  residualAccessTerms: string[];
+}
+
+/** The Collaborate level every Assigned-To grant/share is made at (owner rule 5) — the BFF's fixed enum value. */
+export const ASSIGNED_ACCESS_LEVEL = 100000001;
+
+/**
+ * Names the read-time terms that still bring a contact to the record (task 142, criterion 17 — owner A2 reversed:
+ * standing and organization access STAY), so the operator is never told "removed" while access silently remains.
+ * `null` when no term applies.
+ */
+export function describeResidualAccess(fullName: string, terms: readonly string[] | null | undefined): string | null {
+  if (!terms || terms.length === 0) return null;
+  const unique = Array.from(new Set(terms));
+  if (unique.length === 1 && unique[0] === 'organization-members-standing-grant') {
+    // An ORGANIZATION's automatic grant: its people keep access through the organization's own standing grant.
+    return (
+      `${fullName}'s people still reach this record through the organization's standing grant (the organization is ` +
+      'assigned to this record). Removing this grant does not remove that — change the standing grant on the ' +
+      'organization to remove it.'
+    );
+  }
+  const parts = unique.map(t =>
+    t === 'standing-grant'
+      ? 'their standing grant'
+      : t === 'organization-standing-grant'
+        ? "their organization's standing grant (the organization is assigned to this record)"
+        : t === 'organization-members-standing-grant'
+          ? "the organization's standing grant"
+          : 'access that could not be checked'
+  );
+  return (
+    `${fullName} still reaches this record through ${parts.join(' and ')}. Removing this grant does not remove that — ` +
+    'change the standing grant on the contact or organization to remove it.'
+  );
 }
 
 /**
@@ -469,7 +547,7 @@ interface IRevokeAccessResponseBody {
  * remain / nothing-revoked, and never discard `deactivatedCount`. Uses fields
  * the endpoint ALREADY returns today (no server change required).
  */
-function buildRevokeNotice(
+export function buildRevokeNotice(
   fullName: string,
   data: IRevokeAccessResponseBody
 ): { intent: 'success' | 'warning' | 'error'; text: string } {
@@ -483,6 +561,11 @@ function buildRevokeNotice(
   }
   if ((data.deactivatedCount ?? 0) === 0) {
     return { intent: 'warning', text: `${fullName} already had no active access record to revoke.` };
+  }
+  // Task 142 (criterion 17): an automatic grant whose contact still reaches the record through a read-time term.
+  const residual = describeResidualAccess(fullName, data.residualAccessTerms);
+  if (residual) {
+    return { intent: 'warning', text: `Revoked ${fullName}'s grant. ${residual}` };
   }
   return { intent: 'success', text: `Revoked access for ${fullName}.` };
 }
@@ -501,39 +584,54 @@ interface IGrantBatchOutcome {
   /** The server's `detail` for each grant the record's access policy refused
    * (task 138) — shown verbatim, never replaced by a generic "try again". */
   policyRefusals?: string[];
+  /** Task 149: the server's `detail` for each share that WAS written while some related records of the secure record
+   * are not updated yet. Those shares are counted in `granted`; this only adds the server's sentence. */
+  relatedRecordsPending?: string[];
 }
 
-/** Builds the post-batch notice for `Add (N)` — six distinct shapes ordered by
- * priority (a denial or a failure dominates a narrowed/notify-pending
- * success). Denial and failure are reported separately because they call for
+/** Builds the post-batch notice for `Add (N)` — seven distinct shapes ordered by
+ * priority (a denial or a failure dominates a related-records-pending,
+ * narrowed or notify-pending success). Denial and failure are reported separately because they call for
  * different next actions: a failure invites retry; a denial does not (retrying
  * without Write on the record fails the same way). */
 function buildGrantBatchNotice(outcome: IGrantBatchOutcome): { intent: 'success' | 'warning' | 'error'; text: string } {
   const { granted, selectedCount, failures, denied, anyNotifyPending, anyNarrowed } = outcome;
   const policyRefusals = outcome.policyRefusals ?? [];
+  // Task 149: shares that WERE written (counted in `granted`) while some related records of the secure record are not
+  // updated yet — the server's sentence is appended to whichever notice applies, never reported as a failure.
+  const relatedPending = Array.from(new Set(outcome.relatedRecordsPending ?? [])).join(' ');
+  const relatedSuffix = relatedPending ? ` ${relatedPending}` : '';
 
   if (denied) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.`,
+      text: `Granted access to ${granted} of ${selectedCount} before access was denied. You need Write access on this record to grant more.${relatedSuffix}`,
     };
   }
   if (policyRefusals.length > 0) {
     // Task 138: the record's access policy refused at least one grant. The
-    // server's sentence says why and what to do; retrying would fail the same
-    // way, so it is not phrased as a retryable failure.
+    // server's sentence says why and what to do (for a policy refusal,
+    // retrying would fail the same way; for the two 503 read faults the
+    // sentence itself says to try again), so the modal adds no retry advice
+    // of its own.
     const reasons = Array.from(new Set(policyRefusals)).join(' ');
     const others = failures > 0 ? ` ${failures} other item(s) failed; please try those again.` : '';
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount}. ${reasons}${others}`,
+      text: `Granted access to ${granted} of ${selectedCount}. ${reasons}${others}${relatedSuffix}`,
     };
   }
   if (failures > 0) {
     return {
       intent: 'error',
-      text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.`,
+      text: `Granted access to ${granted} of ${selectedCount}; ${failures} failed. Please try again.${relatedSuffix}`,
     };
+  }
+  if (relatedPending) {
+    const narrowedNote = anyNarrowed
+      ? ' Some were narrowed to your own access level on this record (you can only grant what you hold).'
+      : '';
+    return { intent: 'warning', text: `Granted access to ${granted} item(s).${narrowedNote}${relatedSuffix}` };
   }
   if (anyNotifyPending && anyNarrowed) {
     return {
@@ -675,6 +773,11 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   const [pendingRevoke, setPendingRevoke] = React.useState<PendingRevoke | null>(null);
   const [revoking, setRevoking] = React.useState(false);
 
+  // Task 142: the record's Assigned-To ledger (suggestions on a secure record; provenance and residual read-time
+  // access of automatic grants). `suggestionBusy` is the entry being granted or dismissed.
+  const [assignedEntries, setAssignedEntries] = React.useState<IAssignedAccessEntry[]>([]);
+  const [suggestionBusy, setSuggestionBusy] = React.useState<string | null>(null);
+
   const [notice, setNotice] = React.useState<{ intent: 'success' | 'warning' | 'error'; text: string } | null>(null);
 
   // The designed 401/403 deny states (task 008 FR-07 delegation gate; project
@@ -745,11 +848,22 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }));
   }, [getJson, recordType, recordId]);
 
+  /** Reads the record's Assigned-To ledger (task 142) — a direct, entity-agnostic BFF call like `/user-shares`, behind
+   * the same delegation gate. Fails soft to an empty list: suggestions and provenance are a convenience; every grant is
+   * still visible in Current Access. */
+  const fetchAssignedAccess = React.useCallback(async (): Promise<IAssignedAccessEntry[]> => {
+    const query = `recordType=${encodeURIComponent(recordType)}&recordId=${encodeURIComponent(recordId)}`;
+    const data = await getJson<{ entries?: IAssignedAccessEntry[] }>(
+      `/api/v1/external-access/assigned-access?${query}`
+    );
+    return (data.entries ?? []).map(e => ({ ...e, residualAccessTerms: e.residualAccessTerms ?? [] }));
+  }, [getJson, recordType, recordId]);
+
   const loadData = React.useCallback(async () => {
     setLoading(true);
     setNotice(null);
     try {
-      const [candidateList, grantList, standingList, userShareList, ownerInfo] = await Promise.all([
+      const [candidateList, grantList, standingList, userShareList, ownerInfo, assignedList] = await Promise.all([
         fetchCandidates(),
         fetchExistingGrants(),
         // Standing-grant members (task 073 UAT #2) — optional; a host that
@@ -769,6 +883,8 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // that hasn't wired it, or a non-secure record, resolves to null.
         // Fails soft: this is a read-only display, never a blocking concern.
         fetchSecureOwnerInfo ? fetchSecureOwnerInfo().catch(() => null) : Promise.resolve(null),
+        // Task 142: Assigned-To suggestions + provenance. Fails soft (a convenience, never blocking).
+        fetchAssignedAccess().catch(() => [] as IAssignedAccessEntry[]),
       ]);
       // Union standing + user-share rows into Current Access, deduped by
       // contactId — an explicit per-record `sprk_externalrecordaccess` grant
@@ -783,14 +899,29 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
       // Exclude both explicitly-granted AND standing members from the
       // candidate-approve list (they already have access).
       const currentAccessContactIds = new Set([...grantedContactIds, ...standingOnly.map(s => s.contactId)]);
-      setCandidates(candidateList.filter(c => !currentAccessContactIds.has(c.contactId)));
+      // Task 142: a contact the server already SUGGESTS (a secure record) is offered once — in Suggested Access,
+      // with Grant / Dismiss — not a second time as a role-based candidate.
+      const suggestedContactIds = new Set(
+        assignedList.filter(e => e.state === 'PendingConfirmation').map(e => e.subjectId)
+      );
+      setCandidates(
+        candidateList.filter(c => !currentAccessContactIds.has(c.contactId) && !suggestedContactIds.has(c.contactId))
+      );
+      setAssignedEntries(assignedList);
       setSecureOwnerInfo(ownerInfo);
     } catch {
       setNotice({ intent: 'error', text: 'Failed to load access data. Close and reopen to retry.' });
     } finally {
       setLoading(false);
     }
-  }, [fetchCandidates, fetchExistingGrants, fetchStandingContacts, fetchUserShares, fetchSecureOwnerInfo]);
+  }, [
+    fetchCandidates,
+    fetchExistingGrants,
+    fetchStandingContacts,
+    fetchUserShares,
+    fetchSecureOwnerInfo,
+    fetchAssignedAccess,
+  ]);
 
   React.useEffect(() => {
     if (open && canGrantAccess) {
@@ -1016,6 +1147,7 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     let anyNarrowed = false;
     let denied = false;
     const policyRefusals: string[] = [];
+    const relatedRecordsPending: string[] = [];
     for (const it of selected) {
       const level = rowLevels[it.id];
       try {
@@ -1042,6 +1174,14 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           setAccessDenyState(deny);
           denied = true;
           break;
+        }
+        // Task 149: the share on the record WAS written; only some related records of the secure record are not yet
+        // updated. Counted as granted, with the server's sentence kept for the notice.
+        const pendingDetail = childrenIncompleteDetail(err);
+        if (pendingDetail) {
+          granted += 1;
+          relatedRecordsPending.push(pendingDetail);
+          continue;
         }
         // Task 138: a refusal by the record's access policy carries the
         // server's own explanation — kept, and shown instead of a generic error.
@@ -1071,12 +1211,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         anyNotifyPending,
         anyNarrowed,
         policyRefusals,
+        relatedRecordsPending,
       })
     );
     // Success (for Save's close decision) iff nothing failed, nothing was refused
     // and access was not denied partway — a notify-pending or narrowed grant still
-    // succeeded (the access row/share was written).
-    return !denied && failures === 0 && policyRefusals.length === 0;
+    // succeeded (the access row/share was written). A share whose related records are
+    // still pending (task 149) also succeeded, but Save keeps the modal open once so the
+    // warning is read: it can name related records an administrator must repair. Nothing
+    // is staged any more, so the next Save closes it.
+    return !denied && failures === 0 && policyRefusals.length === 0 && relatedRecordsPending.length === 0;
   }, [availableItems, selectedCandidateIds, rowLevels, grantContact, grantOrganization, shareUser, loadData]);
 
   // Save (task 073 UAT v1.0.29 #1B): if rows are staged but not yet added, COMMIT
@@ -1146,6 +1290,84 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
     }
   }, [pickUser]);
 
+  /** Task 142 (owner A3 = prompt): "Grant" on a suggestion writes through the NORMAL path — `/share-user` for a contact
+   * that represents an internal user, `/grant` otherwise — at Collaborate (owner rule 5), and the server marks the entry
+   * Adopted. Refusals show the server's own sentence. */
+  const grantSuggestion = React.useCallback(
+    async (entry: IAssignedAccessEntry) => {
+      setSuggestionBusy(entry.entryId);
+      const name = entry.subjectName ?? 'This person';
+      try {
+        if (entry.systemUserId) {
+          await postJson('/api/v1/external-access/share-user', {
+            recordType,
+            recordId,
+            systemUserId: entry.systemUserId,
+            accessLevel: ASSIGNED_ACCESS_LEVEL,
+          });
+        } else {
+          await postJson('/api/v1/external-access/grant', {
+            contactId: entry.subjectId,
+            accessLevel: ASSIGNED_ACCESS_LEVEL,
+            recordType,
+            recordId,
+          });
+        }
+        await loadData();
+        setNotice({ intent: 'success', text: `Granted ${name} access (suggested from ${entry.sourceFieldLabel}).` });
+      } catch (err) {
+        const deny = classifyAccessFailure(err);
+        if (deny) setAccessDenyState(deny);
+        else
+          setNotice({
+            intent: 'error',
+            text:
+              err instanceof AccessGrantModalApiError && err.detail
+                ? err.detail
+                : `Failed to grant ${name} access. Please try again.`,
+          });
+      } finally {
+        setSuggestionBusy(null);
+      }
+    },
+    [postJson, recordType, recordId, loadData]
+  );
+
+  /** Task 142 (owner A3): "Dismiss" declines the suggestion — the Assigned-To rule will not suggest or grant it again
+   * while the assignment persists; a manual grant still succeeds. */
+  const dismissSuggestion = React.useCallback(
+    async (entry: IAssignedAccessEntry) => {
+      setSuggestionBusy(entry.entryId);
+      const name = entry.subjectName ?? 'This person';
+      try {
+        await postJson('/api/v1/external-access/assigned-access/dismiss', {
+          recordType,
+          recordId,
+          entryId: entry.entryId,
+        });
+        await loadData();
+        setNotice({
+          intent: 'success',
+          text: `Dismissed. ${name} will not be suggested again while they stay in ${entry.sourceFieldLabel}.`,
+        });
+      } catch (err) {
+        const deny = classifyAccessFailure(err);
+        if (deny) setAccessDenyState(deny);
+        else
+          setNotice({
+            intent: 'error',
+            text:
+              err instanceof AccessGrantModalApiError && err.detail
+                ? err.detail
+                : `Failed to dismiss the suggestion for ${name}. Please try again.`,
+          });
+      } finally {
+        setSuggestionBusy(null);
+      }
+    },
+    [postJson, recordType, recordId, loadData]
+  );
+
   /** Confirms the pending revoke (task 065 extends this to branch on
    * {@link PendingRevoke}'s `kind`: a contact/organization grant goes through
    * `/revoke`; an internal system-user share goes through `/unshare-user` —
@@ -1214,6 +1436,17 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
         // removed. The server's sentence says what to do; nothing was removed.
         setPendingRevoke(null);
         setNotice({ intent: 'warning', text: err.detail });
+      } else if (
+        pendingRevoke.kind === 'share' &&
+        err instanceof AccessGrantModalApiError &&
+        err.reasonCode === USER_SHARE_CHILDREN_INCOMPLETE_REASON_CODE
+      ) {
+        // Task 149: the share on the record IS gone; some related records of the secure record still need
+        // updating (the server completes them within minutes). Reload so the row disappears, and show the
+        // server's sentence — never "Failed to revoke", which would claim the share is still there.
+        setPendingRevoke(null);
+        await loadData();
+        setNotice({ intent: 'warning', text: err.detail });
       } else {
         setNotice({
           intent: 'error',
@@ -1242,6 +1475,21 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
   // their level dropdowns and Add must stay usable, because Restricted never
   // limits internal access.
   const actionsBlocked = accessDenyState !== null;
+
+  // Task 142: suggestions the server is waiting on (secure records) — contact suggestions only where contacts may be
+  // granted (never on Restricted); a linked internal user's suggestion is a share, which Restricted never limits.
+  const pendingSuggestions = assignedEntries.filter(
+    e => e.state === 'PendingConfirmation' && (e.systemUserId || contactGrantsOffered)
+  );
+  /** The automatic-grant provenance of a Current Access row — the source field that granted it (task 142). */
+  const autoSourceFor = (contactId: string): IAssignedAccessEntry | undefined =>
+    assignedEntries.find(
+      e =>
+        (e.subjectId === contactId || e.systemUserId === contactId) && (e.state === 'Granted' || e.state === 'Shared')
+    );
+  /** Read-time terms that keep a contact on the record if its grant is removed (criterion 17). */
+  const residualFor = (contactId: string): string[] =>
+    assignedEntries.find(e => e.subjectId === contactId && e.residualAccessTerms.length > 0)?.residualAccessTerms ?? [];
   // Revoke is never gated by the Access Permission — reviewing + revoking
   // EXISTING access stays available on every record (task 073 UAT #4).
   // The delegation/auth deny DOES block revoke — it is one of the "three write
@@ -1336,6 +1584,49 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                       Secure record — Owner: <strong>{secureOwnerInfo.ownerName}</strong> · Business Unit:{' '}
                       <strong>{secureOwnerInfo.businessUnitName}</strong>
                     </Text>
+                  </div>
+                )}
+
+                {/* Suggested Access (task 142, owner A3 = prompt): on a SECURE record an "Assigned *" person is
+                    suggested, not granted. Server-derived from the access-conferring registry (never a client list).
+                    Grant writes through the normal path at Collaborate; Dismiss declines it while the assignment
+                    persists. Hidden when there is nothing to suggest. */}
+                {pendingSuggestions.length > 0 && (
+                  <div className={styles.section} style={{ marginTop: tokens.spacingVerticalL }}>
+                    <Text className={styles.sectionTitle}>Suggested Access</Text>
+                    <div className={styles.listArea}>
+                      {pendingSuggestions.map(entry => (
+                        <div className={styles.row} key={entry.entryId}>
+                          <div className={styles.rowMain}>
+                            <Text className={styles.rowName}>
+                              {entry.systemUserId ? <PersonAccountsRegular /> : <PersonRegular />}{' '}
+                              {entry.subjectName ?? '(no name)'}
+                            </Text>
+                            <Text className={styles.rowMeta}>Suggested from {entry.sourceFieldLabel}</Text>
+                          </div>
+                          <div className={styles.rowActions}>
+                            <Button
+                              appearance="primary"
+                              size="small"
+                              onClick={() => void grantSuggestion(entry)}
+                              disabled={actionsBlocked || suggestionBusy !== null}
+                              aria-label={`Grant ${entry.subjectName ?? 'suggested person'}`}
+                            >
+                              Grant
+                            </Button>
+                            <Button
+                              appearance="subtle"
+                              size="small"
+                              onClick={() => void dismissSuggestion(entry)}
+                              disabled={actionsBlocked || suggestionBusy !== null}
+                              aria-label={`Dismiss ${entry.subjectName ?? 'suggested person'}`}
+                            >
+                              Dismiss
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -1526,7 +1817,12 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
                                     ? 'Standing grant — ongoing access to assigned records'
                                     : isOrg
                                       ? 'Organization grant — all organization contacts have access'
-                                      : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
+                                      : autoSourceFor(grant.contactId)
+                                        ? `Automatic — ${autoSourceFor(grant.contactId)!.sourceFieldLabel} · granted ${formatGrantDate(grant.grantedDate)}`
+                                        : grant.grantedByContactName
+                                          ? // Task 140: issued by a contact from the external SPA (sprk_grantedbycontact).
+                                            `Granted by ${grant.grantedByContactName} (external contact) on ${formatGrantDate(grant.grantedDate)}`
+                                          : `Granted by ${grant.grantedByName ?? 'unknown'} on ${formatGrantDate(grant.grantedDate)}`}
                               </Text>
                             </div>
                             <div className={styles.rowActions}>
@@ -1625,6 +1921,16 @@ export const AccessGrantModal: React.FC<IAccessGrantModalProps> = ({
           Revoke access for <strong>{pendingRevoke?.fullName}</strong>? They will immediately lose access to this record
           (unless a standing grant or other membership still applies).
         </Text>
+        {/* Task 142 (criterion 17): BEFORE the removal, name the read-time term that will keep this contact on the
+            record (owner A2: standing and organization access stay). */}
+        {pendingRevoke?.kind === 'grant' &&
+          describeResidualAccess(pendingRevoke.fullName, residualFor(pendingRevoke.contactId)) && (
+            <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalM }}>
+              <MessageBarBody>
+                {describeResidualAccess(pendingRevoke.fullName, residualFor(pendingRevoke.contactId))}
+              </MessageBarBody>
+            </MessageBar>
+          )}
       </SprkModal>
 
       {/* Pending-changes warning (task 073 UAT v1.0.29 #1B) — the user staged a

@@ -128,11 +128,15 @@ internal static class ComposeAnnotationEndpoints
         if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
         if (body is null) return BadRequest("Request body is required.");
         if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        // Task 166 (S-80 family): the tenant is the CALLER's claim, never the body. The body's TenantId used to be
+        // required here and reached only the log line below — it is no longer read at all.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId)) return MissingTenantClaim();
 
         logger.LogInformation(
             "Compose pull-annotations: tenant={TenantId} drive={DriveId} item={DocumentSpeId} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, httpContext.TraceIdentifier);
+            tenantId, body.DriveId, documentSpeId, httpContext.TraceIdentifier);
 
         try
         {
@@ -223,12 +227,15 @@ internal static class ComposeAnnotationEndpoints
         if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
         if (body is null) return BadRequest("Request body is required.");
         if (string.IsNullOrWhiteSpace(body.DriveId)) return BadRequest("driveId is required in the request body.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
         if (body.PriorAnchors is null) return BadRequest("priorAnchors is required (may be empty, but must be present).");
+
+        // Task 166: the tenant is the CALLER's claim, never the body (the body's TenantId reached only a log line).
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId)) return MissingTenantClaim();
 
         logger.LogInformation(
             "Compose reanchor-annotations: tenant={TenantId} drive={DriveId} item={DocumentSpeId} priorAnchors={AnchorCount} TraceId={TraceId}",
-            body.TenantId, body.DriveId, documentSpeId, body.PriorAnchors.Count, httpContext.TraceIdentifier);
+            tenantId, body.DriveId, documentSpeId, body.PriorAnchors.Count, httpContext.TraceIdentifier);
 
         try
         {
@@ -302,6 +309,17 @@ internal static class ComposeAnnotationEndpoints
         }
     }
 
+    /// <summary>
+    /// 401 for a caller whose token carries no tenant (<c>tid</c>) claim — task 166. Every handler in this file now
+    /// takes its tenant from the claim, so a missing claim is a credential problem, answered before any SPE
+    /// download or session write. (On the session-scoped POST, <c>AddSessionOwnershipFilter</c> already 401s first.)
+    /// </summary>
+    private static IResult MissingTenantClaim() =>
+        Results.Problem(
+            statusCode: StatusCodes.Status401Unauthorized,
+            title: "Unauthorized",
+            detail: "Tenant identity ('tid' claim) not found in authentication token.");
+
     // FR-29 (task 102, gap 4.3): read a Compose session's anchored annotations + defined-terms.
     // Pure delegation to IComposeService.GetComposeAnnotationsAsync (the CRUD facade — no AI
     // internals per ADR-013). Returns empty collections (never null) for a session with none
@@ -369,18 +387,24 @@ internal static class ComposeAnnotationEndpoints
 
         if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
         if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+
+        // Task 166 (S-80): AddSessionOwnershipFilter authorized (CLAIM tid, sessionId); this handler then
+        // WROTE to (BODY tenantId, sessionId) — so the authorized record and the written record were different
+        // records whenever the two tenants differed. The write now uses the SAME tenant the filter checked.
+        // The sibling GET was converted by task 059; this POST was missed. The body's TenantId is no longer read.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId)) return MissingTenantClaim();
 
         logger.LogInformation(
             "Compose save-annotations: tenant={TenantId} session={SessionId} annotations={AnnotationCount} definedTerms={DefinedTermCount} TraceId={TraceId}",
-            body.TenantId, sessionId, body.AnchoredAnnotations?.Count, body.DefinedTermsTracking?.Count, httpContext.TraceIdentifier);
+            tenantId, sessionId, body.AnchoredAnnotations?.Count, body.DefinedTermsTracking?.Count, httpContext.TraceIdentifier);
 
         try
         {
             var state = await composeService.SaveComposeAnnotationsAsync(
                 new SaveComposeAnnotationsRequest
                 {
-                    TenantId = body.TenantId,
+                    TenantId = tenantId,
                     SessionId = sessionId,
                     AnchoredAnnotations = body.AnchoredAnnotations,
                     DefinedTermsTracking = body.DefinedTermsTracking,
@@ -422,6 +446,9 @@ internal static class ComposeAnnotationEndpoints
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// <summary>Request body for <c>POST /api/compose/document/{id}/pull-annotations</c> (FR-25).</summary>
+/// <remarks><b><c>tenantId</c> is OBSOLETE</b> (unified-access-control-r2 task 166): the handler takes the tenant
+/// from the caller's <c>tid</c> claim and never reads this property. It stays on the contract only so the shipped
+/// client's payload still binds; it is not required and has no effect.</remarks>
 public sealed record PullAnnotationsBody(
     [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("tenantId")] string TenantId);
@@ -439,7 +466,9 @@ public sealed record PullAnnotationsResponse(
 /// <summary>Request body for <c>POST /api/compose/document/{id}/reanchor-annotations</c> (FR-27).
 /// Carries the CLIENT's prior Compose anchored-annotations (from Compose session state) to
 /// re-locate against the reloaded document; the reloaded bytes are fetched server-side by driveId
-/// + documentSpeId (OBO), so the client sends only the anchors + tenant/drive scoping.</summary>
+/// + documentSpeId (OBO), so the client sends only the anchors + drive scoping.</summary>
+/// <remarks><b><c>tenantId</c> is OBSOLETE</b> (unified-access-control-r2 task 166): the tenant comes from the
+/// caller's <c>tid</c> claim; this property is never read and is kept only so the shipped client's payload binds.</remarks>
 public sealed record ReanchorAnnotationsBody(
     [property: JsonPropertyName("driveId")] string DriveId,
     [property: JsonPropertyName("tenantId")] string TenantId,
@@ -458,6 +487,9 @@ public sealed record ReanchorAnnotationsResponse(
 /// task 102). Partial-replace: a <c>null</c> collection leaves the stored one unchanged; a non-null
 /// (possibly empty) collection replaces it wholesale — mirrors
 /// <see cref="SaveComposeAnnotationsRequest"/> (sessionId comes from the route).</summary>
+/// <remarks><b><c>tenantId</c> is OBSOLETE</b> (unified-access-control-r2 task 166, finding S-80): the write uses
+/// the caller's <c>tid</c> claim — the same tenant <c>AddSessionOwnershipFilter</c> authorized — and never reads
+/// this property. Kept so the shipped client's payload still binds; not required, no effect.</remarks>
 public sealed record SaveComposeAnnotationsBody(
     [property: JsonPropertyName("tenantId")] string TenantId,
     [property: JsonPropertyName("anchoredAnnotations")] IReadOnlyList<AnchoredAnnotation>? AnchoredAnnotations = null,

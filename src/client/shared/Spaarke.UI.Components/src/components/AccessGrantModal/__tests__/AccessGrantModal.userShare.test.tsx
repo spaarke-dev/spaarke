@@ -252,6 +252,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
           : null
       );
       const props = makeProps({
+        fetchExistingGrants: jest.fn(async () => []),
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);
@@ -319,6 +320,125 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
       // MUST report a failure — a pre-M8 postJson would have parsed the
       // ProblemDetails body as a success-shaped response and reported success.
       expect(await screen.findByText(/Granted access to 0 of 1; 1 failed/)).toBeInTheDocument();
+    });
+  });
+
+  describe('task 149 — the share stands but a secure record’s related records are not all updated yet', () => {
+    const CHILDREN_INCOMPLETE = 'sdap.access.user_share.children_incomplete';
+
+    it('/share-user children_incomplete shows the server’s sentence, not "1 failed"', async () => {
+      const detail =
+        'The record was shared, but 1 of its 6 related records (documents, events, to-dos and communications) could not be updated yet. They are updated automatically within a few minutes, or you can try again.';
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/share-user') && !url.includes('/unshare-user')
+          ? jsonResponse(
+              { title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        pickUser,
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Gene Gatekeeper');
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await screen.findByText('Uma Userton');
+      await pickLevelFor('Uma Userton', 'View Only');
+      fireEvent.click(addButton());
+
+      // The share WAS written: counted as granted, shown as a warning ("Notice"), never "0 of 1" or an error.
+      expect(
+        await screen.findByText(/Granted access to 1 item\(s\)\. The record was shared, but 1 of its 6 related records/)
+      ).toBeInTheDocument();
+      expect(screen.getByText('Notice')).toBeInTheDocument();
+      expect(screen.queryByText('Error')).not.toBeInTheDocument();
+      expect(screen.queryByText(/0 of 1/)).not.toBeInTheDocument();
+      expect(screen.queryByText(/1 failed/)).not.toBeInTheDocument();
+    });
+
+    it('Save with a staged /share-user that answers children_incomplete stays open once to show the warning, then closes', async () => {
+      const detail =
+        'The record was shared, but 1 of its 6 related records (documents, events, to-dos and communications) could not be updated yet. They are updated automatically within a few minutes, or you can try again.';
+      const pickUser = jest.fn(async (): Promise<IUserPick | null> => USER_PICK);
+      const authenticatedFetch = baseAuthenticatedFetch(url =>
+        url.includes('/share-user') && !url.includes('/unshare-user')
+          ? jsonResponse(
+              { title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE },
+              false,
+              500
+            )
+          : null
+      );
+      const props = makeProps({
+        pickUser,
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Gene Gatekeeper');
+      fireEvent.click(await screen.findByRole('button', { name: 'Add user' }));
+      await screen.findByText('Uma Userton');
+      await pickLevelFor('Uma Userton', 'View Only');
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+      expect(await screen.findByText(/Granted access to 1 item\(s\)\./)).toBeInTheDocument();
+      expect(props.onClose).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+      await waitFor(() => expect(props.onClose).toHaveBeenCalledTimes(1));
+    });
+
+    it('/unshare-user children_incomplete reloads the list and shows the server’s sentence, not "Failed to revoke"', async () => {
+      const detail =
+        "This user's access to the record was removed, but 1 of its 6 related records (documents, events, to-dos and communications) could not be updated yet, so they may still open those. They are removed automatically within a few minutes, or you can try again.";
+      let removed = false;
+      const authenticatedFetch = baseAuthenticatedFetch(url => {
+        if (url.includes('/user-shares')) {
+          return jsonResponse({
+            shares: removed
+              ? []
+              : [
+                  {
+                    systemUserId: 'systemuser-9',
+                    fullName: 'Shared Sam',
+                    accessRightsMask: 262167,
+                    accessLevel: 100000001,
+                    modifiedOn: '2026-10-01T00:00:00Z',
+                  },
+                ],
+          });
+        }
+        if (url.includes('/unshare-user')) {
+          removed = true;
+          return jsonResponse(
+            { title: 'Related records not all updated', detail, reasonCode: CHILDREN_INCOMPLETE },
+            false,
+            500
+          );
+        }
+        return null;
+      });
+      const props = makeProps({
+        fetchExistingGrants: jest.fn(async () => []),
+        authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
+      });
+      renderWithTheme(<AccessGrantModal {...props} />);
+
+      await screen.findByText('Shared Sam');
+      const revokeButtons = screen.getAllByRole('button', { name: 'Revoke' });
+      fireEvent.click(revokeButtons[revokeButtons.length - 1]);
+      expect(await screen.findByText('Revoke access?')).toBeInTheDocument();
+      const confirmButtons = screen.getAllByRole('button', { name: 'Revoke' });
+      fireEvent.click(confirmButtons[confirmButtons.length - 1]);
+
+      expect(await screen.findByText(/may still open those/)).toBeInTheDocument();
+      await waitFor(() => expect(screen.queryByText('Shared Sam')).not.toBeInTheDocument());
+      expect(screen.queryByText(/Failed to revoke access/)).not.toBeInTheDocument();
     });
   });
 
@@ -541,6 +661,7 @@ describe('AccessGrantModal — "+ User" internal system-user share (task 065)', 
         return jsonResponse({});
       });
       const props = makeProps({
+        fetchExistingGrants: jest.fn(async () => []),
         authenticatedFetch: authenticatedFetch as unknown as IAccessGrantModalProps['authenticatedFetch'],
       });
       renderWithTheme(<AccessGrantModal {...props} />);

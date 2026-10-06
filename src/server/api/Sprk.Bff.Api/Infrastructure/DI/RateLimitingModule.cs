@@ -5,12 +5,13 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 
 /// <summary>
 /// DI registration module for rate limiting policies (ADR-009, ADR-010).
-/// Defines per-user/per-IP traffic control policies for Graph, Dataverse, upload, AI, and anonymous access.
+/// Defines per-user/per-IP traffic control policies for Graph, Dataverse, upload, AI, anonymous access and the
+/// liveness probes.
 /// </summary>
 public static class RateLimitingModule
 {
     /// <summary>
-    /// Adds rate limiting services with 8 named policies and ProblemDetails rejection handler.
+    /// Adds rate limiting services with the named policies below and a ProblemDetails rejection handler.
     /// </summary>
     public static IServiceCollection AddRateLimitingModule(this IServiceCollection services)
     {
@@ -100,6 +101,30 @@ public static class RateLimitingModule
                     Window = TimeSpan.FromMinutes(1),
                     PermitLimit = 10,
                     QueueLimit = 0
+                });
+            });
+
+            // 6d. Liveness probes - GET /healthz, /healthz/catalog and /ping ONLY (owner round 14 item 1,
+            //     unified-access-control-r2 task 167). They stay rate limited per client IP (round 12 item 1:
+            //     an anonymous route's compensating control is mandatory), but on a budget no legitimate
+            //     poller reaches: the App Service health check (1/min/instance), the slot-swap warm-up ping
+            //     (a 429 there STOPS the swap), and the pollers at a 5-second cadence (deploy-bff-api.yml
+            //     12 x 5 s; Deploy-BffApi.ps1, the control plane's H9 probe and Rotate-RedisKey.ps1 24 x 5 s
+            //     = 12/min). Under "anonymous" (10/min fixed window) a 5-second poller lost its 11th and 12th
+            //     polls of a window, so a production verify could roll back a good deploy (or a Redis key
+            //     rotation roll itself back) when the app turned healthy in the poller's last ~10 s.
+            //     Sliding window, no queue: a probe is answered or refused at once, never
+            //     held. Every other anonymous route keeps the strict "anonymous" policy above — the guard
+            //     (RouteAuthorizationGuardTests) pins this policy to exactly these three routes.
+            options.AddPolicy("health-probe", context =>
+            {
+                var ipAddress = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                return RateLimitPartition.GetSlidingWindowLimiter(ipAddress, _ => new SlidingWindowRateLimiterOptions
+                {
+                    Window = TimeSpan.FromMinutes(1),
+                    PermitLimit = 120,
+                    QueueLimit = 0,
+                    SegmentsPerWindow = 6
                 });
             });
 

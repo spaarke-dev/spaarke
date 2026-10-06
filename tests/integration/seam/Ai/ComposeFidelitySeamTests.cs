@@ -590,6 +590,9 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
 // no behaviour for existing consumers — every current test still resolves this exact type.
 public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public const string TestTenantId = "tenant-compose-fidelity-seam-001";
 
     /// <summary>The authenticated user's `name` claim the fake auth handler stamps - the save-path
@@ -743,6 +746,9 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
+            // Task 146: every create resolves its owner — the resolver at its module boundary.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
             services.AddSingleton(dataverseServiceMock.Object);
 
             // ── The point of this fixture: KEEP the real ComposeService (+ shadow patch engine +

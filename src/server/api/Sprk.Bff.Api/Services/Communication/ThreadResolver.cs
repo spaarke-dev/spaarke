@@ -64,12 +64,23 @@ public sealed class ThreadResolver : IThreadResolver
     private readonly IReadOnlyDictionary<CommunicationType, IThreadKeyStrategy> _strategies;
     private readonly ILogger<ThreadResolver> _logger;
 
+    /// <summary>
+    /// unified-access-control-r2 task 146, owner decision S6 (round 3, accepted): a RECORD thread — one anchored to a
+    /// regarding record — is a child of that record, owned by its team (the named Secure team for a secure record, with
+    /// sharee access mirrored by task 149), and a message that JOINS a record thread is filed under the thread's record.
+    /// Direct threads and the per-user MASTER thread carry no regarding and stay as they were (per-participant /
+    /// per-user — the constraint's per-user waiver and escalation E2).
+    /// </summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver _ownership;
+
     public ThreadResolver(
         IEnumerable<IThreadKeyStrategy> strategies,
         IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
         ILogger<ThreadResolver> logger)
     {
         _entityService = entityService;
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         // Fail fast on a duplicate channel registration (mirrors CommunicationChannelDispatcher's guard).
         _strategies = strategies.ToDictionary(s => s.SupportedType);
         _logger = logger;
@@ -91,10 +102,11 @@ public sealed class ThreadResolver : IThreadResolver
 
             var resolution = await strategy.ResolveAsync(request, ct);
 
-            // JOIN — an existing thread was found; assign it and we're done.
+            // JOIN — an existing thread was found; assign it and we're done. Joining a RECORD thread files the message
+            // under the thread's record (S6, task 146): its owner is re-derived before the assignment is written.
             if (resolution.ExistingThreadId is { } existing)
             {
-                await AssignThreadAsync(request.CommunicationId, existing, ct);
+                await AssignThreadReconcilingOwnerAsync(request.CommunicationId, existing, ct);
                 _logger.LogInformation(
                     "Joined existing thread {ThreadId} | CommunicationId: {CommunicationId}, Channel: {ChannelType}",
                     existing, request.CommunicationId, request.ChannelType);
@@ -135,6 +147,9 @@ public sealed class ThreadResolver : IThreadResolver
     {
         var anchor = await ReadRegardingAnchorAsync(request.CommunicationId, ct);
 
+        // Task 146 / S6: a record thread is owned by its record's team. A Direct thread (no anchor) keeps its creator.
+        var recordOwner = await ResolveRecordThreadOwnerAsync(anchor, ct);
+
         var thread = new DataverseEntity("sprk_communicationthread")
         {
             ["sprk_name"] = TruncateTo(BuildTopic(request, anchor), 200),
@@ -160,7 +175,113 @@ public sealed class ThreadResolver : IThreadResolver
                 thread["sprk_regardingrecordurl"] = TruncateTo(anchor.RecordUrl, 400);
         }
 
+        if (recordOwner is { } ownerTeamId)
+            thread["ownerid"] = new EntityReference("team", ownerTeamId);
+
         return await _entityService.CreateAsync(thread, ct);
+    }
+
+    // ── Ownership (unified-access-control-r2 task 146, owner decision S6) ────────────────────────────────────────
+
+    /// <summary>
+    /// The typed regarding lookups a THREAD actually carries: <see cref="RegardingFieldMap"/>'s set minus
+    /// <c>sprk_regardingreportcard</c>, which does not exist on <c>sprk_communicationthread</c> (verified against its
+    /// metadata 2026-08-03 — the same exclusion <c>CommunicationThreadReadService.ThreadRegardingFields</c> makes).
+    /// Selecting a column the table lacks faults the whole read.
+    /// </summary>
+    /// <summary>The message's thread lookup — the column a JOIN writes (and a failed owner assignment puts back).</summary>
+    internal const string ThreadLookupOnCommunication = "sprk_communicationthread";
+
+    private static readonly string[] ThreadRegardingColumns = RegardingFieldMap.All
+        .Where(x => x.RegardingField != "sprk_regardingreportcard")
+        .Select(x => x.RegardingField)
+        .ToArray();
+
+    /// <summary>
+    /// The owner of a RECORD thread anchored to <paramref name="anchor"/>: its record's team via the ONE resolver (the
+    /// named Secure team for a secure record). <c>null</c> for a thread with no anchor (Direct / per-user master), which
+    /// keeps its creator. A REFUSAL throws — inside the resolution paths this class's best-effort catch leaves the
+    /// message unthreaded, so no record thread is ever created with an ordinary owner for a secure record.
+    /// </summary>
+    private async Task<Guid?> ResolveRecordThreadOwnerAsync(RegardingAnchor? anchor, CancellationToken ct)
+    {
+        if (anchor is null || !Guid.TryParse(anchor.RecordId, out var recordId) || recordId == Guid.Empty
+            || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
+            return null; // no anchor, or a party anchor (account / contact / organization): keeps its creator
+
+        var owner = await _ownership.ResolveOwnerAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+            {
+                TargetEntityLogicalName = anchor.RecordType,
+                TargetRecordId = recordId,
+            },
+            ct);
+
+        if (!owner.IsOwned)
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communicationthread", owner);
+
+        return owner.OwningTeamId;
+    }
+
+    /// <summary>
+    /// Assigns a message to a thread it JOINED. When the thread is a record thread, the message is filed under the
+    /// thread's record (S6): a reparent — its owner is re-derived (secure-if-any over its own parents plus the thread's
+    /// record) BEFORE the assignment is written, and reassigned when it moves. A REFUSAL leaves the message unthreaded
+    /// (logged) rather than joining a secure record's thread while owned elsewhere. Direct / master threads (no
+    /// regarding) are assigned as before.
+    /// </summary>
+    private Task AssignThreadReconcilingOwnerAsync(Guid communicationId, Guid threadId, CancellationToken ct) =>
+        AssignToThreadReconcilingOwnerAsync(
+            _entityService, _ownership, communicationId, threadId,
+            token => AssignThreadAsync(communicationId, threadId, token), ct);
+
+    /// <summary>
+    /// The ONE "a message joins an existing thread" ownership step, shared by this resolver's JOIN path and
+    /// <see cref="CommunicationService"/>'s explicit respond-into-thread stamp (task 146, S6). Reads the thread's
+    /// typed regarding; for a record thread anchored to an ownership parent, re-derives the message's owner over its
+    /// own parents plus the thread's record BEFORE <paramref name="assign"/> runs, and reassigns it when it moves. A
+    /// REFUSAL throws <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException"/> without assigning.
+    /// A thread with no ownership-parent anchor (Direct / master / party-regarding), or an unreadable thread row, is
+    /// assigned as before.
+    /// </summary>
+    internal static async Task AssignToThreadReconcilingOwnerAsync(
+        IGenericEntityService entityService,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+        Guid communicationId,
+        Guid threadId,
+        Func<CancellationToken, Task> assign,
+        CancellationToken ct)
+    {
+        var threadRow = await entityService.RetrieveAsync(
+            "sprk_communicationthread", threadId, ThreadRegardingColumns, ct);
+        var anchor = threadRow is null ? null : ReadTypedRegardingAnchorFromThread(threadRow);
+
+        if (anchor is null || !Guid.TryParse(anchor.RecordId, out var recordId) || recordId == Guid.Empty
+            || !Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(anchor.RecordType))
+        {
+            await assign(ct);
+            return;
+        }
+
+        var reparent = await ownership.ReparentAsync(
+            new Sprk.Bff.Api.Services.Dataverse.RecordReparent
+            {
+                EntityLogicalName = "sprk_communication",
+                RecordId = communicationId,
+                ParentChanges = new Dictionary<string, EntityReference?>(),
+                InheritedParents = new[] { new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(anchor.RecordType, recordId) },
+                // Task 146 b2: the column the JOIN writes — put back if the owner assignment that must follow it fails, so
+                // the message is never left in a secure record's thread while owned elsewhere.
+                AttachColumns = new[] { ThreadLookupOnCommunication },
+                WhenUnfiled = Sprk.Bff.Api.Services.Dataverse.UnfiledOwnership.KeepCreator,
+            },
+            assign,
+            ct);
+
+        if (reparent.IsRefused)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException("sprk_communication", reparent);
+        }
     }
 
     /// <summary>
@@ -438,6 +559,39 @@ public sealed class ThreadResolver : IThreadResolver
             throw new ArgumentException(
                 "A valid regarding record id (GUID) is required to create a record-anchored thread.", nameof(regarding));
 
+        // Task 146 / owner decision S6: a RECORD thread anchored to an ownership parent (a matter, project, invoice, …)
+        // is a child of that record — owned by the record's team (the named Secure team for a secure record; task 149
+        // mirrors the record's sharees, so the caller keeps sight of it as a sharee of the record). A refusal is a 409
+        // with a stable reason code and creates nothing; a Dataverse fault propagates as the request's 5xx. A thread
+        // regarding a party (account / contact / organization — not an ownership parent) keeps the caller as owner,
+        // as before, "so the new (empty) thread is visible in the caller's all-mode list".
+        EntityReference threadOwner = new("systemuser", ownerSystemUserId);
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnerResolution? recordOwner = null;
+        if (Sprk.Bff.Api.Services.Dataverse.RecordOwnershipResolver.IsOwnershipParent(entityType))
+        {
+            var owner = await _ownership.ResolveOwnerAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                {
+                    TargetEntityLogicalName = entityType,
+                    TargetRecordId = regardingId,
+                    CallerSystemUserId = ownerSystemUserId,
+                    // Task 146 c1-r1 (owner round 13 item 9): the caller asked for this app-created record thread.
+                    RequestedBy = Sprk.Bff.Api.Services.Dataverse.RecordRequester.Of(ownerSystemUserId),
+                },
+                ct);
+            if (!owner.IsOwned)
+            {
+                throw new Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException(
+                    code: owner.RefusalCode ?? Sprk.Bff.Api.Services.Dataverse.RecordOwnerRefusal.NoOwnerSource,
+                    title: "Record owner unresolved",
+                    detail: $"The conversation was not created: {owner.Reason}.",
+                    statusCode: 409);
+            }
+
+            threadOwner = new EntityReference("team", owner.OwningTeamId!.Value);
+            recordOwner = owner;
+        }
+
         var thread = new DataverseEntity("sprk_communicationthread")
         {
             ["sprk_name"] = TruncateTo(resolvedName, 200),
@@ -445,9 +599,8 @@ public sealed class ThreadResolver : IThreadResolver
             ["sprk_threadtype"] = new OptionSetValue(ThreadTypeRecordAnchored),
             ["sprk_privacystate"] = new OptionSetValue(PrivacyStateOpen),
             [NameIsAutoDerivedField] = !hasName,
-            // Owner = caller so the new (empty) thread is visible in the caller's all-mode list (mirrors
-            // DirectThreadAccessService's explicit ownerid on create).
-            ["ownerid"] = new EntityReference("systemuser", ownerSystemUserId),
+            // Owner — the record's team for an ownership parent, else the caller (task 146 above).
+            ["ownerid"] = threadOwner,
             // TYPED regarding lookup — the exact field the by-regarding read filters on, so the new thread
             // shows in the record-scoped conversation list.
             [regardingField] = new EntityReference(entityType, regardingId),
@@ -457,10 +610,12 @@ public sealed class ThreadResolver : IThreadResolver
         if (!string.IsNullOrWhiteSpace(regarding.RecordName))
             thread["sprk_regardingrecordname"] = TruncateTo(regarding.RecordName!.Trim(), 400);
 
+        recordOwner?.StampCreatorOn(thread); // task 146 c1-r1 — the caller, on a team-owned record thread
+
         var threadId = await _entityService.CreateAsync(thread, ct);
         _logger.LogInformation(
-            "Created record-anchored thread {ThreadId} owned by {Owner}, regarding {RecordType}:{RecordId}",
-            threadId, ownerSystemUserId, regarding.EntityType, regarding.RecordId);
+            "Created record-anchored thread {ThreadId} for caller {Caller}, owned by {OwnerType}:{Owner}, regarding {RecordType}:{RecordId}",
+            threadId, ownerSystemUserId, threadOwner.LogicalName, threadOwner.Id, regarding.EntityType, regarding.RecordId);
         return threadId;
     }
 
@@ -565,6 +720,10 @@ public sealed class ThreadResolver : IThreadResolver
         if (await FindDefaultThreadAsync(keyId, ct) is { } existing)
             return existing;
 
+        // Task 146 / S6: a Tier-2 per-record default thread is owned by its record's team; the Tier-3 per-user master
+        // (no anchor) keeps its creator — per-user by design.
+        var recordOwner = await ResolveRecordThreadOwnerAsync(anchor, ct);
+
         var thread = new DataverseEntity("sprk_communicationthread")
         {
             ["sprk_name"] = TruncateTo(BuildDefaultThreadName(anchor), 200),
@@ -596,6 +755,9 @@ public sealed class ThreadResolver : IThreadResolver
             if (!string.IsNullOrWhiteSpace(anchor.RecordUrl))
                 thread["sprk_regardingrecordurl"] = TruncateTo(anchor.RecordUrl, 400);
         }
+
+        if (recordOwner is { } ownerTeamId)
+            thread["ownerid"] = new EntityReference("team", ownerTeamId);
 
         return await _entityService.CreateAsync(thread, ct);
     }

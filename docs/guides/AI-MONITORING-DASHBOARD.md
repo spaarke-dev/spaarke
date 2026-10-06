@@ -1,6 +1,6 @@
 # AI Monitoring Dashboard Guide
 
-> **Last Updated**: 2026-04-05
+> **Last Updated**: 2026-10-04 (export row and alert removed with the deleted export route, task 162)
 > **Applies To**: SDAP AI Document Intelligence features
 
 ---
@@ -38,15 +38,7 @@ The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature h
 | Tool Latency | `ai.tool.duration` (avg) | Tool performance |
 | Tool Token Usage | `ai.tool.tokens` | Per-tool cost tracking |
 
-### Row 4: Export Operations
-
-| Panel | Metrics | Purpose |
-|-------|---------|---------|
-| Export Requests | `ai.export.requests` | Export volume by format |
-| Export Latency | `ai.export.duration` (avg) | Export performance |
-| Export File Size | `ai.export.file_size` (avg) | Output size monitoring |
-
-### Row 5: Resilience & Cache
+### Row 4: Resilience & Cache
 
 | Panel | Metrics | Purpose |
 |-------|---------|---------|
@@ -68,7 +60,10 @@ The following alerts are defined (in `modules/alerts.bicep`; not deployed for cu
 | Tool Failures | Dynamic threshold | Warning | Tool execution failures |
 | Cache Miss Spike | Dynamic threshold | Warning | Cache effectiveness drop |
 | High Token Usage | Dynamic threshold | Warning | Cost impact alert |
-| Export Failures | Dynamic threshold | Warning | Export operation failures |
+
+> The analysis-export row, the `ai.export.*` metrics and the "Export Failures" alert were removed (2026-10-04) with the
+> analysis export route they measured (`POST /api/ai/analysis/{id}/export`, deleted by unified-access-control-r2
+> task 162: no caller, not published). `infrastructure/bicep/modules/dashboard.bicep` and `alerts.bicep` match.
 
 ---
 
@@ -106,7 +101,6 @@ Metrics include the following dimensions for filtering:
 | `ai.extraction` | `native`, `document_intelligence`, `vision` | Text extraction method |
 | `ai.file_type` | `.pdf`, `.docx`, `.txt`, etc. | File type analysis |
 | `ai.tool_id` | `EntityExtractor`, `ClauseAnalyzer`, `DocumentClassifier` | Tool-specific metrics |
-| `ai.format` | `docx`, `pdf`, `email` | Export format |
 | `ai.error_code` | Various error codes | Error analysis |
 | `ai.cache_hit` | `true`, `false` | Cache effectiveness |
 | `service` | `AzureOpenAI`, `AzureAISearch`, `MicrosoftGraph` | Circuit breaker service |
@@ -133,15 +127,6 @@ customMetrics
 | extend tool = tostring(customDimensions["ai.tool_id"])
 | summarize count() by tool, status
 | render piechart
-```
-
-**Export Volume by Format:**
-```kusto
-customMetrics
-| where name == "ai.export.requests"
-| extend format = tostring(customDimensions["ai.format"])
-| summarize count() by format, bin(timestamp, 1h)
-| render columnchart
 ```
 
 **Circuit Breaker Events:**

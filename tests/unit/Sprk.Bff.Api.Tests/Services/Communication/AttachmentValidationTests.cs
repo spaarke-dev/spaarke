@@ -83,6 +83,7 @@ public class AttachmentValidationTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(opts),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             _loggerMock.Object);
     }
 
@@ -163,6 +164,29 @@ public class AttachmentValidationTests
         response.Should().NotBeNull();
         response.Status.Should().Be(CommunicationStatus.Send);
         response.AttachmentCount.Should().Be(0);
+    }
+
+    #endregion
+
+    #region Attachment cap — parity with the route gate (task 161)
+
+    [Fact]
+    public async Task SendAsync_Over150Attachments_RefusesWithExactlyTheAnswerTheRouteGateGivesFirst()
+    {
+        // The record gate (CommunicationRecordAuthorizationFilter) refuses an over-cap send BEFORE any rights query, so
+        // 151 ids never cost 151 Dataverse round trips. Its answer must be this service's own — same code, title,
+        // detail and status — or the cap would change meaning depending on which layer met the request first.
+        var sut = CreateService();
+        var ids = Enumerable.Range(0, 151).Select(_ => Guid.NewGuid().ToString()).ToArray();
+
+        var act = () => sut.SendAsync(CreateValidRequest(attachmentDocumentIds: ids));
+
+        var thrown = (await act.Should().ThrowAsync<Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException>()).Which;
+        var gate = Sprk.Bff.Api.Api.Filters.CommunicationRecordAuthorizationFilter.AttachmentLimitExceeded(ids.Length);
+        thrown.Code.Should().Be(gate.Code);
+        thrown.Title.Should().Be(gate.Title);
+        thrown.Detail.Should().Be(gate.Detail);
+        thrown.StatusCode.Should().Be(gate.StatusCode);
     }
 
     #endregion

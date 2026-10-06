@@ -144,27 +144,9 @@ public class AnalysisOptions
     public int MaxDocumentContextLength { get; set; } = 100_000;
 
     // === Export Settings ===
-
-    /// <summary>
-    /// Enable export to DOCX format.
-    /// </summary>
-    public bool EnableDocxExport { get; set; } = true;
-
-    /// <summary>
-    /// Enable export to PDF format.
-    /// Uses QuestPDF for in-process PDF generation (ADR-001 compliant).
-    /// </summary>
-    public bool EnablePdfExport { get; set; } = true;
-
-    /// <summary>
-    /// Enable email integration via Power Apps email entity.
-    /// </summary>
-    public bool EnableEmailExport { get; set; } = true;
-
-    /// <summary>
-    /// Enable Teams integration via Graph API.
-    /// </summary>
-    public bool EnableTeamsExport { get; set; } = false;
+    // unified-access-control-r2 task 162 (owner round 10 item 1): EnableDocxExport, EnablePdfExport,
+    // EnableEmailExport and EnableTeamsExport were DELETED with their only consumers — POST
+    // /api/ai/analysis/{analysisId}/export and the PDF/Email export services it alone used.
 
     // === Performance Settings ===
 

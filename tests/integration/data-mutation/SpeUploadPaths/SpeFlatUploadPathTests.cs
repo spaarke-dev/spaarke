@@ -191,6 +191,7 @@ public class SpeFlatUploadPathTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<CommunicationService>>(),
             scopeFactory: Sprk.Bff.Api.Tests.Services.Communication.SpeScopeFactoryStub.Create(speFileStore));
     }
@@ -491,6 +492,7 @@ public class SpeFlatUploadPathTests
             spe.Object,
             generic.Object,
             Microsoft.Extensions.Options.Options.Create(Options()),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
             NonSecureContainerResolver(communicationId));
 
@@ -542,6 +544,7 @@ public class SpeFlatUploadPathTests
             spe.Object,
             generic.Object,
             Microsoft.Extensions.Options.Options.Create(Options()),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
             NonSecureContainerResolver(communicationId));
 

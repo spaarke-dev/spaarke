@@ -16,6 +16,8 @@
  * @see CreateTodoWizard/todoService.ts — createTodo
  * @see services/PolymorphicResolverService.ts — applyResolverFields
  */
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, childWriteCalls, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import { createTodoRegardingChild } from '../steps/AddTodoFollowOnStep';
 import { EMPTY_TODO_FORM } from '../../CreateTodoWizard/formTypes';
 import type { ICreateTodoFormState } from '../../CreateTodoWizard/formTypes';
@@ -108,7 +110,8 @@ describe('createTodoRegardingChild (AddTodoFollowOnStep create path)', () => {
       recordName: 'INV-2026-0042',
     };
 
-    const result = await createTodoRegardingChild(dataService, formValues, child);
+    const bff = bffChildWriteFetch(dataService);
+    const result = await createTodoRegardingChild(dataService, formValues, child, bff, FAKE_BFF_BASE_URL);
 
     expect(result.success).toBe(true);
     expect(result.todoId).toBe('new-todo-guid');
@@ -130,6 +133,21 @@ describe('createTodoRegardingChild (AddTodoFollowOnStep create path)', () => {
     expect(payload['sprk_RegardingRecordType@odata.bind']).toBe('/sprk_recordtype_refs(rt-invoice-guid)');
     // Display name falls back to the picker-provided child name (graceful-blank).
     expect(payload.sprk_regardingrecordname).toBe('INV-2026-0042');
+    // UAC-r2 task 147 r1: the create left through the BFF child-record route.
+    expect(childWriteCalls(bff)).toEqual([['POST', '/api/v1/child-records/sprk_todo']]);
+  });
+
+  it('REFUSES the follow-on to-do when the host wired no BFF connection (UAC-r2 task 147 r1: fail closed)', async () => {
+    const { dataService, createRecord } = buildDataService();
+
+    const result = await createTodoRegardingChild(
+      dataService,
+      { ...EMPTY_TODO_FORM, title: 'Follow-up review' },
+      { entityType: 'sprk_invoice', recordId: 'abc-123-def', recordName: 'INV-2026-0042' }
+    );
+
+    expect(result.success).toBe(false);
+    expect(createRecord).not.toHaveBeenCalled();
   });
 
   it('returns a failure result (no record created) for an unsupported regarding entity type', async () => {
@@ -140,7 +158,9 @@ describe('createTodoRegardingChild (AddTodoFollowOnStep create path)', () => {
     const result = await createTodoRegardingChild(
       dataService,
       { ...EMPTY_TODO_FORM, title: 'Orphan todo' },
-      { entityType: 'sprk_kpiassessment', recordId: 'kpi-1', recordName: 'KPI' }
+      { entityType: 'sprk_kpiassessment', recordId: 'kpi-1', recordName: 'KPI' },
+      bffChildWriteFetch(dataService),
+      FAKE_BFF_BASE_URL
     );
 
     expect(result.success).toBe(false);

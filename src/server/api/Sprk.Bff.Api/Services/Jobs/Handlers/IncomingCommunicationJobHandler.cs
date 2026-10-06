@@ -27,6 +27,8 @@ namespace Sprk.Bff.Api.Services.Jobs.Handlers;
 public class IncomingCommunicationJobHandler : IJobHandler
 {
     private readonly IncomingCommunicationProcessor _processor;
+    private readonly NotificationService _notifications;
+    private readonly Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Configuration.CommunicationOptions> _options;
     private readonly ILogger<IncomingCommunicationJobHandler> _logger;
 
     /// <summary>
@@ -36,9 +38,13 @@ public class IncomingCommunicationJobHandler : IJobHandler
 
     public IncomingCommunicationJobHandler(
         IncomingCommunicationProcessor processor,
+        NotificationService notifications,
+        Microsoft.Extensions.Options.IOptions<Sprk.Bff.Api.Configuration.CommunicationOptions> options,
         ILogger<IncomingCommunicationJobHandler> logger)
     {
         _processor = processor ?? throw new ArgumentNullException(nameof(processor));
+        _notifications = notifications ?? throw new ArgumentNullException(nameof(notifications));
+        _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -110,6 +116,11 @@ public class IncomingCommunicationJobHandler : IJobHandler
 
             return JobOutcome.Success(job.JobId, JobType, stopwatch.Elapsed);
         }
+        catch (Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException hold)
+        {
+            stopwatch.Stop();
+            return await HoldAsync(job, hold, stopwatch.Elapsed, ct);
+        }
         catch (Exception ex)
         {
             stopwatch.Stop();
@@ -129,6 +140,80 @@ public class IncomingCommunicationJobHandler : IJobHandler
             return JobOutcome.Poisoned(
                 job.JobId, JobType, ex.Message,
                 job.Attempt, stopwatch.Elapsed);
+        }
+    }
+
+    /// <summary>
+    /// HOLD (task 146; owner round 3 amendment R3 — "never create a record nobody can see"). The email names a record
+    /// whose owner cannot be resolved (unreadable, flagged secure but not isolated, its team missing). Nothing was
+    /// written. Retry — the usual cause is transient or a provisioning step in flight — and at the last attempt leave
+    /// it UNPROCESSED in the ingestion queue (dead-letter) and alert the administrators. Never Success, never a create
+    /// owned by a memberless team.
+    /// </summary>
+    internal async Task<JobOutcome> HoldAsync(
+        JobContract job, Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException hold, TimeSpan elapsed,
+        CancellationToken ct)
+    {
+        // r2 (verifier item 11): the LAST delivery is the processor's dead-letter condition — attempts exhausted OR the
+        // broker's delivery count reached. A redelivered message keeps its Attempt, so keying on attempts alone let the
+        // processor dead-letter the email by delivery count while this answered "retry", and no administrator was told.
+        if (!job.IsFinalDelivery)
+        {
+            _logger.LogWarning(
+                "Incoming communication job {JobId} HELD on attempt {Attempt}/{MaxAttempts} (delivery {DeliveryCount}/{MaxDeliveryCount}): {Error}. Retrying.",
+                job.JobId, job.Attempt, job.MaxAttempts, job.DeliveryCount, JobContract.MaxDeliveryCount, hold.Message);
+            return JobOutcome.Failure(job.JobId, JobType, hold.Message, job.Attempt, elapsed);
+        }
+
+        _logger.LogCritical(
+            "Incoming communication job {JobId} HELD after {Attempt} attempts and dead-lettered unprocessed: "
+            + "{Error} (RefusalCode {RefusalCode}). Nothing was written to Dataverse; resolve the record's ownership "
+            + "and resubmit the dead-lettered message. CorrelationId {CorrelationId}",
+            job.JobId, job.Attempt, hold.Message, hold.RefusalCode, job.CorrelationId);
+        await AlertAdministratorsAsync(job, hold, ct);
+        return JobOutcome.Poisoned(job.JobId, JobType, hold.Message, job.Attempt, elapsed);
+    }
+
+    /// <summary>
+    /// One in-app notification per configured administrator (<c>Communication:OwnershipHoldAlertUserIds</c>) for a HELD
+    /// email, carrying what an administrator needs to resolve it: the refusal code and reason, the job id and its
+    /// correlation id (which find the dead-lettered message). Best-effort per recipient — an alert failure never turns
+    /// the hold into anything else; the Critical log above is the floor.
+    /// </summary>
+    private async Task AlertAdministratorsAsync(
+        JobContract job, Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException hold, CancellationToken ct)
+    {
+        var recipients = _options.Value.OwnershipHoldAlertUserIds ?? Array.Empty<Guid>();
+        if (recipients.Length == 0)
+        {
+            _logger.LogWarning(
+                "No administrators configured (Communication:OwnershipHoldAlertUserIds) for the held email of job {JobId}; "
+                + "the Critical log entry is the only alert.",
+                job.JobId);
+            return;
+        }
+
+        var body =
+            $"An inbound email was not filed and is held unprocessed in the ingestion queue's dead-letter. {hold.Message}\n"
+            + $"Refusal: {hold.RefusalCode}\nJob: {job.JobId}\nCorrelation: {job.CorrelationId}\n"
+            + "Resolve the record's ownership (for a secure record: complete its provisioning), then resubmit the message.";
+        foreach (var userId in recipients.Where(id => id != Guid.Empty).Distinct())
+        {
+            try
+            {
+                await _notifications.CreateNotificationAsync(
+                    userId,
+                    title: "Inbound email held: record owner unresolved",
+                    body: body,
+                    category: "error",
+                    priority: 200000002, // Critical
+                    cancellationToken: ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(
+                    ex, "Could not alert administrator {UserId} about the held email of job {JobId}", userId, job.JobId);
+            }
         }
     }
 

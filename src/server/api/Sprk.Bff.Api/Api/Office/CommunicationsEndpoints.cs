@@ -52,7 +52,8 @@ namespace Sprk.Bff.Api.Api.Office;
 /// </para>
 /// <para>
 /// The group's bare <c>.RequireAuthorization()</c> means "any authenticated caller" and nothing more:
-/// there is no <c>DefaultPolicy</c>/<c>FallbackPolicy</c> override anywhere in the BFF. Authorization
+/// there is no <c>DefaultPolicy</c> override, and the <c>FallbackPolicy</c> (UAC-r2 task 167) also asks only
+/// for an authenticated user. Authorization
 /// on these routes is therefore the DELEGATED QUERY ITSELF — there is no per-record filter because the
 /// record is not known until the query resolves it. Denial is deliberately indistinguishable from
 /// absence (a 404, never a 403): answering 403 would confirm the record exists, trading an IDOR for an
@@ -368,16 +369,17 @@ public static class OfficeCommunicationsEndpoints
             var communicationId = ReadGuid(entity.Value, "sprk_communicationid");
             var subject = ReadString(entity.Value, "sprk_subject") ?? string.Empty;
 
-            // SAME read-only evaluate path as the Communication-group suggest endpoint — reuse, not fork.
+            // SAME read-only evaluate path as the Communication-group suggest endpoint — reuse, not fork — and the
+            // SAME caller-scoped trimming (task 161): a candidate the caller cannot read is absent from the
+            // decision itself, so neither its id nor a status computed with it reaches the response. The helper
+            // also resolves each readable candidate's DISPLAY NAME (task 042 / FR-B2) — the persisted provenance
+            // carries IDs, not names, and the shared candidate model (`derivePrimaryReview`) is designed to receive
+            // `targetName` — from the same delegated read that decided it was readable.
             var (message, associationContext) = await communicationService.ReconstructEnvelopeAsync(communicationId, ct);
-            var decision = await associationResolver.EvaluateAsync(message, associationContext, ct);
-            var suggestions = SuggestAssociationsResponse.FromDecision(communicationId, decision);
-
-            // Resolve candidate DISPLAY NAMES (task 042 / FR-B2). The persisted provenance carries
-            // IDs, not names — so the client would otherwise show a GUID in the picker. We fill the
-            // `targetName` the shared candidate model (`derivePrimaryReview`) is DESIGNED to receive,
-            // reusing the same per-entity name-field map the denorm writer uses (RegardingNameFields).
-            var names = await ResolveCandidateNamesAsync(userClient, suggestions.Candidates, logger, ct);
+            var scoped = await SuggestionCandidateAccess.EvaluateForCallerAsync(
+                communicationId, message, associationContext, associationResolver, userClient, logger, ct);
+            var suggestions = scoped.Suggestions;
+            var names = scoped.Names;
 
             // Task 084 (#1037): "pickable equals savable". The pane renders these candidates as selectable cards
             // and the ribbon quick-save files straight to the top one, so each named candidate also says whether
@@ -418,66 +420,13 @@ public static class OfficeCommunicationsEndpoints
     }
 
     /// <summary>
-    /// Resolve display names for the suggested candidates (task 042). Retrieves each distinct
-    /// candidate record's primary-name attribute (via <see cref="RegardingNameFields"/>) so the add-in
-    /// picker shows a real name instead of a GUID. Best-effort: a miss (unknown entity, bad id, retrieve
-    /// failure) simply leaves that candidate to the client's id fallback. Keyed by candidate targetId.
-    /// </summary>
-    private static async Task<IReadOnlyDictionary<string, string>> ResolveCandidateNamesAsync(
-        IDataverseUserClient userClient,
-        IReadOnlyList<SuggestedCandidate> candidates,
-        ILogger<Program> logger,
-        CancellationToken ct)
-    {
-        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var c in candidates)
-        {
-            if (!seen.Add($"{c.TargetEntity}:{c.TargetId}")) continue; // one retrieve per distinct record
-            var nameField = RegardingNameFields.PrimaryNameField(c.TargetEntity);
-            if (nameField is null) continue;
-            if (!Guid.TryParse(c.TargetId, out var recordId)) continue;
-
-            // 🔴 DELEGATED read (#1020 / task 127). This used the app-only service, so the response
-            // carried the display names of candidate records the caller may have no right to see —
-            // the SECOND-ORDER leak, and the worst of the three on this surface: fixing only the
-            // communication lookup would have left it intact behind a route that now looked fixed.
-            //
-            // A record the caller cannot read simply does not resolve, so it gains no entry here and
-            // is dropped from the response by the caller. Note the OLD catch swallowed every failure
-            // into "no name" — under a delegated client that would have turned a denial into a silent
-            // omission, which is the same disclosure minus the label.
-            var entitySet = RegardingNameFields.EntitySetName(c.TargetEntity);
-            if (entitySet is null) continue;
-
-            var response = await userClient.GetAsync(
-                $"{entitySet}({recordId})?$select={Uri.EscapeDataString(nameField)}", ct);
-
-            if (!response.IsSuccess)
-            {
-                // 403/404 here is the control working: the caller may not read this candidate.
-                logger.LogDebug(
-                    "Candidate {Entity} {Id} not readable by caller (HTTP {StatusCode}); dropping it",
-                    c.TargetEntity, c.TargetId, response.StatusCode);
-                continue;
-            }
-
-            if (response.Body is { } row)
-            {
-                var name = ReadString(row, nameField);
-                if (!string.IsNullOrWhiteSpace(name)) names[c.TargetId] = name;
-            }
-        }
-        return names;
-    }
-
-    /// <summary>
     /// Whether the caller can file to each NAMED candidate (task 084), keyed by candidate <c>targetId</c>.
     /// </summary>
     /// <remarks>
-    /// Only candidates that resolved a name are evaluated. A candidate without one is a record the caller
-    /// cannot read (see <see cref="ResolveCandidateNamesAsync"/>), and the client drops it, so asking whether
-    /// it is fileable would cost a Dataverse call for nothing. The type is the candidate's LOGICAL name;
+    /// Only candidates that resolved a name are evaluated. Since task 161 a record the caller cannot read is not a
+    /// candidate at all (<see cref="SuggestionCandidateAccess"/> removes it from the decision); a readable candidate
+    /// with a blank name is one the client cannot label, so it is not offered for filing and asking whether it is
+    /// fileable would cost a Dataverse call for nothing. The type is the candidate's LOGICAL name;
     /// <c>EntityAccessFilter.TryResolveEntitySet</c> maps it to the same collection as the friendly name the
     /// client sends to the save, so the verdict is the save's.
     /// </remarks>

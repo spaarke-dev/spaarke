@@ -1,0 +1,1176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="167" project="unified-access-control-r2">
+  <metadata>
+    <title>The every-route authorization guard (owner round 9 item 3): extend task 074's RouteAuthorizationGuardTests so EVERY BFF route file is governed and every route declares a per-resource check, an admin policy, or a reasoned waiver; the 82 sweep findings (90 route keys) start as Pending waivers owned by their fix tasks 159-166</title>
+    <phase>Session 27, owner round 9 (2026-10-03): the route authorization sweep</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** (root CLAUDE.md §8 TEST-MODIFYING override: code-review + adr-check run unconditionally). The guard decides which BFF routes the build accepts as authorized; a false "gated" verdict hides a disclosure.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Security forcing function over 120 files and 431 registrations. Each route's credit is a judgment (which filter really decides, which handler really checks, which data is really the caller's own), and the guard itself must fail closed on every parse it cannot complete.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, which tasks 159-166 also edit (each deletes its own Pending waivers and adds credit for its fixed routes). By owner decision (round 9 item 2) it runs at the same time as 159-166 on its own branch; the main session reconciles the waiver list at integration. As authored it changed no file under src/. AMENDED in round r2 (verifier r2 items 6 and 10): it changes exactly ONE file under src/, by owner decision - owner round 12 item 1 added three .RequireRateLimiting("anonymous") calls on existing routes in src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs (execution/justification-of-src-change round r1). That file is not one of the project's parallel-unsafe zones (Api/ExternalAccess/**, Infrastructure/ExternalAccess/**, Spaarke.Core/Auth/**, DataverseWebApiService.cs), which this task only reads. Task 163's branch (line ~325, the removed MapAdminKnowledgeEndpoints block) and task 166 amendment (a) (the /healthz/dataverse/doc/{id} registration) also edit that file in other regions: a textual merge at integration. AMENDED in round f1 (owner round 14, binding): the probes move to a dedicated "health-probe" policy (Infrastructure/DI/RateLimitingModule.cs) and the authorization FallbackPolicy is set (Infrastructure/DI/AuthorizationModule.cs, ApplyFallbackPolicy); comment-only lines change in Api/Finance/FinanceRollupEndpoints.cs, Api/Office/CommunicationsEndpoints.cs and Api/SpeAdmin/ContainerItemEndpoints.cs. None is a parallel-unsafe zone. Task 165's branches also edit AuthorizationModule.cs (the SystemAdmin policy) and ContainerItemEndpoints.cs in other regions: textual merges (note section 17.7). AMENDED in round f2 (main-session round 34 item 7, binding): the /healthz/catalog checks are memoized for 30 s - new Infrastructure/HealthChecks/MemoizedHealthCheck.cs, and the two catalog registrations in Infrastructure/DI/RoutingModule.cs and Infrastructure/DI/ComposeModule.cs use it; EndpointMappingExtensions.cs reads the tag from CatalogHealthChecks.Tag. None is a parallel-unsafe zone; integ/uac-r2-batch4 edits EndpointMappingExtensions.cs in other regions (note section 18.9). AMENDED in round f2-v1 (main-session round 43 item 2, binding): Infrastructure/HealthChecks/MemoizedHealthCheck.cs gains the evaluation bound (the same file f2 added); no other src/ file changes in f2-v1 (note section 19.6). Round f2-v2 (main-session round 52, owner round 56) changes no src/ file: tests/Spaarke.ArchTests only (note section 20.4).</parallel-reason>
+    <deps>none</deps>
+    <tags>testing, security, auth, archtest, bff-api</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <origin>Owner round 9 item 3 (notes/session27-owner-decisions-and-research.md, "Owner answers, round 9"): "every BFF route must declare how it is authorized: a record-level check, an admin policy, or an explicit, reasoned waiver for a route that only touches the caller's own data. A new route with only a sign-in check fails the build. It extends task 074's RouteAuthorizationGuardTests to every route file. The 82 known findings start as Pending waivers owned by their fix tasks; the guard's stale-waiver rule then forces each fix to delete its waiver." Evidence: notes/route-authorization-sweep-2026-10-02.md (82 confirmed findings, 6 refuted, 62 noteworthy, from workflow run wf_c2daa097-2f4).</origin>
+  </metadata>
+
+  <prompt>Today the route guard (tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs) checks only the 25 files in its GovernedFiles list. It credits any filter whose name contains "AuthorizationFilter", and it lets whole files skip the per-route rule as "HandlerAuthorized". The 2026-10-02 sweep found 82 routes where a signed-in caller acts, as the BFF's own identity, on a record it has no rights to. Most of them sit in files the guard never reads, or behind filters it credits that decide nothing. Extend the guard so that every route in every BFF endpoint file shows one of four things: a per-resource decision the guard can see, a verified in-handler decision, an admin policy on a pinned operator route, or a written waiver. Record the 82 findings as Pending waivers owned by tasks 159-166, so the build stays green while they are fixed and each fix must delete its waiver. Change no product code.</prompt>
+
+  <amendments source="main session, 2026-10-03, owner rounds 9-10" binding="true">
+    <!-- Read these before step 0. Each overrides anything below that contradicts it. -->
+    <amendment>Owner decisions now run to round 10: re-read notes/session27-owner-decisions-and-research.md rounds 9 and 10 on work/unified-access-control-r2 before step 0. They are newer than this POML.</amendment>
+    <amendment>Tasks 159-166 run IN PARALLEL with you and do NOT touch your ledger or waivers. They record a "Route authorization ledger input" table in their notes, and the main session fills ResolvedBy and ProofTest from those at integration. Do not wait for them, and do not depend on their branches.</amendment>
+    <amendment>Task 159's events list (GET /api/v1/events) will be a "query runs as the caller" HandlerDecision, not a Permanent waiver. Leave room for that shape.</amendment>
+    <amendment>Do not stop on the number of UNOWNED-NEW candidates. Record each as a Pending waiver owned by "UNOWNED-NEW", with a one-line reason, and list them all in the note. The main session assigns them after you finish. Escalation trigger 8 is answered by this instruction.</amendment>
+    <amendment>Owner round 10 item 1 (dead routes) is the fix tasks' job. Do not delete routes here.</amendment>
+  </amendments>
+
+  <role>SPAARKE platform developer: structural fitness functions over the BFF source (tests/Spaarke.ArchTests, ADR-038 Amendment A1 KEEP path), ASP.NET Core Minimal API route registration (ADR-001, ADR-008 endpoint filters), and the BFF's authorization seams (ADR-003 fail closed).</role>
+
+  <goal>When this task is done:
+(1) Every file the census finds is classified in GovernedFiles, and the GovernedFiles set equals the census set exactly. The census is EndpointFiles(): every non-obj/bin .cs file under src/server/api/Sprk.Bff.Api/ containing a route registration (Map{Verb}, MapMethods or MapHealthChecks). There were 120 files at authoring, 3 of them outside Api/**.
+(2) The scanner resolves every registration to its FULL route key (verb plus absolute path). This includes MapMethods (including the collection-expression form ["PATCH"]), MapHealthChecks, a path given as a same-file const, and routes registered on a group that another file declares (aggregator binding). A registration it cannot resolve is a violation, never a skip. No two registrations produce the same key.
+(3) Rule A applies to every route in every governed file. A route passes only with one of these:
+- a credited per-resource filter;
+- a ResourceAccessRequirement policy (the existing PolicyOnlyRoutes pin);
+- a verified HandlerDecision declaration;
+- an admin mechanism on a route in the pinned AdminOnlyRoutes set;
+- a Permanent waiver with a stated basis;
+- a Pending waiver with an owning task.
+The file-level HandlerAuthorized exemption is gone.
+(4) Rule A credits filters only by an explicit allow-list of attachment forms that were read and found to decide. The pass-through shapes the sweep found are NOT credited: AnalysisAuthorizationFilter in AnalysisAccess mode, CommunicationAuthorizationFilter, AiAuthorizationFilter, DataverseAuthorizationFilter in FromRouteValueWithRecord and FromFetchXmlBody modes, TenantAuthorizationFilter, and the identity-only filters. Each sits in NonDecidingAttachments with an owning task, and a pin test fails when its pass-through is removed from source, so the entry is reclassified when its filter is fixed. Every attachment form used on any route is classified in exactly one list, and an unclassified form fails the build.
+(5) Rule B (NoAuthorizationFilterIsDecorative), the census and fail-closed parsing are kept and extended to every credited filter. Decision-service tokens now match whole identifiers, so "IAiAuthorizationService" no longer satisfies the "AuthorizationService" token by substring.
+(6) All 90 route keys of the 82 sweep findings are Pending waivers with OwningTask 159-166 per the ledger below. They are recorded in a pinned sweep ledger that forbids a Permanent waiver on any of them. An entry resolves only by credit plus a named proof test.
+(7) Every route the extended guard flags that the sweep did not confirm is one of two things. Either it is a Permanent waiver whose basis was verified by reading the handler, or it is a Pending waiver owned by "UNOWNED-NEW" and listed in the task note for the main session to assign. Nothing is silently waived.
+(8) The guard suite is green on the branch. Every new rule has a negative control (fires on a seeded violation) and a positive control (does not fire on the sanctioned shape).</goal>
+
+  <context>
+    <background>Every anchor below was read on the work tree at b18a7d321 (branch work/unified-access-control-r2, 2026-10-02). Line numbers drift: re-verify each before relying on it.
+
+THE GUARD TODAY (tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs, 2289 lines).
+- Scope enum: :104-122 (RouteLevelGate, HandlerAuthorized, GroupGated).
+- GovernedFiles: :126-343 (25 files). Every other file is "NotGoverned" (:99-101), so Rule A never looks at it.
+- Waivers: :378-684. The record is Waiver(Route, Kind, OwningTask, Reason) at :376; the kinds Pending/Permanent are at :370-374; the maintenance procedure is at :348-368.
+  - Eight Permanent waivers are live today and no Pending ones: PUT /api/obo/me/files/{*path} :515 (owner "076"), POST /api/v1/documents :573, GET /api/v1/documents :578, the three /api/office/communications routes :618, :628, :635, GET /api/office/search/entities :654, GET /api/office/search/matter-types :665.
+- PolicyOnlyRoutes :692-709 (empty, pinned); ResourcePolicies :718-732.
+- Census:
+  - ExpectedEndpointFileCount = 120 at :875 (a count only, not the set), with its history comment :734-874.
+  - TheEndpointFileCensusIsPinned :1350-1389.
+- Rules:
+  - Rule A: :881-934 (RouteLevelGate files only).
+  - Waiver reason/owner rule: :936-985.
+  - NoWaiverIsStale :987-1061 (a Pending waiver on a now-Filter route is stale; any waiver on an absent route is stale).
+  - Policy-only pin :1063-1100.
+- Rule B, NoAuthorizationFilterIsDecorative :1106-1182:
+  - The subject is a file named *AuthorizationFilter.cs, or one in ExplicitlyCreditedFilterTypeNames.
+  - Each must contain a DecisionServices token (:1274-1296, matched by SUBSTRING via string.Contains at :1129), or every endpoint file attaching it must.
+  - ClaimOnlyFilters :1194-1241; KnownDecorativeFilters :1267 (empty).
+- Rule E, GroupGatedFilesRegisterNoAbsolutePaths :1302-1348: it regex-scans every Map{Verb} literal in a GroupGated file.
+- Controls:
+  - Detector_NegativeControl_FiresOnEachHistoricalMiss :1395-1489.
+  - RuleB_NegativeControl_FiresOnADecorativeFilter :1491-1559.
+  - Detector_PositiveControl_DoesNotFireOnGatedRoutes :1561-1614. Its fixtures use .AddEndpointFilter&lt;BulkDownloadAuthorizationFilter&gt;() and .AddEndpointFilter&lt;EntityAccessFilter&gt;(); NEITHER is the form the real code uses (see "credit" below).
+  - The Office baseline control :1616-1643; the Office positive control :1645-1671.
+  - RuleBCoversEveryFilterRuleACredits :1673-1703; the nested-group control :1705-1735.
+  - Scanner completeness :1737-1825, which pins OBOEndpoints.cs at 3 registrations.
+- Machinery:
+  - MapCall regex :1851 matches only Map(Get|Post|Put|Patch|Delete).
+  - GroupDecl :1862 matches only `var x = y.MapGroup("literal")`.
+  - ExplicitlyCreditedFilterTypeNames :1886-1896.
+  - FilterMarker :1898-1902 credits ANY ".Add*AuthorizationFilter(" or ".AddEndpointFilter&lt;*Authorization*Filter|*Access*Filter&gt;", plus four explicit names.
+  - NamedPolicy :1904 matches string-literal policies only.
+  - Scan :1926-2029 resolves receivers by variable NAME within one file.
+  - EndpointFiles :2229-2235 covers the whole BffRoot, not only Api/, but selects files by MapCall only.
+
+WHY THE GUARD MISSED THE SWEEP'S FINDINGS (each verified at authoring).
+(a) Coverage. Of the 120 census files only 25 are governed. Rule A never ran over Events, Dataverse, Communication, Ai (except search/visualization), Memory, Insights, Workspace, Reporting, SpeAdmin (except ContainerItemEndpoints), Admin, FieldMappings, WorkAssignmentEndpoints or EndpointMappingExtensions.
+(b) File-level exemption. The eight Compose files and the two external data files are HandlerAuthorized, so Rule A skips them. Sweep findings S-63, S-64, S-65 and S-80 sit in Compose files.
+(c) Decorative credit. FilterMarker credits each of these attachments, yet each lets the request through without a record decision:
+  - .AddAnalysisRecordAuthorizationFilter() runs AnalysisAuthorizationFilter in AuthorizationMode.AnalysisAccess.
+    - AuthorizeAnalysisAccessAsync (src/server/api/Sprk.Bff.Api/Api/Filters/AnalysisAuthorizationFilter.cs:185-212) parses analysisId and returns next(context) with no lookup ("TRACKED: GitHub #233", :203).
+    - Rule B passes the file because it contains "IAiAuthorizationService", which contains the DecisionServices token "AuthorizationService" as a substring.
+    - The sibling .AddAnalysisExecuteAuthorizationFilter() (:19-29; DocumentAccess mode :121-174, which 400s on zero ids and 403s on deny) DOES decide.
+  - .AddEndpointFilter&lt;CommunicationAuthorizationFilter&gt;() (Api/Filters/CommunicationAuthorizationFilter.cs, 43 lines; next at :41) checks IsAuthenticated and an oid, nothing else.
+    - It is in ClaimOnlyFilters with a reason (:1211-1215) saying that per-record scoping is done by ICommunicationAccessFilter.
+    - The sweep shows that is false for send, archive, suggest-associations, create-task, threads, confirm-affinity, proposals and accounts/verify.
+  - .AddAiAuthorizationFilter() and .AddEndpointFilter&lt;AiAuthorizationFilter&gt;() (Api/Filters/AiAuthorizationFilter.cs).
+    - It decides only for arguments of type DocumentAnalysisRequest, IEnumerable&lt;DocumentAnalysisRequest&gt; or Guid (:130-153), and otherwise returns next (:84).
+    - At authoring, none of its 46 attachment sites binds DocumentAnalysisRequest. The only one binding a Guid, GET /api/ai/chat/sessions/by-analysis/{analysisId:guid}, binds an ANALYSIS id that the filter authorizes as a DOCUMENT id. So it decides for no route in this codebase.
+    - Rule B passes it through the same substring.
+  - .AddDataverseAuthorizationFilter(EntitySource.FromRouteValueWithRecord) and (EntitySource.FromFetchXmlBody) (src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseAuthorizationFilter.cs).
+    - ResolveEntities (:177-193) handles FromRouteValueWithRecord in the SAME branch as FromRouteValue and returns only the entity logical name. :128-148 checks only an entity-level Read privilege through IDataversePrivilegeChecker.
+    - That is a correct decision for SCHEMA routes (EntitySource.FromRouteValue: GET /api/dataverse/metadata/{entityLogicalName}, GET /api/dataverse/gridconfigurations/{entityLogicalName}, GET /api/dataverse/savedqueries/{entityLogicalName}).
+    - It is no decision for the record and FetchXML routes (S-10, S-09).
+    - EntitySource.FromSavedQueryEntity exists in the enum (:21) but no route uses it.
+  - .AddTenantAuthorizationFilter() (Api/Filters/TenantAuthorizationFilter.cs).
+    - It compares the tid claim with a tenant id found in the request (:73-94), and passes through when none is found (:76-81). It never consults a record.
+    - It is ClaimOnly (:1197-1199), which is correct about what it decides. The defect is that Rule A credits it as a per-resource gate on the RAG routes (S-04, S-05, S-06, S-30).
+  - Identity-only filters credited the same way:
+    - .AddEndpointFilter&lt;WorkspaceAuthorizationFilter&gt;() (Api/Filters/WorkspaceAuthorizationFilter.cs, oid only).
+    - .AddAgentAuthorizationFilter() (Api/Agent/AgentAuthorizationFilter.cs, oid+tid only). Its ClaimOnly reason (:1207-1210) says it "serves no document metadata", which S-18 and S-19 disprove.
+    - .AddCallerPrincipalAuthorizationFilter() (Api/Filters/CallerPrincipalAuthorizationFilter.cs: principal resolution, a precondition for the handler's check).
+    - .AddReportingAuthorizationFilter() (Api/Reporting/ReportingAuthorizationFilter.cs: a module role claim; not per-resource and not an operator surface).
+    - .AddSpeAdminTenantScopeFilter() (tenant scope). It passes through when no configId is present (Api/Filters/SpeAdminTenantScopeFilter.cs:76-78), and SpeAdminTenantScope.CanAccessConfigAsync returns true on a lookup error and for a BU-less config (Services/SpeAdmin/SpeAdminTenantScope.cs:99-122).
+(d) Real filters the guard does NOT credit today, because their names lack "Authorization":
+  - .AddSessionOwnershipFilter() (Api/Filters/SessionOwnershipFilter.cs:87-97). It compares owners through ChatSessionManager and answers 404 for a missing or not-owned session. It refuses rather than passes when the route has no {sessionId}.
+  - .AddDelegationRuleFilter() (Api/ExternalAccess/DelegationRuleFilter.cs). It checks Write on the target via CallerRecordAccessProbe (:37, :86-184), and every exit denies 403.
+  Both must become credited per-resource filters, inspected by Rule B. SessionOwnershipFilter consults no DecisionServices token (ChatSessionManager), so it needs an OWNER-COMPARISON ClaimOnly entry, like JobOwnershipFilter at :1228-1236.
+(e) Real attachment forms the allow-list must spell exactly (grep at authoring):
+  - BulkDownloadAuthorizationFilter is attached as .AddBulkDownloadAuthorizationFilter() (Api/DocumentsBulkEndpoints.cs:65), NOT .AddEndpointFilter&lt;BulkDownloadAuthorizationFilter&gt;.
+  - EntityAccessFilter is attached as .AddEntityAccessFilter().
+  - Inline lambdas attach with a bare .AddEndpointFilter(async (context, next) =&gt; ...). The one route-level instance is the Guid.Empty validator at Api/Office/OfficeEndpoints.cs:1496, which is validation, not authorization.
+  - The webhook HMAC is attached as .RequireWebhookSignature(...) (Api/Filters/WebhookSignatureFilter.cs:252; used at Api/CommunicationEndpoints.cs:402 and Api/ComposeSyncEndpoints.cs:44).
+(f) Parser gaps.
+  - Three routes register with MapMethods using the collection-expression form ["PATCH"]: Api/Ai/ChatEndpoints.cs:141 PATCH /sessions/{sessionId}/context (sweep S-23), :154 PATCH /sessions/{sessionId}, :213 PATCH /sessions/{sessionId}/tabs.
+  - Two register with MapHealthChecks: Infrastructure/DI/EndpointMappingExtensions.cs:59 /healthz and :66 /healthz/catalog.
+  - Two take their path from a const, so their registrations are unparseable today:
+    - Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs: const at :79, MapGet at :106, giving GET /api/diagnostics/tenant-container-resolver.
+    - Endpoints/Onboarding/ConsentCallbackEndpoint.cs: const at :45, MapPost at :70, giving POST /api/onboarding/consent-callback.
+  - About 120 routes in 39 files are registered on a RouteGroupBuilder passed in from an aggregator, so today the scanner keys them as fragments ("POST /configs"). The aggregators:
+    - Api/SpeAdminEndpoints.cs:27-35: /api/spe + RequireAuthorization + AddSpeAdminAuthorizationFilter + AddSpeAdminTenantScopeFilter.
+      - It binds 19 child files in Api/SpeAdmin/ in TWO call forms: the extension form `group.MapConfigEndpoints()` and the static form `ContainerEndpoints.MapContainerEndpoints(group)`.
+      - Child files nest further groups (ConfigEndpoints.cs "/configs", DashboardEndpoints.cs, SecurityEndpoints.cs).
+    - Api/ComposeEndpoints.cs:30-47: /api/compose + RequireAuthorization, binding 8 Compose files.
+      - MapComposeSyncEndpoints(routes) also receives the ROOT builder. Its webhook POST /api/compose/webhooks/spe-doc-changed is registered on `routes` with an ABSOLUTE path (Api/ComposeSyncEndpoints.cs:42), AllowAnonymous + RequireWebhookSignature.
+    - Api/ExternalAccess/ExternalAccessEndpoints.cs:54-57: externalGroup /api/v1/external + RequireAuthorization(AuthPolicies.ExternalCollaboration) + AddCallerPrincipalAuthorizationFilter.
+      - It binds ExternalProjectDataEndpoints (17 routes) and ExternalModuleDataEndpoints, which nests `externalGroup.MapGroup("/api/dataverse")`.
+      - That gives FIVE routes: POST /api/v1/external/api/dataverse/fetch, GET .../record/{entityLogicalName}/{id:guid}, GET .../metadata/{entityLogicalName}, GET .../savedquery/{savedQueryId:guid}, GET .../savedqueries/{entityLogicalName}.
+    - The same file at :123-126: adminGroup /api/v1/external-access + RequireAuthorization + AddDelegationRuleFilter, binding 10 files plus the inline close-project route at :158.
+  - ⚠️ KEY COLLISION HAZARD. Without the aggregator prefix, ExternalModuleDataEndpoints produces "POST /api/dataverse/fetch" and "GET /api/dataverse/record/{entityLogicalName}/{id:guid}". Those are EXACTLY the keys of sweep findings S-09 and S-10 in Api/Dataverse/. A Pending waiver written for S-09 would then silently cover a different route, and NoWaiverIsStale would compare the wrong routes.
+(g) Dead registration. Api/ExternalAccess/ProjectClosureEndpoint.cs:46 MapProjectClosureEndpoint has zero callers (grep at authoring); the live route is mapped inline at ExternalAccessEndpoints.cs:158. Scanned naively, it produces a duplicate "POST /api/v1/external-access/close-project" key. It is the ONLY duplicate key once aggregator prefixes are applied (checked at authoring).
+(h) Admin policies.
+  - RequireAuthorization("SystemAdmin"): the policy is at Infrastructure/DI/AuthorizationModule.cs:362-377; it is used in Api/Admin/JobsEndpoints.cs:53, Api/Admin/MembershipAdminEndpoints.cs:46 and Api/Ai/RagEndpoints.cs:162.
+  - RequireAuthorization(AuthPolicies.RagApiKey): the policy is at :328-332; it is used at RagEndpoints.cs:142 (service automation key).
+  - .AddSpeAdminAuthorizationFilter(): on /api/spe, and in Api/Insights/PrecedentAdminEndpoints.cs.
+  - .AddRegistrationAuthorizationFilter(): Api/RegistrationEndpoints.cs approve/reject.
+  - RequireAuthorization(AuthPolicies.ExternalCollaboration) only selects authentication schemes. It is NOT an admin mechanism.
+  - There is no DefaultPolicy or FallbackPolicy, so a bare RequireAuthorization() means "signed in".
+  - ⚠️ The SystemAdmin assertion also passes any token whose scope claim CONTAINS the substring "admin" (:371-373). This is recorded as a note for the main session, not fixed here.
+(i) A route the sweep did not cover: GET /healthz/dataverse/doc/{id}. The sweep traced Api/** only.
+  - The route is at Infrastructure/DI/EndpointMappingExtensions.cs:81-111. It is AllowAnonymous and mapped unconditionally; its only control is the "anonymous" rate limit.
+  - It reads a caller-chosen sprk_document app-only through IDocumentDataverseService, and returns its name, file name, parent document, matter, project and invoice ids.
+  - ⚠️ It has a named CONSUMER: .claude/skills/bff-deploy/SKILL.md:50 (§9c, the post-deploy "MI → Dataverse" smoke check), plus the runbooks projects/dotnet-10-upgrade-r1/notes/slot-swap-runbook.md and 051-operator-runbook.md. Whoever fixes it must first move that smoke check to the id-less sibling /healthz/dataverse (:74). This task only records this.
+  - Its siblings take no id: /healthz/dataverse (:74) and /healthz/dataverse/crud (:77, a top-1 read).
+(j) POST /api/v1/documents binds CreateDocumentRequest (src/server/shared/Spaarke.Dataverse/Models.cs: `required string ContainerId` from the body; OwningTeamId is [JsonIgnore]). So the request NAMES an existing resource, the destination container. Today's Permanent waiver at :573 ("CREATE. There is no pre-existing resource") is therefore not true as written. The sweep's S-36 chain names this route as step 1.
+
+ROUTE COUNT AT AUTHORING. These figures come from an independent Python approximation of the scanner over the work tree, with the aggregator prefixes applied.
+- 120 files and 431 registrations: 185 GET, 191 POST, 26 DELETE, 19 PUT, 5 PATCH via MapPatch, plus 3 MapMethods and 2 MapHealthChecks.
+- Under the credit scheme in this task:
+  - 109 are credited per-resource;
+  - 83 are admin-only;
+  - 16 are anonymous;
+  - 223 carry no credit.
+- Of the 90 sweep keys, 74 are uncredited (NoDecision) and 16 sit on already-credited routes (InsufficientDecision).
+- The other 149 uncredited routes and the 16 anonymous routes need a Permanent basis, a HandlerDecision or an UNOWNED-NEW waiver.
+- The executor's real scanner output is authoritative; record it in the task note.
+
+THE SWEEP LEDGER. Each entry gives the sweep table's S-NN id, its severity (c = critical, h = high, m = medium, l = low), the route key as the extended scanner produces it, and a Gap letter. Gap N = NoDecision: the route has no credit today. Gap I = InsufficientDecision: the route is already credited, but the credited check does not cover the finding.
+- 159 (events; GitHub #1098; Api/Events/EventEndpoints.cs:38-118):
+  - S-11 c POST /api/v1/events/{id:guid}/cancel N
+  - S-12 c GET /api/v1/events N
+  - S-13 c GET /api/v1/events/{id:guid} N
+  - S-14 c DELETE /api/v1/events/{id:guid} N
+  - S-15 c PUT /api/v1/events/{id:guid} N
+  - S-16 c POST /api/v1/events/{id:guid}/complete N
+  - S-37 h GET /api/v1/events/{id:guid}/logs N
+  - S-38 h POST /api/v1/events N
+- 160 (Api/Dataverse):
+  - S-09 c POST /api/dataverse/fetch N (FetchEndpoints.cs:54)
+  - S-10 c GET /api/dataverse/record/{entityLogicalName}/{id:guid} N (RecordEndpoints.cs:44)
+- 161 (communications; CommunicationEndpoints.cs:55-384):
+  - S-07 c POST /api/communications/send N
+  - S-07 c POST /api/communications/send-bulk N
+  - S-08 c POST /api/communications/template/render N (CommunicationTemplateEndpoints.cs:38)
+  - S-33 h POST /api/communications/{id:guid}/archive N
+  - S-34 h POST /api/communications/{id:guid}/suggest-associations N
+  - S-35 h POST /api/communications/{communicationId:guid}/create-task N
+  - S-58 m POST /api/communications/threads N
+  - S-59 m POST /api/communications/{id:guid}/confirm-affinity N
+  - S-60 m POST /api/communications/proposals/{reviewLogId:guid}/dismiss N
+  - S-61 m POST /api/communications/proposals/{reviewLogId:guid}/create-task/apply N
+  - S-62 m POST /api/communications/accounts/{id:guid}/verify N
+  - S-79 l GET /api/communications/{id:guid}/status N
+- 162 (AnalysisEndpoints; Api/Ai/AnalysisEndpoints.cs:59-138):
+  - S-01 c POST /api/ai/analysis/{analysisId:guid}/export N
+  - S-02 c GET /api/ai/analysis/{analysisId:guid} N
+  - S-22 h POST /api/ai/analysis/promote N
+  - S-50 m POST /api/ai/analysis/{analysisId:guid}/save N
+  - S-51 m POST /api/ai/analysis/fork N
+  - S-52 m POST /api/ai/analysis/execute I (AddAnalysisExecuteAuthorizationFilter checks Read; the handler writes)
+- 163 (RAG, knowledge, insights, workspace AI):
+  - S-03 c POST /api/ai/knowledge/test-search N
+  - S-26 h GET /api/ai/knowledge/indexes/{indexName}/documents N
+  - S-27 h DELETE /api/ai/knowledge/indexes/{indexName}/documents/{documentId} N
+  - S-28 h POST /api/ai/knowledge/indexes/reindex/{documentId} N
+  - S-04 c POST /api/ai/rag/index-file N
+  - S-05 c POST /api/ai/rag/search N
+  - S-06 c POST /api/ai/rag/index N
+  - S-06 c POST /api/ai/rag/index/batch N
+  - S-30 h DELETE /api/ai/rag/{documentId} N
+  - S-30 h DELETE /api/ai/rag/source/{sourceDocumentId} N
+  - S-20 h POST /api/admin/knowledge/index-reference/{knowledgeSourceId} N
+  - S-21 h DELETE /api/admin/knowledge/index-reference/{knowledgeSourceId} N
+  - S-49 m POST /api/admin/knowledge/index-references N
+  - S-17 c POST /api/insights/ask N
+  - S-40 h POST /api/insights/assistant/query N
+  - S-41 h POST /api/insights/search N
+  - S-46 h POST /api/workspace/ai/summary N
+- 164 (chat, agent, playbooks, prompts, record match):
+  - S-24 h POST /api/ai/chat/sessions N
+  - S-23 h PATCH /api/ai/chat/sessions/{sessionId}/context I (SessionOwnershipFilter)
+  - S-25 h POST /api/ai/chat/sessions/{sessionId}/messages I (SessionOwnershipFilter)
+  - S-53 m POST /api/ai/chat/sessions/{sessionId}/dispatch I (SessionOwnershipFilter)
+  - S-18 h POST /api/agent/message N
+  - S-19 h POST /api/agent/run-playbook N
+  - S-78 l GET /api/agent/playbooks/status/{jobId:guid} N
+  - S-29 h POST /api/ai/playbooks/{id:guid}/execute I (PlaybookAccessAuthorizationFilter)
+  - S-54 m PUT /api/ai/playbooks/{id:guid}/nodes/reorder I (PlaybookOwnerAuthorizationFilter)
+  - S-55 m GET /api/ai/playbooks/by-id/{id} N
+  - S-55 m GET /api/ai/playbooks/by-name/{name} N
+  - S-56 m GET /api/ai/prompts N
+  - S-56 m POST /api/ai/prompts N
+  - S-57 m GET /api/ai/prompts/{id} N
+  - S-57 m PUT /api/ai/prompts/{id} N
+  - S-57 m DELETE /api/ai/prompts/{id} N
+  - S-57 m POST /api/ai/prompts/{id}/render N
+  - S-31 h POST /api/ai/document-intelligence/match-records N
+  - S-32 h POST /api/ai/document-intelligence/associate-record N
+- 165 (SpeAdmin, Admin/RecordMatching):
+  - S-44 h POST /api/spe/bulk/delete I (admin-only credit)
+  - S-72 m POST /api/spe/bulk/permissions I (admin-only)
+  - S-45 h PUT /api/spe/configs/{id:guid} I (admin-only)
+  - S-73 m GET /api/spe/configs/{id:guid} I (admin-only)
+  - S-74 m POST /api/spe/configs I (admin-only)
+  - S-75 m DELETE /api/spe/configs/{id:guid} I (admin-only)
+  - S-47 m POST /api/admin/record-matching/sync N
+  - S-48 m POST /api/admin/record-matching/sync-incremental N
+  - S-77 l GET /api/admin/record-matching/status N
+- 166 (the rest):
+  - S-36 h PUT /api/v1/documents/{id} I (DocumentAuthorizationFilter "write" checks the row, not the new SPE pointer)
+  - S-66 m GET /api/v1/documents N (today a Permanent waiver at :578 — WRONG per the sweep; it becomes Pending)
+  - S-39 h POST /api/v1/external-access/close-project I (DelegationRuleFilter checks the project; the handler acts on a caller-named container)
+  - S-42 h GET /api/memory/records/{entityLogicalName}/{id:guid} N
+  - S-43 h POST /api/memory/pins N
+  - S-68 m PUT /api/memory/pins/{pinId} N
+  - S-63 m POST /api/compose/documents/{documentSpeId}/promote N
+  - S-64 m POST /api/compose/upload N
+  - S-65 m POST /api/compose/document/{documentSpeId}/check-changes N
+  - S-80 l POST /api/compose/sessions/{sessionId}/annotations I (SessionOwnershipFilter checks the claim tenant; the write uses the body tenant)
+  - S-67 m POST /api/v1/field-mappings/push N
+  - S-69 m POST /api/office/quickcreate/{entityType} I (QuickCreateSourceAccessFilter gates only the source read)
+  - S-70 m POST /api/reporting/export N
+  - S-71 m GET /api/reporting/embed-token N
+  - S-81 l GET /api/reporting/reports/{reportId:guid} N
+  - S-76 m POST /api/v1/work-assignments N
+  - S-82 l GET /api/workspace/state N
+Totals: 82 findings and 90 route keys (159: 8, 160: 2, 161: 12, 162: 6, 163: 17, 164: 19, 165: 9, 166: 17). There are 74 N keys and 16 I keys. By finding, severity is 17 critical, 29 high, 30 medium and 6 low.
+
+THE SWEEP'S SIX REFUTED ROUTES, and how the extended guard sees them.
+- POST /api/finance/matters/{matterId}/recalculate and POST /api/finance/projects/{projectId}/recalculate: credited by FinanceAuthorizationFilter (task 130). No waiver.
+- POST /api/v1/external-access/revoke: credited by the adminGroup's DelegationRuleFilter. No waiver.
+- GET /api/reporting/reports: refuted only because of the Reporting role filter, which this task does NOT credit. It is flagged. Classify it by reading the handler: Permanent ReferenceData only if it lists a configured catalog and nothing caller-chosen; otherwise UNOWNED-NEW.
+- GET /api/ai/chat/context-mappings/analysis/{analysisId} (Api/Ai/AnalysisChatContextEndpoints.cs:37). The skeptic found it fails safe only because the app-only Retrieve asks for attributes that do not exist (Services/Ai/Chat/AnalysisChatContextResolver.cs:267-277). That is not an authorization decision. It is flagged; record it as Pending UNOWNED-NEW (a latent IDOR), not Permanent.
+- GET /api/ai/playbooks/runs/{runId:guid}, /stream, /detail and POST .../cancel (Api/Ai/PlaybookRunEndpoints.cs:56-95).
+  - The sweep refuted these because PlaybookOrchestrationService is Scoped (Infrastructure/DI/AnalysisServicesModule.cs:1302) and _activeRuns is an instance field (Services/Ai/PlaybookOrchestrationService.cs:61), so another caller's run is never reachable.
+  - Re-verify. If it holds, record Permanent CallerScopedOnly citing both anchors, and note to the main session that these routes can then never find a run started by an earlier request (a functional defect). If it does not hold, record UNOWNED-NEW.
+
+PRELIMINARY CLASSIFICATION of the uncredited, non-sweep routes. This is the author's reading at authoring. The executor MUST read each handler and decide. The categories are the PermanentBasis values defined in the constraints.
+- Anonymous at authoring (16 routes). Each needs Permanent AnonymousByDesign, and the reason must name the compensating control and its file:line; otherwise UNOWNED-NEW.
+  - In Infrastructure/DI/EndpointMappingExtensions.cs:59-125: GET /healthz, GET /healthz/catalog, GET /healthz/dataverse, GET /healthz/dataverse/crud, GET /healthz/dataverse/doc/{id}, GET /ping, GET /status.
+  - GET /api/config/client and GET /api/config (Api/ConfigEndpoints.cs:60, :83).
+  - GET /api/office/health (Api/Office/OfficeEndpoints.cs:76).
+  - POST /api/office/save-debug: mapped only inside env.IsDevelopment() (OfficeEndpoints.cs:117-119).
+  - POST /api/registration/demo-request (Api/RegistrationEndpoints.cs:22).
+  - POST /api/onboarding/consent-callback: HMAC-verified per its description (read the handler).
+  - POST /api/compose/webhooks/spe-doc-changed: RequireWebhookSignature, plus clientState in the handler; both mandatory.
+  - POST /api/communications/incoming-webhook (Api/CommunicationEndpoints.cs:400, RequireWebhookSignature :402; read its handler).
+  - POST /api/communications/acs/eventgrid (Api/AcsEventGridEndpoints.cs:30). The shared secret is OPTIONAL: it is enforced only when Communication:Acs:EventGridIngress:ValidationKey is set (Services/Communication/Acs/AcsEventGridIngressService.cs:68-69, "optional shared-secret"). So the compensating control is not mandatory, and the route is UNOWNED-NEW unless another mandatory control is found.
+- NEW, and not anonymous-by-design: GET /healthz/dataverse/doc/{id} (background item (i)). Pending UNOWNED-NEW, severity high.
+- Candidate HandlerDecision. Verify that the handler, or the named service method it calls, consults a vocabulary seam covering EVERY caller-chosen id the handler acts on.
+  - Communications reads through CommunicationThreadReadService, which uses IImpersonatedCommunicationQuery and ICommunicationAccessFilter: GET /api/communications/threads/{threadId:guid}/messages, .../unread-count, GET /api/communications/threads, GET /api/communications/by-regarding/{entityType}/{id:guid}, GET /api/communications.
+  - GET /api/communications/{id:guid}/attachments/text, via CommunicationAttachmentTextService.
+  - GET /api/communications/queue-feed, via CommunicationQueueFeedService.
+  - POST /api/communications/proposals/{reviewLogId:guid}/apply and /undo, and POST /api/communications/{communicationId:guid}/tasks/{taskId:guid}/undo. Comments say the write runs under MSCRMCallerID impersonation, but CommunicationProposalApplyService and CommunicationCreateTaskApplyService reference only ICallerSystemUserResolver by name. Find the real seam, or classify UNOWNED-NEW.
+  - POST /api/ai/daily-briefing/render and /email (IImpersonatedCommunicationQuery).
+  - GET /api/documents/{documentId}/permissions and POST /api/documents/permissions/batch (Api/PermissionsEndpoints.cs, AuthorizationService in the handler).
+  - The eight /api/workspace/layouts, sections and templates routes (WorkspaceLayoutService owner check).
+  - POST /api/ai/rag/send-to-index (handler-level GetCallerRecordAccessAsync, Api/Ai/RagEndpoints.cs:765).
+  - The 17 /api/v1/external/projects..., /matters..., /workassignments... and /todos... routes, and GET /api/v1/external/me and /me/entitlements (CallerPrincipal rights: HoldsReadOnProject, RightsForRoot and AccessRights in ExternalProjectDataEndpoints.cs).
+  - The FIVE external module data routes under /api/v1/external/api/dataverse/ (IsRecordAccessible, Tier2ScopeFilterInjector). For the three schema/view routes, the sweep's noteworthy list says they disclose saved-query FetchXML/LayoutXML of registered entities regardless of Tier-2 scope: a schema read, so ReferenceData is a candidate.
+  - The three /api/office/communications routes and GET /api/office/search/entities. Today these are Permanent (IDataverseUserClient / impersonated query); convert them to HandlerDecision.
+  - The Compose routes not in the sweep: load, refresh-profile, save, create-on-save, apply-template, checkout, checkin, heartbeat, pull-annotations, reanchor-annotations, active-document, project.
+    - The sweep's noteworthy list says: refresh-profile writes app-only on SPE-read-only rights; save rebinds a body-named session; active-document records a body document id unchecked; load reads a body-named record's origin app-only.
+    - Each of those is UNOWNED-NEW unless the handler proves otherwise.
+- Candidate CallerScopedOnly:
+  - GET /api/me, GET /api/me/capabilities, GET /api/users/me/memberships/{entityType}.
+  - The four /api/memory/user routes, GET /api/memory/pins, and DELETE /api/memory/pins/{pinId} (verify the owner check).
+  - The three /api/notifications routes (verify that dismiss checks the owner).
+  - GET /api/workspace/portfolio, GET /api/workspace/briefing.
+  - GET /api/ai/chat/sessions (list), GET and PUT /api/ai/chat/event-rules/opt-out.
+  - The four playbook-run routes above.
+  - GET /api/ai/playbooks (verify that it lists only the caller's own or shared playbooks).
+- Candidate ReferenceData:
+  - GET /api/ai/capabilities, the three handler catalog routes, GET /api/ai/model-deployments and /{id:guid}, the two /api/ai/nda-standard routes, the five /api/ai/scopes routes.
+  - GET /api/ai/chat/context-mappings and /standalone, GET /api/ai/chat/playbooks (verify), GET /api/ai/knowledge/indexes/health.
+  - GET /api/ai/playbooks/public and /templates.
+  - GET /api/ai/feedback/playbook/{id} and /capability/{id} (tenant-wide counts).
+  - The three /api/v1/field-mappings profile/validate routes (configuration) and the three /api/navmap routes (metadata).
+  - GET /api/dataverse/savedquery/{savedQueryId:guid} (system view definitions; verify that it cannot return a userquery).
+  - GET /api/office/search/matter-types (existing), GET /api/reporting/status, GET /api/workspace/health, GET /api/agent/playbooks (verify which playbooks it lists).
+- Candidate CreateWithNoPriorResource, under the STRICT definition in the constraints:
+  - PUT /api/obo/me/files/{*path} (existing; no container parameter).
+  - POST /api/ai/playbooks.
+  - POST /api/communications/threads/direct and POST /api/communications/draft (verify that neither names an existing record).
+  - POST /api/compose/documents/create-on-save (verify).
+  - POST /api/v1/documents does NOT qualify as written (background item (j)): re-verify, and classify as UNOWNED-NEW if the body ContainerId (or any other caller-chosen id) is written without a caller-rights check.
+- Candidate CallerSuppliedContentOnly:
+  - POST /api/ai/rag/embedding, POST /api/ai/daily-briefing/summarize and /narrate.
+  - POST /api/workspace/files/extract-text and /summarize.
+  - POST /api/workspace/matters/pre-fill, POST /api/workspace/projects/pre-fill, POST /api/workspace/matters/ai-summary (verify).
+  - POST /api/workspace/calculate-scores and POST /api/workspace/events/{id:guid}/scores (the route comment says the client supplies the scoring inputs; verify that nothing is read by id).
+  - POST /api/compose/project.
+- Candidate OperatorGateInHandler: GET /api/diagnostics/tenant-container-resolver (task 081: a positively-classified app-only caller AND an operator allow-list in the handler).
+- NEW candidates (UNOWNED-NEW unless reading the handler shows a real decision):
+  - DELETE /api/ai/chat/context-mappings/cache: any signed-in user evicts every cached mapping. An operator action with no admin policy.
+  - GET /api/resilience/circuits, /circuits/{serviceName} and /health: operator diagnostics behind sign-in only.
+  - POST /api/ai/feedback: the body SessionId is not owner-checked.
+  - GET /api/ai/chat/sessions/by-analysis/{analysisId:guid}: the wrong-domain filter makes it always 403, and the handler has no owner check.
+  - GET /api/ai/chat/context-mappings/analysis/{analysisId}: refuted by accident (above).
+  - POST /api/ai/chat/export/word: the body SessionId is unchecked and the upload is OBO. It may be Permanent if the session id selects nothing sensitive.
+  - POST /api/communications/threads/{threadId:guid}/rename, PATCH .../pin, DELETE /api/communications/threads/{threadId:guid}, DELETE /api/communications/{id:guid}: an impersonated READ check, then an app-only WRITE (Read is not Write).
+  - POST, PUT and DELETE /api/reporting/reports: an Author/Admin role, any workspaceId.
+  - The Compose noteworthy routes above.
+  - The ACS eventgrid route, if its secret is optional.
+  - POST /api/v1/documents, if background item (j) holds.
+
+NOT FLAGGED BUT WORTH THE MAIN SESSION'S ATTENTION. These are credited, so the guard cannot see them. Record them in the task note; do not waive them.
+- Admin-credited:
+  - The /api/spe/environments routes and GET/POST /api/spe/dashboard/* have no business-unit scoping.
+  - GET /api/spe/bulk/{operationId}/status has no starter check.
+  - SpeAdminTenantScope.CanAccessConfigAsync fails open (above).
+  - POST /api/spe/containertypes/{typeId}/register sends an app-only token to a caller-supplied host.
+  - The SystemAdmin policy's "admin" scope substring.
+- Per-resource-credited, with a defect the sweep noted:
+  - Api/Filters/PlaybookAuthorizationFilter.cs:125 compares playbook.OwnerId (a systemuserid) with the Entra oid. That probably denies every owner (fail closed, functional breakage).
+  - POST /api/ai/chat/sessions/{sessionId}/documents/from-document answers 404 or 422 before its in-handler check (an existence oracle).
+  - POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve re-checks no target at approve time.
+  - EntityAccessFilter passes through when SaveRequest.TargetEntity is null (EntityAccessFilter.cs:234-244).
+These belong with tasks 164, 165 or 166 or with a new task. This task only lists them.</background>
+    <relevant-files>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file role="new">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (recommended: make the class partial and move the waiver list, the sweep ledger, the HandlerDecision declarations, NonDecidingAttachments and AdminOnlyRoutes here, so tasks 159-166 conflict on one data file rather than on the rules; optional, record the choice in the note)</file>
+      <file role="new">projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/TASK-INDEX.md (this task's status cell only)</file>
+      <file role="read">projects/unified-access-control-r2/notes/route-authorization-sweep-2026-10-02.md</file>
+      <file role="read">projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md (round 9)</file>
+      <file role="read">projects/unified-access-control-r2/notes/task-074-route-authorization-forcing-function.md</file>
+      <file role="read">C:/Users/RALPHS~1/AppData/Local/Temp/claude/c--code-files-spaarke-wt-unified-access-control-r2/993ea642-9455-4e0e-8f57-ed99084c5e37/scratchpad/idor-sweep.json (the sweep's full verifier traces; a session scratch file — if it is gone, the sweep note above is the source of truth)</file>
+      <file role="read">tests/CLAUDE.md (§ Structural fitness functions: negative + positive control, written reason per allow-list entry, maintenance procedure in the file)</file>
+      <file role="read">tests/Spaarke.ArchTests/SessionOwnershipGuardTests.cs (the sibling guard for {sessionId} routes; do not duplicate it)</file>
+      <file role="read">tests/Spaarke.ArchTests/SourceScan.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/AnalysisAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/AiAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/CommunicationAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Services/Dataverse/DataverseAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/SessionOwnershipFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/DelegationRuleFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/SpeAdminTenantScopeFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/WorkspaceAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Agent/AgentAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Reporting/ReportingAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/CallerPrincipalAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/PlaybookAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/BulkDownloadAuthorizationFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/Filters/WebhookSignatureFilter.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Api/SpeAdminEndpoints.cs, Api/ComposeEndpoints.cs and Api/ExternalAccess/ExternalAccessEndpoints.cs (the three aggregators)</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file role="read">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="read">.claude/skills/bff-deploy/SKILL.md (§9c uses GET /healthz/dataverse/doc/{id} as a smoke check: name it in that route's waiver reason)</file>
+      <file role="read">every endpoint file the census returns (each route's handler is read before its classification is written)</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs TheSetOfPolicyOnlyRoutesIsPinned (:1063-1100) — the pinned-set pattern to copy for AdminOnlyRoutes and SweepFindings</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs NoAuthorizationFilterIsDecorative pair rule (:1134-1162) — the "a filter alone or the filter plus its endpoint decides" shape to copy for HandlerDecision's hop check</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="074" status="completed">Built RouteAuthorizationGuardTests. This task extends it; it does not replace it. Every existing control keeps passing: the four historical misses, Rule B's decorative fixture, the Office baseline control and the nested-group control. The only exception is a fixture written in an attachment form the real code does not use; it is updated to the real form, and each update is explained in a comment.</dependency>
+      <dependency task="159" status="pending, running at the same time">Fixes the eight events routes. It deletes their Pending waivers and sets their ledger ResolvedBy.</dependency>
+      <dependency task="160" status="pending, running at the same time">Fixes S-09 and S-10. It deletes their waivers and sets ResolvedBy.</dependency>
+      <dependency task="161" status="pending, running at the same time">Fixes the 12 communications keys.</dependency>
+      <dependency task="162" status="pending, running at the same time">Fixes the six analysis keys.</dependency>
+      <dependency task="163" status="pending, running at the same time">Fixes the 17 RAG, knowledge, insights and workspace-AI keys.</dependency>
+      <dependency task="164" status="pending, running at the same time">Fixes the 19 chat, agent, playbook, prompt and record-match keys.</dependency>
+      <dependency task="165" status="pending, running at the same time">Fixes the nine SPE admin and record-matching admin keys.</dependency>
+      <dependency task="166" status="pending, running at the same time">Fixes the remaining 17 keys.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the whole task. Change NO file under src/. Change no client code, script, Dataverse or Azure resource either. The deliverable is the ArchTest guard, its data, and the task note. If a registration cannot be parsed without reformatting product code, fix the scanner. If the scanner cannot be made to parse it, fire escalation trigger 3. Do not fix any finding here: the fixes are tasks 159-166.</constraint>
+    <constraint source="ADR-003">Scope: the guard's own decisions. Fail closed. Each of the following is a VIOLATION, never a skip or a pass:
+- an unparseable registration;
+- an unresolved route path or group prefix;
+- a GroupGated file whose aggregator binding cannot be found;
+- two registrations producing the same route key;
+- a HandlerDecision whose handler or hop method cannot be located, or whose hop resolves to more than one body without the seam in every body;
+- an unknown PermanentBasis;
+- an attachment form used on a route that no classification list names;
+- a file the census finds that GovernedFiles does not list.</constraint>
+    <constraint source="project">Scope: census and scanner.
+- EndpointFiles() selects a file by the SAME registration vocabulary the scanner reads: Map{Verb}, MapMethods and MapHealthChecks. A future file registering only MapMethods must be counted.
+- Aggregator binding resolves both call forms, `group.MapXEndpoints()` and `XEndpoints.MapXEndpoints(group)`, from the aggregator's source. The aggregator files Api/SpeAdminEndpoints.cs and Api/ComposeEndpoints.cs register no route directly and are not census files; they are read as aggregators. The bound group's prefix and chain are inherited, including nested groups inside the child file.
+- A registration on a SECOND, root builder parameter (MapComposeSyncEndpoints's `routes`) is a root registration. Its key is its literal path and its chain is its own.
+- Rule E (GroupGatedFilesRegisterNoAbsolutePaths) applies only to registrations on the aggregator-bound group parameter. It must not flag the Compose webhook on `routes`.
+- MapMethods verbs are read from the collection-expression form ["PATCH"], the new[] { "PATCH" } form and the new string[] { ... } form. Any other form is unparseable.</constraint>
+    <constraint source="project">Scope: credit.
+- Replace FilterMarker's generic "contains Authorization/Access" alternations with an explicit allow-list of credited per-resource attachment forms, one entry per form.
+- Each entry carries the filter file and a written reason of at least 60 characters naming what the filter checks and where (file:line).
+- The allow-list at authoring (verify each by reading the filter):
+  - .AddDocumentAuthorizationFilter(...), .AddContainerDocumentAuthorizationFilter(), .AddBulkDownloadAuthorizationFilter();
+  - .AddRecordSearchAuthorizationFilter(), .AddSemanticSearchAuthorizationFilter(), .AddVisualizationAuthorizationFilter(), .AddVisualizationContentAuthorizationFilter();
+  - .AddFinanceAuthorizationFilter(...), .AddRecordRouteAccessAuthorizationFilter(...);
+  - .AddEntityAccessFilter(), .AddJobOwnershipFilter(), .AddTodoSourceAccessFilter(), .AddQuickCreateSourceAccessFilter(), .AddOfficeVersionSaveAuthorizationFilter();
+  - .AddPlaybookAccessAuthorizationFilter(), .AddPlaybookOwnerAuthorizationFilter();
+  - .AddSessionOwnershipFilter() (new), .AddDelegationRuleFilter() (new);
+  - .AddAnalysisExecuteAuthorizationFilter() (and NOT .AddAnalysisRecordAuthorizationFilter());
+  - .AddDataverseAuthorizationFilter(EntitySource.FromRouteValue ...) only.
+- Do not list a form no route uses (FromSavedQueryEntity, .AddEndpointFilter&lt;BulkDownloadAuthorizationFilter&gt;, .AddEndpointFilter&lt;EntityAccessFilter&gt;). A test fails on an allow-list entry that no route attaches.
+- Rule A and Rule B both derive from this one list: keep the "one list, two consumers" property (:1880-1885). Each credited filter's file is inspected by Rule B.</constraint>
+    <constraint source="project">Scope: the attachment-form census. Every authorization-shaped call that appears in any route chain (route or group level) must be named in exactly ONE of these lists:
+- the credited allow-list;
+- the four admin mechanisms;
+- NonDecidingAttachments;
+- a NotAuthorization list. Each NotAuthorization entry carries a reason. At authoring it holds .AddOfficeAuthFilter, .AddOfficeRateLimitFilter, .AddIdempotencyFilter, .AddTenantEnvironmentRoutingFilter, .AddEndpointFilter&lt;DocumentUrlIdentityFilter&gt;, the inline .AddEndpointFilter(async ...) lambda, .RequireWebhookSignature(...), .RequireRateLimiting(...), .RequireAuthorization() and .RequireAuthorization(AuthPolicies.ExternalCollaboration).
+"Authorization-shaped" means any .Add*Filter call, any .AddEndpointFilter call, any .RequireAuthorization call, and .RequireWebhookSignature. A form in none of the lists fails the build naming the file:line, so the next new filter must be classified before it can merge. A form in two lists fails.</constraint>
+    <constraint source="project">Scope: non-credited forms.
+- Record each known pass-through as a NonDecidingAttachments entry with:
+  - the attachment form;
+  - the filter file;
+  - the reason;
+  - the source evidence;
+  - an OwningTask — the fix task whose POML modifies that filter: AnalysisRecord mode 162, AiAuthorizationFilter 164, CommunicationAuthorizationFilter 161, DataverseAuthorizationFilter record/fetch modes 160, TenantAuthorizationFilter 163, AgentAuthorizationFilter 164, SpeAdminTenantScopeFilter 165, or "-" for a filter that is an identity or role precondition by design: WorkspaceAuthorizationFilter, CallerPrincipalAuthorizationFilter, ReportingAuthorizationFilter.
+- Pin each entry's evidence with a test that reads the filter source and asserts that the pass-through still exists:
+  - AnalysisAuthorizationFilter.AuthorizeAnalysisAccessAsync returns next without a decision-service call;
+  - AiAuthorizationFilter returns next when no document id is extracted, and no endpoint handler binds DocumentAnalysisRequest;
+  - CommunicationAuthorizationFilter references no decision service;
+  - DataverseAuthorizationFilter.ResolveEntities handles FromRouteValueWithRecord in the FromRouteValue branch, returning the entity name only and never reading the record id, and returns entity names only for FromFetchXmlBody;
+  - TenantAuthorizationFilter passes through when no tenant is found;
+  - WorkspaceAuthorizationFilter, AgentAuthorizationFilter and CallerPrincipalAuthorizationFilter reference no decision service;
+  - ReportingAuthorizationFilter decides from role claims;
+  - SpeAdminTenantScopeFilter passes through without a configId.
+- When a pin fails because a filter was fixed, the failure message gives this remedy: delete the NonDecidingAttachments entry, add the form to the credited allow-list if it now decides, and re-run Rule A.
+- Correct the ClaimOnlyFilters reasons for CommunicationAuthorizationFilter (:1211-1215) and AgentAuthorizationFilter (:1207-1210). They must no longer claim that per-record scoping happens elsewhere, or that the agent gateway serves no document data.</constraint>
+    <constraint source="project">Scope: Rule B's decision vocabulary.
+- DecisionServices and CallerContextSeams tokens match WHOLE identifiers (an identifier boundary on both sides, outside comments), not substrings. Add "IAiAuthorizationService" as its own DecisionServices entry, with a reason naming AnalysisAuthorizationFilter's DocumentAccess path (:139).
+- Re-run Rule B and record in the note every filter whose verdict changed. Add a token only after reading that the filter calls it. A filter that fails only because it relied on a substring match is either given its real token with a reason, or reported (escalation trigger 5).
+- Keep the RuleB_NegativeControl prose control passing.</constraint>
+    <constraint source="project">Scope: admin credit.
+- Exactly four mechanisms count as an admin policy:
+  - RequireAuthorization("SystemAdmin");
+  - RequireAuthorization(AuthPolicies.RagApiKey);
+  - .AddSpeAdminAuthorizationFilter() (including when inherited from the /api/spe aggregator);
+  - .AddRegistrationAuthorizationFilter().
+- ReportingAuthorizationFilter is a module role gate, not admin. RequireAuthorization(AuthPolicies.ExternalCollaboration) is scheme selection, not admin.
+- A route credited ONLY by an admin mechanism must be in a pinned AdminOnlyRoutes set. Copy TheSetOfPolicyOnlyRoutesIsPinned, so that both "added" and "removed" fail. Group the set by file, with one written reason per group stating why the surface is an operator surface.
+- A route that also carries a credited per-resource filter is per-resource, not admin-only.</constraint>
+    <constraint source="project">Scope: HandlerDecision.
+- A route whose decision is in its handler is credited only by a per-route declaration with these fields:
+  - the route key;
+  - the handler method name in the endpoint file;
+  - the decision seam;
+  - an optional chain of up to two "ConcreteType.Method" hops the handler calls;
+  - a reason citing file:line.
+- The test locates the handler body: the method by name, or the inline lambda in the registration statement. It follows each declared hop to that method's body, finding the single file under src/server/** (excluding obj/bin) that declares the concrete type. That covers Spaarke.Core and Spaarke.Dataverse as well as the BFF. The test passes only when the last body contains the seam token outside comments.
+- An interface type in a hop is refused (name the implementation). If a method name has several overloads in the type, every overload must contain the seam.
+- The seam must be in DecisionServices, or in a new, separately listed CallerContextSeams vocabulary in which each entry has a reason and the type's file. Candidates to verify, all of which exist at authoring:
+  - IDataverseUserClient (Infrastructure/Dataverse/IDataverseUserClient.cs);
+  - IImpersonatedCommunicationQuery (Services/Communication/IImpersonatedCommunicationQuery.cs);
+  - DataverseImpersonation (src/server/shared/Spaarke.Dataverse/DataverseImpersonation.cs);
+  - CallerRecordAccessProbe (Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs, already in DecisionServices);
+  - the CallerPrincipal rights methods HoldsReadOnProject and RightsForRoot;
+  - IsRecordAccessible;
+  - Tier2ScopeFilterInjector (Api/ExternalAccess/Tier2ScopeFilterInjector.cs);
+  - an OBO SPE call, only where SPE's check covers every caller-chosen id.
+- Do not admit a general service type (this is the reason IOfficeService was refused, :1190-1192).
+- A HandlerDecision is allowed only when the decision covers EVERY caller-chosen identifier the handler acts on. A decision that covers some of them is a finding, not a credit.
+- State in the declaration list's maintenance comment that this is a PRESENCE check, the same limit Rule B has. The behavioural deny tests of tasks 159-166 are the proof, not this rule.</constraint>
+    <constraint source="project">Scope: waivers.
+- Keep the Waiver record and its maintenance procedure, and add the following fields:
+  - Permanent waivers carry a PermanentBasis from the closed set {AnonymousByDesign, CallerScopedOnly, ReferenceData, CreateWithNoPriorResource, CallerSuppliedContentOnly, OperatorGateInHandler}.
+  - Pending waivers carry a Gap from {NoDecision, InsufficientDecision}.
+  - An InsufficientDecision waiver carries ObservedMechanisms: the exact, normalized mechanism fingerprint of the route when the waiver was written. The fingerprint is built only from authorization-relevant forms: sorted distinct credited, admin and NonDeciding attachment names; "policy:NAME"; "anonymous"; and "handler:SEAM" for a HandlerDecision. NotAuthorization forms are excluded, so adding a rate limiter does not make a waiver stale.
+- Definitions (each enforced by reading the handler; cite file:line in the reason):
+  - CallerScopedOnly: the route reads or writes only rows keyed by a server-derived caller identity (oid, systemuserid, contact id), and takes no caller-chosen id of another principal's record.
+  - ReferenceData: it returns configuration, catalog or schema content that is not customer record content, and takes no record id.
+  - CreateWithNoPriorResource: the request names NO existing record, container, drive, owner, parent or regarding id.
+  - CallerSuppliedContentOnly: it processes only bytes or text in the request and reads no stored record, index or file by any id.
+  - AnonymousByDesign: the route is .AllowAnonymous(), and a MANDATORY compensating control is named with file:line. An optional control does not count.
+  - OperatorGateInHandler: the handler denies every caller outside an operator allow-list or app-only classification before any data access.
+- Pending waiver OwningTask values form a closed set: "159" through "166" and "UNOWNED-NEW". The existing Permanent owner strings ("076", "#1020", "#1021", "-") are kept.
+- Never add a Permanent waiver to make the build green (maintenance rule 4, :362-363). Converting Permanent to Pending is allowed. Converting Pending to Permanent is forbidden; for sweep routes the ledger test enforces this, and elsewhere the reviewer enforces it.
+- If no basis in the closed set fits a route that is genuinely safe, fire escalation trigger 2 rather than inventing a basis.</constraint>
+    <constraint source="project">Scope: the sweep ledger.
+- Add a pinned SweepFindings list with one entry per route key in the ledger above. Each entry holds: S-id, severity, route key, owning task, Gap, ResolvedBy = null, ProofTest = null.
+- Owning task strings are exactly "159" through "166".
+- The OwningTask and Gap of each sweep route's Pending waiver must equal the ledger's.
+- The 82 findings and 90 route keys in the background are the closed set. Do not add, drop or re-own an entry. If a key cannot be found on the branch, fire escalation trigger 4.
+- An entry resolves ONLY by credit. When ResolvedBy is set, the route must pass Rule A by a credited filter, a HandlerDecision or (for the admin-only SPE routes) its AdminOnlyRoutes entry, and it must carry NO waiver of any kind.
+- ProofTest must then be set to "{repo-relative test file}::{test method name}", and the test asserts that the file exists and contains that method name. That test is the fix task's behavioural deny test.
+- A fix task's "the query is the gate" shape (a list trimmed by an impersonated or delegated query) is recorded as a HandlerDecision, never as a Permanent waiver.
+- State in the ledger's maintenance comment that for InsufficientDecision entries the guard cannot see a fix made inside an already-credited filter or handler. That resolution is by declaration (ResolvedBy plus ProofTest), reviewed at code review.</constraint>
+    <constraint source="project">Scope: fixes that landed before this task runs. If a 159-166 commit is already on this branch:
+- Its fixed routes get no waiver. Their ledger entry has ResolvedBy set to that task and a ProofTest found in its commit.
+- If that commit left a waiver on a sweep route (for example a Permanent "query is the gate" waiver), convert it to the credit form it describes (HandlerDecision), delete the waiver, and record the conversion in the note.
+- If it cannot be expressed as a credit, fire escalation trigger 4.</constraint>
+    <constraint source="project">Scope: new findings.
+- A route the extended guard flags that is not in the sweep ledger is a NEW finding, unless reading its handler proves it fits a PermanentBasis (cite file:line in the reason).
+- Each NEW finding gets a Pending waiver with OwningTask "UNOWNED-NEW" and its Gap set honestly.
+- Each NEW finding also gets a row in the task note: route key, file:line, what a signed-in or anonymous caller can do, proposed severity, evidence, and any named consumer a fix would break.
+- Never waive a flagged route Permanent because it is inconvenient, and never omit one from the note.</constraint>
+    <constraint source="ADR-038">Scope: tests added. No Mock&lt;HttpMessageHandler&gt;, no DI-registration tests, no constructor null-check tests. These are source-analysis fitness functions on the ArchTests KEEP path (ADR-038 Amendment A1). Each rule carries a negative control and a positive control. The negative control fires on a seeded violation, ideally as an inline ScanText fixture so that it cannot go stale. The positive control does not fire on the sanctioned shape. Each rule's maintenance procedure lives in the test file (tests/CLAUDE.md).</constraint>
+    <constraint source="project">Scope: proof. Prove that every new rule bites by seeding:
+- Make the violation locally on the REAL file. Where a real-file edit would touch src/, which is forbidden, use an inline fixture instead.
+- Confirm that the rule fails naming the route, then restore.
+- Record each proof (rule, what was seeded, the failure text) in the task note, as tasks 078 and 079 did (:569-570, :548-549).</constraint>
+    <constraint source="project">Scope: test runs (project hard gate, project CLAUDE.md "Hard gates"). Before the PR, run each of these in full and record pass/skip/fail counts:
+- tests/Spaarke.ArchTests (NetArchTest included);
+- the BFF unit suite, tests/unit/Sprk.Bff.Api.Tests;
+- BOTH integration suites, tests/integration/Sprk.Bff.Api.IntegrationTests and tests/integration/Spe.Integration.Tests.
+No test may make a Dataverse or Azure call. A failure outside this task's files is reported with its test name, not hidden.</constraint>
+    <constraint source="ADR-002">Scope: the whole task. Introduce no Dataverse plugins (none are possible in a test-only task). Do not suggest a plugin as a fix in any waiver reason or note.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: the PR. This task changes no BFF source, so publish size and the CVE scan are unaffected; state that in the PR rather than measuring. Run /conflict-check before the PR: RouteAuthorizationGuardTests.cs is edited by tasks 159-166 and by other projects that add routes.</constraint>
+    <constraint source="owner 2026-09-30 (binding)">Scope: the whole task. No scope cuts and nothing deferred. Scope discovered during execution is added to this task, or recorded as an UNOWNED-NEW waiver for the main session; it is not dropped. There is no live gate: this task makes no live call.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (Amendment A1, the ArchTests KEEP path; §7 bans)</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/task-074-route-authorization-forcing-function.md</file>
+      <file>projects/unified-access-control-r2/notes/route-authorization-sweep-2026-10-02.md</file>
+      <file>projects/unified-access-control-r2/notes/session27-owner-decisions-and-research.md (round 9, the mandate and fix pattern)</file>
+    </files>
+    <patterns>
+      <pattern name="pinned route set" location="tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:1063-1100">Compute the set from the scanner, compare it with a pinned literal set, and fail on both "added" and "removed".</pattern>
+      <pattern name="filter/endpoint pair decides" location="tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:1134-1162">A filter with no decision of its own passes only if every endpoint that attaches it consults a decision service. This is the shape for HandlerDecision's hop check.</pattern>
+      <pattern name="self-liquidating waiver list" location="tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:987-1061">A Pending waiver whose route gains a gate, or whose route disappears, fails; the remedy is deletion.</pattern>
+      <pattern name="inline-fixture control" location="tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:1395-1489">Feed the scanner literal source text, so the negative control cannot go stale when real files change.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor FULL (TEST-MODIFYING). Re-verify every anchor in the background on the current branch. Run the existing guard once and record its state. Check whether any of tasks 159-166 has already landed on this branch (git log for their task ids) and record which ones.</step>
+    <step order="1">Scanner:
+- Add MapMethods (all three verb-array forms), MapHealthChecks (as GET) and same-file const route paths.
+- Add aggregator binding (both call forms, the second root-builder parameter, and nested groups in child files), verified against the aggregator's source.
+- Add the duplicate-key check.
+- Widen EndpointFiles() to the same vocabulary.
+- Extend ScannerAccountsForEveryRegistrationInTheGovernedFiles's independent regex to the same forms.
+- Classify the dead ProjectClosureEndpoint.MapProjectClosureEndpoint as NotMapped, with a zero-caller test, without deleting the file.</step>
+    <step order="2">Census: classify every file EndpointFiles() returns into GovernedFiles (RouteLevelGate, GroupGated or NotMapped; retire the file-level HandlerAuthorized scope). Add a test that the GovernedFiles set equals the census set. Keep ExpectedEndpointFileCount and its history comment, with a new entry for this task.</step>
+    <step order="3">Credit:
+- Build the credited allow-list, the attachment-form census with NotAuthorization, NonDecidingAttachments with its owners and pins, the admin mechanisms with AdminOnlyRoutes, and HandlerDecision with CallerContextSeams.
+- Define the AuthMechanism values they map to.
+- Switch DecisionServices to whole-identifier matching and add IAiAuthorizationService.
+- Update Rule B's inspected set to the allow-list. SessionOwnershipFilter and DelegationRuleFilter are now inspected; add an OWNER-COMPARISON ClaimOnly reason for SessionOwnershipFilter.
+- Correct the two ClaimOnly reasons.
+- Update the positive-control fixtures that use attachment forms the real code does not use.</step>
+    <step order="4">Rule A over every route. Add the waiver fields (Basis, Gap, ObservedMechanisms), the extended stale rules, and the sweep ledger with its ResolvedBy and ProofTest test.</step>
+    <step order="5">Classify every flagged route by reading its handler:
+- The 90 sweep keys are Pending per the ledger.
+- Every other flagged route is a verified Permanent basis, a verified HandlerDecision, or UNOWNED-NEW.
+- Convert the GET /api/v1/documents Permanent waiver to Pending (S-66, owner 166). Re-verify POST /api/v1/documents under the strict CreateWithNoPriorResource definition.
+- Report GET /healthz/dataverse/doc/{id} as soon as it is confirmed (escalation trigger 7), before finishing.</step>
+    <step order="6">Write the controls and the seeding proofs for every new rule. Update the file's maintenance procedure text (the class summary, the scope boundary comment and the waiver maintenance procedure) to describe the every-route rule.</step>
+    <step order="7">Run the four suites in full. Write the task note: scanner output counts, every UNOWNED-NEW finding, the not-flagged list for the main session, the Rule B verdict changes, the seeding proofs, and the landed-fix reconciliation. Update TASK-INDEX.md to ✅ [done].</step>
+  </steps>
+
+  <escalation>
+    <trigger>1. A route whose intended audience is unclear (an operator surface or a user surface), so that you cannot decide between admin credit and a per-resource requirement: STOP for that route, list it with both readings, and continue with the rest. Do not credit it as admin by default.</trigger>
+    <trigger>2. A flagged route that you are confident is safe but that fits none of the six PermanentBasis values: STOP and present the route and the proposed new basis with its definition, per CLAUDE.md §6. Do not widen an existing basis to cover it, and do not leave it unwaived.</trigger>
+    <trigger>3. A registration the scanner cannot parse without changing a file under src/: STOP, and name the file:line and the registration shape. Do not edit src/ and do not narrow the census.</trigger>
+    <trigger>4. A sweep ledger route key is not found on the branch (renamed, deleted, or already fixed by a landed 159-166 commit), or a landed fix cannot be expressed as a credit: record what you found (the commit, and the new key if it was re-keyed) and STOP for the main session's reconciliation of that entry. Do not invent a key, re-own an entry, or drop one silently.</trigger>
+    <trigger>5. A credit vocabulary addition (a filter, a seam, a decision-service token or an admin mechanism) that would credit a general-purpose service rather than an authorization decision: STOP and present the choice. Also STOP for an addition that would credit any sweep route OTHER than the 16 InsufficientDecision keys listed in the ledger. The 74 NoDecision keys must stay uncredited until their fix tasks act.</trigger>
+    <trigger>6. Crediting RequireAuthorization("SystemAdmin") while its assertion also passes a token whose scope merely contains "admin" (AuthorizationModule.cs:371-373): record it in the note and continue with the credit as specified. If you judge the admin credit unsafe because of it, STOP and present the option of making admin credit conditional on a fixed policy (a separate task) rather than changing the policy here.</trigger>
+    <trigger>7. Any UNOWNED-NEW finding you rate critical or high (GET /healthz/dataverse/doc/{id} is expected to be one): write it at the top of the task note and in current-task.md, send it to the main session if you run as a sub-agent, then continue. A live anonymous disclosure must not wait for the task to finish.</trigger>
+    <trigger>8. The number of UNOWNED-NEW findings exceeds 25: STOP after classification and send the list to the main session before writing the controls, because the owner may want to re-scope the fix tasks first.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs (task 074) is the only route-authorization guard. tests/Spaarke.ArchTests/SessionOwnershipGuardTests.cs covers only {sessionId} routes and their body-scoped twins. A grep for other route-guard tests at authoring found none. Every new element is data or a rule inside this one guard: the credited allow-list, the attachment-form census, NonDecidingAttachments, AdminOnlyRoutes, HandlerDecision, CallerContextSeams, PermanentBasis, Gap, ObservedMechanisms and SweepFindings.</existing>
+    <extension>Yes, extend. The task extends the existing guard in place and creates no new guard, test project or product type. One optional partial-class file holds its data, to keep the 2289-line file cohesive and to localize the 159-166 merge conflicts.</extension>
+    <cost-of-doing-nothing>The guard keeps reading 25 of 120 files and keeps crediting filters that decide nothing. The 82 routes the sweep found then stay invisible to the build, 17 of them critical, including cross-matter reads of analyses, events, records and RAG content. A fix that regresses passes CI, and the next sign-in-only route over an app-only client merges green. Without aggregator prefixes, a waiver for S-09 would also silently cover the external module route that produces the same fragment key. GET /healthz/dataverse/doc/{id}, an anonymous read of document metadata by id, was outside the sweep's scope and would stay unseen.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Ledger.cs (if the split is chosen)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Census:
+- A test asserts that the GovernedFiles set equals the EndpointFiles() set exactly. Every census file is classified, including Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs, Endpoints/Onboarding/ConsentCallbackEndpoint.cs and Infrastructure/DI/EndpointMappingExtensions.cs.
+- EndpointFiles() counts a file that registers only MapMethods or MapHealthChecks.
+- ExpectedEndpointFileCount stays pinned, with a history entry for this task.
+- Negative: an inline fixture registering only MapMethods is counted, and a GovernedFiles entry naming a missing file fails. A seeded extra endpoint file fails naming it; use an inline fixture, or a temporary file in the test's own scan root.
+- No file is classified with the retired file-level HandlerAuthorized scope.</criterion>
+    <criterion testable="true">Scanner forms resolve to full keys:
+- PATCH /api/ai/chat/sessions/{sessionId}/context, PATCH /api/ai/chat/sessions/{sessionId} and PATCH /api/ai/chat/sessions/{sessionId}/tabs (MapMethods with ["PATCH"]).
+- GET /healthz and GET /healthz/catalog (MapHealthChecks).
+- GET /api/diagnostics/tenant-container-resolver and POST /api/onboarding/consent-callback (const paths).
+- Aggregator routes, for example GET /api/spe/configs/{id:guid}, GET /api/spe/containers/{containerId} (static call form), POST /api/compose/upload, GET /api/v1/external/projects/{id:guid}, POST /api/v1/external-access/grant, and all five /api/v1/external/api/dataverse/* routes.
+- POST /api/compose/webhooks/spe-doc-changed resolves from the `routes` parameter with no doubled prefix.
+The completeness test's independent count includes the new forms and matches the scanner for every governed file. Negative: inline fixtures with an unresolvable const path, an unknown aggregator, and a MapMethods call in an unreadable form each fail as unparseable.</criterion>
+    <criterion testable="true">Duplicate keys:
+- A test fails when two registrations produce the same route key. Negative: an inline fixture of ExternalModuleDataEndpoints scanned WITHOUT its aggregator binding produces "POST /api/dataverse/fetch", which collides with Api/Dataverse/FetchEndpoints.cs, and the test fails naming both files.
+- ProjectClosureEndpoint.cs is NotMapped, with a test that fails if MapProjectClosureEndpoint gains a caller. The real scan produces no duplicate close-project key.
+- Rule E does not flag the Compose webhook on `routes`. Negative: a fixture with an absolute "/api/..." path on the bound group parameter still fails Rule E.</criterion>
+    <criterion testable="true">Rule A over every route:
+- Every route of every governed file is credited (a per-resource filter, a resource policy, a verified HandlerDecision, or admin-only in AdminOnlyRoutes) or waived.
+- The test name and failure text describe the every-route rule and its remedy.
+- Negative: two cases each fail naming the route: a fixture copy of FileAccessEndpoints with .AddDocumentAuthorizationFilter("read") removed from a route, and a fixture route carrying only RequireAuthorization().
+- Positive: these controls still pass: the four historical-miss controls, the nested-group control, the Office baseline control and the Office positive control.
+- Detector_PositiveControl_DoesNotFireOnGatedRoutes is updated to the real forms .AddBulkDownloadAuthorizationFilter() and .AddEntityAccessFilter(), with a comment saying why.</criterion>
+    <criterion testable="true">Decorative forms are not credited. Inline fixture routes carrying ONLY one of the following each classify as no credit:
+- .AddAnalysisRecordAuthorizationFilter();
+- .AddEndpointFilter&lt;CommunicationAuthorizationFilter&gt;();
+- .AddAiAuthorizationFilter() and .AddEndpointFilter&lt;AiAuthorizationFilter&gt;();
+- .AddDataverseAuthorizationFilter(EntitySource.FromRouteValueWithRecord) and .AddDataverseAuthorizationFilter(EntitySource.FromFetchXmlBody);
+- .AddTenantAuthorizationFilter();
+- .AddEndpointFilter&lt;WorkspaceAuthorizationFilter&gt;();
+- .AddAgentAuthorizationFilter(), .AddCallerPrincipalAuthorizationFilter(), .AddReportingAuthorizationFilter(), .AddSpeAdminTenantScopeFilter().
+Positive: .AddAnalysisExecuteAuthorizationFilter(), .AddDataverseAuthorizationFilter(EntitySource.FromRouteValue), .AddBulkDownloadAuthorizationFilter(), .AddSessionOwnershipFilter() and .AddDelegationRuleFilter() classify as per-resource credit. Fail closed: an unknown ".AddFooAuthorizationFilter()" classifies as NO credit, and it fails the attachment-form census naming file:line. An allow-list entry that no route attaches fails.</criterion>
+    <criterion testable="true">Pass-through pins:
+- One test per NonDecidingAttachments entry reads the real filter source, and passes while the pass-through exists: AnalysisAuthorizationFilter.cs:185-212; AiAuthorizationFilter.cs:84, plus zero DocumentAnalysisRequest-bound handlers; CommunicationAuthorizationFilter.cs (whole file); DataverseAuthorizationFilter.cs:177-193; TenantAuthorizationFilter.cs:76-81; SpeAdminTenantScopeFilter.cs:76-78; and the identity-only and role-only filters.
+- Each entry names its OwningTask per the constraint.
+- Negative: an inline fixture of each filter, with the pass-through replaced by a decision, makes its pin fail with the "delete this entry, credit the form" remedy.</criterion>
+    <criterion testable="true">Rule B kept:
+- NoAuthorizationFilterIsDecorative and RuleBCoversEveryFilterRuleACredits pass over the new allow-list.
+- SessionOwnershipFilter.cs and DelegationRuleFilter.cs are now inspected; SessionOwnershipFilter passes through an OWNER-COMPARISON ClaimOnly reason.
+- Decision tokens match whole identifiers. Negative: a fixture filter whose only token is "IAiAuthorizationServiceFactory" (or "MyAuthorizationServiceHelper") does not satisfy "AuthorizationService". Positive: AnalysisAuthorizationFilter.cs satisfies "IAiAuthorizationService".
+- KnownDecorativeFilters stays empty.
+- The ClaimOnlyFilters reasons for CommunicationAuthorizationFilter and AgentAuthorizationFilter no longer claim per-record scoping elsewhere, or "no document data".
+- The existing Rule B negative control (the decorative SemanticSearch fixture) and the prose control still fail and pass as before.
+- The note lists every filter whose Rule B verdict changed.</criterion>
+    <criterion testable="true">Admin:
+- Only RequireAuthorization("SystemAdmin"), RequireAuthorization(AuthPolicies.RagApiKey), AddSpeAdminAuthorizationFilter and AddRegistrationAuthorizationFilter count as admin.
+- AdminOnlyRoutes is pinned and grouped by file, with a reason per group.
+- Negative: these three cases each fail: a fixture route with RequireAuthorization("SystemAdmin") that is not in the pin fails as "added"; a pinned route that gains a per-resource filter fails as "removed"; and a route credited only by AddReportingAuthorizationFilter or RequireAuthorization(AuthPolicies.ExternalCollaboration) is NOT admin, and is flagged.</criterion>
+    <criterion testable="true">HandlerDecision:
+- For every declaration, the handler is located, and the seam token is found as a whole identifier, outside comments, in the declared body after following at most two declared hops.
+- Hops resolve across src/server/** (a hop into src/server/shared/Spaarke.Core is resolved, not refused).
+- Negative: each of these fails: a declaration whose handler body lacks the seam; a declaration naming a handler that does not exist; a seam token present only in a comment; a seam that is not in DecisionServices or CallerContextSeams; a hop naming an interface; and a hop method with two overloads of which only one contains the seam.
+- Positive: GET /api/documents/{documentId}/permissions (AuthorizationService in Api/PermissionsEndpoints.cs) passes as a HandlerDecision.
+- Each CallerContextSeams entry carries a reason and the seam type's file.</criterion>
+    <criterion testable="true">Waiver semantics:
+- Every Permanent waiver has a PermanentBasis from the closed set.
+- Every Pending waiver has a Gap, and an OwningTask in {"159".."166", "UNOWNED-NEW"}.
+- InsufficientDecision waivers carry ObservedMechanisms equal to the route's current authorization-relevant fingerprint.
+Stale rules, each with a seeded negative:
+- a NoDecision Pending waiver on a route that gains any credit (including a HandlerDecision) fails;
+- an InsufficientDecision waiver whose route's fingerprint changed fails;
+- adding .RequireRateLimiting to an InsufficientDecision route does NOT change its fingerprint (positive);
+- a NoDecision waiver on a route that is already credited fails ("use InsufficientDecision");
+- a Permanent waiver on a route that has a per-resource credit or a HandlerDecision fails as redundant;
+- an AnonymousByDesign waiver on a route that is not anonymous fails;
+- an anonymous route with neither an AnonymousByDesign nor a Pending waiver fails;
+- any waiver on an absent route fails (the existing rule, kept).</criterion>
+    <criterion testable="true">Sweep ledger:
+- SweepFindings holds exactly the 90 route keys of the 82 findings in the background, each with its S-id, severity, owning task and Gap.
+- A test asserts that each entry with ResolvedBy null has a Pending waiver whose OwningTask and Gap equal the ledger's, and that no sweep route carries a Permanent waiver.
+- An entry with ResolvedBy set has no waiver, passes Rule A by credit, and has a ProofTest naming a test file that exists and contains the named method.
+- Negative: each of these fails: seeding a Permanent waiver on POST /api/v1/events; deleting the Pending waiver of GET /api/dataverse/record/{entityLogicalName}/{id:guid} without setting ResolvedBy; re-owning POST /api/communications/send to "166"; and setting ResolvedBy on an entry with a ProofTest naming a method that does not exist.
+- The failure text tells a fix task to make the route pass by credit, delete its waiver, and set ResolvedBy to its task id and ProofTest to its deny test.</criterion>
+    <criterion testable="true">Task 159 routes (events): these eight routes (S-11..S-16, S-37, S-38) are each flagged by Rule A as uncredited and carry a Pending NoDecision waiver owned by "159":
+- POST /api/v1/events/{id:guid}/cancel
+- GET /api/v1/events
+- GET /api/v1/events/{id:guid}
+- DELETE /api/v1/events/{id:guid}
+- PUT /api/v1/events/{id:guid}
+- POST /api/v1/events/{id:guid}/complete
+- GET /api/v1/events/{id:guid}/logs
+- POST /api/v1/events
+Negative: with any one of these waivers removed, Rule A fails naming that route.</criterion>
+    <criterion testable="true">Task 160 routes:
+- POST /api/dataverse/fetch (S-09) and GET /api/dataverse/record/{entityLogicalName}/{id:guid} (S-10) are flagged, because their DataverseAuthorizationFilter forms are not credited. They carry Pending NoDecision waivers owned by "160".
+- Neither waiver matches any /api/v1/external/api/dataverse/* route.
+- Negative: removing either waiver fails Rule A naming the route.
+- GET /api/dataverse/metadata/{entityLogicalName}, GET /api/dataverse/gridconfigurations/{entityLogicalName} and GET /api/dataverse/savedqueries/{entityLogicalName} remain credited through EntitySource.FromRouteValue and need no waiver.</criterion>
+    <criterion testable="true">Task 161 routes (communications): these twelve routes are flagged, because CommunicationAuthorizationFilter is not credited. Each carries a Pending NoDecision waiver owned by "161":
+- POST /api/communications/send (S-07)
+- POST /api/communications/send-bulk (S-07)
+- POST /api/communications/template/render (S-08)
+- POST /api/communications/{id:guid}/archive (S-33)
+- POST /api/communications/{id:guid}/suggest-associations (S-34)
+- POST /api/communications/{communicationId:guid}/create-task (S-35)
+- POST /api/communications/threads (S-58)
+- POST /api/communications/{id:guid}/confirm-affinity (S-59)
+- POST /api/communications/proposals/{reviewLogId:guid}/dismiss (S-60)
+- POST /api/communications/proposals/{reviewLogId:guid}/create-task/apply (S-61)
+- POST /api/communications/accounts/{id:guid}/verify (S-62)
+- GET /api/communications/{id:guid}/status (S-79)
+Negative: removing any one fails Rule A naming it.</criterion>
+    <criterion testable="true">Task 162 routes (analysis):
+- These five routes are flagged and carry Pending NoDecision waivers owned by "162":
+  - POST /api/ai/analysis/{analysisId:guid}/export (S-01)
+  - GET /api/ai/analysis/{analysisId:guid} (S-02)
+  - POST /api/ai/analysis/promote (S-22)
+  - POST /api/ai/analysis/{analysisId:guid}/save (S-50)
+  - POST /api/ai/analysis/fork (S-51)
+- POST /api/ai/analysis/execute (S-52) is credited by AddAnalysisExecuteAuthorizationFilter, and carries a Pending InsufficientDecision waiver owned by "162" with its ObservedMechanisms.
+- Negative: removing an S-01, S-02, S-22, S-50 or S-51 waiver fails Rule A naming the route, and changing S-52's chain in a fixture makes its waiver stale.</criterion>
+    <criterion testable="true">Task 163 routes (RAG, knowledge, insights, workspace AI): these seventeen routes are flagged and carry Pending NoDecision waivers owned by "163":
+- POST /api/ai/knowledge/test-search (S-03)
+- GET /api/ai/knowledge/indexes/{indexName}/documents (S-26)
+- DELETE /api/ai/knowledge/indexes/{indexName}/documents/{documentId} (S-27)
+- POST /api/ai/knowledge/indexes/reindex/{documentId} (S-28)
+- POST /api/ai/rag/index-file (S-04)
+- POST /api/ai/rag/search (S-05)
+- POST /api/ai/rag/index and POST /api/ai/rag/index/batch (S-06)
+- DELETE /api/ai/rag/{documentId} and DELETE /api/ai/rag/source/{sourceDocumentId} (S-30)
+- POST /api/admin/knowledge/index-reference/{knowledgeSourceId} (S-20)
+- DELETE /api/admin/knowledge/index-reference/{knowledgeSourceId} (S-21)
+- POST /api/admin/knowledge/index-references (S-49)
+- POST /api/insights/ask (S-17)
+- POST /api/insights/assistant/query (S-40)
+- POST /api/insights/search (S-41)
+- POST /api/workspace/ai/summary (S-46)
+Negative: removing any one fails Rule A naming it. POST /api/ai/rag/send-to-index is NOT a sweep route; it passes only through a verified HandlerDecision or its own classification.</criterion>
+    <criterion testable="true">Task 164 routes (chat, agent, playbooks, prompts, record match):
+- These fourteen routes carry Pending NoDecision waivers owned by "164":
+  - POST /api/ai/chat/sessions (S-24)
+  - POST /api/agent/message (S-18)
+  - POST /api/agent/run-playbook (S-19)
+  - GET /api/agent/playbooks/status/{jobId:guid} (S-78)
+  - GET /api/ai/playbooks/by-id/{id} and GET /api/ai/playbooks/by-name/{name} (S-55)
+  - GET /api/ai/prompts and POST /api/ai/prompts (S-56)
+  - GET, PUT and DELETE /api/ai/prompts/{id}, and POST /api/ai/prompts/{id}/render (S-57)
+  - POST /api/ai/document-intelligence/match-records (S-31)
+  - POST /api/ai/document-intelligence/associate-record (S-32)
+- These five routes carry Pending InsufficientDecision waivers owned by "164":
+  - PATCH /api/ai/chat/sessions/{sessionId}/context (S-23)
+  - POST /api/ai/chat/sessions/{sessionId}/messages (S-25)
+  - POST /api/ai/chat/sessions/{sessionId}/dispatch (S-53)
+  - POST /api/ai/playbooks/{id:guid}/execute (S-29)
+  - PUT /api/ai/playbooks/{id:guid}/nodes/reorder (S-54)
+- Negative: removing a NoDecision waiver fails Rule A naming the route, and a fixture chain change on an InsufficientDecision route makes its waiver stale.</criterion>
+    <criterion testable="true">Task 165 routes (SPE admin, record-matching admin):
+- These six routes are admin-only routes in AdminOnlyRoutes, and carry Pending InsufficientDecision waivers owned by "165" with ObservedMechanisms:
+  - POST /api/spe/bulk/delete (S-44)
+  - POST /api/spe/bulk/permissions (S-72)
+  - PUT /api/spe/configs/{id:guid} (S-45)
+  - GET /api/spe/configs/{id:guid} (S-73)
+  - POST /api/spe/configs (S-74)
+  - DELETE /api/spe/configs/{id:guid} (S-75)
+- These three routes carry NO admin mechanism today, are flagged, and carry Pending NoDecision waivers owned by "165":
+  - POST /api/admin/record-matching/sync (S-47)
+  - POST /api/admin/record-matching/sync-incremental (S-48)
+  - GET /api/admin/record-matching/status (S-77)
+- Negative: removing an S-47, S-48 or S-77 waiver fails Rule A naming the route. Giving an SPE config route a per-resource filter in a fixture makes its waiver stale and its AdminOnlyRoutes entry "removed".</criterion>
+    <criterion testable="true">Task 166 routes (the rest):
+- These thirteen routes carry Pending NoDecision waivers owned by "166":
+  - GET /api/v1/documents (S-66). The Permanent waiver at RouteAuthorizationGuardTests.cs:578 is REPLACED by a Pending NoDecision waiver owned by "166" that cites the sweep.
+  - GET /api/memory/records/{entityLogicalName}/{id:guid} (S-42)
+  - POST /api/memory/pins (S-43)
+  - PUT /api/memory/pins/{pinId} (S-68)
+  - POST /api/compose/documents/{documentSpeId}/promote (S-63)
+  - POST /api/compose/upload (S-64)
+  - POST /api/compose/document/{documentSpeId}/check-changes (S-65)
+  - POST /api/v1/field-mappings/push (S-67)
+  - POST /api/reporting/export (S-70)
+  - GET /api/reporting/embed-token (S-71)
+  - GET /api/reporting/reports/{reportId:guid} (S-81)
+  - POST /api/v1/work-assignments (S-76)
+  - GET /api/workspace/state (S-82)
+- These four routes carry Pending InsufficientDecision waivers owned by "166":
+  - PUT /api/v1/documents/{id} (S-36)
+  - POST /api/v1/external-access/close-project (S-39)
+  - POST /api/compose/sessions/{sessionId}/annotations (S-80)
+  - POST /api/office/quickcreate/{entityType} (S-69)
+- Negative: removing a NoDecision waiver fails Rule A naming the route. The old Permanent GET /api/v1/documents waiver, if restored, fails the sweep-ledger rule.</criterion>
+    <criterion testable="true">Refuted routes:
+- POST /api/finance/matters/{matterId}/recalculate, POST /api/finance/projects/{projectId}/recalculate and POST /api/v1/external-access/revoke pass by per-resource credit, with no waiver. [SUPERSEDED for revoke by owner round 12 item 9 (binding), recorded in round r2: revoke is still credited per resource (AddDelegationRuleFilter) but carries a Pending InsufficientDecision waiver owned by 166 (the client-supplied ContainerId, 166 amendment (b)); NamedRoutes_CarryTheirRecordedClassification asserts that state. The two finance routes are unchanged: credited, no waiver.]
+- GET /api/ai/chat/context-mappings/analysis/{analysisId} carries a Pending UNOWNED-NEW waiver.
+- GET /api/reporting/reports and the four /api/ai/playbooks/runs/{runId:guid} routes are classified per the background, with the evidence cited in the waiver reason.</criterion>
+    <criterion testable="true">New findings:
+- GET /healthz/dataverse/doc/{id} carries a Pending UNOWNED-NEW waiver (Gap NoDecision; anonymous). Its reason names the bff-deploy SKILL.md §9c consumer. It was reported when confirmed. [SUPERSEDED for the owner by owner round 12 item 8 (binding), recorded in round r2: the waiver is Pending NoDecision owned by 166, because task 166 amendment (a) names this route; everything else in this line holds (anonymous, the §9c consumer named, reported on confirmation). NamedRoutes_CarryTheirRecordedClassification asserts that state.]
+- Every other flagged route outside the sweep ledger carries one of: a Permanent waiver with a basis whose reason cites the handler file:line that proves it; a verified HandlerDecision; or a Pending UNOWNED-NEW waiver.
+- Each NEW candidate listed in the background is resolved in one of those ways, with the reason recorded.
+- The task note lists every UNOWNED-NEW route with file:line, impact, proposed severity, evidence and any named consumer. The count in the note equals the number of UNOWNED-NEW waivers in the code.</criterion>
+    <criterion testable="true">Anonymous routes:
+- Every route the scanner classifies as anonymous (16 at authoring) has either a Permanent AnonymousByDesign waiver or a Pending UNOWNED-NEW waiver. An AnonymousByDesign reason names a MANDATORY compensating control with file:line, for example a rate limit, an HMAC signature, OAuth state or an IsDevelopment-only mapping.
+- POST /api/communications/acs/eventgrid is AnonymousByDesign only if a mandatory control is found. The shared secret alone is optional (AcsEventGridIngressService.cs:68-69), so it does not qualify.</criterion>
+    <criterion testable="true">Existing waivers:
+- PUT /api/obo/me/files/{*path} keeps Permanent CreateWithNoPriorResource.
+- POST /api/v1/documents is re-verified under the strict CreateWithNoPriorResource definition. Because its body names ContainerId, it keeps a Permanent basis only if the reason cites the handler line that authorizes that container as the caller; otherwise it becomes a Pending UNOWNED-NEW waiver.
+- GET /api/office/search/matter-types keeps Permanent ReferenceData.
+- The three /api/office/communications routes and GET /api/office/search/entities are either converted to verified HandlerDecision declarations (with their Permanent waivers deleted), or keep Permanent with a basis. The choice and the reason are recorded in the note.
+- No Pending waiver is converted to Permanent.</criterion>
+    <criterion testable="true">Scope: git diff shows changes only under tests/Spaarke.ArchTests/, in projects/unified-access-control-r2/notes/task-167-every-route-authorization-guard.md, in this task's TASK-INDEX.md status cell, in this POML's status, and in projects/unified-access-control-r2/current-task.md. No file under src/ changed. [SUPERSEDED in part by owner round 12 item 1 (binding, 2026-10-03), recorded in round r2: exactly one src/ file changes - three .RequireRateLimiting("anonymous") lines in Infrastructure/DI/EndpointMappingExtensions.cs on /healthz, /healthz/catalog and /ping. See parallel-reason and execution/justification-of-src-change.] [SUPERSEDED further by owner round 14 items 1-2 (binding, 2026-10-03), recorded in round f1: the three probes use a dedicated "health-probe" policy (RateLimitingModule.cs), the authorization FallbackPolicy is set (AuthorizationModule.cs), comment-only corrections in three endpoint files, and the consequences in tests/, scripts/, docs/guides/ and infrastructure/byok/ listed in note section 17.2. See execution/justification-of-src-change round="f1".]</criterion>
+    <criterion testable="true">Seeding proofs: for every new rule, the task note records what was seeded and the failure text observed. The rules are: the census set, the scanner forms, duplicate keys, aggregator binding, Rule E's exception, every-route Rule A, the attachment-form census, the non-credited forms, the pass-through pins, whole-identifier tokens, the admin pin, HandlerDecision, each stale rule, and the sweep ledger.</criterion>
+    <criterion testable="true">Suites: these are run in full before the PR, with counts recorded in the note:
+- tests/Spaarke.ArchTests (green);
+- tests/unit/Sprk.Bff.Api.Tests;
+- tests/integration/Sprk.Bff.Api.IntegrationTests;
+- tests/integration/Spe.Integration.Tests.
+The ADR-038 bans hold in every test added: no Mock&lt;HttpMessageHandler&gt;, no DI-registration test, no constructor null-check test. No test calls Dataverse or Azure.</criterion>
+    <criterion testable="true">Maintenance text: the class summary, the scope-boundary comment and the waiver maintenance procedure in RouteAuthorizationGuardTests describe all of the following:
+- the every-route rule;
+- the four credit kinds;
+- the attachment-form census;
+- the PermanentBasis set and its definitions;
+- the Gap kinds;
+- the sweep ledger;
+- how a fix task resolves its entry (credit, delete the waiver, ResolvedBy, ProofTest).
+Each new list carries its own maintenance comment.</criterion>
+    <criterion testable="true">Test scope: cover exactly the behaviours listed above, plus the fail-closed branches named in the constraints. Anything beyond that needs a one-line justification in the task note.</criterion>
+  </acceptance-criteria>
+
+  <notes>Mandate: owner round 9 (notes/session27-owner-decisions-and-research.md). Evidence: notes/route-authorization-sweep-2026-10-02.md; the full traces are in the sweep's idor-sweep.json (a session scratch file; the path is in relevant-files).
+
+Fix-task mapping, as given by the main session:
+- 159 events (GitHub #1098);
+- 160 Api/Dataverse;
+- 161 communications;
+- 162 AnalysisEndpoints;
+- 163 RAG/knowledge/insights/workspace-ai. AdminKnowledgeEndpoints is assigned here as "knowledge", even though its routes are under /api/admin.
+- 164 chat/agent/playbooks/prompts/record-match;
+- 165 SpeAdmin + Admin/RecordMatching;
+- 166 the rest.
+
+This task changes no runtime behaviour, so the caller-level negative case belongs to each fix task: a caller with no rights on the target gets the fail-closed answer, and an unknown id gets the same answer. Here, the negative case for every route is the guard's own: with the route's waiver removed, the build fails naming the route.
+
+The scope is widened from Api/** to every census file. The census already counts the three files outside Api/**, and round 9 says "every BFF route". Leaving them ungoverned would leave a route surface that the census sees and the rule ignores, which is why GET /healthz/dataverse/doc/{id} was never seen.
+
+The six PermanentBasis values read the owner's round-9 waiver class ("a route that only touches the caller's own data") as covering routes that touch no other principal's record: anonymous probes, reference data, creates that name nothing, caller-supplied content, and an operator gate in the handler. The main session should confirm that reading with the owner. Until then, escalation trigger 2 stops any further widening.
+
+The route counts in the background come from a Python approximation of the scanner run at authoring. They are guidance, not acceptance values.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load the knowledge files first. Follow task-execute; Step 9.5 code-review + adr-check are mandatory (FULL, TEST-MODIFYING).</protocol>
+    <outcome date="2026-10-03" branch="task/uac-r2-167" base="6b243f092" result="completed">
+      Full record: notes/task-167-every-route-authorization-guard.md. Test code only; no file under src/ changed.
+      DONE: RouteAuthorizationGuardTests is now three partials (rules+controls / Scanner / Ledger data). Census = GovernedFiles
+      (120 files, asserted EQUAL; HandlerAuthorized scope retired; ProjectClosureEndpoint NotMapped, zero callers). Scanner
+      resolves MapMethods (three verb forms), MapHealthChecks, same-file const paths, and call-site binding through method
+      parameters and three pinned aggregators: 431 registrations, 430 live, 0 unparseable, 0 duplicate keys. Rule A over every
+      live route: PerResource 108, HandlerDecision 43 (verified in source, up to two hops plus same-type helpers),
+      AdminOnly 83 (pinned in 24 file groups), Anonymous 16, None 180. Credit = an explicit allow-list of 20 forms;
+      12 NonDecidingAttachments pinned to source evidence with owners (160-165 or "-"); 10 NotAuthorization forms;
+      every authorization-shaped call classified exactly once. Rule B tokens match whole identifiers (IAiAuthorizationService
+      added); PlaybookAuthorizationFilter moved to an OWNER-COMPARISON ClaimOnly entry (it passed only on a substring);
+      SessionOwnershipFilter and DelegationRuleFilter inspected. Waivers 212: 122 Pending (90 sweep per the pinned 90-key
+      ledger; 11 owned by 161/166 amendments; 21 UNOWNED-NEW listed in the note) + 90 Permanent with a closed basis and a
+      file:line. Sweep ledger resolves only by credit (ResolvedBy + ProofTest).
+      ESCALATIONS: trigger 7 fired (GET /healthz/dataverse/doc/{id}, anonymous document-metadata read, HIGH) and was sent to
+      the main session on confirmation; owner set to 166 per its amendment (a), not UNOWNED-NEW. Trigger 6 recorded
+      (SystemAdmin "admin" scope substring; task 165 fixes the policy). Triggers 1, 2, 3, 4, 5 and 8 did not fire; three
+      closed-set readings are listed for owner confirmation (note section 9).
+      SEEDING PROOFS: 18 violations seeded on the real data file, each failed the named rule, file restored byte-for-byte.
+      TESTS: Guard 47/47 (35 Facts + 1 Theory over 12 entries); ArchTests 378/378 on the final state; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed, 25 skipped, 0 failed.
+      BFF unit suite: run 1 14157 passed / 55 failed / 54 skipped; run 2 (TRX) 14009 / 203 / 54. All 203 are
+      cancellations under machine contention (249-254 dotnet processes, CPU 87-88 percent): 201 TaskCanceledException at
+      the 2-minute client timeout, 1 client-aborted IOException, 1 fidelity-gate case failing on a TaskCanceledException.
+      Isolated re-run of the 73 classes: 880 passed, 4 failed (again cancellations), 2 skipped; those 4 run serially:
+      9/9 passed. The unit assembly compiles nothing this task changed (note section 12).
+      QUALITY GATES: code-review (no Critical; warnings recorded in the note section 13) and adr-check (ADR-038/003/008/002
+      compliant; nothing else applicable) run. /conflict-check: no open PR or master change on the guard; tasks 159-166 edit it
+      in parallel by owner decision.
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-167-r1" base="1d1720348" result="completed" round="verifier r1 + owner round 12">
+      Full record: notes/task-167-every-route-authorization-guard.md section 15.
+      VERIFIER ITEMS: (1) HandlerDecision now verifies the BODY only (braces / after the lambda arrow, never the
+      signature); the seam counts as a whole identifier in the body, or as a USED parameter or top-level field/property
+      whose declared type is the seam (qualified names match); an unused DI parameter earns nothing, and the hop-call
+      check can no longer be satisfied by the handler's own name. (2) The field rule reads only top-level members, so a
+      sibling method's parameter lends nothing. (3) New rule AnonymityIsDeclaredOnlyOnAScannedChain refuses attribute /
+      metadata / wrapper anonymity. (4) New rule NoRouteIsRegisteredInAFormTheScannerCannotRead refuses .Map, MapFallback*,
+      MapHub, MapControllers and any undeclared Map* call. (5) The basis widenings were answered by owner round 12. (6)
+      DELETE /api/memory/pins/{pinId} is Pending 166 (404-vs-403 oracle). (7) Accepted by owner round 12 item 8. (8)
+      Comment drift fixed. (9) The census is LoadUnits + CensusOf; its control runs them over a temporary scan root.
+      OWNER ROUND 12: item 1 rate limits added to GET /healthz, /healthz/catalog and /ping (the ONLY src/ change:
+      three .RequireRateLimiting("anonymous") lines in Infrastructure/DI/EndpointMappingExtensions.cs, the existing
+      policy); item 2 ReferenceData reading accepted; item 3 helpers accepted; item 4 new PermanentBasis.OwnerComparison
+      (heartbeat), DELETE pin Pending 166; item 6 the five playbook lists CallerScopedOnly, oid-vs-systemuserid filter fix
+      assigned to task 164 (main session to add to 164's POML); item 9 Pending InsufficientDecision 166 on
+      POST /api/v1/external-access/revoke and POST /api/office/todo, S-39 reason extended for close-project. No escalation
+      trigger was left unanswered.
+      WAIVERS: 214 = 125 Pending (90 sweep; 14 owned by 161/166 amendments or owner round 12; 21 UNOWNED-NEW) + 89
+      Permanent (CallerScopedOnly 31, ReferenceData 26, CallerSuppliedContentOnly 15, AnonymousByDesign 14,
+      OwnerComparison 1, CreateWithNoPriorResource 1, OperatorGateInHandler 1).
+      SEEDING: 7 seeds (4 on real src: the verifier's unused-parameter seed on PermissionsEndpoints, an [AllowAnonymous]
+      attribute on GET /api/me, an app.MapFallback, a MapMethods-only endpoint file), each failed the named rule and was
+      restored.
+      TESTS: Guard 51/51; ArchTests 382/382; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed,
+      25 skipped, 0 failed; BFF unit suite 14202 passed / 10 failed / 54 skipped (all 10 TaskCanceledException
+      client timeouts under machine contention; those 10 re-run in isolation: 15/15 theory cases passed).
+      /conflict-check: no open PR or master change on the four files; task 166 amendment (a) will edit
+      EndpointMappingExtensions.cs next to these lines (soft warn).
+    </outcome>
+    <outcome date="2026-10-03" branch="task/uac-r2-167-r2" base="449d3e8dd" result="completed; one owner question open (item 5)" round="verifier r2">
+      Full record: notes/task-167-every-route-authorization-guard.md section 16. Test code, this POML and the note only;
+      no src/ file changed in r2; no waiver changed (214 = 125 Pending + 89 Permanent; UNOWNED-NEW stays 21).
+      ITEM 2 / 9 (FAIL-OPEN, closed): new rule NoRouteIsAnonymousByOmission - every live route's effective chain
+      (own calls + every group's, aggregator groups and continuation statements included) carries
+      .RequireAuthorization(...) or a declared .AllowAnonymous(); NO waiver is consulted, so a route callable without
+      signing in (the BFF sets no FallbackPolicy / DefaultPolicy) can no longer pass under any basis. An [Authorize]
+      attribute or WithMetadata(new AuthorizeAttribute()) is not read and fails (fail closed). Real code: 0 violations.
+      Control AnonymousByOmission_NegativeControl_FiresEvenUnderAWaiver: the verifier's GET /api/zzref + ReferenceData
+      waiver passes Rule A and every waiver rule (the pre-r2 hole) and fails the new rule; four undeclared shapes fail;
+      six declared shapes pass. Chosen over reclassifying implicit anonymity as Credit.Anonymous, which would have let
+      an AnonymousByDesign or Pending waiver cover an UNDECLARED public route.
+      ITEM 6 / 10 / 11 (closed for traceability): parallel-reason amended; the scope, refuted-routes and new-findings
+      criteria carry SUPERSEDED annotations naming owner round 12 items 1, 9 and 8; the named-routes test now also pins
+      the /healthz/dataverse/doc/{id} owner "166". The r1 comment block is rewritten as "the three shapes that would
+      fail open".
+      ITEMS 1, 3, 4, 7, 8: verified, not open; no change.
+      ITEM 5 (NOT closed - owner question): read-only evidence disproves the "client IP not forwarded" branch (the
+      limiter's own rejection log on spaarke-bff-dev, Linux, recorded public IP 47.198.16.39 on 2026-10-02) and shows
+      legitimate probe load of at most 3/min on /healthz over 30 days, all callers combined. The one real edge: pollers
+      at a 5 s cadence (deploy-bff-api.yml 12 x 5 s; Deploy-BffApi.ps1 and control-plane H9 24 x 5 s) lose their last
+      two polls of the FINAL fixed window when the app answered Unhealthy to the ten before; a production verify can
+      then roll back a good deploy. r1's "Deploy-BffApi.ps1 is unaffected" was wrong and is corrected. Options for the
+      owner: A keep "anonymous" + pollers at 6 s; B (recommended) a dedicated per-IP "health-probe" policy (30/min) for
+      /healthz, /healthz/catalog, /ping - one new registration, section 11 answers prepared in note section 16.3;
+      C accept the edge.
+      SEEDING (real src, each restored and touched): r2-1 the verifier's zzref route + ReferenceData waiver (1 failed,
+      the new rule only); r2-2 RequireAuthorization removed from the /api/compose aggregator group and from GET /api/me
+      (the rule names 18 routes: 17 Compose + /api/me; the root-mapped webhook correctly not); r2-3 the doc route's
+      owner flipped to UNOWNED-NEW (named-routes test: expected "166").
+      TESTS: Guard 53/53; ArchTests 384/384; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed,
+      25 skipped, 0 failed; BFF unit suite 14198 passed / 14 failed / 54 skipped (all 14 TaskCanceledException client
+      timeouts under machine contention; those 14 re-run in isolation: 21/21 theory cases passed).
+      /conflict-check: no open PR (23) or master change on the guard files; local siblings 160, 161-r1, 162, 163 edit the
+      guard (163 also EndpointMappingExtensions.cs at ~:325, not this task's lines) - soft warn, reconciled at
+      integration by owner round 9 item 2.
+      PLACEMENT (CLAUDE.md section 10/11): no new BFF service, registration, endpoint, option, job, column, package or
+      file in r2. No Dataverse plugin (ADR-002). The new rule fails closed (ADR-003).
+    </outcome>
+    <outcome date="2026-10-04" branch="task/uac-r2-167-f1" base="a6d85598d" result="completed; nothing open" round="fix f1 (owner round 14 + verifier r2 residuals)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 17.
+      ITEM 1 (owner round 14 item 1, closed): new "health-probe" rate-limit policy in RateLimitingModule (per client IP,
+      sliding window 120/min, 6 segments, no queue) on GET /healthz, /healthz/catalog, /ping only; every other anonymous
+      route keeps "anonymous" (10/min). Pinned at build time (TheHealthProbeRateLimitPolicyCoversExactlyTheLivenessProbes;
+      NamedRoutes asserts health-probe, not anonymous) and at runtime on the real app (HealthProbeRateLimitContractTests:
+      48 polls see no 429; the 121st /ping from one IP is 429 with Retry-After, another IP is not; /status still 429s its
+      11th call).
+      ITEM 2 (owner round 14 item 2, closed): AuthorizationModule.ApplyFallbackPolicy sets FallbackPolicy = an
+      authenticated user, applied inside AddAuthorization; build pin TheAuthorizationFallbackPolicyRequiresAnAuthenticatedUser
+      + FallbackPolicy_NegativeControl_EachUnsafeShapeFails; runtime AuthorizationFallbackPolicyTests (real app: anonymous
+      unmatched 401, signed-in 404, probes still anonymous, every endpoint declares authorization or anonymity; a host on
+      the same method with a no-fallback negative control). The build rule NoRouteIsAnonymousByOmission is kept and
+      strengthened. The 16 explicitly anonymous routes are a pinned set (ExplicitlyAnonymousRoutes) listed in note 17.3.
+      ITEM 5 (closed): a group continuation is credited only in the unbroken run of same-group statements directly after
+      the declaration (or the receiving method's opening brace); any other authorization-shaped call on a group is a
+      scanner problem (braced or brace-less conditional, lambda, try, after an early return or another statement).
+      ITEM 6 (closed): sign-in is PROVEN from source - a RequireAuthorization form counts only when its policy's
+      AddPolicy registration inside AddAuthorization calls RequireAuthenticatedUser (or bare with no permissive
+      DefaultPolicy override); lambdas, policy objects and unresolvable names never count.
+      ITEMS 3, 4, 7, 8, 9: verified; 8 closed by item 1; 9 verified read-only on the main checkout.
+      CONSEQUENCES FIXED: an anonymous request to an unmapped path is now 401, so every artifact that read "anonymous
+      401 = registered" or "anonymous 404 = absent" was corrected - three route-retirement regression tests (endpoint
+      table + signed-in 404), Refine_GetMethod_NotAllowed (bearer), 21 vacuous *_EndpointExists_* tests (new
+      EndpointTable helper), scripts/Test-Deployment.ps1 (also pointed at deleted routes), scripts/Deploy-WorkspaceBff.ps1
+      (-AccessToken), scripts/Capture-BffBaseline.ps1, three docs/guides files, and the BYOK bicep + README health check
+      path ('/health' was never mapped). The .claude/skills/bff-deploy/SKILL.md edit is recorded in note 17.8 for the
+      main session.
+      SEEDING: 8 seeds on real source (f1-1..f1-8), each failed the named rule(s), each restored and touched.
+      TESTS: Guard 61/61; ArchTests 392/392; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed, 25 skipped, 0 failed; BFF unit suite run 1 14219 passed / 1 failed (Refine_GetMethod_NotAllowed, a real FallbackPolicy consequence, then fixed) / 54 skipped; run 2 (final) 14207 passed / 14 failed / 54 skipped, all 14 TaskCanceledException client timeouts under machine contention, those 14 re-run in isolation 47/47 cases passed (note section 17.11). FOUND (for the main session, note 17.9): /healthz/catalog runs uncached Dataverse reconciliation per call, so the 120/min probe budget lets one anonymous address drive ~360-480 Dataverse requests a minute; proposed complete fix: a single-flight 30 s result memo in RoutingConsumerTypeHealthCheck and ComposeIdentityKeyHealthCheck.
+      PUBLISH SIZE: base 45.65 MB vs branch 45.65 MB (+398 bytes), Compress-Archive, 212 files each, PDBs included. No
+      package change (CVE set unchanged).
+    </outcome>
+    <outcome date="2026-10-04" branch="task/uac-r2-167-f2" base="263024620" result="completed; nothing open" round="fix f2 (main-session round 34 items 4, 5, 7 + the f1 verifier's items 4-14)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 18.
+      ROUND 34 ITEM 4 (closed): a sweep entry whose route key is absent passes only with ResolvedBy, no waiver, no live
+      re-keyed twin (same verb and path, only a parameter name or constraint changed), and a ProofTest whose scope pairs the
+      retired verb with a path the template matches and asserts absence (404/405 or an empty endpoint-table answer); any
+      other absent key still fails. All 31 absence proofs written by 159, 160, 163 and 164 on integ/uac-r2-batch4 pass the
+      rule (checked read-only); the ResolvedBy/ProofTest rows the main session records at integration are in note 18.2.
+      ROUND 34 ITEM 5 (closed): each AdminOnlyRoutes group declares its admin mechanism; a pin fails on a route listed without
+      it; admin credit resolves a sweep entry only in a SystemAdmin or SPE-admin group the route really carries (no longer
+      /api/spe/ only); the RAG key and the registration approver role resolve no sweep finding.
+      ROUND 34 ITEM 7 (closed): every /healthz/catalog check is registered through CatalogHealthChecks.AddCatalogCheck - one
+      evaluation per 30 s shared by every caller, single flight, a fault shared for no longer than the window, its own DI
+      scope, CancellationToken.None; the health-probe rate limit unchanged. CatalogHealthMemoContractTests (8, FakeTimeProvider,
+      incl. the real app over HTTP and a pin that every catalog-tagged registration is memoized).
+      VERIFIER ITEMS 4/11 (closed): a received-group continuation is credited only when every call binding the group is itself
+      in an unconditional run (recursively); otherwise a scanner problem. 5/12 (closed): RequireAuthenticatedUser must be in the
+      unbroken opening run of the policy lambda (or its expression chain); DefaultPolicy/FallbackPolicy right-hand sides must be
+      one builder chain. 6/12 (closed): same-file and Type.X const names resolve; any unresolvable AddPolicy name fails every
+      named verdict closed; AddPolicy outside AddAuthorization is catalogued. 7/14 (closed): a non-literal RequireRateLimiting
+      argument fails the probe pin. 8/13 (closed): the verifier's three vacuous presence tests plus two more found in f2 prove
+      presence by the endpoint table or a signed-in request; ANTI-PATTERNS row 17 and a repo-root runbook corrected; new build
+      rule NoTestProvesRoutePresenceWithAnAnonymousRequest refuses the shape (two integ tests will trip it at integration -
+      exact replacement in note 18.5). 9 (closed): the fallback pin requires an unconditional application. 2, 3, 10: verified.
+      SEEDING: f2-1..f2-9 on real source or the real data file, each failing exactly the named rule(s), each restored and
+      touched; f2-5 exposed a false negative in the new presence rule (a header set by another test counted), fixed and re-seeded.
+      TESTS: Guard 68/68; ArchTests 399/399; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed,
+      25 skipped, 0 failed (a first run's 7 Reporting failures came from a test DLL still built from seed f2-5r; rebuilt, clean);
+      BFF unit suite 14170 passed / 59 failed / 54 skipped of 14283, all 59 TaskCanceledException client timeouts under machine
+      contention (66 dotnet processes), those 59 re-run in isolation 120/120 cases passed (note section 18.11).
+      PUBLISH SIZE: base 263024620 45.65 MB (47,870,406 bytes) vs branch 265a178d6 45.65 MB (47,872,621 bytes) = +2,215
+      bytes, Compress-Archive, 212 files each, 4 PDBs each (included). No package change (CVE set unchanged).
+    </outcome>
+    <outcome date="2026-10-05" branch="task/uac-r2-167-f2-v1" base="700c3960d" result="completed; nothing open" round="fix f2-v1 (the f2 verifier's items 1-17 + main-session round 43)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 19.
+      ITEM 1 (closed): the policy catalog is OrdinalIgnoreCase for registrations and lookups, as AuthorizationOptions resolves
+      names (verified by reflection on 10.0.1 and pinned at runtime by PolicyAndRateLimitNamesResolveAsTheGuardAssumes); a
+      re-cased re-registration (literal, const alias, AuthorizationBuilder) is a second registration, so nothing naming the
+      policy is sign-in. ITEM 2 (closed): every statement of a policy-builder lambda must be add-only (AuthenticationSchemes
+      assignment, Requirements.Add, chains of the framework add-only members not shadowed by a BFF extension), the builder
+      parameter may appear nowhere else, and PendingRequirements / .Succeed( are refused. ITEM 3 (closed, for EVERY
+      ProofTest): the file must be compiled by a CI-run BFF test project (ProofTestProjects, pinned by
+      TheProofTestProjectsAreRunByCi; Compile items evaluated with MSBuild semantics) and the method must be a plain unskipped
+      xUnit Fact/Theory, public, non-generic, in public non-abstract types, outside #if, with no Skip call and no early
+      return; the 13 ProofTests referenced on integ/uac-r2-batch4 all pass (checked read-only). ITEMS 4 + 5 / ROUND 43 ITEM 1
+      (closed, option A, all 16 anonymous routes): ExplicitlyAnonymousRoutes pins every control each route carries
+      (rate-limit policy, RequireWebhookSignature, IsDevelopment-only mapping), EveryExplicitlyAnonymousRouteCarriesItsPinnedControl
+      reads them from code and requires the waiver text to agree; RateLimitPoliciesAreAppliedOnlyOnAScannedChain refuses
+      EnableRateLimiting / DisableRateLimiting in any form, wrappers and method groups. ITEM 6 (closed): presence evidence is
+      tied to the asserted request (its client, its request message, or a table read of the same verb and path); untraceable
+      responses need evidence for every request. ITEM 7 / ROUND 43 ITEM 2 (closed): MemoizedHealthCheck bounds the shared
+      evaluation at CatalogHealthChecks.EvaluationTimeout (15 s, on a worker, TimeProvider) - a hang becomes a shared fault
+      re-evaluated after the 30 s window - and each catalog registration carries the same HealthCheckRegistration.Timeout.
+      ITEMS 8-14: verified; item 11's observation closed (an AdminOnlyRoutes route is listed only in a group of its own file).
+      FOUND AND CLOSED (note 19.2): AuthorizationBuilder AddDefaultPolicy / AddFallbackPolicy were invisible to the catalog and
+      the fallback pin; NothingButAnAuthenticatedUserSatisfiesSignIn refuses pipeline-stage replacement, ASP.NET Core
+      IAuthorizationService implementations, direct IAuthorizationHandler, handlers over non-BFF requirements,
+      PendingRequirements and any other Succeed call.
+      SEEDING: f2v1-1..f2v1-9 on real source or the real data file (note 19.5), each failing exactly the named rule(s), each
+      restored and touched; the verifier's exact seeds for items 1-6 each fail.
+      TESTS: Guard 76/76; CatalogHealthMemoContractTests 10/10 (five runs green); ArchTests 407/407;
+      Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests 403 passed, 25 skipped, 0 failed of 428; BFF unit suite
+      14231 passed / 0 failed / 54 skipped of 14285 (no contention failures this run).
+      PUBLISH SIZE: base 700c3960d 45.65 MB (47,872,599 bytes) vs branch 8c6d49718 45.66 MB (47,873,044 bytes) = +445 bytes,
+      Compress-Archive, 212 files each, 4 PDBs each (included). No package change (CVE set unchanged).
+    </outcome>
+    <outcome date="2026-10-05" branch="task/uac-r2-167-f2-v2" base="8223691bc" result="completed; last fix round (owner round 56); class d-f items recorded as known limits" round="fix f2-v2 (the f2-v1 verifier's items 1-10 + main-session round 52 + owner round 56)">
+      Full record: notes/task-167-every-route-authorization-guard.md section 20 and "Known limits (owner round 56)".
+      Round 52 (decided, so it stands under round 56) chose RUNTIME proofs; they are built against the REAL BFF booted
+      in-process from Program.cs as Development and as Production (tests/Spaarke.ArchTests/BootedBff.cs; every mapping gate on;
+      a loopback handshake-only Redis lets CacheModule connect in Production). The verifier's proposed TEXT fixes were drafted
+      and removed before commit: each closes a class (d) bypass the runtime proofs already decide (owner round 56: record, do
+      not build).
+      ITEM 1 / CRITERION 12 (class d for the text rule; closed by round 52 item 1): NoPolicyAndNoEndpointAdmitsAnAnonymousCallerAtRunTime
+      evaluates an anonymous principal through the booted app's own IAuthorizationService and handlers against every
+      registered policy, the default and fallback policies and the middleware policy of every non-anonymous endpoint; no
+      authentication scheme may authenticate a credential-less request; every authorization pipeline stage must be the
+      framework's. Control: the verifier's three handlers compiled (shadowed lambda, local function, reflection), a
+      credential-less scheme, a replaced service, no fallback. Text rule unchanged, limits stated.
+      ITEM 2 / ROUND 43 ITEM 1 (class d for the text pin; closed by round 52 item 2): NoDevelopmentOnlyRouteIsMappedInProduction
+      (the Production boot maps no pinned development-only route; the routes that differ between boots are exactly that set)
+      and NoServerCodeWritesTheHostEnvironmentName (an IL scan of every production project under src/server for a framework
+      EnvironmentName setter; the L2 Worker now built by the ArchTests target; an unbuilt project fails closed).
+      ITEM 3 (class d for the text rule; closed by round 52 item 3): a retired ledger entry resolves only when neither boot
+      maps its verb and path (LedgerViolations' mappedAtRunTime); no booted app, no resolution. ProofTest text checks of
+      f2-v1 stay for the named regression test, limits stated.
+      ITEM 4 (round 52 item 4): a bearer counts only when the last Authorization assignment to that client or message before
+      the request is new AuthenticationHeaderValue("Bearer", non-empty token); Authorization = null never counts.
+      ALSO: TheScannerAndTheBootedAppAgreeOnEveryRoute (430 = 430; keeps the runtime absence checks non-vacuous) and
+      TheAnonymousSurfaceAtRunTimeIsThePinnedSurface (round 52 item 1's exemption, pinned at run time).
+      SEEDING (note 20.3, real source, restored and touched): f2v2-1 the verifier's SeedOpen handler: 1 failed (runtime proof);
+      f2v2-2 env.EnvironmentName = Development before IsDevelopment(): 4 failed; f2v2-3 a deleted route re-mapped unreadably:
+      3 failed (ledger, agreement, Rule A); f2v2-3p the route really deleted: green; f2v2-4 Authorization = null in
+      ScopePersonasEndpointTests: 1 failed naming the test.
+      TESTS: Guard 86/86 (76 + 10 new); ArchTests 417/417; Sprk.Bff.Api.IntegrationTests 104/104; Spe.Integration.Tests
+      403 passed, 25 skipped, 0 failed of 428; BFF unit suite 14230 passed / 1 failed / 54 skipped of 14285 (contended, 29 m) -
+      the one failure (IdentifierReverseLookupRungTests.Fr12_NewRecordFraming_..., a confidence value) passed on an isolated
+      re-run (class 21/21); this round changes no src/ file and no unit test.
+      PUBLISH SIZE: not re-measured - no src/ file, BFF csproj or BFF package changed. CVE: Spaarke.ArchTests has no
+      vulnerable packages (dotnet list package --vulnerable --include-transitive).
+      INTEGRATION: keep ONE IL reader (task 132's IlCallScan or this CompiledIl), note 20.6.
+    </outcome>
+    <justification-of-new-files round="f2-v2">
+      tests/Spaarke.ArchTests/BootedBff.cs, CompiledIl.cs, RouteAuthorizationGuardTests.Runtime.cs and
+      RouteAuthorizationGuardTests.Compiled.cs (ArchTests KEEP path, partial parts of the existing guard), plus
+      Microsoft.AspNetCore.Mvc.Testing 10.0.11 and the L2 Worker in Spaarke.ArchTests.csproj. Main-session round 52 (binding)
+      requires the guard to check sign-in, development-only mappings and retired-route absence against the REAL booted
+      application. EXISTING: the BFF test projects' WebApplicationFactory fixtures (not referenced by ArchTests; none boots
+      Production; each replaces authentication with a fake, which would void the sign-in proof); no IL reader on this branch
+      (task 132's is unmerged - keep one at integration). EXTENSION: ArchTests cannot reference those fixtures without their
+      fakes. COST OF DOING NOTHING: round 52's decided runtime proofs cannot run inside the guard, so the text heuristics the
+      verifier defeated stay the only check. No BFF service, registration, endpoint, option, job, column or BFF package
+      (CLAUDE.md section 10 not triggered). No Dataverse plugin (ADR-002).
+    </justification-of-new-files>
+    <justification-of-src-change round="f2-v1">
+      Main-session round 43 item 2 (binding). No NEW surface: the existing MemoizedHealthCheck.State gains an
+      EvaluationTimeout constructor argument and property; CatalogHealthChecks gains the EvaluationTimeout constant beside
+      MemoTtl; the existing AddCatalogCheck registration passes it as HealthCheckRegistration.Timeout. No new type, endpoint,
+      service, DI registration, option, job, column, package, PCF or Dataverse plugin (ADR-002). COST OF DOING NOTHING: a hung
+      Dataverse read kept the shared evaluation unfinished forever - every /healthz/catalog caller waited until its own
+      client gave up and the memo never re-evaluated. ADR-009 path C and ADR-010 unchanged. Fail closed (ADR-003): a timeout
+      is the registration's failure status. Publish size measured (note 19.8).
+    </justification-of-src-change>
+    <justification-of-src-change round="f2">
+      Main-session round 34 item 7 (binding). NEW SURFACE: MemoizedHealthCheck (internal sealed IHealthCheck decorator) and
+      CatalogHealthChecks.AddCatalogCheck (internal static registration helper), Infrastructure/HealthChecks/MemoizedHealthCheck.cs.
+      EXISTING: IEndpointResponseCache (IMemoryCache, system clock, no in-flight sharing; ADR-009 path-A exception scoped to it by
+      name), TopicRegistryTtlLookup (domain registry cache), the two health checks (a memo in each duplicates logic, and
+      RoutingConsumerTypeHealthCheck is rebuilt per probe); grep found no health-check decorator or single-flight helper.
+      EXTENSION: a decorator on the framework's HealthCheckRegistration; no change to either check, no DI registration added
+      (AddCheck became Add of a registration; ADR-010). COST OF DOING NOTHING: one anonymous address drives ~360-480 Dataverse
+      requests a minute through the BFF identity on /healthz/catalog (a quarter to a third of the per-identity
+      service-protection budget); a handful throttle every user. ADR-009: metadata L1 exception documented on the class (path C).
+      No new endpoint, option, job, column, package, PCF or Dataverse plugin (ADR-002). Fail closed (ADR-003): a fault is
+      reported as a failure. Publish size measured (note 18.7).
+    </justification-of-src-change>
+    <justification-of-new-files round="f2">
+      tests/integration/contract/Api/CatalogHealthMemoContractTests.cs (contract KEEP path): round 34 item 7 asks for the memo
+      to be tested with a fake TimeProvider; EXISTING: no test exercised a memoized health check; EXTENSION: the
+      ComposeIdentityKeyHealthCheck contract tests cover the check's status ladder, not the route's cost; COST OF DOING
+      NOTHING: the 30 s window, single flight and fault expiry would be pinned only in source. Spe.Integration.Tests.csproj links
+      the EXISTING tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/EndpointTable.cs (no copy) so the Spe reporting test can
+      read registration from the endpoint table.
+    </justification-of-new-files>
+    <justification-of-src-change round="f1">
+      Owner round 14 items 1-2 (binding). NEW SURFACE: (1) the "health-probe" rate-limit policy. EXISTING: the
+      "anonymous" policy (RateLimitingModule.cs, fixed 10/min per IP, 12 anonymous routes). EXTENSION: no - raising
+      "anonymous" would triple the budget of row-creating, HMAC and Dataverse-hitting anonymous routes. COST OF DOING
+      NOTHING: 5-second pollers (deploy-bff-api.yml, Deploy-BffApi.ps1, control plane H9, Rotate-RedisKey.ps1) lose
+      polls 11-12 of a window to 429 and a production verify can roll back a good deploy; a 429 on the slot-swap
+      warm-up stops the swap. (2) AuthorizationModule.ApplyFallbackPolicy (a public static method of the existing
+      module). EXISTING: AddAuthorization in the same module, which calls it. EXTENSION: it is the extension; a separate
+      method only so a test host can use the real policy (the AddCredentialSelection precedent). COST OF DOING NOTHING: an
+      endpoint that declares nothing is callable by anyone (owner round 14 item 2). No new endpoint, service type, DI
+      registration of a type, option, job, column, package, PCF or Dataverse plugin (ADR-002). Fail closed (ADR-003).
+      Publish size measured: +398 bytes (note 17.5).
+    </justification-of-src-change>
+    <justification-of-src-change round="r1">
+      Owner round 12 item 1 (binding) overrides this POML's "change NO file under src/" for one purpose: rate-limit
+      GET /healthz, GET /healthz/catalog and GET /ping. Three .RequireRateLimiting("anonymous") calls on EXISTING routes
+      in Infrastructure/DI/EndpointMappingExtensions.cs. CLAUDE.md section 10 placement: the routes' own registration file;
+      no new endpoint, service, DI registration, option, rate-limit policy, job, column or package (the existing
+      "anonymous" policy, RateLimitingModule.cs:95-104), so the section 11 three-question template for NEW surface is not
+      triggered. Publish size not measured (harness rule). No Dataverse plugin (ADR-002). Fail closed unchanged (ADR-003).
+    </justification-of-src-change>
+    <justification-of-new-files round="f1">
+      tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs (auth KEEP path) and
+      tests/integration/contract/Api/HealthProbeRateLimitContractTests.cs (contract KEEP path): the runtime proofs owner
+      round 14 asks for ("negative and positive controls"); EXISTING: no test exercised a fallback policy or the probe rate
+      limit (RateLimitingContractTests covers the AI policies on a minimal host); EXTENSION: the existing classes test other
+      subjects; COST OF DOING NOTHING: the FallbackPolicy and the probe budget would be pinned only in source, never shown to
+      behave. tests/unit/Sprk.Bff.Api.Tests/TestInfrastructure/EndpointTable.cs: EXISTING: the two retirement tests inline
+      the same endpoint-table enumeration (kept, they assert absence); EXTENSION: a shared helper is the extension for 21
+      call sites; COST OF DOING NOTHING: 21 existence tests could no longer fail once anonymous 401 stopped proving a route
+      exists.
+    </justification-of-new-files>
+    <justification-of-new-files>
+      tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.Scanner.cs and RouteAuthorizationGuardTests.Ledger.cs.
+      EXISTING: RouteAuthorizationGuardTests.cs (task 074) is the only route guard (grep found no other); these files are
+      partial-class parts of it, not a new guard. EXTENSION: yes, the guard is extended in place; the split separates three
+      reasons to change (rules, parser, data) inside one class. COST OF DOING NOTHING: one 6,000-line file in which every
+      159-166 waiver deletion conflicts with rule edits; and without the parser rewrite the guard keeps reading 25 of 120 files
+      and keying aggregator routes as fragments, so a waiver for S-09 would silently cover the external module route.
+      No BFF service, registration, endpoint, option, job, column or package is added (CLAUDE.md section 10 not triggered:
+      no publish-size or CVE impact). No Dataverse plugin (ADR-002).
+    </justification-of-new-files>
+  </execution>
+</task>

@@ -9,6 +9,7 @@ using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Communication;
@@ -23,10 +24,16 @@ namespace Sprk.Bff.Api.Api;
 /// <summary>
 /// Communication endpoints for sending emails via Graph API.
 /// POST /send: Single email send. POST /send-bulk: Bulk send to multiple recipients.
-/// GET /{id}/status: Communication status lookup.
 /// POST /accounts/{id}/verify: Mailbox verification.
 /// POST /incoming-webhook: Graph change notification receiver for inbound emails.
 /// </summary>
+/// <remarks>
+/// <para><b>Two filters, two jobs (unified-access-control-r2 task 161).</b> <see cref="CommunicationAuthorizationFilter"/>
+/// is an IDENTITY precondition only (authenticated + an oid). Every route that reads, attaches to or changes a record
+/// the caller names ALSO carries <c>.AddCommunicationRecordAuthorizationFilter(...)</c>, which asks Dataverse AS THE
+/// CALLER about that exact record before the handler runs (<see cref="CommunicationRecordAuthorizationFilter"/>).
+/// Routes without it scope their reads to the caller inside the handler (impersonated read services).</para>
+/// </remarks>
 public static class CommunicationEndpoints
 {
     /// <summary>
@@ -54,8 +61,9 @@ public static class CommunicationEndpoints
 
         group.MapPost("/send", SendCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Send)
             .WithName("SendCommunication")
-            .WithDescription("Send an email communication via Microsoft Graph API")
+            .WithDescription("Send an email communication via Microsoft Graph API. The caller must be able to read every attached document, see the target thread and the inherit-from communication, and hold AppendTo on every association and copied regarding record (403 otherwise).")
             .Produces<SendCommunicationResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
@@ -63,19 +71,54 @@ public static class CommunicationEndpoints
 
         group.MapPost("/send-bulk", SendBulkCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.SendBulk)
             .WithName("SendBulkCommunication")
-            .WithDescription("Send an email communication to multiple recipients via Microsoft Graph API")
+            .WithDescription("Send an email communication to multiple recipients via Microsoft Graph API. The attachments (Read) and associations (AppendTo) are authorized once for the whole request; a deny is one 403 and nothing is sent.")
             .Produces<BulkSendResponse>(StatusCodes.Status200OK)
             .Produces<BulkSendResponse>(207)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
-        group.MapGet("/{id:guid}/status", GetCommunicationStatusAsync)
-            .WithName("GetCommunicationStatus")
-            .WithDescription("Get the status of a sent communication")
-            .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
-            .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
+        // unified-access-control-r2 task 147 r1c (owner round 28 item 1: "re-files go through the existing families"; round 36
+        // item 2: 161's family had no re-file route, so the event route's rule applies here too). The browser's re-file of a
+        // communication (the Communication form's Connections links, ConnectionsWriteHandler) sends its regarding lookups and
+        // ADR-024 resolver fields here — ONLY those (the association status and override reason stay the caller's own
+        // update). The identity precondition, then 161's per-record gate AS THE CALLER (Write on the communication; the
+        // shape checked first), then the ONE re-file core (OwnedChildWrite.RefileAsync — AppendTo on every record it is moved
+        // under, F3 on a move out of a secure record, the owner decided and assigned; an unfiled communication keeps its
+        // creator, E1), the core-ancestor re-stamp, and SecureChildReconciler.AfterRefileAsync (its mirror, and 148's pass over
+        // what is filed under it when it moved under, out of or between secure records).
+        group.MapPatch("/{id:guid}/filing", (
+                Guid id,
+                [Microsoft.AspNetCore.Mvc.FromBody] System.Text.Json.JsonElement body,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Infrastructure.Dataverse.IDataverseUserClient user,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Dataverse.CoreAncestorRestamper restamper,
+                [Microsoft.AspNetCore.Mvc.FromServices] Sprk.Bff.Api.Services.Access.SecureChildReconciler children,
+                HttpContext httpContext,
+                ILogger<Program> logger,
+                CancellationToken ct) =>
+                ChildRecordEndpoints.UpdateAsync(
+                    "sprk_communication", id, body, user, ownership, restamper, children, httpContext, logger, ct,
+                    filingOnly: true))
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Refile)
+            .WithName("RefileCommunication")
+            .WithDescription("Re-file a communication: its regarding lookups and regarding fields only, as the caller (Write on " +
+                "the communication, AppendTo on every record it is moved under, F3 on a move out of a secure record); the " +
+                "owner follows the records it is filed under, and so do the records filed under it")
+            .Produces(StatusCodes.Status204NoContent)
+            .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status409Conflict);
+
+        // GET /{id}/status was DELETED by unified-access-control-r2 task 161 (owner round 10 item 1): it had no caller
+        // anywhere in the repository and is in no published API description (src/solutions/CopilotAgent/
+        // spaarke-bff-openapi.yaml publishes only /send from this group), and it answered any signed-in caller with
+        // any communication's status, Graph message id, sent time and sender, read app-only (sweep finding S-79).
+        // A deleted route cannot be mis-gated later; CommunicationRecordAuthorizationContractTests pins its absence.
 
         // GET /{id}/attachments/text — re-extracted, normalized text for each of a communication's file
         // attachments, for the reconciliation browse reader's folds (email-communication-intelligence-r2 B2.1).
@@ -108,6 +151,7 @@ public static class CommunicationEndpoints
         // route param — no collision with GET /threads (list), POST /threads/direct, or /threads/{id}/*.
         group.MapPost("/threads", CreateRecordThreadAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.CreateRecordThread)
             .WithName("CreateRecordThread")
             .WithDescription("Create a new named, record-anchored thread (item 9): owner = server-resolved caller, denormalized ADR-024 regarding pointer, Record-Anchored type. 403 on unresolved caller; 400 on missing regarding.")
             .Produces<CreateRecordThreadResponse>(StatusCodes.Status200OK)
@@ -157,15 +201,17 @@ public static class CommunicationEndpoints
         // POST /api/communications/threads/{threadId}/rename — set a user-chosen thread name (task 004 / FR-17).
         // The caller is resolved server-side (never client-supplied); the write authorizes the caller AGAINST the
         // thread by an IMPERSONATED visibility check (a caller MUST NOT rename a thread they cannot see → 403,
-        // ADR-028 / NFR-01), a blank name is a 400. The write sets sprk_name AND flips sprk_nameisautoderived to
+        // ADR-028 / NFR-01) — and, since task 161, the record filter first requires WRITE on the thread (owner D1),
+        // denying with the same 403 body — a blank name is a 400. The write sets sprk_name AND flips sprk_nameisautoderived to
         // Edited in ONE update so the auto re-derive never overwrites the user's name (edit-preserve). This BFF
         // write is the ONLY marker-flip path — NO Dataverse plugin (hard MUST NOT). Distinct route: POST verb +
         // literal /rename segment, no collision with GET /threads/{threadId}/messages|unread-count or POST
         // /threads/direct.
         group.MapPost("/threads/{threadId:guid}/rename", RenameThreadAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ThreadRename)
             .WithName("RenameThread")
-            .WithDescription("Rename a communication thread (FR-17): sets sprk_name + flips sprk_nameisautoderived to Edited so the auto re-derive never overwrites it. Caller resolved server-side; 403 if the caller cannot see the thread; 400 on a blank name. No Dataverse plugin — this BFF write is the only marker-flip path.")
+            .WithDescription("Rename a communication thread (FR-17): sets sprk_name + flips sprk_nameisautoderived to Edited so the auto re-derive never overwrites it. The caller must hold Write on the thread and see it — otherwise 403, the same answer a thread that does not exist gets (also for a missing bearer token or an unresolved caller); 400 on a blank name. No Dataverse plugin — this BFF write is the only marker-flip path.")
             .Produces<RenameThreadResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
@@ -173,38 +219,44 @@ public static class CommunicationEndpoints
         // PATCH /api/communications/threads/{threadId}/pin — pin/unpin a thread (task 041 / FR-24). Pin only — no
         // archive/mute/tag equivalent. Same authorization shape as rename: the caller is resolved server-side and
         // authorized AGAINST the thread by an impersonated visibility check (403 if the caller cannot see it —
-        // ADR-028 / NFR-01). Sets sprk_ispinned (task 040 schema) in one write via IThreadResolver.SetPinnedAsync.
+        // ADR-028 / NFR-01), after the record filter has required WRITE on it (task 161, owner D1; same 403 body).
+        // Sets sprk_ispinned (task 040 schema) in one write via IThreadResolver.SetPinnedAsync.
         // Distinct route: PATCH verb + literal /pin segment, no collision with the rename POST or any GET route.
         group.MapPatch("/threads/{threadId:guid}/pin", SetThreadPinnedAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ThreadPin)
             .WithName("SetThreadPinned")
-            .WithDescription("Pin/unpin a communication thread (FR-24): sets sprk_ispinned. Caller resolved server-side; 403 if the caller cannot see the thread. No Dataverse plugin — this BFF write is the only pin-state write path.")
+            .WithDescription("Pin/unpin a communication thread (FR-24): sets sprk_ispinned. The caller must hold Write on the thread and see it — otherwise 403, the same answer a thread that does not exist gets (also for a missing bearer token or an unresolved caller). No Dataverse plugin — this BFF write is the only pin-state write path.")
             .Produces<SetThreadPinnedResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         // DELETE /api/communications/threads/{threadId} — soft-delete (deactivate) a thread (round 7 item 7).
         // Same authorization shape as rename/pin: the caller is resolved server-side and authorized AGAINST the
-        // thread by an impersonated visibility check (403 if the caller cannot see it — ADR-028 / NFR-01), then
+        // thread by an impersonated visibility check (403 if the caller cannot see it — ADR-028 / NFR-01), after the
+        // record filter has required WRITE on it (task 161, owner D1; same 403 body), then
         // statecode/statuscode are set to Inactive via IThreadResolver.DeactivateThreadAsync (reversible; no
         // physical delete, no Dataverse plugin). Distinct route: DELETE verb + literal /threads segment, no
         // collision with the DELETE /{id} message-deactivate below.
         group.MapDelete("/threads/{threadId:guid}", DeactivateThreadAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ThreadDeactivate)
             .WithName("DeactivateThread")
-            .WithDescription("Soft-delete (deactivate) a communication thread (round 7 item 7): sets statecode/statuscode to Inactive. Caller resolved server-side; 403 if the caller cannot see the thread. Reversible — no physical delete, no Dataverse plugin.")
+            .WithDescription("Soft-delete (deactivate) a communication thread (round 7 item 7): sets statecode/statuscode to Inactive. The caller must hold Write on the thread and see it — otherwise 403, the same answer a thread that does not exist gets (also for a missing bearer token or an unresolved caller). Reversible — no physical delete, no Dataverse plugin.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
         // DELETE /api/communications/{id} — soft-delete (deactivate) a single message (round 7 item 8). Caller
         // resolved + authorized AGAINST the message by an impersonated visibility check (403 if the caller cannot
-        // see it), then statecode/statuscode set to Inactive via IThreadResolver.DeactivateMessageAsync. DELETE
+        // see it), after the record filter has required WRITE on it (task 161, owner D1; same 403 body), then
+        // statecode/statuscode set to Inactive via IThreadResolver.DeactivateMessageAsync. DELETE
         // verb + bare /{id} (no suffix) is distinct from POST /{id}/archive and the DELETE /threads/{threadId}
         // above (literal /threads segment).
         group.MapDelete("/{id:guid}", DeactivateCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.MessageDeactivate)
             .WithName("DeactivateCommunication")
-            .WithDescription("Soft-delete (deactivate) a single message (round 7 item 8): sets statecode/statuscode to Inactive. Caller resolved server-side; 403 if the caller cannot see the message. Reversible — no physical delete.")
+            .WithDescription("Soft-delete (deactivate) a single message (round 7 item 8): sets statecode/statuscode to Inactive. The caller must hold Write on the message and see it — otherwise 403, the same answer a message that does not exist gets (also for a missing bearer token or an unresolved caller). Reversible — no physical delete.")
             .Produces(StatusCodes.Status204NoContent)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
 
@@ -238,16 +290,18 @@ public static class CommunicationEndpoints
 
         group.MapPost("/{id:guid}/archive", ArchiveCommunicationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.Archive)
             .WithName("ArchiveCommunication")
-            .WithDescription("Archive an existing communication to SharePoint on demand (.eml Document + a Document per attachment). Idempotent — a communication already archived returns AlreadyArchived without duplicating.")
+            .WithDescription("Archive an existing communication to SharePoint on demand (.eml Document + a Document per attachment). Idempotent — a communication already archived returns AlreadyArchived without duplicating. The caller must see the communication (404 otherwise), hold AppendTo on it and the Create privilege on sprk_document (403 otherwise).")
             .Produces<ArchiveCommunicationResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/{id:guid}/suggest-associations", SuggestAssociationsAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.SuggestAssociations)
             .WithName("SuggestCommunicationAssociations")
-            .WithDescription("Preview the Association Engine's regarding suggestions for a stored communication (target(s) + confidence + provenance). READ-ONLY — evaluates the rungs on demand WITHOUT writing to the record. Auth-scoped via the endpoint filter (NFR-07); AI-flagged privilege is surfaced as a signal, never decided (ADR-015).")
+            .WithDescription("Preview the Association Engine's regarding suggestions for a stored communication (target(s) + confidence + provenance). READ-ONLY — evaluates the rungs on demand WITHOUT writing to the record. Authorized per record: the caller must see the communication (404 otherwise), and every candidate the caller cannot read is removed before the status is decided. AI-flagged privilege is surfaced as a signal, never decided (ADR-015).")
             .Produces<SuggestAssociationsResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
@@ -258,11 +312,14 @@ public static class CommunicationEndpoints
         // messages with matching signals. Learns from HUMAN confirmations only (not the engine's auto-files).
         // Best-effort / non-fatal (NFR-04): a disabled tenant, unmapped target, or store failure is a no-op that
         // still returns 200 — it MUST NOT fail the user's confirmation (the regarding write already succeeded
-        // client-side via Xrm.WebApi, ADR-024). Auth-scoped via the endpoint filter (NFR-07).
+        // client-side via Xrm.WebApi, ADR-024). Authorized per record (task 161): the caller must see the communication,
+        // its typed regarding lookup must already name the target (the human's write really happened), and the caller
+        // must hold Write on it — otherwise the same 200 no-op, so the never-fails contract holds.
         group.MapPost("/{id:guid}/confirm-affinity", RecordAffinityConfirmationAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ConfirmAffinity)
             .WithName("RecordCommunicationAffinityConfirmation")
-            .WithDescription("FR-A4 affinity learning: record that a human confirmed this communication is regarding {targetEntityType}:{targetRecordId}, incrementing the per-(signal, target) confirmation frequency the deterministic AffinityRung reads. Signals are computed with the SAME AffinityRung.ExtractSignals the read path uses (read/write canonicalization parity). Best-effort — never fails the confirmation; disabled-tenant / unmapped-target / store-failure are no-ops.")
+            .WithDescription("FR-A4 affinity learning: record that a human confirmed this communication is regarding {targetEntityType}:{targetRecordId}, incrementing the per-(signal, target) confirmation frequency the deterministic AffinityRung reads. Signals are computed with the SAME AffinityRung.ExtractSignals the read path uses (read/write canonicalization parity). Best-effort — never fails the confirmation; disabled-tenant / unmapped-target / store-failure / a caller who cannot see or write the communication, or whose communication does not name the target, are no-ops.")
             .Produces<RecordAffinityConfirmationResult>(StatusCodes.Status200OK);
 
         // GET /api/communications/queue-feed?regarding=&top= — the FR-17 ranked-exceptions queue-feed (task 032).
@@ -291,8 +348,9 @@ public static class CommunicationEndpoints
         // no UI. Registered unconditionally (ADR-010/ADR-032).
         group.MapPost("/proposals/{reviewLogId:guid}/apply", ApplyProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ProposalApply)
             .WithName("ApplyCommunicationProposal")
-            .WithDescription("Job B apply (FR-10 / FR-E4): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only audit row. An optional body {\"overrideValue\":\"…\"} (FR-E4) applies the reviewer's EDITED value instead of the AI's — through the same allow-list + citation + coercion guards, recorded as an Overriden audit row. Caller resolved server-side (403 fail-closed); non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
+            .WithDescription("Job B apply (FR-10 / FR-E4): apply a confirmed pending field-update proposal to the associated record under the confirming user's MSCRMCallerID impersonation, then write the append-only audit row. An optional body {\"overrideValue\":\"…\"} (FR-E4) applies the reviewer's EDITED value instead of the AI's — through the same allow-list + citation + coercion guards, recorded as an Overriden audit row. The caller must see the proposal's communication: an unknown proposal, one whose communication the caller cannot see, a missing bearer token and an unresolved caller all get the same 404 PROPOSAL_NOT_FOUND. A non-allow-listed field (403), unverifiable citation (422), or already-resolved proposal (409) are refused.")
             .Accepts<ApplyProposalRequest>("application/json")
             .Produces<ApplyProposalResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
@@ -309,8 +367,9 @@ public static class CommunicationEndpoints
         // request body. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
         group.MapPost("/proposals/{reviewLogId:guid}/dismiss", DismissProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ProposalDismiss)
             .WithName("DismissCommunicationProposal")
-            .WithDescription("Job B reject (FR-E4): terminally dismiss a pending field-update proposal — write one append-only Dismissed audit row attributed to the rejecting user and make NO record change. Caller resolved server-side (403 fail-closed); a missing proposal (404), malformed proposal (422), or non-pending/already-resolved proposal (409) are refused.")
+            .WithDescription("Job B reject (FR-E4): terminally dismiss a pending field-update proposal — write one append-only Dismissed audit row attributed to the rejecting user and make NO record change. The caller must see the proposal's communication: an unknown proposal, one whose communication the caller cannot see, a missing bearer token and an unresolved caller all get the same 404 PROPOSAL_NOT_FOUND. A malformed proposal (422), or non-pending/already-resolved proposal (409) are refused.")
             .Produces<DismissProposalResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -323,13 +382,16 @@ public static class CommunicationEndpoints
         // CREATES the sprk_event (type=task) via the blessed IActionSeam.CreateTaskAsync write core, PATCHes the
         // remaining FR-E5 fields (status/completed-date/base-date/final-due-date) under the confirming user's
         // MSCRMCallerID impersonation, and writes ONE append-only Applied audit row (Path B — the facade is unchanged
-        // per ADR-013; see CommunicationCreateTaskApplyService remarks). Caller resolved server-side (403 fail-closed);
+        // per ADR-013; see CommunicationCreateTaskApplyService remarks). Since task 161 the record filter first requires,
+        // as the caller, visibility of the proposal's communication (404 PROPOSAL_NOT_FOUND otherwise, also for a
+        // missing bearer token or an unresolved caller), AppendTo on the target and Create (+ Assign) on sprk_event;
         // a non-create-task/unverifiable-citation proposal (422), an already-resolved proposal (409), or a failed
         // create/patch (422) are refused. Registered unconditionally (ADR-010/ADR-032). r1 builds no UI.
         group.MapPost("/proposals/{reviewLogId:guid}/create-task/apply", ApplyCreateTaskProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ProposalCreateTaskApply)
             .WithName("ApplyCommunicationCreateTaskProposal")
-            .WithDescription("Job C apply (FR-D5): create the sprk_event (type=task) a confirmed create-task proposal describes via IActionSeam.CreateTaskAsync, PATCH the human-supplied FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row. Caller resolved server-side (403 fail-closed); non-create-task/unverifiable-citation (422), already-resolved (409), or failed create/patch (422) are refused.")
+            .WithDescription("Job C apply (FR-D5): create the sprk_event (type=task) a confirmed create-task proposal describes via IActionSeam.CreateTaskAsync, PATCH the human-supplied FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row. The caller must see the proposal's communication (otherwise — and for a missing bearer token or an unresolved caller — the same 404 PROPOSAL_NOT_FOUND an unknown proposal gets), and hold AppendTo on its target record, the Create privilege on sprk_event and, when assignedTo names someone else, the Assign privilege on sprk_event (403 otherwise). Non-create-task/unverifiable-citation (422), already-resolved (409), or failed create/patch (422) are refused.")
             .Produces<ApplyCreateTaskResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -340,18 +402,22 @@ public static class CommunicationEndpoints
         // reconcile tab's "+ New task" (a task the reviewer AUTHORED, not proposed by the engine) POSTs here with the
         // task form + the confirmed record as the regarding. Reuses the SAME create-task path as an applied proposal —
         // IActionSeam.CreateTaskAsync + the caller-impersonated FR-E5 PATCH + ONE append-only Applied audit row — with
-        // NO proposal row / NO citation / NO open-walk (there is nothing extracted to verify). Association gating is the
-        // UI's (NFR-10): the caller supplies the confirmed record, matching the applied-proposal sibling's posture.
-        // Caller resolved server-side (403 fail-closed); a blank subject / missing regarding (422) or a failed
+        // NO proposal row / NO citation / NO open-walk (there is nothing extracted to verify). The caller supplies the
+        // confirmed record; since task 161 the record filter requires, as the caller, visibility of the communication,
+        // AppendTo on that record and the Create (and, for another owner, Assign) privilege on sprk_event; an
+        // invisible communication, a missing bearer token and an unresolved caller all get the 404
+        // COMMUNICATION_NOT_FOUND an unknown id gets. A blank subject / missing regarding (422) or a failed
         // create/patch (422) are refused. Registered unconditionally (ADR-010/032). r1 builds no UI.
         group.MapPost("/{communicationId:guid}/create-task", CreateAdHocTaskAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.CreateAdHocTask)
             .WithName("CreateCommunicationAdHocTask")
-            .WithDescription("Job C ad-hoc create (FR-E5 \"+ New task\"): create a reviewer-authored sprk_event (type=task) regarding the confirmed record via IActionSeam.CreateTaskAsync, PATCH the FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row — the SAME create-task path as an applied proposal, minus the proposal/citation. Caller resolved server-side (403 fail-closed); blank subject / missing regarding (422), or failed create/patch (422) are refused.")
+            .WithDescription("Job C ad-hoc create (FR-E5 \"+ New task\"): create a reviewer-authored sprk_event (type=task) regarding the confirmed record via IActionSeam.CreateTaskAsync, PATCH the FR-E5 fields under the confirming user's MSCRMCallerID impersonation, and write one append-only Applied audit row — the SAME create-task path as an applied proposal, minus the proposal/citation. The caller must see the communication (otherwise — and for a missing bearer token or an unresolved caller — the same 404 COMMUNICATION_NOT_FOUND an unknown id gets), and hold AppendTo on the regarding record, the Create privilege on sprk_event and, when assignedTo names someone else, the Assign privilege on sprk_event (403 otherwise, also for a regarding type outside the live-verified catalogue). Blank subject / missing regarding (422), or failed create/patch (422) are refused.")
             .Accepts<CreateAdHocTaskRequest>("application/json")
             .Produces<CreateAdHocTaskResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
 
         // POST /api/communications/proposals/{reviewLogId}/undo — Job B UNDO (email-communication-intelligence-r2 B2.2).
@@ -360,8 +426,9 @@ public static class CommunicationEndpoints
         // blessed core + allow-list gate as apply), and writes one append-only compensating audit row. No body.
         group.MapPost("/proposals/{reviewLogId:guid}/undo", UndoProposalAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.ProposalUndo)
             .WithName("UndoCommunicationProposal")
-            .WithDescription("Job B undo (B2.2): reverse a just-applied field-update proposal by writing its stored oldValue back to the target record under the caller's MSCRMCallerID impersonation, then write one append-only compensating audit row. Caller resolved server-side (403 fail-closed); missing/malformed proposal (404/422), non-allow-listed field (403), lookup field (422), or a failed coercion/PATCH (422) are refused.")
+            .WithDescription("Job B undo (B2.2): reverse a just-applied field-update proposal by writing its stored oldValue back to the target record under the caller's MSCRMCallerID impersonation, then write one append-only compensating audit row. The caller must see the proposal's communication: an unknown proposal, one whose communication the caller cannot see, a missing bearer token and an unresolved caller all get the same 404 PROPOSAL_NOT_FOUND. A malformed proposal (422), non-allow-listed field (403), lookup field (422), or a failed coercion/PATCH (422) are refused.")
             .Produces<UndoProposalResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
@@ -374,17 +441,20 @@ public static class CommunicationEndpoints
         // then writes ONE append-only compensating audit row tying the cancel to the communication (provenance + W1/W2).
         group.MapPost("/{communicationId:guid}/tasks/{taskId:guid}/undo", UndoCreateTaskAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.TaskUndo)
             .WithName("UndoCommunicationCreateTask")
-            .WithDescription("Job C undo (B2.2): soft-cancel a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID impersonation and write one append-only compensating audit row for the communication. Caller resolved server-side (403 fail-closed); a failed write — caller lacks access or the event no longer exists (422) — or a failed audit write (500) are refused.")
+            .WithDescription("Job C undo (B2.2): soft-cancel a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID impersonation and write one append-only compensating audit row for the communication. The caller must see the communication (otherwise — and for a missing bearer token or an unresolved caller — the same 404 COMMUNICATION_NOT_FOUND an unknown id gets); a failed write — caller lacks access or the event no longer exists (422) — or a failed audit write (500) are refused.")
             .Produces<UndoCreateTaskResult>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)
             .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .AddCommunicationRecordAuthorizationFilter(CommunicationRecordRoute.AccountVerify)
             .WithName("VerifyCommunicationAccount")
-            .WithDescription("Verify a communication account's mailbox capabilities (send and/or read)")
+            .WithDescription("Verify a communication account's mailbox capabilities (send and/or read). The caller must hold Write on the account (404 otherwise, identical to a non-existent id).")
             .Produces<VerificationResult>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
@@ -489,6 +559,7 @@ public static class CommunicationEndpoints
         CreateRecordThreadRequest request,
         IThreadResolver threadResolver,
         ICallerSystemUserResolver callerResolver,
+        IImpersonatedCommunicationQuery impersonatedQuery,
         HttpContext context,
         CancellationToken ct)
     {
@@ -511,16 +582,58 @@ public static class CommunicationEndpoints
                 statusCode: 400);
         }
 
+        // Task 161: the record filter has required AppendTo on this record. Its displayed name is the record's OWN
+        // primary name, read AS THE CALLER — the body RegardingRecordName is never persisted and never names the
+        // thread (the caller used to be able to label any record's thread with any text).
+        var regardingType = request.RegardingEntityType.Trim().ToLowerInvariant();
+        var recordName = await ReadRecordNameAsCallerAsync(
+            impersonatedQuery, regardingType, request.RegardingRecordId, callerId, ct);
+
         var threadId = await threadResolver.CreateRecordThreadAsync(
             callerId,
             request.Name,
             new RecordThreadAnchor(
-                request.RegardingEntityType,
+                regardingType,
                 request.RegardingRecordId.ToString(),
-                request.RegardingRecordName),
+                recordName),
             ct);
 
         return TypedResults.Ok(new CreateRecordThreadResponse { ThreadId = threadId });
+    }
+
+    /// <summary>
+    /// The regarding record's primary name as the CALLER reads it (one impersonated top-1 query on its live-verified
+    /// entity set), or <c>null</c> when the row is not visible or has no name. A read fault propagates: the thread is
+    /// not created rather than created under a name nobody checked.
+    /// </summary>
+    private static async Task<string?> ReadRecordNameAsCallerAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery,
+        string regardingType,
+        Guid recordId,
+        Guid callerSystemUserId,
+        CancellationToken ct)
+    {
+        var entitySet = RegardingNameFields.EntitySetName(regardingType);
+        var nameField = RegardingNameFields.PrimaryNameField(regardingType);
+        if (entitySet is null || nameField is null)
+        {
+            throw new SdapProblemException(
+                code: "VALIDATION_ERROR",
+                title: "Validation Error",
+                detail: $"'{regardingType}' is not a supported regarding record type.",
+                statusCode: 400);
+        }
+
+        // Primary key = "{logicalName}id" for every type in RegardingNameFields (live-verified, task-161 note §2).
+        var rows = await impersonatedQuery.QueryAsync(
+            entitySet, $"$select={nameField}&$filter={regardingType}id eq {recordId}&$top=1", callerSystemUserId, ct);
+
+        return rows.Count > 0
+               && rows[0].TryGetValue(nameField, out var value)
+               && value.ValueKind == JsonValueKind.String
+               && !string.IsNullOrWhiteSpace(value.GetString())
+            ? value.GetString()
+            : null;
     }
 
     /// <summary>
@@ -665,57 +778,15 @@ public static class CommunicationEndpoints
         return Results.Json(bulkResponse, statusCode: 207);
     }
 
-    private static async Task<IResult> GetCommunicationStatusAsync(
-        Guid id,
-        IGenericEntityService dataverseService,
-        ILogger<CommunicationService> logger,
-        CancellationToken ct)
-    {
-        Entity entity;
-        try
-        {
-            entity = await dataverseService.RetrieveAsync(
-                "sprk_communication",
-                id,
-                new[] { "statuscode", "sprk_graphmessageid", "sprk_sentat", "sprk_from" },
-                ct);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Communication {CommunicationId} not found in Dataverse", id);
-            throw new SdapProblemException(
-                code: "COMMUNICATION_NOT_FOUND",
-                title: "Communication not found",
-                detail: $"Communication with ID '{id}' does not exist.",
-                statusCode: 404);
-        }
-
-        var statusCodeValue = entity.GetAttributeValue<OptionSetValue>("statuscode")?.Value ?? 1;
-        var status = (CommunicationStatus)statusCodeValue;
-
-        var sentAtDateTime = entity.GetAttributeValue<DateTime?>("sprk_sentat");
-        DateTimeOffset? sentAt = sentAtDateTime.HasValue
-            ? new DateTimeOffset(sentAtDateTime.Value, TimeSpan.Zero)
-            : null;
-
-        var response = new CommunicationStatusResponse
-        {
-            CommunicationId = id,
-            Status = status,
-            GraphMessageId = entity.GetAttributeValue<string>("sprk_graphmessageid"),
-            SentAt = sentAt,
-            From = entity.GetAttributeValue<string>("sprk_from")
-        };
-
-        return TypedResults.Ok(response);
-    }
-
     private static async Task<IResult> ArchiveCommunicationAsync(
         Guid id,
         CommunicationService communicationService,
+        HttpContext httpContext,
         CancellationToken ct)
     {
-        var result = await communicationService.ArchiveExistingAsync(id, ct);
+        // Task 146 c1-r1 (owner round 13 item 9): the caller asked for the archive documents the application creates.
+        var result = await communicationService.ArchiveExistingAsync(
+            id, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext.User));
         return TypedResults.Ok(result);
     }
 
@@ -985,11 +1056,17 @@ public static class CommunicationEndpoints
         Guid id,
         CommunicationService communicationService,
         IncomingAssociationResolver associationResolver,
+        IDataverseUserClient userClient,
+        ILogger<CommunicationService> logger,
         CancellationToken ct)
     {
+        // The record filter has established the caller can see the communication. The candidates are evaluated
+        // through the SAME caller-scoped helper as the Office suggestions route (task 161): a record the caller cannot
+        // read is removed before the ladder decides, so neither its id nor a status computed with it is returned.
         var (message, context) = await communicationService.ReconstructEnvelopeAsync(id, ct);
-        var decision = await associationResolver.EvaluateAsync(message, context, ct);
-        return TypedResults.Ok(SuggestAssociationsResponse.FromDecision(id, decision));
+        var scoped = await SuggestionCandidateAccess.EvaluateForCallerAsync(
+            id, message, context, associationResolver, userClient, logger, ct);
+        return TypedResults.Ok(scoped.Suggestions);
     }
 
     /// <summary>

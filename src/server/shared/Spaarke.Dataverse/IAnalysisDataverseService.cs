@@ -21,8 +21,25 @@ public interface IAnalysisDataverseService
     /// <para>When <paramref name="regarding"/> is supplied, the ADR-024 polymorphic <c>regarding</c>
     /// field-set (entity-specific lookup + denormalized resolver fields) is written on the analysis so
     /// it surfaces on the parent's Analyses tab.</para>
+    ///
+    /// <para><paramref name="owningTeamId"/> (unified-access-control-r2 task 146) is the team that owns the new row,
+    /// resolved by the BFF's <c>IRecordOwnershipResolver</c> from the document and/or regarding record — the named
+    /// Secure team when either is secure. REQUIRED: a create without it throws
+    /// <see cref="InvalidOperationException"/> before any write, because this create is app-only and an unset owner
+    /// makes the BFF application user own an AI analysis of a secure document in the root business unit. Optional
+    /// in the signature only so the parameter could be added without reordering; every caller passes it.</para>
+    ///
+    /// <para><paramref name="createdByPersonId"/> (task 146 c1-r1, owner round 13 item 9) is the person who asked for the
+    /// analysis, written as <see cref="RecordCreatorPersonColumn.LogicalName"/> — this create is app-only, so
+    /// <c>createdby</c> is the application user. <c>null</c> for a writer that acts for nobody (a background profile).</para>
     /// </summary>
-    Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, CancellationToken ct = default);
+    Task<Guid> CreateAnalysisAsync(Guid? documentId, string? name = null, Guid? playbookId = null, AnalysisRegardingTarget? regarding = null, Guid? owningTeamId = null, Guid? createdByPersonId = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates an <c>sprk_analysisoutput</c> row. <see cref="AnalysisOutputEntity.OwningTeamId"/> is REQUIRED (task 146):
+    /// an analysis output carries the analysis's content, so it is owned like its analysis — a create without an owner
+    /// throws <see cref="InvalidOperationException"/> before any write.
+    /// </summary>
     Task<Guid> CreateAnalysisOutputAsync(AnalysisOutputEntity output, CancellationToken ct = default);
 
     /// <summary>

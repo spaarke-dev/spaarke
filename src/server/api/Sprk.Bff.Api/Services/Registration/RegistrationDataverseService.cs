@@ -6,6 +6,7 @@ using System.Text.Json.Serialization;
 using Azure.Core;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Membership;
 
 namespace Sprk.Bff.Api.Services.Registration;
 
@@ -46,6 +47,7 @@ public class RegistrationDataverseService : IDisposable
     private readonly TokenCredential _credential;
     private readonly ILogger<RegistrationDataverseService> _logger;
     private readonly ContactIdentityBinderFactory _binderFactory;
+    private readonly IMembershipCacheInvalidator _accessCacheInvalidator;
     private readonly TrackingIdGenerator _trackingIdGenerator;
     private readonly SemaphoreSlim _tokenSemaphore = new(1, 1);
     private AccessToken? _currentToken;
@@ -65,10 +67,12 @@ public class RegistrationDataverseService : IDisposable
         TokenCredential credential,
         IHttpClientFactory httpClientFactory,
         ILogger<RegistrationDataverseService> logger,
-        ContactIdentityBinderFactory binderFactory)
+        ContactIdentityBinderFactory binderFactory,
+        IMembershipCacheInvalidator accessCacheInvalidator)
     {
         _logger = logger;
         _binderFactory = binderFactory ?? throw new ArgumentNullException(nameof(binderFactory));
+        _accessCacheInvalidator = accessCacheInvalidator ?? throw new ArgumentNullException(nameof(accessCacheInvalidator));
         _trackingIdGenerator = trackingIdGenerator;
         _credential = credential;
         _httpClientFactory = httpClientFactory;
@@ -426,10 +430,77 @@ public class RegistrationDataverseService : IDisposable
         // Task 141: link the new user to its contact at creation — in the SAME environment the systemuser was
         // created in (the target, never the default one), so Assigned-To / No Access / briefing matching work
         // from the user's first day rather than from the next reconciliation tick.
-        await LinkContactForNewSystemUserAsync(
-            userId, azureAdObjectId, firstName, lastName, email, ContactLinkEnvironment(targetDataverseUrl), ct);
+        try
+        {
+            await LinkContactForNewSystemUserAsync(
+                userId, azureAdObjectId, firstName, lastName, email, ContactLinkEnvironment(targetDataverseUrl), ct);
+        }
+        finally
+        {
+            // Task 132 (C12): the business-unit bind (and the contact link) changed this user's identity. For a brand
+            // new user there is nothing cached; when Dataverse hands back an EXISTING user's id, its cached identity,
+            // membership and root sets would otherwise keep the old business unit for their TTLs.
+            await EvictUserAccessAsync(userId, targetDataverseUrl, "business-unit bind").ConfigureAwait(false);
+        }
 
         return userId;
+    }
+
+    /// <summary>
+    /// Evicts the user's cached identity, membership and impersonated root sets after a write that changed their teams
+    /// or business unit (unified-access-control-r2 task 132 · defect C12) — through the ONE hook every such writer
+    /// must call (<see cref="IMembershipCacheInvalidator.InvalidateUserAccessAsync"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Only for a write to THIS BFF's own environment.</b> This BFF's caches hold the users of its own
+    /// <c>Dataverse:ServiceUrl</c> environment only (D-13: one BFF per customer environment). A write whose
+    /// environment (<paramref name="targetDataverseUrl"/>, else <c>DATAVERSE_URL</c>) is a different one — a demo or
+    /// customer target — has nothing here to evict, and is skipped. When either URL is unknown it evicts: an
+    /// unnecessary eviction costs one re-read; a missing one leaves old access for the TTLs.</para>
+    /// <para><b>Works with no HttpContext</b> (<c>DemoExpirationService</c> is a background path): the eviction is
+    /// tenant-agnostic. <b>Never fails the write</b> — it has already happened; the TTL is the backstop. Not bound to
+    /// the caller's token, for the same reason.</para>
+    /// </remarks>
+    private async Task EvictUserAccessAsync(Guid systemUserId, string? targetDataverseUrl, string operation)
+    {
+        var writeEnvironment = ContactLinkEnvironment(targetDataverseUrl);
+        if (!IsThisBffsEnvironment(writeEnvironment))
+        {
+            _logger.LogDebug(
+                "[ACCESS-EVICT] {Operation} for systemuser {SystemUserId} wrote to {Environment}, not this BFF's own " +
+                "environment — no cached entry here can describe that user (D-13); nothing evicted",
+                operation, systemUserId, writeEnvironment);
+            return;
+        }
+
+        try
+        {
+            await _accessCacheInvalidator
+                .InvalidateUserAccessAsync(systemUserId, $"registration:{operation}", CancellationToken.None)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // The hook's contract is never-throws; this guards the write against a broken implementation anyway.
+            _logger.LogWarning(ex,
+                "[ACCESS-EVICT] Eviction after {Operation} for systemuser {SystemUserId} failed; the cached entries lapse " +
+                "on their TTLs", operation, systemUserId);
+        }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="dataverseBaseUrl"/> is this BFF's own <c>Dataverse:ServiceUrl</c> environment (task 132).
+    /// Unknown on either side counts as "yes" — see <see cref="EvictUserAccessAsync"/>.
+    /// </summary>
+    internal bool IsThisBffsEnvironment(string? dataverseBaseUrl)
+    {
+        var own = _configuration["Dataverse:ServiceUrl"];
+        if (string.IsNullOrWhiteSpace(own) || string.IsNullOrWhiteSpace(dataverseBaseUrl))
+        {
+            return true;
+        }
+
+        return string.Equals(own.Trim().TrimEnd('/'), dataverseBaseUrl.Trim().TrimEnd('/'), StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -567,26 +638,36 @@ public class RegistrationDataverseService : IDisposable
             ["@odata.id"] = $"{targetApiUrl}/{SystemUserEntitySet}({systemUserId})"
         };
 
-        HttpResponseMessage response;
-        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        try
         {
-            using var request = await CreateAuthenticatedRequestForUrlAsync(
-                HttpMethod.Post, targetDataverseUrl, navigationUrl, ct);
-            request.Content = JsonContent.Create(refBody);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            using var client = _httpClientFactory.CreateClient(HttpClientName);
-            response = await client.SendAsync(request, ct);
-        }
-        else
-        {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
-            request.Content = JsonContent.Create(refBody);
-            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
-            response = await _httpClient.SendAsync(request, ct);
-        }
+            HttpResponseMessage response;
+            if (!string.IsNullOrEmpty(targetDataverseUrl))
+            {
+                using var request = await CreateAuthenticatedRequestForUrlAsync(
+                    HttpMethod.Post, targetDataverseUrl, navigationUrl, ct);
+                request.Content = JsonContent.Create(refBody);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                using var client = _httpClientFactory.CreateClient(HttpClientName);
+                response = await client.SendAsync(request, ct);
+            }
+            else
+            {
+                using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, navigationUrl, ct);
+                request.Content = JsonContent.Create(refBody);
+                request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                response = await _httpClient.SendAsync(request, ct);
+            }
 
-        response.EnsureSuccessStatusCode();
-        _logger.LogInformation("Added systemuser {UserId} to team {TeamName}", systemUserId, teamName);
+            response.EnsureSuccessStatusCode();
+            _logger.LogInformation("Added systemuser {UserId} to team {TeamName}", systemUserId, teamName);
+        }
+        finally
+        {
+            // Task 132 (C12): whether or not the response confirmed it, the association may have been applied (a
+            // timeout after Dataverse committed). Evicting is always safe; not evicting leaves the user without the
+            // team's records for the identity + membership TTLs.
+            await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team add").ConfigureAwait(false);
+        }
     }
 
     /// <summary>
@@ -606,22 +687,31 @@ public class RegistrationDataverseService : IDisposable
 
         _logger.LogInformation("Removing systemuser {UserId} from team {TeamName}", systemUserId, teamName);
 
-        HttpResponseMessage response;
-        if (!string.IsNullOrEmpty(targetDataverseUrl))
+        try
         {
-            using var request = await CreateAuthenticatedRequestForUrlAsync(
-                HttpMethod.Delete, targetDataverseUrl, navigationUrl, ct);
-            using var client = _httpClientFactory.CreateClient(HttpClientName);
-            response = await client.SendAsync(request, ct);
-        }
-        else
-        {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, ct);
-            response = await _httpClient.SendAsync(request, ct);
-        }
+            HttpResponseMessage response;
+            if (!string.IsNullOrEmpty(targetDataverseUrl))
+            {
+                using var request = await CreateAuthenticatedRequestForUrlAsync(
+                    HttpMethod.Delete, targetDataverseUrl, navigationUrl, ct);
+                using var client = _httpClientFactory.CreateClient(HttpClientName);
+                response = await client.SendAsync(request, ct);
+            }
+            else
+            {
+                using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Delete, navigationUrl, ct);
+                response = await _httpClient.SendAsync(request, ct);
+            }
 
-        response.EnsureSuccessStatusCode();
-        _logger.LogInformation("Removed systemuser {UserId} from team {TeamName}", systemUserId, teamName);
+            response.EnsureSuccessStatusCode();
+            _logger.LogInformation("Removed systemuser {UserId} from team {TeamName}", systemUserId, teamName);
+        }
+        finally
+        {
+            // Task 132 (C12): the OVER-GRANT direction — without this the removed user keeps every team-owned record
+            // for the identity + membership TTLs. Runs with no HttpContext too (DemoExpirationService).
+            await EvictUserAccessAsync(systemUserId, targetDataverseUrl, "team remove").ConfigureAwait(false);
+        }
     }
 
     /// <summary>

@@ -98,6 +98,12 @@ public static class ExternalAccessEndpoints
         // registered predicate (app-only, no OBO, no Graph pointers). Additive — handlers + the group
         // filter above are untouched.
         externalGroup.MapExternalModuleDataEndpoints();
+
+        // Contact-side Grant Access (unified-access-control-r2 task 140, owner C4 / Q2): a contact holding Collaborate or
+        // Full Access grants colleagues of their OWN organization, at or below their own level, never organization-wide.
+        // On THIS group because a contact can authenticate nowhere else (ADR-028 A3: one ExternalCollaboration group);
+        // every route carries ContactGrantorAuthorizationFilter, which refuses a systemuser (Manage Access is theirs).
+        externalGroup.MapContactGrantEndpoints();
     }
 
     // =========================================================================
@@ -146,6 +152,15 @@ public static class ExternalAccessEndpoints
         // (spec FR-29, task 063): the server half of the Manage Access "+ User" picker (task 065). On this group so
         // they inherit the same Write-on-the-record delegation gate as every route above.
         adminGroup.MapInternalShareEndpoints();
+
+        // POST /api/v1/external-access/no-access/enforce — enforce one No Access entry now (task 143, owner Q4 + R3:
+        // "immediate on save"). On this group so the delegation filter gates it on Write on the ENTRY; it only removes.
+        adminGroup.MapNoAccessEnforceEndpoint();
+
+        // POST /assigned-access/sync · GET /assigned-access · POST /assigned-access/dismiss — the Assigned-To auto-grants
+        // (task 142, owner Q5 + R3: the form save, the wizards and "Update Access" call the BFF; owner A3: suggestions on
+        // secure records). On this group so the delegation filter gates each on Write on the RECORD.
+        adminGroup.MapAssignedAccessEndpoints();
 
         // POST /api/v1/external-access/invite — Onboard an external user via CIAM (idempotent)
         adminGroup.MapInviteExternalUserEndpoint();

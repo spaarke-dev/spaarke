@@ -1,6 +1,6 @@
 # Anti-Patterns
 
-> **Last Updated**: 2026-04-05
+> **Last Updated**: 2026-10-04 (row 17: verify route registration WITH a bearer — unified-access-control-r2 task 167 f2)
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: New
@@ -58,7 +58,7 @@
 | # | Anti-Pattern | Why It's Wrong | Correct Approach | Reference |
 |---|-------------|---------------|-----------------|-----------|
 | 16 | **Publishing BFF to `/tmp` or external directory** — running `dotnet publish -o /tmp/publish` | Packages from external directories are incomplete (~22MB vs ~61MB); nested DLLs are missing, causing endpoints to silently return 404 while `/healthz` still passes | Publish from the project directory: `dotnet publish -c Release -o ./publish` from `src/server/api/Sprk.Bff.Api/`; use `Deploy-BffApi.ps1` | [bff-deploy skill](../../.claude/skills/bff-deploy/SKILL.md) |
-| 17 | **Assuming deployment worked because `az webapp deploy` returned success** — skipping health check and endpoint verification | Azure CLI may report success before the deployment registers; the app may still serve old code or have missing routes | Always verify with health check and test specific endpoints (expect 401, not 404, for auth-protected routes) | [bff-deploy skill](../../.claude/skills/bff-deploy/SKILL.md) |
+| 17 | **Assuming deployment worked because `az webapp deploy` returned success** — skipping health check and endpoint verification | Azure CLI may report success before the deployment registers; the app may still serve old code or have missing routes | Always verify with health check and test specific endpoints WITH a bearer token (`az account get-access-token --resource api://<BFF-API-APP-ID>`): anything but 404 means the route is registered, 404 means it is not. An ANONYMOUS 401 proves only that authentication is enforced — since unified-access-control-r2 task 167 the authorization FallbackPolicy answers 401 for a request that matches no route too ([DEPLOYMENT-VERIFICATION-GUIDE](../guides/DEPLOYMENT-VERIFICATION-GUIDE.md) Step 4) | [bff-deploy skill](../../.claude/skills/bff-deploy/SKILL.md) |
 
 ### Deployment (PCF)
 

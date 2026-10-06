@@ -78,19 +78,49 @@ function buildNavigationService(lookupResult: LookupResult[] = []): INavigationS
   };
 }
 
+/**
+ * UAC-r2 task 147 r1: the analysis (and its follow-on to-do) is created through the BFF's
+ * `POST /api/v1/child-records/{table}`, not through `dataService.createRecord`. This fake BFF answers that route by
+ * handing the SAME payload to the mock data service (so the payload assertions below still describe what reaches the
+ * server) and passes every other request to the suite's own fetch.
+ */
+/** The tables created through the fake BFF route, in order (reset per test). */
+const childRecordPosts: string[] = [];
+beforeEach(() => {
+  childRecordPosts.length = 0;
+});
+
+function routeChildRecords(
+  dataService: IDataService,
+  inner: CreateAnalysisWizardData['authenticatedFetch']
+): CreateAnalysisWizardData['authenticatedFetch'] {
+  return (async (input: RequestInfo, init?: RequestInit) => {
+    const url = String(input);
+    const create = /\/api\/v1\/child-records\/([a-z_]+)$/.exec(url);
+    if (create && init?.method === 'POST') {
+      childRecordPosts.push(create[1]);
+      const id = await dataService.createRecord(create[1], JSON.parse(String(init.body)));
+      return { ok: true, status: 201, json: async () => ({ id }), text: async () => '' } as unknown as Response;
+    }
+    return inner(input as string, init);
+  }) as CreateAnalysisWizardData['authenticatedFetch'];
+}
+
 function buildData(overrides: Partial<CreateAnalysisWizardData> = {}): CreateAnalysisWizardData {
+  const dataService = overrides.dataService ?? buildDataService();
+  const authenticatedFetch =
+    overrides.authenticatedFetch ??
+    jest.fn().mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) });
   return {
     wizardId: 'create-analysis-test',
     bffBaseUrl: 'https://bff.example.com',
-    authenticatedFetch: jest
-      .fn()
-      .mockResolvedValue({ ok: true, json: async () => ({ documentIds: ['uploaded-doc-id'] }) }),
-    dataService: buildDataService(),
     navigationService: buildNavigationService([
       { id: 'existing-doc-id', name: 'MSA Draft', entityType: 'sprk_document' },
     ]),
     searchUsers: jest.fn().mockResolvedValue([]),
     ...overrides,
+    dataService,
+    authenticatedFetch: routeChildRecords(dataService, authenticatedFetch),
   };
 }
 
@@ -193,6 +223,8 @@ describe('CreateAnalysisWizardWidget', () => {
     });
 
     await waitFor(() => expect(dataService.createRecord).toHaveBeenCalled());
+    // UAC-r2 task 147 r1: the analysis left through the BFF child-record route, not Xrm.WebApi.
+    expect(childRecordPosts).toEqual(['sprk_analysis']);
     const [entityName, payload] = (dataService.createRecord as jest.Mock).mock.calls[0];
     expect(entityName).toBe('sprk_analysis');
     expect(payload).toMatchObject({

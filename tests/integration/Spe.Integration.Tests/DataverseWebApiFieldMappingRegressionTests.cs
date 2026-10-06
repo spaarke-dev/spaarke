@@ -56,7 +56,12 @@ public class DataverseWebApiFieldMappingRegressionTests
             "API_APP_ID (e.g. spaarke-dev) to run this DEF-2 regression against a real environment.");
 
         using var http = new HttpClient();
-        var sut = new DataverseWebApiService(http, cfg, NullLogger<DataverseWebApiService>.Instance);
+        var sut = new DataverseWebApiService(
+            http,
+            cfg,
+            NullLogger<DataverseWebApiService>.Instance,
+            new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
 
         // Act — the exact call that previously threw NotImplementedException on the WebApi impl.
         var setName = await sut.GetEntitySetNameAsync("sprk_fieldmappingprofile");

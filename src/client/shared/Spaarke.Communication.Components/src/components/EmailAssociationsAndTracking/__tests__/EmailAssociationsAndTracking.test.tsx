@@ -79,6 +79,9 @@ function makeWriteContext(): IResolverWriteContext {
     } as unknown as IResolverWriteContext['webApi'],
     hostEntity: 'sprk_communication',
     hostRecordId: HOST_ID,
+    // UAC-r2 task 147 r1: every regarding write (confirm, new record, undo) is a re-file through the BFF's communications
+    // filing route; webApi.updateRecord carries only the plain status / override-reason columns.
+    refileThroughBff: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -180,13 +183,25 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
-    const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    await waitFor(() => expect(props.writeContext.refileThroughBff).toHaveBeenCalled());
+    const call = (props.writeContext.refileThroughBff as jest.Mock).mock.calls[0];
     expect(call[0]).toBe('sprk_communication');
     expect(call[1]).toBe(HOST_ID);
     const payload = call[2] as Record<string, unknown>;
     const nulledBinds = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
     expect(nulledBinds).toHaveLength(0);
+  });
+
+  it('UAC-r2 147 r1: with NO BFF re-file wired, a confirm is refused and nothing is written through webApi (fail closed)', async () => {
+    const ctx = { ...makeWriteContext(), refileThroughBff: undefined };
+    const props = baseProps({ writeContext: ctx });
+    renderWithProvider(<EmailConnectionsReview {...props} />);
+
+    fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(ctx.webApi.updateRecord).not.toHaveBeenCalled();
   });
 
   it('FR-A4 (R-1): fires recordAffinity with the confirmed target after a successful confirm (fire-and-forget learning)', async () => {
@@ -203,14 +218,14 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
   it('FR-A4 (R-1): does NOT record affinity when the confirmation write fails (learning only follows a real confirm)', async () => {
     const recordAffinity = jest.fn();
     const ctx = makeWriteContext();
-    (ctx.webApi.updateRecord as jest.Mock).mockRejectedValue(new Error('write failed'));
+    (ctx.refileThroughBff as jest.Mock).mockRejectedValue(new Error('write failed'));
     const props = baseProps({ writeContext: { ...ctx, recordAffinity } });
     renderWithProvider(<EmailConnectionsReview {...props} />);
 
     fireEvent.click(screen.getByRole('radio', { name: /Acme v Beta/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    await waitFor(() => expect(ctx.webApi.updateRecord).toHaveBeenCalled());
+    await waitFor(() => expect(ctx.refileThroughBff).toHaveBeenCalled());
     expect(recordAffinity).not.toHaveBeenCalled();
   });
 
@@ -226,8 +241,8 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
 
     await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
     // The created record flows through the SAME confirm → applyRegardingSelection write.
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
-    const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    await waitFor(() => expect(props.writeContext.refileThroughBff).toHaveBeenCalled());
+    const call = (props.writeContext.refileThroughBff as jest.Mock).mock.calls[0];
     expect(call[0]).toBe('sprk_communication');
     expect(call[1]).toBe(HOST_ID);
     const payload = call[2] as Record<string, unknown>;
@@ -247,7 +262,7 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
 
     await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
     // No confirm write on a cancelled create.
-    expect(props.writeContext.webApi.updateRecord).not.toHaveBeenCalled();
+    expect(props.writeContext.refileThroughBff).not.toHaveBeenCalled();
   });
 
   it('E1b: with NO launcher, the tile falls back to the fire-and-forget onCreateNewRecord (existing consumers unchanged)', () => {
@@ -258,7 +273,7 @@ describe('EmailConnectionsReview (single-primary redesign 2026-07-29)', () => {
     fireEvent.click(screen.getByTestId('create-new-record'));
 
     expect(onCreateNewRecord).toHaveBeenCalledTimes(1);
-    expect(props.writeContext.webApi.updateRecord).not.toHaveBeenCalled();
+    expect(props.writeContext.refileThroughBff).not.toHaveBeenCalled();
   });
 
   it('NEEDS CONFIRMATION: an auto-matched (autoFiled) top candidate is pre-selected with a Confirm', () => {
@@ -376,7 +391,7 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
     expect(screen.queryByRole('button', { name: 'Select' })).not.toBeInTheDocument();
     // Clicking a card's Confirm fires the additive write directly.
     fireEvent.click(screen.getAllByRole('button', { name: 'Confirm' })[0]);
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+    await waitFor(() => expect(props.writeContext.refileThroughBff).toHaveBeenCalled());
   });
 
   it('item 4: "Look up another record" is a labelled field that opens the record-type menu', async () => {
@@ -398,7 +413,7 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
 
     fireEvent.click(screen.getByTestId('create-new-record'));
     await waitFor(() => expect(onLaunchCreateRecord).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+    await waitFor(() => expect(props.writeContext.refileThroughBff).toHaveBeenCalled());
   });
 
   it('item 6: a confirmed primary shows the "Filed to …" success banner', () => {
@@ -466,7 +481,7 @@ describe('EmailConnectionsReview — reconcile variant (owner UAT round-3 2026-0
     renderWithProvider(<EmailConnectionsReview {...props} />);
 
     fireEvent.click(screen.getByTestId('candidate-undo'));
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
+    await waitFor(() => expect(props.writeContext.refileThroughBff).toHaveBeenCalled());
   });
 
   it('the default variant does NOT render the filed banner (email-form layout unchanged)', () => {
@@ -544,8 +559,8 @@ describe('R3-CARD-2: "See all" candidates modal (top-3 strip cap)', () => {
     const confirms = within(modal).getAllByRole('button', { name: 'Confirm' });
     fireEvent.click(confirms[3]);
 
-    await waitFor(() => expect(props.writeContext.webApi.updateRecord).toHaveBeenCalled());
-    const call = (props.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    await waitFor(() => expect(props.writeContext.refileThroughBff).toHaveBeenCalled());
+    const call = (props.writeContext.refileThroughBff as jest.Mock).mock.calls[0];
     expect(call[0]).toBe('sprk_communication');
     expect(call[1]).toBe(HOST_ID);
     const payload = call[2] as Record<string, unknown>;

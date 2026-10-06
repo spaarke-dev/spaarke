@@ -83,7 +83,7 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         repo.LastWrittenRun.Should().NotBeNull();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Running);
         repo.LastWrittenRun.CurrentPhase.Should().Be("H7");
-        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H7");
+        repo.LastWrittenRun.CompletedPhases.Should().ContainSingle(cp => cp.Phase == "H7");
 
         var gate = repo.LastWrittenRun.GateStates[H7DataverseEnvVarValuesHandler.EnvVarsSetGateId];
         gate.Status.Should().Be(GateState.Verified);
@@ -215,6 +215,27 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingUpstreamState);
         failure.Diagnostic.Should().Contain("speContainerId");
         writer.CallCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ASpeContainerIdWrittenBeforeH8Completed_IsNeverConsumed_NoWriterCall()
+    {
+        // unified-access-control-r2 task 165, owner round 41 item 1: the pre-round-41 replication-pending path wrote
+        // the root container's id while it was still UNBOUND. H7 writes sprk_SharePointEmbeddedContainerId only from a
+        // container H8 has completed — that is, bound.
+        var run = BuildRun();
+        foreach (var h8 in run.CompletedPhases.Where(cp => cp.Phase == "H8").ToList()) { run.CompletedPhases.Remove(h8); }
+        var repo = new FakeRepository(run, etag: "etag-7b");
+        var writer = FakeEnvVarValuesWriter.Success();
+        var handler = BuildHandler(repo, writer);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(EnvVarValuesRejectionCodes.MissingUpstreamState);
+        failure.Diagnostic.Should().Contain("H8 has not completed");
+        writer.CallCount.Should().Be(0, "an unbound container must never become sprk_SharePointEmbeddedContainerId");
     }
 
     // ---------- T8 missing client secret ----------
@@ -824,6 +845,15 @@ public sealed class H7DataverseEnvVarValuesHandlerTests
         run.InterStepState.OpenAiEndpoint = OpenAiEndpoint;
         run.InterStepState.SpeContainerId = SpeContainerId;
         run.InterStepState.BffApiUrl = StampBffUrl;
+        // H8 has completed: it hands the root container to H7 only once bound (unified-access-control-r2 task 165).
+        run.CompletedPhases.Add(new CompletedPhase
+        {
+            Phase = "H8",
+            IdempotencyKey = $"spe-{CustomerId}",
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-10),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-9),
+            JobId = RunId,
+        });
         return run;
     }
 

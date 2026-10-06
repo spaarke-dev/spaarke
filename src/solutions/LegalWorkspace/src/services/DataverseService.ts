@@ -15,6 +15,9 @@
  *   - AI features go to BFF (never called directly from client)
  */
 
+import { createChildRecordViaBff } from '@spaarke/ui-components';
+import { authenticatedFetch } from './authInit';
+import { getBffBaseUrl } from '../config/runtimeConfig';
 import { IResult, ok, fail, tryCatch } from '../types/result';
 import { IMatter, IEvent, ITodo, IProject, IDocument, IInvoice, IUserPreference } from '../types/entities';
 import { TodoStatus, EventFilterCategory } from '../types/enums';
@@ -173,7 +176,15 @@ export class DataverseService {
    * Construct with the Xrm.WebApi interface (or compatible).
    * Obtain via: getWebApi() from xrmProvider.ts
    */
-  constructor(private readonly _webApi: IWebApi) {}
+  constructor(
+    private readonly _webApi: IWebApi,
+    /**
+     * UAC-r2 task 147 r1 (owner round 28 item 1): how a to-do is CREATED — through the BFF (G5), which decides its owner.
+     * Injectable for tests.
+     */
+    private readonly _createTodoRecord: (payload: WebApiEntity) => Promise<string> = payload =>
+      createChildRecordViaBff(authenticatedFetch, getBffBaseUrl(), 'sprk_todo', payload)
+  ) {}
 
   // -------------------------------------------------------------------------
   // Matter queries
@@ -495,13 +506,13 @@ export class DataverseService {
    *   sprk_name   = title
    *   statuscode  = 1 (Open)
    *   statecode   = 0 (Active)
-   *   ownerid     = userId
+   *   (no owner: the BFF decides it — UAC-r2 task 147 r1)
    *
    * Per OS-1: no `sprk_todoflag` write. Per FR-09: the source field is no
    * longer modelled on the entity — provenance lives in audit logs instead.
    *
    * @param title  - The subject / title for the to-do item
-   * @param userId - The GUID of the current user (will be set as owner)
+   * @param userId - The GUID of the current user (kept for the call signature; the owner is the server's decision)
    * @returns      IResult<string> — the new sprk_todoid GUID on success
    */
   async createTodo(title: string, userId: string): Promise<IResult<string>> {
@@ -509,18 +520,17 @@ export class DataverseService {
       return fail('VALIDATION_ERROR', 'To-do title cannot be empty.');
     }
 
+    void userId;
+    // UAC-r2 task 147 r1 (owner round 28 item 1): no `ownerid` — the client never sets the owner. The BFF creates the
+    // to-do as the application, owned by the team the ownership rule names (for an unfiled to-do, the caller's
+    // business-unit team, owner round 5) and records the caller as its creator person.
     const record: WebApiEntity = {
       sprk_name: title.trim(),
       statecode: STATECODE_ACTIVE,
       statuscode: TODO_STATUSCODE_VALUES.Open,
-      // Assign owner via the standard OData bind for `ownerid`.
-      'ownerid@odata.bind': `/systemusers(${userId})`,
     };
 
-    return tryCatch(async () => {
-      const result = await this._webApi.createRecord('sprk_todo', record);
-      return result.id;
-    }, 'TODO_CREATE_ERROR');
+    return tryCatch(async () => this._createTodoRecord(record), 'TODO_CREATE_ERROR');
   }
 
   /**

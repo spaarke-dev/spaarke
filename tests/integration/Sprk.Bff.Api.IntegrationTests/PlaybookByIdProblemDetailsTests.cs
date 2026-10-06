@@ -80,8 +80,10 @@ public class PlaybookByIdProblemDetailsTests : IClassFixture<PlaybookByIdIntegra
 
         titleProp.GetString().Should().Be("Playbook Not Found");
         statusProp.GetInt32().Should().Be(404);
-        detailProp.GetString().Should().Contain(missingId,
-            "detail must include the requested id (user-supplied input, permitted by ADR-015)");
+        // unified-access-control-r2 task 164 (sweep #55): the 404 is ONE uniform body for an unknown id, a denied id
+        // and a decision fault, so the detail no longer echoes the requested id. `instance` (the request path) stays.
+        detailProp.GetString().Should().NotContain(missingId,
+            "the uniform playbook-unavailable 404 must not reveal or echo the requested id");
         instanceProp.GetString().Should().Be($"/api/ai/playbooks/by-id/{missingId}",
             "instance must identify the specific request URI per RFC 7807");
     }

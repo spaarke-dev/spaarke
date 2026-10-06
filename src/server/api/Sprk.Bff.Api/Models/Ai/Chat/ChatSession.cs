@@ -126,6 +126,19 @@ public record ChatSession(
     /// </summary>
     public string? OwnerOid { get; init; }
 
+    /// <summary>
+    /// The SharePoint Embedded DRIVE id of <see cref="DocumentId"/> when that id is an SPE drive-item id rather than a
+    /// <c>sprk_document</c> GUID — a Compose "Path B" session bound to a document not yet saved as a Dataverse row
+    /// (<c>ComposeService.LoadAsync</c> records it on every load). <see langword="null"/> for every other session.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 164 (owner round 16 item 2): a turn on a session whose document is an SPE item is
+    /// authorized by the caller's OWN SPE read of that item (OBO), which needs the drive as well as the item id. A
+    /// session that carries a non-GUID document id and no drive id cannot be decided, so its turns are refused (fail
+    /// closed) until Compose re-loads the document and records the drive.
+    /// </remarks>
+    public string? DocumentDriveId { get; init; }
+
     // =========================================================================
     // FR-D4 (task 032) — stored, writable session title.
     //

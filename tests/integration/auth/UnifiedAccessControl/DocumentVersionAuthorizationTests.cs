@@ -8,9 +8,12 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Documents;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -166,6 +169,25 @@ public class DocumentVersionAuthorizationTests : IClassFixture<DocumentVersionTe
     }
 
     [Fact]
+    public async Task ListVersions_OfAMovedFile_ReportsTheOriginalAuthorAndDate_OfEachReplayedVersion()
+    {
+        // unified-access-control-r2 task 166 f1-v2, owner round 45 item 1: a relocation replays a file's history into its
+        // copy through the BFF identity; Graph cannot set a version's author or date, so the relocation records them and
+        // this route reports them — the history a user sees is unchanged by the move.
+        var client = _fixture.CreateClientWithRights("ReadAccess");
+
+        var response = await client.GetAsync($"/api/documents/{DocumentVersionTestFixture.RelocatedDocumentId}/versions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "body was: {0}", await response.Content.ReadAsStringAsync());
+        var versions = (await response.Content.ReadFromJsonAsync<List<VersionInfoDto>>())!;
+        versions.Select(v => v.Id).Should().Equal("4.0", "3.0", "2.0");
+        var replayed = versions.Single(v => v.Id == "3.0");
+        replayed.LastModifiedBy.Should().Be(DocumentVersionTestFixture.OriginalAuthor);
+        replayed.LastModifiedDateTime.Should().Be(new DateTimeOffset(2024, 2, 3, 4, 5, 6, TimeSpan.Zero));
+        versions.Single(v => v.Id == "4.0").LastModifiedBy.Should().Be("Graph Author", "a version written after the move is Graph's");
+    }
+
+    [Fact]
     public async Task OpenPriorVersion_WhenCallerHoldsRead_StreamsTheExactPriorVersionBytes()
     {
         var client = _fixture.CreateClientWithRights("ReadAccess");
@@ -212,17 +234,29 @@ public class DocumentVersionAuthorizationTests : IClassFixture<DocumentVersionTe
 
     /// <summary>
     /// Positive control for the two 404s above: proves they mean "route absent", not "this fixture
-    /// 404s everything". A route that DOES exist on the same host answers differently.
+    /// 404s everything". A route that DOES exist on the same host answers differently — to the SAME kind
+    /// of caller the 404s were sent by: a SIGNED-IN one.
     /// </summary>
+    /// <remarks>
+    /// Until task 167 f2 this sent the request WITHOUT a bearer and asserted "not 404". Since the BFF's
+    /// authorization FallbackPolicy (UAC-r2 task 167, owner round 14 item 2) an anonymous request answers
+    /// 401 whether or not the route exists, so that assertion could no longer fail: renaming the route left
+    /// it green. Now the caller is signed in (no rights on the document, so the per-document filter answers
+    /// 403 — the route is reached), and the endpoint table names both surviving routes.
+    /// </remarks>
     [Fact]
-    public async Task SurvivingVersionRoute_WithoutBearer_Returns401NotFound()
+    public async Task SurvivingVersionRoutes_AreMapped_AndASignedInCallerIsAnsweredNot404()
     {
-        var client = _fixture.CreateClient();
+        var client = _fixture.CreateClientWithRights("None");
 
         var response = await client.GetAsync(VersionsRoute);
 
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
-            "if this were 404 the route-absence assertions above would be vacuous");
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "a signed-in caller with no rights reaches the route and its per-document filter refuses — if this "
+            + "were 404 the route-absence assertions above would be vacuous");
+        EndpointTable.AssertMapped(_fixture, "GET", VersionsRoute);
+        EndpointTable.AssertMapped(_fixture, "GET", VersionContentRoute);
+        _fixture.VersionListReads.Should().BeEmpty();
     }
 }
 
@@ -284,8 +318,27 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
             // would be indistinguishable from a denial.
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(new VersionedDocumentDataverseService());
+
+            // The document's relocation record (task 166 f1-v2, owner round 45 item 1): its version "3.0" was REPLAYED by a
+            // relocation, so the route must report the ORIGINAL author and date the relocation recorded, not Graph's.
+            var entities = new Mock<IGenericEntityService>();
+            entities.Setup(e => e.RetrieveAsync("sprk_document", Guid.Parse(RelocatedDocumentId),
+                    It.Is<string[]>(c => c.Contains(RelocatedVersionHistory.Column)), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new Entity("sprk_document", Guid.Parse(RelocatedDocumentId))
+                {
+                    [RelocatedVersionHistory.Column] =
+                        $$"""{"v":1,"item":"item-{{RelocatedDocumentId}}","versions":[{"id":"3.0","by":"{{OriginalAuthor}}","at":"2024-02-03T04:05:06+00:00","size":1048576}]}""",
+                });
+            services.RemoveAll<IGenericEntityService>();
+            services.AddSingleton(entities.Object);
         });
     }
+
+    /// <summary>A document whose file a relocation moved (its version "3.0" was replayed).</summary>
+    public const string RelocatedDocumentId = "22222222-2222-2222-2222-222222222222";
+
+    /// <summary>The author the relocation recorded for the replayed version.</summary>
+    public const string OriginalAuthor = "Alice Original";
 
     /// <summary>
     /// A document whose SPE pointers the version routes will accept: a <c>b!</c>-prefixed drive id
@@ -364,7 +417,7 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
             _listReads.Add((driveId, itemId));
             return Task.FromResult<IReadOnlyList<VersionInfoDto>?>(new List<VersionInfoDto>
             {
-                new("4.0", "e4", new DateTimeOffset(2026, 8, 5, 14, 0, 0, TimeSpan.Zero), 2097152),
+                new("4.0", "e4", new DateTimeOffset(2026, 8, 5, 14, 0, 0, TimeSpan.Zero), 2097152, "Graph Author"),
                 new("3.0", "e3", new DateTimeOffset(2026, 8, 1, 10, 30, 0, TimeSpan.Zero), 1048576),
                 new("2.0", "e2", new DateTimeOffset(2026, 7, 20, 9, 0, 0, TimeSpan.Zero), 524288),
             });
@@ -387,6 +440,7 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
 
         public Task<FileHandleDto?> GetFileMetadataAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> GetFileMetadataAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
+        public Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<SpeItemCreator?>>();
         public Task<Stream?> DownloadFileAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
         // Deliberately UNMODELLED, not recorded. These are the INTERNAL OBO version routes; the
         // app-only overload exists only for the external-access surface (unified-access-control-r2).

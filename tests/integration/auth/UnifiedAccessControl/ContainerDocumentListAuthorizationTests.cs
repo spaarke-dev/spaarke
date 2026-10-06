@@ -242,6 +242,56 @@ public class ContainerDocumentListAuthorizationTests
     }
 
     // =============================================================================================
+    // Task 166 r2 — the QUERY source (GET /api/v1/documents?containerId=): a missing id is the
+    // filter's OWN 400, and the filter never calls next() for it.
+    // =============================================================================================
+
+    // The route-level test cannot pin "never next()": the list handler answers the identical 400 for a missing id
+    // before any read, so a filter that passed the id-less request through would look the same from outside (the
+    // r1 verifier's seed proved it). This drives the filter itself, with a handler that records being reached and a
+    // Dataverse double that records any call.
+    [Theory(DisplayName = "Task 166 r2: query source — a missing containerId is the filter's own 400, never next()")]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task QuerySource_AMissingContainerId_IsTheFiltersOwn400_AndNeverReachesTheHandler(string? containerId)
+    {
+        var registry = Substitute.For<ISecurableEntityRegistry>();
+        var entityService = Substitute.For<IGenericEntityService>();
+        var accessDataSource = new StubAccessDataSource(AccessRights.Read);
+        var filter = new ContainerDocumentAuthorizationFilter(
+            new RecordContainerResolver(registry, entityService, NullLogger<RecordContainerResolver>.Instance),
+            new AuthorizationService(accessDataSource, Array.Empty<IAuthorizationRule>(), NullLogger<AuthorizationService>.Instance),
+            NullLogger<ContainerDocumentAuthorizationFilter>.Instance,
+            queryParameter: "containerId");
+
+        var http = new DefaultHttpContext { User = CallerPrincipal() };
+        http.Request.Headers.Authorization = "Bearer test-caller-token";
+        if (containerId is not null)
+        {
+            http.Request.QueryString = QueryString.Create("containerId", containerId);
+        }
+
+        var reachedHandler = false;
+        var result = await filter.InvokeAsync(
+            EndpointFilterInvocationContext.Create(http),
+            _ =>
+            {
+                reachedHandler = true;
+                return ValueTask.FromResult<object?>(new object());
+            });
+
+        reachedHandler.Should().BeFalse("an id-less request must be answered by the gate, never passed to the handler");
+        var problem = result.Should().BeAssignableTo<Microsoft.AspNetCore.Http.HttpResults.ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status400BadRequest);
+        problem.ProblemDetails.Detail.Should().Be(ContainerDocumentAuthorizationFilter.MissingQueryContainerIdDetail);
+        problem.ProblemDetails.Detail.Should().Be("ContainerId is required for listing documents");
+        registry.ReceivedCalls().Should().BeEmpty("no resolver question is asked for a missing id");
+        entityService.ReceivedCalls().Should().BeEmpty("no Dataverse call is made for a missing id");
+        accessDataSource.WasConsulted.Should().BeFalse();
+    }
+
+    // =============================================================================================
     // HARNESS
     // =============================================================================================
 

@@ -381,7 +381,10 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             resolver.Setup(r => r.GetDefaultIndexName()).Returns(DefaultIndex);
 
             _indexHandler = new RagIndexingJobHandler(
-                new FileIndexingService(spe.Object, extractor.Object, chunker.Object, Index, NullLogger<FileIndexingService>.Instance),
+                new FileIndexingService(
+                    spe.Object, extractor.Object, chunker.Object, Index, NullLogger<FileIndexingService>.Instance,
+                    // The saved document's pointer names its business unit's container (task 166 r1 pointer check).
+                    TestRecordContainerResolver.ForBusinessUnitContainers(Drive)),
                 Idempotency,
                 Mock.Of<IDocumentDataverseService>(),
                 resolver.Object,
@@ -423,9 +426,10 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             new ConfigurationBuilder()
                 .AddInMemoryCollection(new Dictionary<string, string?> { ["TENANT_ID"] = Tenant })
                 .Build(),
-            // Task 080: never consulted here — every payload in this suite carries its DocumentId, so the worker
-            // creates no document. A resolver that answers nothing would refuse any create that did happen.
-            Mock.Of<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>());
+            // Task 080: every payload in this suite carries its DocumentId, so the worker creates no document. Task
+            // 146: an email save still creates its sprk_emailartifact, owned like its document — so the resolver is
+            // consulted for the artifact and must answer a team.
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
         /// <summary>Queues the save's finalization (production <see cref="OfficeJobQueue"/>) and delivers it.</summary>
         public async Task<IReadOnlyList<JobContract>> FinalizeAsync(
@@ -546,6 +550,11 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             IEnumerable<KnowledgeDocument> documents, CancellationToken cancellationToken = default) =>
             IndexDocumentsBatchAsync(documents, null, cancellationToken);
 
+        // Not on the version-save path (it belongs to the relocation of a file between containers, task 166 f1-v1).
+        public Task<int> DeleteSupersededFileChunksAsync(
+            string tenantId, string speFileId, string? onlyForDocumentId, string? searchIndexName, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+
         public Task<RagSearchResponse> SearchAsync(string query, RagSearchOptions options, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
 
@@ -565,14 +574,6 @@ public sealed class VersionSaveAiRefreshSeamTests : IDisposable
             throw new NotSupportedException();
 
         public Task<KnowledgeIndexHealth> GetIndexHealthAsync(string tenantId, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<IndexedDocumentsPage> GetIndexedDocumentsAsync(
-            string indexName, string tenantId, int page, int pageSize, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
-
-        public Task<int> DeleteIndexedDocumentAsync(
-            string indexName, string documentId, string tenantId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
     }
 

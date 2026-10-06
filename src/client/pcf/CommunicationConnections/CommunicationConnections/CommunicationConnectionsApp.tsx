@@ -65,6 +65,7 @@ import {
   type IRegardingSelection,
 } from '@spaarke/communication-components/logic/connections';
 import { ConnectionsEditor } from './ConnectionsEditor';
+import { refileThroughBff } from './bffWrites';
 import { resolveTitle } from './title';
 
 const useStyles = makeStyles({
@@ -460,6 +461,9 @@ export const CommunicationConnectionsApp: React.FC<ICommunicationConnectionsAppP
       webApi: context.webAPI as unknown as IResolverWriteContext['webApi'],
       hostEntity,
       hostRecordId,
+      // v1.7.0 (UAC-r2 task 147 r1, owner round 28 item 1): a regarding write moves the communication into or out of a
+      // record, so its owner follows — it is re-filed through the BFF, never written through context.webAPI.
+      refileThroughBff,
     }),
     [context.webAPI, hostEntity, hostRecordId]
   );

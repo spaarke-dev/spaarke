@@ -16,8 +16,8 @@ namespace Sprk.Bff.Api.Tests.Api.Memory;
 /// <summary>
 /// Handler tests for <see cref="MemoryGovernanceEndpoints"/> (task AIR2-052, FR-B-03). Exercises the
 /// authorization + audit BEHAVIOR of the minimal governance surface against fake collaborators:
-/// record-authorization-aligned read (allow / DENY-no-leak), structural user-scope ownership,
-/// GDPR delete/erase with identifiers-only audit, and the INERT-field / no-litigation-hold guarantees.
+/// structural user-scope ownership, GDPR delete/erase with identifiers-only audit, and the INERT-field /
+/// no-litigation-hold guarantees. (The record-memory read route was retired by uac-r2 task 166.)
 /// </summary>
 public class MemoryGovernanceEndpointsTests
 {
@@ -45,16 +45,6 @@ public class MemoryGovernanceEndpointsTests
             Sensitivity = sensitivity,
             DeletionPolicy = deletionPolicy,
         };
-
-    private static MemoryItem RecordItem() => new()
-    {
-        Version = MemoryItemContract.SchemaVersion,
-        Scope = MemoryScope.Record,
-        SubjectType = "sprk_matter",
-        SubjectId = "matter-guid-1",
-        Fact = new MemoryFact { Type = MemoryFactType.KeyFact, Key = "Trial Strategy", Value = "Bifurcate", ConfirmedByUser = true },
-        Source = MemoryOrigin.AiDerived,
-    };
 
     // =====================================================================
     // User-initiated seed (FR-F3 / D-042-01) — source=user, keyed by the SERVER-RESOLVED
@@ -177,61 +167,11 @@ public class MemoryGovernanceEndpointsTests
             TenantId, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    // =====================================================================
-    // Record-authorization-aligned read (FR-B-03 core)
-    // =====================================================================
-
-    [Fact]
-    public async Task ReadRecordMemory_WhenCallerCannotReadRecord_Returns403AndDoesNotQueryMemory()
-    {
-        // Arrange — the authorizer denies (caller lacks record read access)
-        var store = new Mock<IMemoryItemStore>();
-        var authorizer = new Mock<IMemoryAccessAuthorizer>();
-        authorizer
-            .Setup(a => a.CanCallerReadRecordAsync(It.IsAny<ClaimsPrincipal>(), "sprk_matter", It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false);
-
-        // Act
-        var result = await MemoryGovernanceEndpoints.ReadRecordMemoryAsync(
-            "sprk_matter", Guid.NewGuid(), Ctx(), store.Object, authorizer.Object, NullLogger<MemoryListResponse>.Instance, default);
-
-        // Assert — denied (403) and NO memory was read (no leak of a record's memory the caller can't see)
-        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
-        store.Verify(s => s.GetForRecordAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task ReadRecordMemory_WhenCallerCanReadRecord_ReturnsRecordMemory()
-    {
-        // Arrange — the authorizer allows
-        var recordId = Guid.NewGuid();
-        var store = new Mock<IMemoryItemStore>();
-        store.Setup(s => s.GetForRecordAsync("sprk_matter", recordId.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { RecordItem() });
-        var authorizer = new Mock<IMemoryAccessAuthorizer>();
-        authorizer
-            .Setup(a => a.CanCallerReadRecordAsync(It.IsAny<ClaimsPrincipal>(), "sprk_matter", recordId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true);
-
-        // Act
-        var result = await MemoryGovernanceEndpoints.ReadRecordMemoryAsync(
-            "sprk_matter", recordId, Ctx(), store.Object, authorizer.Object, NullLogger<MemoryListResponse>.Instance, default);
-
-        // Assert
-        var ok = result.Should().BeOfType<Ok<MemoryListResponse>>().Subject;
-        ok.Value!.Count.Should().Be(1);
-        ok.Value.Items[0].SubjectType.Should().Be("sprk_matter");
-    }
-
-    [Fact]
-    public async Task ReadRecordMemory_WhenNoOidClaim_Returns401()
-    {
-        var result = await MemoryGovernanceEndpoints.ReadRecordMemoryAsync(
-            "sprk_matter", Guid.NewGuid(), Ctx(oid: null), Mock.Of<IMemoryItemStore>(),
-            Mock.Of<IMemoryAccessAuthorizer>(), NullLogger<MemoryListResponse>.Instance, default);
-
-        result.Should().BeOfType<ProblemHttpResult>().Which.StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
-    }
+    // The record-memory read (GET /api/memory/records/{entityLogicalName}/{id:guid}) and its three handler
+    // tests were DELETED 2026-10-03 by unified-access-control-r2 task 166: the route had no caller and its
+    // only check was an entity-type privilege that ignored the record id (finding S-42). Its ABSENCE is
+    // asserted through the real mapper by tests/integration/regression/RouteAuthorization/
+    // DeadRouteRetirementTests.cs.
 
     // =====================================================================
     // User review + delete + erase (GDPR, structural ownership, audit)

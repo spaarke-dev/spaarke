@@ -28,14 +28,14 @@
 // sprk_opportunity — per event-source inventory §3A/§3D/§3E).
 // Task 086 (2026-06-22): Adds IMembershipCacheInvalidator (FR-2P2.8 +
 // AC-1P2.7). SYMMETRIC registration per bff-extensions.md §F.1 + ADR-032
-// P2 Quiet no-op:
-//   - Membership:CacheInvalidator:Enabled=true AND IConnectionMultiplexer
-//     resolvable → real MembershipCacheInvalidator + subscriber hosted
-//     service that evicts MembershipResolverService cache entries on
-//     channel `membership-cache-invalidate`.
-//   - Else → NullMembershipCacheInvalidator (logs once, no Redis calls,
-//     no subscriber). The 5-min cache TTL on MembershipResolverService is
-//     the correctness backstop; pub/sub is the latency optimization.
+// P2 Quiet no-op — re-keyed by unified-access-control-r2 task 132 (see the
+// registration below for why the old gate could never select the real one):
+//   - Redis:Enabled=true → real MembershipCacheInvalidator: BFF write-path
+//     access evictions always active; junction pub/sub publish + the
+//     subscriber hosted service only with Membership:CacheInvalidator:Enabled.
+//   - Else (in-memory cache) → NullMembershipCacheInvalidator (logs once, no
+//     Redis calls, no subscriber). The 2-min cache TTLs (task 132) are the
+//     correctness backstop; eviction is the latency optimization.
 // MembershipJunctionUpdater (task 084) consumes IMembershipCacheInvalidator
 // unconditionally; the recon job (task 085) reuses the same handler so
 // invalidations fire from both paths automatically.
@@ -180,40 +180,62 @@ public static class MembershipModule
         services.Configure<MembershipCacheInvalidatorOptions>(
             configuration.GetSection(MembershipCacheInvalidatorOptions.SectionName));
 
-        // SYMMETRIC registration per bff-extensions.md §F.1 + ADR-032 P2
-        // Quiet no-op. Real impl wins only when BOTH:
-        //   (a) Membership:CacheInvalidator:Enabled=true (operator
-        //       explicitly opted in), AND
-        //   (b) IConnectionMultiplexer is registered in the container
-        //       (CacheModule only registers it when Redis:Enabled=true).
-        // Either gate fails → Null peer wins. This guarantees that
-        // local-dev / CI environments without Redis still resolve
-        // IMembershipCacheInvalidator cleanly via minimal-API param
-        // inference.
+        // SYMMETRIC registration per bff-extensions.md §F.1 + ADR-032 P2 Quiet no-op — RE-KEYED by
+        // unified-access-control-r2 task 132 (defect C12):
+        //
+        //   Redis:Enabled=true  → real MembershipCacheInvalidator. Its BFF write-path access evictions (team/BU/owner
+        //                         changes) are ALWAYS active; the junction pub/sub PUBLISH and its subscriber hosted
+        //                         service follow Membership:CacheInvalidator:Enabled (the channel switch).
+        //   Redis:Enabled=false → NullMembershipCacheInvalidator (in-memory cache — Development/Testing only, CacheModule
+        //                         refuses it anywhere else). Nothing can be pattern-evicted; it logs that once.
+        //
+        // ⚠️ WHY the old gate was replaced, not just extended. It was `Enabled && services.Any(IConnectionMultiplexer)`,
+        // but Program.cs calls AddMembership BEFORE AddCacheModule, so no multiplexer was ever registered at this point
+        // and the real invalidator could never be selected — in any environment, flag or no flag (and once CacheModule
+        // ran, a multiplexer — real or NullConnectionMultiplexer — is always present, so the check meant nothing
+        // either). Turning the flag on in Bicep would therefore have changed nothing. Redis:Enabled is the value
+        // CacheModule itself decides by, read from the same configuration, so this gate cannot disagree with it.
+        //
+        // Correctness of the access evictions therefore does NOT depend on a kill switch (ADR-032 tension, task 132
+        // notes): every deployed environment runs Redis (customer.bicep, model1-shared.bicep, model2-full.bicep set
+        // Redis__Enabled=true; CacheModule fails startup without it outside Development/Testing).
         var cacheInvalidatorEnabled = configuration
             .GetSection(MembershipCacheInvalidatorOptions.SectionName)
             .GetValue<bool>("Enabled");
-        var redisRegistered = services.Any(d =>
-            d.ServiceType == typeof(StackExchange.Redis.IConnectionMultiplexer));
+        var redisIsTheCache = configuration
+            .GetSection(Configuration.RedisOptions.SectionName)
+            .GetValue<bool>("Enabled");
 
-        if (cacheInvalidatorEnabled && redisRegistered)
+        if (redisIsTheCache)
         {
             services.AddSingleton<MembershipCacheInvalidator>();
             services.AddSingleton<IMembershipCacheInvalidator>(sp =>
                 sp.GetRequiredService<MembershipCacheInvalidator>());
 
-            // Subscriber hosted service — runs on every BFF instance, evicts
-            // cache entries on channel messages. Singleton + IHostedService.
-            services.AddSingleton<MembershipCacheInvalidationSubscriber>();
-            services.AddHostedService(sp =>
-                sp.GetRequiredService<MembershipCacheInvalidationSubscriber>());
+            if (cacheInvalidatorEnabled)
+            {
+                // Subscriber hosted service — runs on every BFF instance, evicts
+                // cache entries on channel messages. Singleton + IHostedService.
+                // Only with the channel switch on: with it off nothing publishes, so there is nothing to consume.
+                services.AddSingleton<MembershipCacheInvalidationSubscriber>();
+                services.AddHostedService(sp =>
+                    sp.GetRequiredService<MembershipCacheInvalidationSubscriber>());
+            }
         }
         else
         {
+            // P2 Null-Object: see ADR-032.
             services.AddSingleton<NullMembershipCacheInvalidator>();
             services.AddSingleton<IMembershipCacheInvalidator>(sp =>
                 sp.GetRequiredService<NullMembershipCacheInvalidator>());
         }
+
+        // unified-access-control-r2 task 132 (main-session round 55): the invalidator chosen above — real, or the Null peer
+        // with the in-memory cache — is ALSO the share-write observer DataverseWebApiService notifies after every POA share
+        // write (GraphModule passes it to the client's constructor). Unconditional, so the client always has one (ADR-032
+        // symmetric; bff-extensions.md §F.1): the eviction is a property of the write, not of the caller.
+        services.AddSingleton<Spaarke.Dataverse.IRecordShareWriteObserver>(sp =>
+            sp.GetRequiredService<IMembershipCacheInvalidator>());
 
         // Task 084: Subscription consumer (consumer side).
         // Options bound from "Membership:JunctionUpdater" section (distinct

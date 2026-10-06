@@ -1,10 +1,10 @@
 using System.Collections.Concurrent;
+using System.Net.Http.Headers;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
-using Microsoft.AspNetCore.Authentication;
-using System.Net.Http.Headers;
 using Azure.Core;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
@@ -130,6 +131,13 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             // authorization" from "included but the download happened to fail offline".
             services.RemoveAll<SpeFileStore>();
             services.AddSingleton<SpeFileStore>(sp => new StubSpeFileStore(sp, DownloadedItemIds));
+
+            // The download routes verify a row's pointer before following it app-only (unified-access-control-r2
+            // task 166 r1). Every document here points into "drive-{id}", a business-unit container of this test
+            // environment, so these tests stay about the per-document AUTHORIZATION decision.
+            services.RemoveAll<RecordContainerResolver>();
+            services.AddScoped(_ => TestRecordContainerResolver.ForBusinessUnitContainers(
+                c => c.StartsWith("drive-", StringComparison.Ordinal)));
         });
     }
 
@@ -322,7 +330,9 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             TokenCredential credential,
             ILogger<DocumentCheckoutService> logger,
             ConcurrentBag<Guid> deleted)
-            : base(httpClient, speFileStore, configuration, credential, logger)
+            : base(httpClient, speFileStore, configuration, credential, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), logger,
+                // Only DeleteAsync is exercised (overridden); no preview/edit URL is minted.
+                TestRecordContainerResolver.ForBusinessUnitContainers())
         {
             _deleted = deleted;
         }

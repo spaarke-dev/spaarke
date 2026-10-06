@@ -1,7 +1,8 @@
 using System.Diagnostics;
-using System.Text.Json;
-using Microsoft.Extensions.Caching.Distributed;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Http;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Telemetry;
 
 namespace Sprk.Bff.Api.Infrastructure.Caching;
@@ -11,17 +12,38 @@ namespace Sprk.Bff.Api.Infrastructure.Caching;
 /// while ensuring authorization DECISIONS are always computed fresh per-request.
 ///
 /// ADR-003: Cache data, NOT decisions. Decisions are computed by AuthorizationService/OperationAccessRule.
-/// ADR-009: Redis-first via IDistributedCache; short TTLs for security-sensitive data.
+/// ADR-009: Redis-first through <see cref="ITenantCache"/>; short TTLs for security-sensitive data.
 ///
-/// Cache key scheme:
-/// - User roles:       sdap:auth:roles:{userOid}                    TTL 2 min
-/// - Team memberships: sdap:auth:teams:{userOid}                    TTL 2 min
-/// - Resource access:  sdap:auth:access:{authMode}:{userOid}:{resId} TTL 60s
+/// Cache key scheme (unified-access-control-r2 task 132 · defect C12 — moved onto <see cref="ITenantCache"/>,
+/// ADR-009 path C; on-wire keys carry the configured <c>InstanceName</c> in front):
+/// - Document access: <c>tenant:{tid}:auth-access:{authMode}:{userOid}:{documentId}:v2</c>       TTL 60 s
+/// - Record access:   <c>tenant:{tid}:auth-record-access:{entitySet}:{userOid}:{recordId}:v2</c> TTL 60 s
+///
+/// Both are evicted for EVERY user of a record by <c>IMembershipCacheInvalidator</c> on the BFF's owner changes
+/// (<c>InvalidateRecordOwnerChangeAsync</c>) and share changes (<c>InvalidateRecordShareChangeAsync</c>, called through
+/// <c>IRecordShareWriteObserver</c> by <c>DataverseWebApiService</c> on every grant / modify / revoke it makes, round 55)
+/// — task 132. A table re-owned silently by an Assign cascade is never cached (<see cref="CachesRecordEntitySet"/>).
+///
+/// The former user-level role and team keys (<c>sdap:</c>-prefixed, 2-minute) are GONE: they were written on every
+/// miss and read by nothing in the repo (task 132 removed them with their TTLs).
 ///
 /// Performance target: Authorization overhead drops from 50-200ms (Dataverse) to &lt;10ms on cache hit.
 /// Security: Fail-open to inner data source on cache errors (cache is optimization, not requirement).
 ///
-/// Auth-mode key segment (finding A-19 / spec FR-13, fixed by task 014): the resource-access key
+/// <para><b>A fault is never stored (task 132 · C12).</b> The inner source marks a snapshot
+/// <see cref="AccessSnapshot.Faulted"/> when it is not a complete Dataverse answer — a failed read, a 429/5xx/timeout,
+/// a failed user lookup, a failed probe or team/role sub-read, or a DEGRADED probe-derived Read after
+/// <c>RetrievePrincipalAccess</c> gave no answer. Such a snapshot is returned to the request unchanged and NOT
+/// cached, so a transient fault denies one request instead of 60 seconds of them, and a Write holder is never pinned
+/// at Read. A legitimate None (RPA answered with no rights, a 403/404 probe, a user lookup that found no systemuser)
+/// IS cached.</para>
+///
+/// <para><b>Tenant segment (ADR-009).</b> The caller's <c>tid</c> claim. Every caller of this decorator runs inside an
+/// HTTP request carrying a validated Entra token (AuthorizationService denies without a caller token;
+/// AiAuthorizationService takes the HttpContext), and every Entra token carries <c>tid</c>. A request with no
+/// <c>tid</c> is not cached at all — never keyed under a sentinel tenant.</para>
+///
+/// Auth-mode key segment (finding A-19 / spec FR-13, fixed by task 014): the document-access key
 /// includes an <c>{authMode}</c> segment ("sp" when <c>userAccessToken</c> is null/empty, "obo"
 /// otherwise) so an app-only (service-principal) snapshot can never be served to a subsequent OBO
 /// caller, or vice versa, within the 60s TTL. The discriminator is a mode flag, never the raw token —
@@ -45,33 +67,90 @@ namespace Sprk.Bff.Api.Infrastructure.Caching;
 /// </summary>
 public class CachedAccessDataSource : IAccessDataSource
 {
-    private readonly IAccessDataSource _inner;
-    private readonly IDistributedCache _cache;
-    private readonly ILogger<CachedAccessDataSource> _logger;
+    /// <summary>Cache resource for the document-scoped snapshot (<see cref="GetUserAccessAsync"/>).</summary>
+    internal const string DocumentAccessResource = "auth-access";
 
-    /// <summary>TTL for user roles cache (security-sensitive, keep short).</summary>
-    private static readonly TimeSpan RolesTtl = TimeSpan.FromMinutes(2);
+    /// <summary>
+    /// Cache resource for the entity-agnostic record snapshot (<see cref="GetRecordAccessAsync"/>). A DISTINCT
+    /// resource from <see cref="DocumentAccessResource"/>, and the entity set is part of the id — see the remarks in
+    /// <see cref="GetRecordAccessAsync"/>.
+    /// </summary>
+    internal const string RecordAccessResource = "auth-record-access";
 
-    /// <summary>TTL for team memberships cache (security-sensitive, keep short).</summary>
-    private static readonly TimeSpan TeamsTtl = TimeSpan.FromMinutes(2);
+    /// <summary>Cache schema version (ADR-009). v1 of the tenant-scoped keys; the old <c>sdap:</c> keys are orphaned.</summary>
+    /// <remarks>
+    /// <b>Bumped 1 → 2</b> (task 132 integration residual): the document id segment is now normalised
+    /// (<see cref="DocumentIdSegment"/>), so the share/owner-change eviction can address it. A v1 entry may carry a
+    /// differently-cased id the eviction pattern would not match; the bump makes every v1 entry unreachable instead.
+    /// </remarks>
+    internal const int CacheVersion = 2;
 
     /// <summary>TTL for per-resource access cache (most sensitive, shortest TTL).</summary>
-    private static readonly TimeSpan ResourceAccessTtl = TimeSpan.FromSeconds(60);
+    internal static readonly TimeSpan ResourceAccessTtl = TimeSpan.FromSeconds(60);
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-    };
+    private readonly IAccessDataSource _inner;
+    private readonly ITenantCache _cache;
+    private readonly IHttpContextAccessor? _httpContextAccessor;
+    private readonly ILogger<CachedAccessDataSource> _logger;
 
     public CachedAccessDataSource(
         IAccessDataSource inner,
-        IDistributedCache cache,
+        ITenantCache cache,
+        IHttpContextAccessor? httpContextAccessor,
         ILogger<CachedAccessDataSource> logger)
     {
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _httpContextAccessor = httpContextAccessor;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <summary>
+    /// The cache id of a document-access snapshot — the reader's ONLY id builder, also used to build the
+    /// eviction pattern (task 132), so a removal addresses exactly the key a read wrote.
+    /// </summary>
+    internal static string DocumentAccessCacheId(string authMode, string userId, string resourceId)
+        => $"{authMode}:{userId}:{resourceId}";
+
+    /// <summary>
+    /// The cache id of a record-access snapshot — the reader's ONLY id builder, also used by the per-record eviction
+    /// pattern (<c>MembershipCacheInvalidator.RecordOwnerChangePatterns</c>, task 132) with <c>*</c> for the user.
+    /// </summary>
+    internal static string RecordAccessCacheId(string entitySetName, string userId, string recordId)
+        => $"{entitySetName}:{userId}:{recordId}";
+
+    /// <summary>The record id segment, in the one format both the reader and the eviction pattern use.</summary>
+    internal static string RecordIdSegment(Guid recordId) => recordId.ToString("D");
+
+    /// <summary>
+    /// The document id segment of a document-access key: a GUID in the one format <see cref="RecordIdSegment"/> uses
+    /// (callers pass route text, whose casing and braces vary), anything else verbatim. Shared with the eviction
+    /// pattern (<c>MembershipCacheInvalidator</c>, task 132), so an owner or share change on a document reaches every
+    /// snapshot of it however the id was spelled on the request that cached it.
+    /// </summary>
+    internal static string DocumentIdSegment(string resourceId)
+        => Guid.TryParse(resourceId, out var id) ? RecordIdSegment(id) : resourceId;
+
+    /// <summary>
+    /// Whether <paramref name="entitySetName"/> is the set the document-scoped <see cref="GetUserAccessAsync"/> answers for
+    /// — its snapshot key carries no set, so the eviction must add the document-access pattern for such a record.
+    /// </summary>
+    internal static bool IsDocumentEntitySet(string entitySetName)
+        => string.Equals(entitySetName?.Trim(), DataverseAccessDataSource.DocumentEntitySetName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a record snapshot of <paramref name="entitySetName"/> is cached at all — the ONE predicate this reader and
+    /// the eviction hook share. False only for a table Dataverse re-owns as a side effect of a secure root's Assign
+    /// cascade (<c>AssignCascadeChildOwners.IsReownedByCascadeEntitySet</c>, task 132 integration residual): no BFF
+    /// write can evict after those owner changes, so such a snapshot is always read live.
+    /// </summary>
+    internal static bool CachesRecordEntitySet(string entitySetName)
+        => !Sprk.Bff.Api.Infrastructure.Dataverse.AssignCascadeChildOwners.IsReownedByCascadeEntitySet(entitySetName);
+
+    /// <summary>The request's tenant (<c>tid</c>), or null — in which case nothing is read from or written to the cache.</summary>
+    internal static string? TenantFor(ClaimsPrincipal? user)
+        => user?.FindFirst("tid")?.Value
+            ?? user?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
     /// <inheritdoc />
     public async Task<AccessSnapshot> GetUserAccessAsync(
@@ -90,53 +169,25 @@ public class CachedAccessDataSource : IAccessDataSource
         // NEVER used as (or embedded in) the key — only this two-value mode flag.
         var authMode = string.IsNullOrEmpty(userAccessToken) ? "sp" : "obo";
 
-        // Try to get the full access snapshot from resource-level cache first
-        var resourceCacheKey = $"sdap:auth:access:{authMode}:{userId}:{resourceId}";
-        var sw = Stopwatch.StartNew();
-
-        try
+        var tenantId = TenantFor(_httpContextAccessor?.HttpContext?.User);
+        if (tenantId is null)
         {
-            var cachedJson = await _cache.GetStringAsync(resourceCacheKey, ct);
-            sw.Stop();
-
-            if (cachedJson != null)
-            {
-                var cached = JsonSerializer.Deserialize<CachedAccessSnapshot>(cachedJson, JsonOptions);
-                if (cached != null)
-                {
-                    _logger.LogDebug(
-                        "[AUTH-CACHE] HIT resource access: UserId={UserId}, ResourceId={ResourceId}, Latency={LatencyMs}ms",
-                        userId, resourceId, sw.ElapsedMilliseconds);
-                    CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, "auth-access");
-
-                    return cached.ToAccessSnapshot();
-                }
-            }
-
-            _logger.LogDebug(
-                "[AUTH-CACHE] MISS resource access: UserId={UserId}, ResourceId={ResourceId}, Latency={LatencyMs}ms",
-                userId, resourceId, sw.ElapsedMilliseconds);
-            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+            // No tid: not cached (ADR-009 forbids an untenanted key; a sentinel tenant would pool callers).
+            return await _inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
         }
-        catch (Exception ex)
+
+        var cacheId = DocumentAccessCacheId(authMode, userId, DocumentIdSegment(resourceId));
+        var cached = await TryGetAsync(tenantId, DocumentAccessResource, cacheId, ct);
+        if (cached is not null)
         {
-            sw.Stop();
-            _logger.LogWarning(ex,
-                "[AUTH-CACHE] Error reading resource access cache: UserId={UserId}, ResourceId={ResourceId}. Falling through to Dataverse.",
-                userId, resourceId);
-            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+            return cached;
         }
 
         // Cache miss or error - fetch from Dataverse
         var snapshot = await _inner.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
 
-        // Cache the result (fire-and-forget style, don't block the response)
-        _ = CacheSnapshotAsync(resourceCacheKey, snapshot, ResourceAccessTtl);
-
-        // Also cache roles and teams separately with longer TTL (2 min)
-        // These are user-level data reusable across resources
-        _ = CacheRolesAsync(userId, snapshot.Roles);
-        _ = CacheTeamsAsync(userId, snapshot.TeamMemberships);
+        // Cache the result (fire-and-forget style, don't block the response) — unless it is a fault (task 132).
+        CacheUnlessFaulted(tenantId, DocumentAccessResource, cacheId, snapshot);
 
         return snapshot;
     }
@@ -160,140 +211,114 @@ public class CachedAccessDataSource : IAccessDataSource
             return await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
         }
 
-        // DISTINCT key namespace ("record", not "access") AND the entity set is part of the key.
+        var tenantId = TenantFor(_httpContextAccessor?.HttpContext?.User);
+        if (tenantId is null || !CachesRecordEntitySet(entitySetName))
+        {
+            // No tid (ADR-009), or a table re-owned silently by an Assign cascade (task 132): read live, never cached.
+            return await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+        }
+
+        // DISTINCT resource ("auth-record-access", not "auth-access") AND the entity set is part of the id.
         //
-        // This matters: GetUserAccessAsync's key is `...:access:{authMode}:{userId}:{resourceId}` with no
-        // entity type, because that path is document-only by contract. Reusing that shape for arbitrary
-        // entities would make the key ambiguous about WHICH RECORD was asked about — a snapshot for one
-        // table answering for another table's record of the same id. Separate prefix + entity set makes
-        // that structurally impossible rather than merely unlikely.
+        // This matters: GetUserAccessAsync's id is `{authMode}:{userId}:{resourceId}` with no entity type, because
+        // that path is document-only by contract. Reusing that shape for arbitrary entities would make the key
+        // ambiguous about WHICH RECORD was asked about — a snapshot for one table answering for another table's
+        // record of the same id. Separate resource + entity set makes that structurally impossible rather than
+        // merely unlikely.
         //
         // No authMode discriminator: this method denies without a caller token, so every cached entry is
         // an OBO answer by construction.
-        var cacheKey = $"sdap:auth:record:{entitySetName}:{userId}:{recordId}";
-        var sw = Stopwatch.StartNew();
+        var cacheId = RecordAccessCacheId(entitySetName, userId, RecordIdSegment(recordId));
+        var cached = await TryGetAsync(tenantId, RecordAccessResource, cacheId, ct);
+        if (cached is not null)
+        {
+            return cached;
+        }
 
+        var snapshot = await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+
+        CacheUnlessFaulted(tenantId, RecordAccessResource, cacheId, snapshot);
+
+        return snapshot;
+    }
+
+    private async Task<AccessSnapshot?> TryGetAsync(string tenantId, string resource, string cacheId, CancellationToken ct)
+    {
+        var sw = Stopwatch.StartNew();
         try
         {
-            var cachedJson = await _cache.GetStringAsync(cacheKey, ct);
+            var cached = await _cache.GetAsync<CachedAccessSnapshot>(tenantId, resource, cacheId, CacheVersion, ct: ct);
             sw.Stop();
 
-            if (cachedJson != null)
+            if (cached is not null)
             {
-                var cached = JsonSerializer.Deserialize<CachedAccessSnapshot>(cachedJson, JsonOptions);
-                if (cached != null)
-                {
-                    _logger.LogDebug(
-                        "[AUTH-CACHE] HIT record access: UserId={UserId}, EntitySet={EntitySet}, " +
-                        "RecordId={RecordId}, Latency={LatencyMs}ms",
-                        userId, entitySetName, recordId, sw.ElapsedMilliseconds);
-                    CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, "auth-access");
-
-                    return cached.ToAccessSnapshot();
-                }
+                _logger.LogDebug(
+                    "[AUTH-CACHE] HIT {Resource}: Id={CacheId}, Latency={LatencyMs}ms",
+                    resource, cacheId, sw.ElapsedMilliseconds);
+                CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, "auth-access");
+                return cached.ToAccessSnapshot();
             }
 
+            _logger.LogDebug(
+                "[AUTH-CACHE] MISS {Resource}: Id={CacheId}, Latency={LatencyMs}ms",
+                resource, cacheId, sw.ElapsedMilliseconds);
             CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             sw.Stop();
             _logger.LogWarning(ex,
-                "[AUTH-CACHE] Error reading record access cache: UserId={UserId}, EntitySet={EntitySet}, " +
-                "RecordId={RecordId}. Falling through to Dataverse.",
-                userId, entitySetName, recordId);
+                "[AUTH-CACHE] Error reading {Resource} cache: Id={CacheId}. Falling through to Dataverse.",
+                resource, cacheId);
             CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
         }
 
-        var snapshot = await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+        return null;
+    }
 
-        _ = CacheSnapshotAsync(cacheKey, snapshot, ResourceAccessTtl);
+    /// <summary>
+    /// Writes the snapshot unless it is <see cref="AccessSnapshot.Faulted"/> — the ONE cache gate of this class
+    /// (task 132 · C12). Fire-and-forget: the response never waits for the cache.
+    /// </summary>
+    private void CacheUnlessFaulted(string tenantId, string resource, string cacheId, AccessSnapshot snapshot)
+    {
+        if (snapshot.Faulted)
+        {
+            _logger.LogInformation(
+                "[AUTH-CACHE] NOT caching {Resource} {CacheId}: the snapshot is faulted or degraded (task 132 — a fault " +
+                "is returned to this request only, never stored). Rights for this request: {Rights}.",
+                resource, cacheId, snapshot.AccessRights);
+            return;
+        }
 
-        return snapshot;
+        _ = CacheSnapshotAsync(tenantId, resource, cacheId, snapshot);
     }
 
     /// <summary>
     /// Caches the full access snapshot for a user+resource combination.
     /// </summary>
-    private async Task CacheSnapshotAsync(string cacheKey, AccessSnapshot snapshot, TimeSpan ttl)
+    private async Task CacheSnapshotAsync(string tenantId, string resource, string cacheId, AccessSnapshot snapshot)
     {
         try
         {
-            var cached = CachedAccessSnapshot.FromAccessSnapshot(snapshot);
-            var json = JsonSerializer.Serialize(cached, JsonOptions);
-
-            await _cache.SetStringAsync(
-                cacheKey,
-                json,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = ttl
-                });
+            await _cache.SetAsync(
+                tenantId, resource, cacheId, CacheVersion,
+                CachedAccessSnapshot.FromAccessSnapshot(snapshot), ResourceAccessTtl);
 
             _logger.LogDebug(
-                "[AUTH-CACHE] Cached resource access: UserId={UserId}, ResourceId={ResourceId}, TTL={TtlSeconds}s",
-                snapshot.UserId, snapshot.ResourceId, ttl.TotalSeconds);
+                "[AUTH-CACHE] Cached {Resource}: UserId={UserId}, ResourceId={ResourceId}, TTL={TtlSeconds}s",
+                resource, snapshot.UserId, snapshot.ResourceId, ResourceAccessTtl.TotalSeconds);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex,
-                "[AUTH-CACHE] Error caching resource access for UserId={UserId}, ResourceId={ResourceId}. Non-critical.",
-                snapshot.UserId, snapshot.ResourceId);
+                "[AUTH-CACHE] Error caching {Resource} for UserId={UserId}, ResourceId={ResourceId}. Non-critical.",
+                resource, snapshot.UserId, snapshot.ResourceId);
             // Don't throw - caching is optimization, not requirement
-        }
-    }
-
-    /// <summary>
-    /// Caches user roles with 2-min TTL.
-    /// </summary>
-    private async Task CacheRolesAsync(string userId, IEnumerable<string> roles)
-    {
-        try
-        {
-            var cacheKey = $"sdap:auth:roles:{userId}";
-            var json = JsonSerializer.Serialize(roles.ToList(), JsonOptions);
-
-            await _cache.SetStringAsync(
-                cacheKey,
-                json,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = RolesTtl
-                });
-
-            _logger.LogDebug("[AUTH-CACHE] Cached roles: UserId={UserId}, TTL={TtlSeconds}s",
-                userId, RolesTtl.TotalSeconds);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[AUTH-CACHE] Error caching roles for UserId={UserId}. Non-critical.", userId);
-        }
-    }
-
-    /// <summary>
-    /// Caches user team memberships with 2-min TTL.
-    /// </summary>
-    private async Task CacheTeamsAsync(string userId, IEnumerable<string> teams)
-    {
-        try
-        {
-            var cacheKey = $"sdap:auth:teams:{userId}";
-            var json = JsonSerializer.Serialize(teams.ToList(), JsonOptions);
-
-            await _cache.SetStringAsync(
-                cacheKey,
-                json,
-                new DistributedCacheEntryOptions
-                {
-                    AbsoluteExpirationRelativeToNow = TeamsTtl
-                });
-
-            _logger.LogDebug("[AUTH-CACHE] Cached teams: UserId={UserId}, TTL={TtlSeconds}s",
-                userId, TeamsTtl.TotalSeconds);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "[AUTH-CACHE] Error caching teams for UserId={UserId}. Non-critical.", userId);
         }
     }
 
@@ -301,7 +326,11 @@ public class CachedAccessDataSource : IAccessDataSource
     /// DTO for serializing AccessSnapshot to/from Redis.
     /// Avoids serializing the full AccessSnapshot which has enum flags and DateTimeOffset.
     /// </summary>
-    private sealed class CachedAccessSnapshot
+    /// <remarks>
+    /// Carries no fault flag on purpose (task 132): a faulted snapshot is never written, so every hit is a complete
+    /// answer and restores with <see cref="AccessSnapshot.Faulted"/> false.
+    /// </remarks>
+    internal sealed class CachedAccessSnapshot
     {
         public string UserId { get; set; } = string.Empty;
         public string ResourceId { get; set; } = string.Empty;

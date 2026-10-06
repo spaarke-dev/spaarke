@@ -262,7 +262,7 @@ public sealed class MembershipJunctionUpdater : IMembershipJunctionUpdater
         // any cached membership results for (PersonId, EntityLogicalName).
         // Fire-and-forget: the invalidator's resilience contract guarantees
         // PublishInvalidationAsync never throws (Redis failures → log +
-        // continue; the 5-min cache TTL is the backstop).
+        // continue; the 2-min cache TTL is the backstop — task 132).
         //
         // Reuse path: task 085's MembershipReconciliationJob invokes
         // HandleAsync directly (no Service Bus topic involved); recon-driven

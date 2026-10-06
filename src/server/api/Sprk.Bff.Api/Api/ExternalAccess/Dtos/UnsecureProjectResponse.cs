@@ -51,6 +51,30 @@ namespace Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 /// actually knows. The JSON contract is still purely additive; only in-assembly source is affected,
 /// and both call sites live in the endpoint.</para>
 /// </remarks>
+/// <param name="Children">
+/// Task 148: what this call did to the record's EXISTING related records — each re-owned OUT of the Secure Record owner team
+/// to the owner the ownership rule gives a child of an ordinary record (its business unit's team), its mirrored shares
+/// removed — BEFORE the record's own shares were revoked and its flag cleared. On an already-unsecure record it is the pass
+/// that completes an earlier unsecure's related records (owner round 11 item 3). A successful response always carries a
+/// complete pass; an incomplete one is the <c>sdap.unsecure.children_incomplete</c> error, which leaves the flag set.
+/// Additive to the JSON contract.
+/// </param>
+/// <param name="RelatedSecureRecords">
+/// unified-access-control-r2 task 158 (owner round 6): the work assignments and projects FILED UNDER this record that are
+/// still secure after the call. A record filed under a secure record became secure itself, and it STAYS secure when that
+/// record is unsecured (never auto-unsecure) — the UI offers each one, with a checkbox, to unsecure through
+/// <c>alsoUnsecure</c> (or later, on its own). <c>null</c> for a work assignment (nothing is filed under one for this
+/// rule) or when the list could not be read (<paramref name="RelatedSecureRecordsUnreadable"/>). Additive.
+/// </param>
+/// <param name="RelatedRecordsUnsecured">
+/// Task 158: one entry per <c>alsoUnsecure</c> record — <c>unsecured</c>, or <c>refused</c> / <c>failed</c> with the reason
+/// code (F3's <c>sdap.unsecure.not_permitted</c> / <c>sdap.unsecure.permission_unverifiable</c>,
+/// <c>sdap.unsecure.not_related</c>, or the code its own unsecure answered). <c>null</c> when none was asked. Additive.
+/// </param>
+/// <param name="RelatedSecureRecordsUnreadable">
+/// Task 158: <c>true</c> when the records filed under this one could not be read, so <paramref name="RelatedSecureRecords"/>
+/// is not known (never reported as "none"). Additive.
+/// </param>
 public record UnsecureProjectResponse(
     Guid ProjectId,
     Guid NewOwnerSystemUserId,
@@ -58,4 +82,15 @@ public record UnsecureProjectResponse(
     bool AlreadyUnsecure,
     bool? SweepComplete,
     string RecordType,
-    Guid RecordId);
+    Guid RecordId,
+    SecureChildPassSummary? Children = null,
+    IReadOnlyList<RelatedSecureRecord>? RelatedSecureRecords = null,
+    IReadOnlyList<RelatedUnsecureOutcome>? RelatedRecordsUnsecured = null,
+    bool RelatedSecureRecordsUnreadable = false);
+
+/// <summary>A work assignment or project filed under the record, still secure (task 158).</summary>
+public record RelatedSecureRecord(string RecordType, Guid RecordId, string? Name);
+
+/// <summary>What happened to one <c>alsoUnsecure</c> record (task 158).</summary>
+/// <param name="Outcome"><c>unsecured</c>, <c>refused</c> or <c>failed</c>.</param>
+public record RelatedUnsecureOutcome(string RecordType, Guid RecordId, string Outcome, string? ReasonCode, string? Detail);

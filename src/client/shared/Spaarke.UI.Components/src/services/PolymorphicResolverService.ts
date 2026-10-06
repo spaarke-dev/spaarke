@@ -806,9 +806,10 @@ export async function applyResolverFields(
 //     target stamps ONLY that target — never its own parent associations.
 //     Inverting this silently grants every Project-holder access to every
 //     Matter under it.
-//  2. Derivation reads the target's OWN core-ancestor lookups and stops
-//     (ADR-034 1-hop). It never recurses. Those lookups are themselves FR-26
-//     stamps, which is what makes one read sufficient.
+//  2. Derivation reads the target's OWN root columns and stops (ADR-034
+//     1-hop). It never recurses. Those columns are themselves FR-26 stamps or
+//     the target's own typed root lookups (INTERMEDIATE_ROOT_COLUMNS), which is
+//     what makes one read sufficient.
 
 /**
  * CORE record entities — direct grants required; these never inherit.
@@ -833,11 +834,21 @@ export const CORE_RECORD_ENTITIES: ReadonlyArray<string> = [
  * Pinned literally by a unit test alongside {@link CORE_RECORD_ENTITIES}.
  *
  * NOTE: entities in NEITHER set (e.g. `sprk_budget`, `sprk_organization`,
- * `contact`, `sprk_reportcard`) are intentionally unclassified for FR-26.
- * They confer access through other evaluator terms (org-expansion, explicit
- * grant) — not through core-ancestor inheritance — so no stamp is derived for
- * them. That is a distinct, non-error state; see
+ * `contact`, `sprk_reportcard`) are intentionally unclassified for FR-26: they
+ * never inherit through core-ancestor inheritance themselves, and they confer
+ * access through other evaluator terms (org-expansion, explicit grant).
+ * `sprk_budget`, `sprk_reportcard` and `sprk_agreement` ARE intermediates,
+ * though (task 169, mirroring server task 156): a child filed UNDER one of them
+ * is stamped with that record's root — see {@link INTERMEDIATE_ROOT_COLUMNS}.
+ * Organization, contact and account derive nothing; see
  * {@link CoreAncestorDerivationStatus}.
+ *
+ * `sprk_memo` joined the set in unified-access-control-r2 task 147 (owner round
+ * 2 item 6, C10 part 2). A memo carries all four core-ancestor lookups (live
+ * metadata, 2026-10-04), so a record filed under a memo now inherits the memo's
+ * own core ancestor instead of reading as unclassified. The C# mirror
+ * (`CoreAncestorResolver.ChildRecordEntities`) changed in the same commit, and
+ * the cross-language parity test pins the two.
  */
 export const CHILD_RECORD_ENTITIES: ReadonlyArray<string> = [
   'sprk_invoice',
@@ -846,6 +857,7 @@ export const CHILD_RECORD_ENTITIES: ReadonlyArray<string> = [
   'sprk_event',
   'sprk_todo',
   'sprk_analysis',
+  'sprk_memo',
 ] as const;
 
 /** True when `entityLogicalName` is a CORE record (direct grants required). */
@@ -892,6 +904,98 @@ export const CORE_ANCESTOR_LOOKUPS: ReadonlyArray<{
   },
 ] as const;
 
+/** One row of {@link INTERMEDIATE_ROOT_COLUMNS}. */
+export interface IIntermediateRootColumn {
+  /** The record a child is filed under (e.g. `sprk_document`). */
+  intermediate: string;
+  /** A lookup column ON the intermediate that names its root (e.g. `sprk_relatedmatter`). */
+  column: string;
+  /** The CORE entity that column points at (e.g. `sprk_matter`). */
+  rootEntity: string;
+}
+
+/**
+ * The columns ON each intermediate that name its root (project / matter / work
+ * assignment / service request): the columns {@link deriveCoreAncestorStamps}
+ * reads when a child is filed under that intermediate. One row per
+ * (intermediate, column, root).
+ *
+ * **MUST equal the C# `CoreAncestorResolver.IntermediateRootColumns`** (the
+ * server owns this invariant, ADR-002 WP-2; the client previews it). Pinned
+ * across languages by `CoreAncestorResolverTests.IntermediateRootColumns_MatchTheTypeScriptSide`,
+ * which PARSES this array literal: keep it a flat array of single-quoted object
+ * literals in the property order intermediate, column, rootEntity, with no
+ * spreads, no referenced or computed values and no comments inside the array.
+ *
+ * Groups (task 169, mirroring server task 156):
+ * - `sprk_communication`, `sprk_event`, `sprk_todo`, `sprk_analysis` — the four
+ *   `sprk_regarding{core}` columns (the server's `StandardRootColumns()`).
+ * - `sprk_invoice`, `sprk_budget` — typed `sprk_project` / `sprk_matter` lookups.
+ * - `sprk_document` — the project / matter / work assignment links of the
+ *   canonical document link vocabulary (`Spaarke.Dataverse.DocumentLinkFields`):
+ *   the typed column and its `sprk_related*` twin. `sprk_relatedservicerequest`
+ *   and every link to a non-root are excluded, as on the server.
+ * - `sprk_agreement`, `sprk_reportcard` — `sprk_regardingmatter` /
+ *   `sprk_regardingproject`.
+ *
+ * This table is what is READ on the intermediate. What is WRITTEN on the child
+ * is always the {@link CORE_ANCESTOR_LOOKUPS} column of the row's `rootEntity`,
+ * never the intermediate's own column name. Being an intermediate does not make
+ * a record a CHILD: {@link CHILD_RECORD_ENTITIES} is unchanged.
+ *
+ * Literal entity names here are a project-scoped ADR-012 §6.5 Path A exception
+ * (unified-access-control-r2 `notes/phase3-derivation-rules.md` §7, "ADR-012
+ * tension 1", widened by task 169): an access-model table pinned by a test.
+ */
+// The sprk_memo rows: task 147 r1 put the memo in the CHILD taxonomy with the four stamp columns (C#
+// IntermediateRootColumns); they were added here when task 169 integrated on top of 147 (owner round 28 item 3).
+// No comment may sit INSIDE this array: the C# lock-step test parses its body and refuses anything but literal rows.
+export const INTERMEDIATE_ROOT_COLUMNS: ReadonlyArray<IIntermediateRootColumn> = [
+  { intermediate: 'sprk_communication', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_communication', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_communication', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_communication', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
+  { intermediate: 'sprk_event', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_event', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_event', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_event', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
+  { intermediate: 'sprk_todo', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_todo', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_todo', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_todo', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
+  { intermediate: 'sprk_analysis', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_analysis', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_analysis', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_analysis', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
+  { intermediate: 'sprk_memo', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_memo', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_memo', column: 'sprk_regardingworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_memo', column: 'sprk_regardingservicerequest', rootEntity: 'sprk_servicerequest' },
+  { intermediate: 'sprk_invoice', column: 'sprk_project', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_invoice', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_document', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_document', column: 'sprk_relatedmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_document', column: 'sprk_project', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_document', column: 'sprk_relatedproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_document', column: 'sprk_workassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_document', column: 'sprk_relatedworkassignment', rootEntity: 'sprk_workassignment' },
+  { intermediate: 'sprk_agreement', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_agreement', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_reportcard', column: 'sprk_regardingmatter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_reportcard', column: 'sprk_regardingproject', rootEntity: 'sprk_project' },
+  { intermediate: 'sprk_budget', column: 'sprk_matter', rootEntity: 'sprk_matter' },
+  { intermediate: 'sprk_budget', column: 'sprk_project', rootEntity: 'sprk_project' },
+];
+
+/**
+ * The rows of {@link INTERMEDIATE_ROOT_COLUMNS} for one intermediate, in table
+ * order. Empty when the entity is not an intermediate. Built from the table on
+ * each call — there is no second list of root columns.
+ */
+function intermediateRootColumnsFor(entityLogicalName: string): IIntermediateRootColumn[] {
+  return INTERMEDIATE_ROOT_COLUMNS.filter(r => r.intermediate === entityLogicalName);
+}
+
 /** One resolved core-ancestor stamp to write onto the child being saved. */
 export interface ICoreAncestorStamp {
   /** Core entity logical name (e.g. `sprk_matter`). */
@@ -913,13 +1017,16 @@ export interface ICoreAncestorStamp {
  * - `core-target`   — target is itself CORE. The stamp is the target. Its own
  *                     parent associations are NOT ancestors (Matter ≠ child of
  *                     Project).
- * - `derived`       — target is CHILD and carried ≥1 core-ancestor stamp.
- * - `no-ancestor`   — target is CHILD and every core-ancestor lookup is null.
- *                     A real, legitimate state (an orphan communication); the
- *                     child simply inherits nothing.
- * - `unclassified`  — target is neither CORE nor CHILD (budget, organization,
- *                     contact, report card). No ancestor concept applies.
- * - `error`         — the ancestor read failed. The caller MUST NOT write.
+ * - `derived`       — target is an INTERMEDIATE ({@link INTERMEDIATE_ROOT_COLUMNS})
+ *                     and carried ≥1 root.
+ * - `no-ancestor`   — target is an INTERMEDIATE and every root column is null
+ *                     (or it carries none of them). A real, legitimate state (an
+ *                     orphan communication); the child simply inherits nothing.
+ * - `unclassified`  — target is neither CORE nor an intermediate
+ *                     (`sprk_organization`, `contact`, `account`, anything not in
+ *                     the table). No ancestor concept applies.
+ * - `error`         — the ancestor read failed, or the target names two
+ *                     different roots of one type. The caller MUST NOT write.
  */
 export type CoreAncestorDerivationStatus = 'core-target' | 'derived' | 'no-ancestor' | 'unclassified' | 'error';
 
@@ -941,14 +1048,19 @@ export interface ICoreAncestorDerivationResult {
  * | Target class | Read performed | Result |
  * |---|---|---|
  * | CORE  | none | `core-target`, stamp = the target itself |
- * | CHILD | ONE `$select` of the target's own core-ancestor lookups | `derived` / `no-ancestor` |
+ * | INTERMEDIATE ({@link INTERMEDIATE_ROOT_COLUMNS}) | ONE `$select` of the target's own root columns | `derived` / `no-ancestor` / `error` (two different roots of one type) |
  * | other | none | `unclassified` |
  *
  * **1-hop, enforced structurally (ADR-034).** The read selects the target's own
- * `sprk_regarding{core}` columns and stops. There is no recursion and no
- * grandparent walk — those columns are themselves FR-26 stamps written by this
- * same function when the target was saved, which is exactly why one read is
- * enough.
+ * root columns and stops. There is no recursion and no grandparent walk — those
+ * columns are either FR-26 stamps written when the target was saved or the
+ * target's own typed root lookups, which is exactly why one read is enough.
+ *
+ * **Mirrors the server (ADR-002 WP-2).** This is the client preview of C#
+ * `CoreAncestorResolver.ResolveStampsAsync`: same table, same ambiguity rule.
+ * One known, deliberate difference: metadata that answers with NO columns is
+ * `error` here (the client cannot tell it from a failed discovery) where the
+ * server answers `NoAncestor`; the client is the stricter side.
  *
  * **Fail-closed (NFR-01).** A read failure returns `status: 'error'`. Callers
  * MUST abort the write rather than saving a child that silently carries no
@@ -999,19 +1111,23 @@ export async function deriveCoreAncestorStamps(
     };
   }
 
-  // --- Neither core nor child: no ancestor concept. Not an error.
-  if (!isChildRecordEntity(targetEntity)) {
+  // --- Neither core nor an intermediate: no ancestor concept. Not an error.
+  //     (Task 169, mirroring server task 156: the intermediates are every type in
+  //     INTERMEDIATE_ROOT_COLUMNS — the child taxonomy plus agreement, budget and
+  //     report card — not only CHILD_RECORD_ENTITIES.)
+  const rootColumns = intermediateRootColumnsFor(targetEntity);
+  if (rootColumns.length === 0) {
     return { status: 'unclassified', stamps: [] };
   }
 
-  // --- CHILD target: read ITS core-ancestor stamps (the single hop).
+  // --- INTERMEDIATE target: read ITS root columns (the single hop).
   //
   // Only select columns that actually exist on the target entity — selecting a
   // missing lookup returns HTTP 400 and would turn a schema gap into a blocked
   // save. Nav-props are the presence oracle and are cached per entity.
   const targetNavProps = await discoverNavProps(targetEntity, fetchImpl);
   const presentColumns = new Set(targetNavProps.map(n => n.columnName.toLowerCase()));
-  const applicable = CORE_ANCESTOR_LOOKUPS.filter(c => presentColumns.has(c.lookupAttribute.toLowerCase()));
+  const applicable = rootColumns.filter(r => presentColumns.has(r.column.toLowerCase()));
 
   if (targetNavProps.length === 0) {
     // Discovery failed (HTTP error / network). We cannot distinguish "target
@@ -1021,22 +1137,22 @@ export async function deriveCoreAncestorStamps(
       status: 'error',
       stamps: [],
       error:
-        `[PolymorphicResolver] Could not discover nav-props for child target "${targetEntity}"; ` +
+        `[PolymorphicResolver] Could not discover nav-props for intermediate target "${targetEntity}"; ` +
         `core-ancestor derivation cannot be verified (FR-26 / NFR-01 fail-closed).`,
     };
   }
 
   if (applicable.length === 0) {
-    // The target is child-class but carries no core-ancestor lookup at all.
+    // The target is an intermediate but carries none of its root columns.
     // Its own chain is already broken upstream; nothing to inherit.
     console.warn(
-      `[PolymorphicResolver] Child target "${targetEntity}" has none of the core-ancestor lookups ` +
-        `(${CORE_ANCESTOR_LOOKUPS.map(c => c.lookupAttribute).join(', ')}); no ancestor stamp can be derived.`
+      `[PolymorphicResolver] Intermediate target "${targetEntity}" has none of its root columns ` +
+        `(${rootColumns.map(r => r.column).join(', ')}); no ancestor stamp can be derived.`
     );
     return { status: 'no-ancestor', stamps: [] };
   }
 
-  const selectFields = applicable.map(c => `_${c.lookupAttribute}_value`);
+  const selectFields = applicable.map(r => `_${r.column}_value`);
   let row: Record<string, unknown> | undefined;
   try {
     const primaryIdAttr = `${targetEntity}id`;
@@ -1063,22 +1179,60 @@ export async function deriveCoreAncestorStamps(
     };
   }
 
+  // Stamps are keyed by ROOT ENTITY (as C# ResolveStampsAsync keys them). Each
+  // is written on the CHILD's CORE_ANCESTOR_LOOKUPS column for that root — never
+  // on the intermediate's own column name (a document's `sprk_relatedmatter`
+  // becomes the child's `sprk_regardingmatter`).
   const stamps: ICoreAncestorStamp[] = [];
-  for (const c of applicable) {
-    const raw = row[`_${c.lookupAttribute}_value`];
-    if (typeof raw === 'string' && raw.trim().length > 0) {
-      stamps.push({
-        entityType: c.entityType,
-        entitySet: c.entitySet,
-        lookupAttribute: c.lookupAttribute,
-        recordId: cleanGuid(raw),
-      });
+  const sourceColumnByRoot = new Map<string, string>();
+  for (const r of applicable) {
+    const raw = row[`_${r.column}_value`];
+    if (typeof raw !== 'string' || raw.trim().length === 0) continue;
+    const recordId = cleanGuid(raw);
+
+    const already = stamps.find(s => s.entityType === r.rootEntity);
+    if (already) {
+      if (already.recordId !== recordId) {
+        // Two columns of one root type naming DIFFERENT records (a document's
+        // sprk_matter and sprk_relatedmatter): the root is not known, and either
+        // choice is a guess. Fail closed, with no partial stamp set.
+        return {
+          status: 'error',
+          stamps: [],
+          error:
+            `[PolymorphicResolver] ${targetEntity}(${cleanTargetId}) names two different ${r.rootEntity} records ` +
+            `(${sourceColumnByRoot.get(r.rootEntity)} and ${r.column}), so its root cannot be determined ` +
+            `(FR-26 / NFR-01 fail-closed).`,
+        };
+      }
+      continue; // The same record named twice → one stamp.
     }
+
+    const lookup = CORE_ANCESTOR_LOOKUPS.find(c => c.entityType === r.rootEntity);
+    if (!lookup) {
+      // Unreachable while every rootEntity has a CORE_ANCESTOR_LOOKUPS entry (the
+      // table-closure test pins that). Fail closed rather than guess a column.
+      return {
+        status: 'error',
+        stamps: [],
+        error:
+          `[PolymorphicResolver] Root "${r.rootEntity}" of ${targetEntity}.${r.column} has no entry in ` +
+          `CORE_ANCESTOR_LOOKUPS. The intermediate table and the lookup table have diverged.`,
+      };
+    }
+
+    sourceColumnByRoot.set(r.rootEntity, r.column);
+    stamps.push({
+      entityType: lookup.entityType,
+      entitySet: lookup.entitySet,
+      lookupAttribute: lookup.lookupAttribute,
+      recordId,
+    });
   }
 
   if (stamps.length === 0) {
     console.warn(
-      `[PolymorphicResolver] Child target ${targetEntity}(${cleanTargetId}) carries no core-ancestor stamp; ` +
+      `[PolymorphicResolver] Intermediate target ${targetEntity}(${cleanTargetId}) carries no core-ancestor stamp; ` +
         `the record being written will inherit no access (FR-26 no-ancestor).`
     );
     return { status: 'no-ancestor', stamps: [] };

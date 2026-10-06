@@ -68,6 +68,8 @@
       },
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": true,
+      "$comment_speAdminPlatformOperatorEnvironment": "Spaarke-OPERATED environment (unified-access-control-r2 task 165, owner round 49 item 1) — today the ONLY one (round 57 item 1). A JSON boolean, unquoted: Deploy-BffApi.ps1 fails on any other type, because PowerShell reads the string 'false' as true (round 57 item 3). Deploy-BffApi.ps1 sets App Service SpeAdmin__PlatformOperatorEnvironment=true on the slot(s) it deploys to, which lets the BFF's SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type (security alerts / secure score; container-type permissions / consumers / register) serve a root-unit admin. NEVER set this on a customer environment — the deploy FAILS when a customer environment carries the setting.",
       "$comment_migration": "Dev migrated 2026-05-24 from Windows spe-api-dev-67e2xz to Linux spaarke-bff-dev (canonical naming). Old env scheduled for decommission after stability period. See projects/sdap-bff-api-remediation-fix/baseline/linux-dev-migration.md."
     },
     "demo": {
@@ -104,8 +106,9 @@
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false,
       "subscriptionId": "2ff9ee48-6f1d-4664-865c-f11868dd1b50",
-      "$comment_corrected": "Corrected 2026-10-05 (T242b) from the live subscription \"Spaarke Demo Environment\": the entry named spaarke-bff-prod / rg-spaarke-platform-prod / sprk-platform-prod-kv, which no longer exist. spaarke-bff-demo is Stopped (task 242c). AI Search spaarke-search-demo is NOT present in rg-spaarke-demo. Owner 2026-10-05: demo is the next environment used to test the provisioning orchestration."
-    },
+      "$comment_corrected": "Corrected 2026-10-05 (T242b) from the live subscription \"Spaarke Demo Environment\": the entry named spaarke-bff-prod / rg-spaarke-platform-prod / sprk-platform-prod-kv, which no longer exist. spaarke-bff-demo is Stopped (task 242c). AI Search spaarke-search-demo is NOT present in rg-spaarke-demo. Owner 2026-10-05: demo is the next environment used to test the provisioning orchestration.",
+      "speAdminPlatformOperatorEnvironment": false,
+      "$comment_speAdminPlatformOperatorEnvironment": "NOT YET a Spaarke-operated environment (unified-access-control-r2 task 165, owner round 57 item 1). This entry (spaarke-bff-demo, Stopped) is the candidate for Spaarke's production operator environment; only dev carries the marker for now. The change that stands it up sets this to true (a JSON boolean, unquoted) together with SpeAdminOperatorEnvironmentMarkerGuardTests.SpaarkeOperatedEnvironments and the App Service setting; Deploy-BffApi.ps1 then binds the marker to THIS entry's appServiceName / resourceGroup (round 62 item 1). demo is reachable through Deploy-BffApi.ps1 -Environment demo since master T242b added it to the ValidateSet, which is what round 62 item 2 required. Until then its tenant-wide and type-wide SPE admin routes refuse (fail closed)."    },
     "_template": {
       "$comment": "Template entry showing the full schema. Copy this to add a new customer environment. All fields are required unless marked optional.",
       "displayName": "REQUIRED — Human-readable name",
@@ -139,7 +142,9 @@
       "requiredCorsOrigins": [],
       "$comment_requiredCorsOrigins": "REQUIRED (may be empty). Origins that MUST appear in this environment's Cors__AllowedOrigins__N App Settings. List ONLY origins CorsModule's suffix rules do not already match — so NOT *.dynamics.com / *.powerapps.com / *.powerappsportals.com. In practice this means your Azure Static Web App front-ends (Office add-ins, external SPA). Deploy-BffApi.ps1 asserts these after every deploy and fails if one is missing. Leaving the key ABSENT makes the deploy warn that the environment is unaudited; an explicit empty array asserts 'this environment genuinely has no SWA front-ends'.",
       "dataverseRegion": "unitedstates",
-      "isLegacyNaming": false
+      "isLegacyNaming": false,
+      "speAdminPlatformOperatorEnvironment": false,
+      "$comment_speAdminPlatformOperatorEnvironment": "A CUSTOMER environment is false (or leaves the key out) — ALWAYS. true is only for a Spaarke-operated environment (today only dev; Spaarke's production operator environment adds it in the change that stands it up — round 57 item 1), and the value is a JSON boolean, never a string (round 57 item 3): it opens the SPE admin routes that span the whole SharePoint Embedded tenant or a whole container type to that environment's root admin (unified-access-control-r2 task 165, owner round 49 item 1). Deploy-BffApi.ps1 fails a deploy to an environment that carries the setting without declaring it here."
     }
   }
 }

@@ -28,6 +28,16 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Who created the item (app-only; Graph <c>createdBy</c>), or <see langword="null"/> when the item is not in that
+    /// drive. Uncached — it is evidence on an authorization path (unified-access-control-r2 task 166 r2: the
+    /// document-pointer check verifies the ITEM, owner round 23 item 1).
+    /// </summary>
+    Task<SpeItemCreator?> GetItemCreatorAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Download file content as a stream (app-only auth).
     /// </summary>
     Task<Stream?> DownloadFileAsync(

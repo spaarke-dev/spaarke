@@ -21,6 +21,18 @@
 //       identity credential (task 248). Calls Storage.FileStorage.Containers.PostAsync +
 //       Containers[id].Activate.PostAsync per topology doc §6.
 //     - Test: fake ISpeContainerProvisioner returning canned outcomes.
+//
+// BUSINESS-UNIT STAMP + RESUME (unified-access-control-r2 task 165, owner rounds
+// 35 / 41 / 49 — re-applied to H8-B at the batch-4 integration):
+//   - BindRootContainerAsync stamps the container with its owning business unit
+//     (custom property Spaarke.Contracts.Spe.SpeContainerBusinessUnitBinding.PropertyName
+//     — the one C# constant the BFF authorizes against), reads it back, and
+//     DELETES the container when the stamp did not land. H8 calls it once the
+//     container is verified addressable.
+//   - ActivateAsync re-activates a container H8 created and RECORDED whose
+//     /activate failed, so a resume never creates a second container.
+//   - Every fault after the container POST was sent is a CreateFailure saying
+//     whether a container may exist (ContainerInDoubt) — never an exception.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
@@ -36,12 +48,77 @@ public interface ISpeContainerProvisioner
 {
     /// <summary>
     /// Creates and activates a container of the specified container-type.
-    /// Domain failures do NOT throw; infra faults (transport, timeout) MAY
-    /// throw. Successful outcome carries the new container's GUID.
+    /// Domain failures do NOT throw. A fault before any Graph request is sent
+    /// (the owning-app token exchange) MAY throw; every fault after the container
+    /// POST was sent is returned (<see cref="SpeContainerProvisionOutcome.CreateFailure.ContainerInDoubt"/> /
+    /// <see cref="SpeContainerProvisionOutcome.ActivateFailure"/>), so the handler can record what may exist.
+    /// Successful outcome carries the new container's GUID.
     /// </summary>
     Task<SpeContainerProvisionOutcome> ProvisionAsync(
         SpeContainerProvisionRequest request,
         CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Activates a container H8 already created and recorded whose <c>/activate</c> failed (unified-access-control-r2
+    /// task 165: a resume continues with the container it made — it never creates another). Returns
+    /// <see cref="SpeContainerProvisionOutcome.Success"/> or <see cref="SpeContainerProvisionOutcome.ActivateFailure"/>
+    /// only; a fault before any Graph request MAY throw.
+    /// </summary>
+    Task<SpeContainerProvisionOutcome> ActivateAsync(
+        SpeContainerActivationRequest request,
+        CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Stamps a container H8 created with its owning business unit (unified-access-control-r2 task 165, owner round 35
+    /// item 1 — every container-creation path stamps), reads the stamp back, and REMOVES the container when the stamp
+    /// does not read back, so no unbound container is left behind. Called by the handler once the container is verified
+    /// readable (an SPE container may be unaddressable for up to 24h after creation — stamping it earlier would remove
+    /// healthy containers during that documented window). Domain failures do NOT throw; a fault before any Graph call
+    /// MAY throw.
+    /// </summary>
+    Task<SpeContainerBindOutcome> BindRootContainerAsync(
+        SpeContainerBindRequest request,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.ActivateAsync"/>.</summary>
+/// <param name="CustomerId">Customer partition key — audit logs only.</param>
+/// <param name="TenantId">Customer Entra tenant id (§4D I1/I5).</param>
+/// <param name="OwningAppId">The container type's owning app — the identity that created the container.</param>
+/// <param name="ContainerId">The recorded container to activate.</param>
+public sealed record SpeContainerActivationRequest(
+    string CustomerId,
+    string TenantId,
+    string OwningAppId,
+    string ContainerId);
+
+/// <summary>Inputs to <see cref="ISpeContainerProvisioner.BindRootContainerAsync"/>.</summary>
+/// <param name="CustomerId">Customer partition key — audit logs only.</param>
+/// <param name="TenantId">Customer Entra tenant id (§4D I1/I5).</param>
+/// <param name="OwningAppId">The container type's owning app — the identity that created the container.</param>
+/// <param name="ContainerId">The container to bind.</param>
+/// <param name="BusinessUnitId">The owning business unit: the ROOT business unit of the customer's Dataverse environment.</param>
+public sealed record SpeContainerBindRequest(
+    string CustomerId,
+    string TenantId,
+    string OwningAppId,
+    string ContainerId,
+    Guid BusinessUnitId);
+
+/// <summary>Discriminated result of <see cref="ISpeContainerProvisioner.BindRootContainerAsync"/>.</summary>
+public abstract record SpeContainerBindOutcome
+{
+    private SpeContainerBindOutcome() { }
+
+    /// <summary>The stamp was written and read back.</summary>
+    public sealed record Bound : SpeContainerBindOutcome;
+
+    /// <summary>
+    /// The stamp did not land. <paramref name="Removed"/> is true when the container was then deleted (nothing unbound
+    /// is left); false when that also failed and an UNBOUND container remains (no admin route reaches it until the
+    /// backfill binds it with <c>-Bind</c>, an operator removes it, or a resume of H8 binds it).
+    /// </summary>
+    public sealed record NotBound(string Diagnostic, bool Removed) : SpeContainerBindOutcome;
 }
 
 /// <summary>
@@ -94,10 +171,13 @@ public abstract record SpeContainerProvisionOutcome
     public sealed record Success(SpeContainerProvisionOutputs Outputs) : SpeContainerProvisionOutcome;
 
     /// <summary>
-    /// The container CREATE call failed (Graph API error). No confirmed
-    /// external side effect — Resumable at the handler level.
+    /// The container CREATE call failed. With <paramref name="ContainerInDoubt"/> false it is Graph's own answer (an
+    /// <c>ODataError</c>) — nothing was created, Resumable at the handler level. With it true the POST got NO
+    /// authoritative answer (a client timeout, a dropped connection, a 2xx without an id): a container may exist,
+    /// unbound, that no one names — the handler records that and creates no container until an operator has checked
+    /// (unified-access-control-r2 task 165, owner round 49 item 2).
     /// </summary>
-    public sealed record CreateFailure(string Diagnostic) : SpeContainerProvisionOutcome;
+    public sealed record CreateFailure(string Diagnostic, bool ContainerInDoubt = false) : SpeContainerProvisionOutcome;
 
     /// <summary>
     /// The container was created but the follow-up /activate call failed.
@@ -105,5 +185,6 @@ public abstract record SpeContainerProvisionOutcome
     /// GUID (for audit / cleanup). Handler classifies as QuarantineRequired —
     /// a created-but-not-activated container is unusable per topology doc §6.
     /// </summary>
-    public sealed record ActivateFailure(string ContainerId, string Diagnostic) : SpeContainerProvisionOutcome;
+    /// <remarks><paramref name="NoAnswer"/>: the /activate call got no authoritative answer (transport fault, timeout).</remarks>
+    public sealed record ActivateFailure(string ContainerId, string Diagnostic, bool NoAnswer = false) : SpeContainerProvisionOutcome;
 }

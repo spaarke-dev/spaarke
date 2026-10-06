@@ -14,6 +14,8 @@
  * @see projects/set-regarding-and-field-mapping-resolver-r2/tasks/020-wire-event-matter-project.poml
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, childWriteCalls, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { EventService } from '../eventService';
 import type { ICreateEventFormState } from '../formTypes';
@@ -127,7 +129,7 @@ describe('EventService — Field Mapping Framework engine wiring (task 020)', ()
       } as Response)
     );
 
-    const service = new EventService(ds, authenticatedFetch, 'https://bff.example.com');
+    const service = new EventService(ds, bffChildWriteFetch(ds, authenticatedFetch), 'https://bff.example.com');
     const result = await service.createEvent(makeForm(), 'sprk_matter', NO_CASCADE);
 
     expect(result.success).toBe(true);
@@ -146,7 +148,7 @@ describe('EventService — Field Mapping Framework engine wiring (task 020)', ()
     const ds = makeDataService();
     const authenticatedFetch = jest.fn(async () => Promise.resolve({ ok: false, status: 404 } as Response));
 
-    const service = new EventService(ds, authenticatedFetch, 'https://bff.example.com');
+    const service = new EventService(ds, bffChildWriteFetch(ds, authenticatedFetch), 'https://bff.example.com');
     const result = await service.createEvent(makeForm(), 'sprk_matter', NO_CASCADE);
 
     expect(result.success).toBe(true);
@@ -155,25 +157,34 @@ describe('EventService — Field Mapping Framework engine wiring (task 020)', ()
     expect(payload!['sprk_priorityreason']).toBeUndefined();
   });
 
-  it('is a graceful no-op when authenticatedFetch/bffBaseUrl are not supplied (lookup-only construction site)', async () => {
+  it('REFUSES the create when authenticatedFetch/bffBaseUrl are not supplied (UAC-r2 task 147 r1: fail closed)', async () => {
     const ds = makeDataService();
     const service = new EventService(ds); // no authenticatedFetch/bffBaseUrl injected
 
     const result = await service.createEvent(makeForm(), 'sprk_matter', NO_CASCADE);
 
+    // The event create goes through the BFF; without the connection nothing is created as the user.
+    expect(result.success).toBe(false);
+    expect(ds._captured['sprk_event']).toBeUndefined();
+  });
+
+  it('sends the sprk_event create to POST /api/v1/child-records/sprk_event (UAC-r2 task 147 r1)', async () => {
+    const ds = makeDataService();
+    const authenticatedFetch = jest.fn(async () => Promise.resolve({ ok: false, status: 404 } as Response));
+    const bff = bffChildWriteFetch(ds, authenticatedFetch);
+
+    const service = new EventService(ds, bff, 'https://bff.example.com');
+    const result = await service.createEvent(makeForm(), 'sprk_matter', NO_CASCADE);
+
     expect(result.success).toBe(true);
-    expect(result.warnings).toEqual([]);
-    const payload = ds._captured['sprk_event']?.[0];
-    // Resolver-field write from applyResolverFields still happens (unrelated to the engine);
-    // the point under test is that no fetch to the field-mappings endpoint occurs.
-    expect(payload).toBeDefined();
+    expect(childWriteCalls(bff)).toEqual([['POST', 'https://bff.example.com/api/v1/child-records/sprk_event']]);
   });
 
   it('does not call the engine when no regarding parent is supplied', async () => {
     const ds = makeDataService();
     const authenticatedFetch = jest.fn(async () => Promise.resolve({ ok: false, status: 404 } as Response));
 
-    const service = new EventService(ds, authenticatedFetch, 'https://bff.example.com');
+    const service = new EventService(ds, bffChildWriteFetch(ds, authenticatedFetch), 'https://bff.example.com');
     const result = await service.createEvent(makeForm({ regardingRecordId: '' }), undefined, NO_CASCADE);
 
     expect(result.success).toBe(true);

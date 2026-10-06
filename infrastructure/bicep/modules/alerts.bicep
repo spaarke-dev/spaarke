@@ -276,49 +276,6 @@ resource tokenUsageAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
 }
 
 // =====================================================
-// Alert 7: Export Failures
-// =====================================================
-resource exportFailureAlert 'Microsoft.Insights/metricAlerts@2018-03-01' = {
-  name: '${alertNamePrefix}-export-failures'
-  location: 'global'
-  tags: tags
-  properties: {
-    description: 'Alert when export operations are failing'
-    severity: warningSeverity
-    enabled: true
-    scopes: [
-      appInsightsId
-    ]
-    evaluationFrequency: 'PT5M'
-    windowSize: 'PT15M'
-    criteria: {
-      'odata.type': 'Microsoft.Azure.Monitor.MultipleResourceMultipleMetricCriteria'
-      allOf: [
-        {
-          name: 'ExportFailureCriteria'
-          criterionType: 'DynamicThresholdCriterion'
-          metricName: 'customMetrics/ai.export.requests'
-          metricNamespace: 'microsoft.insights/components'
-          operator: 'LessThan'
-          alertSensitivity: 'High'
-          failingPeriods: {
-            numberOfEvaluationPeriods: 4
-            minFailingPeriodsToAlert: 3
-          }
-          timeAggregation: 'Total'
-        }
-      ]
-    }
-    actions: [
-      {
-        actionGroupId: actionGroupId
-      }
-    ]
-    autoMitigate: true
-  }
-}
-
-// =====================================================
 // Action Group (if not provided externally)
 // =====================================================
 resource actionGroup 'Microsoft.Insights/actionGroups@2023-01-01' = if (empty(actionGroupId)) {
@@ -345,5 +302,4 @@ output ragLatencyAlertId string = ragLatencyAlert.id
 output toolFailureAlertId string = toolFailureAlert.id
 output cacheMissAlertId string = cacheMissAlert.id
 output tokenUsageAlertId string = tokenUsageAlert.id
-output exportFailureAlertId string = exportFailureAlert.id
 output defaultActionGroupId string = empty(actionGroupId) ? actionGroup.id : actionGroupId

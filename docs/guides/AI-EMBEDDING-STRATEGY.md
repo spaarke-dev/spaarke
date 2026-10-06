@@ -407,7 +407,6 @@ After completing migration:
 | `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeDocument.cs` | Document schema with vector field annotations |
 | `src/server/api/Sprk.Bff.Api/Options/AiSearchOptions.cs` | Index name configuration |
 | `infrastructure/ai-search/spaarke-knowledge-index-v2.json` | Knowledge index schema definition |
-| `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs` | Golden reference knowledge indexing |
 | `src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceRetrievalService.cs` | Golden reference knowledge retrieval + result caching |
 | `src/server/api/Sprk.Bff.Api/Models/Ai/ReferenceSearchResult.cs` | Reference search response models |
 | `src/server/api/Sprk.Bff.Api/Models/Ai/KnowledgeRetrievalConfig.cs` | Per-action knowledge retrieval settings |

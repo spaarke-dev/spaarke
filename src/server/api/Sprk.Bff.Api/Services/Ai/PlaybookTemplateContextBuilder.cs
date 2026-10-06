@@ -40,6 +40,142 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </remarks>
 public static class PlaybookTemplateContextBuilder
 {
+    /// <summary>The query language of a node-config position whose rendered text is executed as a query.</summary>
+    public enum QueryTextLanguage
+    {
+        /// <summary>FetchXML: substituted values are XML-escaped (<c>&amp; &lt; &gt; " '</c>).</summary>
+        FetchXml,
+
+        /// <summary>An OData filter: substituted values are escaped for a string literal (<c>'</c> doubled).</summary>
+        OData,
+    }
+
+    /// <summary>
+    /// A deep copy of a template <paramref name="context"/> in which EVERY string value is escaped for
+    /// <paramref name="language"/> — the substitution-point half of the playbook-parameter fix (unified-access-control-r2
+    /// task 164, owner round 16 item 3: "every caller value substituted into FetchXML or OData text is escaped at the
+    /// substitution point, so no parameter can inject regardless of key").
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why the values, not the output.</b> Layer 1 renders with <c>NoEscape</c>, and helpers such as
+    /// <c>default</c> and <c>joinIds</c> write "safe" strings that a Handlebars text encoder would skip, as would a
+    /// triple-stash. Escaping the values before rendering covers every way a value can reach the text, while the
+    /// template's own literal text (authored by a maker in <c>sprk_playbooknode</c>) is untouched.</para>
+    /// <para><b>Every value, not only Parameters.</b> Node outputs carry caller-influenced text too (the Start node binds
+    /// the caller's payload; an LLM's output is shaped by the document it read), so the whole context is escaped. A
+    /// value that is a GUID, a number or an ISO date is unchanged by either escape, so legitimate runs render the same
+    /// text as before.</para>
+    /// <para>Dictionaries keep their key comparer; lists and arrays become lists; anonymous and other CLR objects become
+    /// dictionaries of their public properties (Handlebars resolves both the same way); numbers, booleans, GUIDs and
+    /// dates are kept as they are. The copy keeps the context's SHAPE, shared and self references included: the builder
+    /// embeds a node's output dictionary inside itself (<c>{{node.output.x}}</c> next to <c>{{node.x}}</c>), so a naive
+    /// recursive copy would never end.</para>
+    /// </remarks>
+    public static Dictionary<string, object?> EscapeForQueryText(
+        IReadOnlyDictionary<string, object?> context, QueryTextLanguage language)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var copies = new Dictionary<object, object?>(ReferenceEqualityComparer.Instance);
+        var comparer = (context as Dictionary<string, object?>)?.Comparer ?? StringComparer.Ordinal;
+        var escaped = new Dictionary<string, object?>(comparer);
+        copies[context] = escaped;
+        foreach (var (key, value) in context)
+        {
+            escaped[key] = EscapeValue(value, language, copies);
+        }
+
+        return escaped;
+    }
+
+    /// <summary>Escapes one string for <paramref name="language"/>.</summary>
+    public static string EscapeQueryTextValue(string value, QueryTextLanguage language) => language switch
+    {
+        QueryTextLanguage.FetchXml => System.Security.SecurityElement.Escape(value) ?? string.Empty,
+        QueryTextLanguage.OData => value.Replace("'", "''", StringComparison.Ordinal),
+        _ => throw new ArgumentOutOfRangeException(nameof(language), language, "Unknown query-text language."),
+    };
+
+    /// <summary>
+    /// Escapes one context value. <paramref name="copies"/> maps every container already copied to its copy, so a container
+    /// met again — shared, or containing itself — maps to the SAME copy (the graph keeps its shape and the walk ends).
+    /// </summary>
+    private static object? EscapeValue(object? value, QueryTextLanguage language, Dictionary<object, object?> copies)
+    {
+        switch (value)
+        {
+            case null:
+                return null;
+            case string text:
+                return EscapeQueryTextValue(text, language);
+            case char character:
+                return EscapeQueryTextValue(character.ToString(), language);
+            case bool or byte or sbyte or short or ushort or int or uint or long or ulong or float or double or decimal
+                or Guid or DateTime or DateTimeOffset or TimeSpan or Enum:
+                return value;
+            case JsonElement element:
+                return EscapeValue(TemplateEngine.ConvertJsonElement(element), language, copies);
+        }
+
+        if (copies.TryGetValue(value, out var existing))
+        {
+            return existing;
+        }
+
+        switch (value)
+        {
+            case IDictionary<string, object?> dictionary:
+            {
+                var comparer = (dictionary as Dictionary<string, object?>)?.Comparer ?? StringComparer.Ordinal;
+                var copy = new Dictionary<string, object?>(comparer);
+                copies[value] = copy;
+                foreach (var (key, item) in dictionary.ToList())
+                {
+                    copy[key] = EscapeValue(item, language, copies);
+                }
+
+                return copy;
+            }
+            case System.Collections.IDictionary nonGeneric:
+            {
+                var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
+                copies[value] = copy;
+                foreach (System.Collections.DictionaryEntry entry in nonGeneric)
+                {
+                    copy[entry.Key.ToString() ?? string.Empty] = EscapeValue(entry.Value, language, copies);
+                }
+
+                return copy;
+            }
+            case System.Collections.IEnumerable sequence:
+            {
+                var copy = new List<object?>();
+                copies[value] = copy;
+                foreach (var item in sequence)
+                {
+                    copy.Add(EscapeValue(item, language, copies));
+                }
+
+                return copy;
+            }
+            default:
+            {
+                // Anonymous objects (the run and document bags) and any other CLR object: its public properties.
+                var copy = new Dictionary<string, object?>(StringComparer.Ordinal);
+                copies[value] = copy;
+                foreach (var property in value.GetType().GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance))
+                {
+                    if (property.GetIndexParameters().Length == 0)
+                    {
+                        copy[property.Name] = EscapeValue(property.GetValue(value), language, copies);
+                    }
+                }
+
+                return copy;
+            }
+        }
+    }
+
     /// <summary>
     /// Builds the merged template context dictionary from a run context. Used by the
     /// orchestrator's <see cref="PlaybookOrchestrationService.ApplyConfigJsonTemplates"/>

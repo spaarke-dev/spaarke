@@ -143,6 +143,34 @@ export class ODataDataverseClient implements IDataverseClient {
     this.logger.info('ODataDataverseClient', `Updated ${entityLogicalName} record: ${sanitizedId}`);
   }
 
+  /**
+   * Delete a record via OData DELETE — used only to remove a document whose file the BFF refused to attach
+   * (unified-access-control-r2 task 166 f1).
+   */
+  async deleteRecord(entityLogicalName: string, id: string): Promise<void> {
+    const entitySetName = this.getEntitySetName(entityLogicalName);
+    const sanitizedId = id.replace(/[{}]/g, '').toLowerCase();
+    const url = `${this.baseApiUrl}/${entitySetName}(${sanitizedId})`;
+    const token = await this.getAccessToken();
+
+    const response = await fetch(url, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/json',
+        'OData-MaxVersion': '4.0',
+        'OData-Version': '4.0',
+      },
+    });
+
+    if (!response.ok) {
+      const errorBody = await this.tryReadErrorBody(response);
+      throw new Error(
+        `Failed to delete ${entityLogicalName} record ${sanitizedId}: HTTP ${response.status} ${response.statusText}. ${errorBody}`
+      );
+    }
+  }
+
   // -----------------------------------------------------------------------
   // Private helpers
   // -----------------------------------------------------------------------

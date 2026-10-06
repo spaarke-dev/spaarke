@@ -2,8 +2,8 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 using Microsoft.Xrm.Sdk;
+using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Office;
@@ -59,12 +59,12 @@ public sealed class EmailUploadCaptureSeamTests
             new ParticipantCorrelationRung(dv.Object),
         };
         var resolver = new IncomingAssociationResolver(
-            rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), NullLogger<IncomingAssociationResolver>.Instance);
+            rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<IncomingAssociationResolver>.Instance);
 
         var enrich = enrichment ?? new Mock<ICommunicationEnrichmentService>();
 
         return new EmailUploadCaptureService(
-            dv.Object, resolver, enrich.Object, NullLogger<EmailUploadCaptureService>.Instance);
+            dv.Object, resolver, enrich.Object, new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(), NullLogger<EmailUploadCaptureService>.Instance);
     }
 
     private static SaveRequest EmailSave(string? internetMessageId, SaveEntityReference? target)
@@ -87,9 +87,11 @@ public sealed class EmailUploadCaptureSeamTests
     {
         var dv = new Mock<IDataverseService>();
         var matterId = Guid.NewGuid();
+        DataverseEntity? createdRow = null;
         // The email was never captured before → the race-proof create inserts a fresh canonical row.
         dv.Setup(d => d.CreateCommunicationRaceProofAsync(
                 It.IsAny<DataverseEntity>(), "<m@x.com>", It.IsAny<CancellationToken>()))
+            .Callback<DataverseEntity, string?, CancellationToken>((e, _, _) => createdRow = e)
             .ReturnsAsync((CommId, false));
         var capture = BuildCapture(dv, out var writes);
 
@@ -109,7 +111,10 @@ public sealed class EmailUploadCaptureSeamTests
 
         // Parity: routed through the SAME IncomingAssociationResolver as mailbox capture → the save-pane
         // selection is auto-filed as the regarding via the ExplicitReference rung, with provenance persisted.
-        var (_, fields) = writes.Should().ContainSingle().Subject;
+        // unified-access-control-r2 task 146 r2 (verifier item 9): a capture OWNED from its filing (a team, here the
+        // matter's) is CREATED with that filing — the filing is on the create, not a separate later update.
+        writes.Should().BeEmpty("the filing rides the create, so no team-owned row ever exists filed under nothing");
+        var fields = createdRow!.Attributes.ToDictionary(a => a.Key, a => a.Value);
         ((Microsoft.Xrm.Sdk.EntityReference)fields["sprk_regardingmatter"]).Id.Should().Be(matterId);
         ((OptionSetValue)fields["sprk_associationstatus"]).Value.Should().Be(AssociationStatusCodes.Resolved);
 

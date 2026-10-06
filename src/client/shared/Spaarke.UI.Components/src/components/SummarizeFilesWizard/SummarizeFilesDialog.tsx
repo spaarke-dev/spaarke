@@ -46,7 +46,8 @@ import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
 import { EMPTY_PROJECT_FORM } from '../CreateProjectWizard/projectFormTypes';
 import { ProjectService } from '../CreateProjectWizard/projectService';
-import { provisionSecureProject } from '../CreateProjectWizard/provisioningService';
+import { provisionSecureProject, type IProvisionProjectResult } from '../CreateProjectWizard/provisioningService';
+import { SecureProvisioningOutcome } from '../CreateProjectWizard/SecureProvisioningOutcome';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 
 // ---------------------------------------------------------------------------
@@ -472,6 +473,8 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     const warnings: string[] = [];
     let createdProjectId: string | undefined;
     let createdProjectName: string | undefined;
+    // Task 133: a provisioning failure the same caller can finish is shown with its "Try securing again" action.
+    let retryableProvisioning: IProvisionProjectResult | undefined;
 
     // ── Send Email via canonical sendCommunication() (ADR-045) ─────────
     // Task 060 (W6): replaced the prior inline BFF send fetch with the typed
@@ -517,16 +520,15 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         // authenticatedFetch + bffBaseUrl are REQUIRED here, not optional conveniences.
         //
         // This step renders the same `CreateProjectStep` the real wizard does, Secure toggle
-        // included. `projectService` writes `sprk_issecure = true` unconditionally and then
-        // cascades `sprk_containerid` from the acting user's business unit — but the thing that
-        // gives a secure project its OWN container, `provisionSecureProject`, lives in
-        // `CreateProjectWizard`'s onFinish, which THIS path does not go through.
+        // included. Securing a project — marking it secure (task 150: the server's first write;
+        // `projectService` never writes `sprk_issecure`, which is field-secured) and giving it its
+        // OWN container — is `provisionSecureProject`, called below exactly as the wizard does.
         //
-        // So before this fix a user could tick "Secure" here and get a project flagged secure
-        // whose documents land in the SHARED business-unit container, with no warning — the
-        // wizard's provisioning-failure message lives on a path this dialog bypasses. It looked
-        // secure in Dataverse and to anything reading the flag. That is the exact isolation gap
-        // unified-access-control-r2 exists to close.
+        // Before the original fix a user could tick "Secure" here and get a project flagged secure
+        // whose documents (then) landed in the SHARED business-unit container, with no warning — the
+        // wizard's provisioning-failure message lives on a path this dialog bypasses. That is the
+        // exact isolation gap unified-access-control-r2 exists to close. This dialog adds no file or
+        // child record to the project it creates, so task 150's hold-back has nothing to hold back here.
         const service = new ProjectService(dataService, authenticatedFetch, bffBaseUrl);
         const result = await service.createProject(currentProjectFormValues);
 
@@ -548,25 +550,32 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
                   bffBaseUrl
                 );
                 if (!provisionResult.success) {
-                  warnings.push(
-                    `Secure Project provisioning failed: ${provisionResult.errorMessage} — ` +
-                      'the project was created but its dedicated document container was not ' +
-                      'provisioned, so its documents would go to the shared container. It needs ' +
-                      'to be provisioned before documents are added.'
-                  );
+                  // Since task 076 a secure project without its own container REFUSES uploads (it never
+                  // falls back to the shared container), and since task 133 the classified message says
+                  // what state the project was left in — so it is shown as is.
+                  if (provisionResult.retryable) {
+                    retryableProvisioning = provisionResult;
+                  } else {
+                    warnings.push(`Securing the project did not finish: ${provisionResult.errorMessage}`);
+                  }
                 }
               } catch (err) {
+                // `provisionSecureProject` never throws; kept as a belt. Task 150: the project may or may not have
+                // been marked secure (the server's first write), so the copy claims neither. Copy: owner round 10
+                // item 9 (F6 row 5, option A — notes/task-150-issecure-lock.md §6).
                 warnings.push(
-                  `Secure Project provisioning failed: ${err instanceof Error ? err.message : 'Unknown error'} — ` +
-                    'the project was created but is NOT yet isolated.'
+                  `Securing the project did not finish (${err instanceof Error ? err.message : 'Unknown error'}). ` +
+                    'The project was created; an administrator can check how far securing it got and finish it.'
                 );
               }
             } else {
-              // Fail LOUDLY rather than silently creating a secure-in-name-only project.
+              // Fail LOUDLY rather than silently creating a project the user believes is secure. Task 150: the client
+              // no longer writes sprk_issecure, so with no BFF to ask the project is NOT marked secure — the old
+              // "was marked Secure" was replaced. Copy: owner round 10 item 9 (F6 row 4, option A —
+              // notes/task-150-issecure-lock.md §6).
               warnings.push(
-                'Project was marked Secure but could not be provisioned from this dialog ' +
-                  '(no authenticated BFF connection). Its documents would go to the shared ' +
-                  'container — provision it before adding documents.'
+                'The project was created but not secured, because securing it needs a connection to the Spaarke ' +
+                  'service that this dialog does not have. An administrator can secure it.'
               );
             }
           }
@@ -598,9 +607,20 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       icon: <CheckmarkCircleFilled fontSize={64} style={{ color: tokens.colorPaletteGreenForeground1 }} />,
       title: warnings.length > 0 ? 'Summary Complete (with warnings)' : 'Summary Complete',
       body: (
-        <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-          Your file summary is ready. {actionSummary}.
-        </Text>
+        <>
+          <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+            Your file summary is ready. {actionSummary}.
+          </Text>
+          {retryableProvisioning && createdProjectId && authenticatedFetch && bffBaseUrl && (
+            <SecureProvisioningOutcome
+              projectId={createdProjectId}
+              projectRef={createdProjectName}
+              initialResult={retryableProvisioning}
+              authenticatedFetch={authenticatedFetch}
+              bffBaseUrl={bffBaseUrl}
+            />
+          )}
+        </>
       ),
       actions: (
         <>

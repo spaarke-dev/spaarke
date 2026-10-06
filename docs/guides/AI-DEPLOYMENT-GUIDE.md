@@ -738,8 +738,7 @@ File → Download → Extract Text → Chunk → Generate Embeddings → Index t
 |----------|--------|---------|
 | `/api/ai/rag/index-file` | POST | Index a file (OBO) |
 | `/api/ai/rag/search` | POST | Hybrid search |
-| `/api/ai/rag/index` | POST | Index document chunks |
-| `/api/ai/rag/index/batch` | POST | Batch index chunks |
+| `/api/ai/rag/index` | POST | Index document chunks (SystemAdmin; caller's own tenant partition) |
 
 ### 8.5 Required Configuration
 

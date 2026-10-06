@@ -74,20 +74,28 @@ public class BulkUpdateTransactionTests
             "a null value is skipped, so the column it names is left untouched rather than cleared");
     }
 
+    /// <summary>
+    /// <see cref="DBNull.Value"/> CLEARS the column inside the same transaction — <c>UpdateAsync</c>'s convention
+    /// (task 140, round 34 item 3: <c>set-record-share-expiry</c> severs a contact issuer in the same all-or-nothing
+    /// write). The attribute is present with a null value (the SDK's "clear"), never the unserializable
+    /// <see cref="DBNull"/> itself; its twin, a C# null, is still skipped (the test above).
+    /// </summary>
     [Fact]
-    public void BuildBulkUpdateTransaction_WhenAFieldValueIsDBNull_ThrowsBeforeAnythingIsSent()
+    public void BuildBulkUpdateTransaction_WhenAFieldValueIsDBNull_ClearsThatColumnInTheSameTransaction()
     {
         var updates = new List<(Guid id, Dictionary<string, object> fields)>
         {
             (FirstId, new Dictionary<string, object> { ["sprk_isdefault"] = false }),
-            (SecondId, new Dictionary<string, object> { ["sprk_name"] = DBNull.Value }),
+            (SecondId, new Dictionary<string, object> { ["sprk_isdefault"] = false, ["sprk_name"] = DBNull.Value }),
         };
 
-        var act = () => DataverseServiceClientImpl.BuildBulkUpdateTransaction(Table, updates);
+        var transaction = DataverseServiceClientImpl.BuildBulkUpdateTransaction(Table, updates);
 
-        act.Should().Throw<ArgumentException>()
-            .WithMessage("*index 1*sprk_name*UpdateAsync*",
-                "DBNull cannot be serialized here; failing fast avoids a misleading 'outcome unknown' error for a request never sent");
+        var targets = transaction.Requests.Cast<UpdateRequest>().Select(r => r.Target).ToList();
+        targets.Should().HaveCount(2, "the clear travels in the ONE transaction, not a second write");
+        targets[1].Attributes.Should().ContainKey("sprk_name");
+        targets[1]["sprk_name"].Should().BeNull("a null attribute value is how the SDK clears a column");
+        targets[0].Attributes.Should().NotContainKey("sprk_name");
     }
 
     [Fact]

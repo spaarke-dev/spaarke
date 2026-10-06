@@ -20,7 +20,10 @@ namespace Sprk.Bff.Api.Api.Reporting;
 /// access token. Embed tokens are cached in Redis with the key format
 /// <c>pbi:embed:{workspaceId}:{reportId}:{userId}</c> to reduce Power BI API round-trips.
 /// </summary>
-public sealed class ReportingEmbedService
+// unified-access-control-r2 task 166 r1: UNSEALED and the five methods the endpoints call are VIRTUAL — a permitted
+// ADR-010 test seam (POML constraint), so the endpoint contract tests can substitute the Power BI boundary. No behaviour
+// change; nothing derives from it in production.
+public class ReportingEmbedService
 {
     /// <summary>
     /// Power BI OAuth 2.0 scope for client-credentials / App Owns Data.
@@ -116,7 +119,7 @@ public sealed class ReportingEmbedService
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><see cref="EmbedConfig"/> containing the embed token, URL, report ID, expiry, and refresh hint.</returns>
-    public async Task<EmbedConfig> GetEmbedConfigAsync(
+    public virtual async Task<EmbedConfig> GetEmbedConfigAsync(
         Guid workspaceId,
         Guid reportId,
         string? username,
@@ -345,39 +348,9 @@ public sealed class ReportingEmbedService
             .ToList();
     }
 
-    /// <summary>
-    /// Returns a single report by ID from the specified Power BI workspace.
-    /// </summary>
-    /// <param name="workspaceId">Power BI workspace (group) GUID.</param>
-    /// <param name="reportId">Report GUID.</param>
-    /// <param name="profileId">Optional service principal profile ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The matching <see cref="PowerBiReport"/> DTO.</returns>
-    public async Task<PowerBiReport> GetReportAsync(
-        Guid workspaceId,
-        Guid reportId,
-        Guid? profileId = null,
-        CancellationToken ct = default)
-    {
-        _logger.LogDebug("Fetching report {ReportId} from workspace {WorkspaceId}",
-            reportId, workspaceId);
-
-        var client = await GetPowerBIClientAsync(profileId, ct);
-
-        Report report;
-        try
-        {
-            report = await client.Reports.GetReportInGroupAsync(workspaceId, reportId, ct);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch report {ReportId} from workspace {WorkspaceId}",
-                reportId, workspaceId);
-            throw;
-        }
-
-        return MapToDto(report);
-    }
+    // GetReportAsync DELETED 2026-10-04 by unified-access-control-r2 task 166 f1 (verifier item 14): its only caller was
+    // the Save-As registration branch, removed by owner round 23 item 2. A Power BI report is never looked up by an id a
+    // client names — every report id comes from a catalog row read as the caller.
 
     // -----------------------------------------------------------------------------------------
     // Report create / delete
@@ -398,7 +371,7 @@ public sealed class ReportingEmbedService
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>The newly created <see cref="PowerBiReport"/> DTO.</returns>
-    public async Task<PowerBiReport> CreateReportAsync(
+    public virtual async Task<PowerBiReport> CreateReportAsync(
         Guid workspaceId,
         string name,
         Guid datasetId,
@@ -442,7 +415,7 @@ public sealed class ReportingEmbedService
     /// <param name="reportId">Report GUID to delete.</param>
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task DeleteReportAsync(
+    public virtual async Task DeleteReportAsync(
         Guid workspaceId,
         Guid reportId,
         Guid? profileId = null,
@@ -478,32 +451,61 @@ public sealed class ReportingEmbedService
     /// <param name="workspaceId">Power BI workspace GUID.</param>
     /// <param name="reportId">Report GUID to export.</param>
     /// <param name="format">Output format: <see cref="ExportFormat.PDF"/> or <see cref="ExportFormat.PPTX"/>.</param>
+    /// <param name="username">
+    ///   The row-level-security username (the caller's business unit id). Required: an export is the same data path
+    ///   as an embed, so it carries the same effective identity (unified-access-control-r2 task 166 r2).
+    /// </param>
+    /// <param name="roles">The dataset RLS role(s) <paramref name="username"/> is evaluated under. Required.</param>
     /// <param name="profileId">Optional service principal profile ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
     ///   A <see cref="Stream"/> containing the exported file bytes. The caller must dispose it.
     /// </returns>
-    /// <exception cref="InvalidOperationException">Thrown when the Power BI export job fails.</exception>
+    /// <exception cref="ArgumentException">Thrown when no RLS identity is supplied — an export is never unfiltered.</exception>
+    /// <exception cref="InvalidOperationException">
+    ///   Thrown when the Power BI export job fails, or when the report's dataset (which the identity must name) cannot
+    ///   be determined.
+    /// </exception>
     /// <exception cref="TimeoutException">
     ///   Thrown when the export job does not complete within the polling timeout
     ///   (<see cref="ExportMaxPolls"/> × <see cref="ExportPollInterval"/>).
     /// </exception>
-    public async Task<Stream> ExportReportAsync(
+    public virtual async Task<Stream> ExportReportAsync(
         Guid workspaceId,
         Guid reportId,
         ExportFormat format,
+        string username,
+        IList<string> roles,
         Guid? profileId = null,
         CancellationToken ct = default)
     {
+        // An export runs as the service principal, so without an effective identity Power BI would return every
+        // business unit's rows (or fail on an RLS dataset). Refuse rather than export unfiltered (task 166 r2).
+        if (string.IsNullOrWhiteSpace(username) || roles is not { Count: > 0 })
+        {
+            throw new ArgumentException("An export requires the caller's row-level-security identity.", nameof(username));
+        }
+
         _logger.LogInformation(
-            "Exporting report {ReportId} from workspace {WorkspaceId} as {Format}",
-            reportId, workspaceId, format);
+            "Exporting report {ReportId} from workspace {WorkspaceId} as {Format} (RLS user: {Username})",
+            reportId, workspaceId, format, username);
 
         var client = await GetPowerBIClientAsync(profileId, ct);
-        var pbiFormat = MapExportFormat(format);
 
-        // Step 1: Trigger the async export job.
-        var exportRequest = new ExportReportRequest { Format = pbiFormat };
+        // The identity must name the report's dataset — read it from Power BI, as the embed path does.
+        Report report;
+        try
+        {
+            report = await client.Reports.GetReportInGroupAsync(workspaceId, reportId, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch report {ReportId} for export", reportId);
+            throw;
+        }
+
+        // Step 1: Trigger the async export job — WITH the caller's effective identity.
+        var exportRequest = BuildExportRequest(format, report.DatasetId, username, roles);
         Export exportJob;
         try
         {
@@ -593,7 +595,13 @@ public sealed class ReportingEmbedService
     /// added to every outgoing request so the call is scoped to that service principal profile
     /// (task PBI-003 multi-workspace isolation pattern).
     /// </summary>
-    private async Task<PowerBIClient> GetPowerBIClientAsync(
+    /// <remarks>
+    /// <c>protected internal virtual</c> returning the SDK's own <see cref="IPowerBIClient"/> interface (unified-access-control-r2
+    /// task 166 f1, verifier item 7): the ONE seam below which a test substitutes the Power BI service, so the REAL
+    /// <see cref="ExportReportAsync"/> body runs — and a regression that drops the export's row-level-security identity
+    /// fails a test instead of shipping. The SDK type never leaves this class (ADR-007).
+    /// </remarks>
+    protected internal virtual async Task<IPowerBIClient> GetPowerBIClientAsync(
         Guid? profileId,
         CancellationToken ct)
     {
@@ -671,6 +679,45 @@ public sealed class ReportingEmbedService
             Name: report.Name ?? string.Empty,
             EmbedUrl: report.EmbedUrl ?? string.Empty,
             DatasetId: Guid.TryParse(report.DatasetId, out var dsId) ? dsId : Guid.Empty);
+
+    /// <summary>
+    /// The Power BI export request for <paramref name="format"/>, carrying the row-level-security
+    /// <see cref="EffectiveIdentity"/> (<paramref name="username"/> under <paramref name="roles"/> on
+    /// <paramref name="datasetId"/>) — the same identity <see cref="BuildGenerateTokenRequest"/> puts in an embed token
+    /// (unified-access-control-r2 task 166 r2). No identity, no request: a blank username, no roles or no dataset throw,
+    /// so an export can never run unfiltered as the service principal.
+    /// </summary>
+    internal static ExportReportRequest BuildExportRequest(
+        ExportFormat format, string? datasetId, string username, IList<string> roles)
+    {
+        if (string.IsNullOrWhiteSpace(username) || roles is not { Count: > 0 })
+        {
+            throw new ArgumentException("An export requires a row-level-security identity.", nameof(username));
+        }
+
+        if (string.IsNullOrWhiteSpace(datasetId))
+        {
+            throw new InvalidOperationException(
+                "The report's dataset could not be determined, so the export's row-level-security identity cannot be applied.");
+        }
+
+        return new ExportReportRequest
+        {
+            Format = MapExportFormat(format),
+            PowerBIReportConfiguration = new PowerBIReportExportConfiguration
+            {
+                Identities =
+                [
+                    new EffectiveIdentity
+                    {
+                        Username = username,
+                        Datasets = [datasetId],
+                        Roles = roles,
+                    },
+                ],
+            },
+        };
+    }
 
     /// <summary>Maps the public <see cref="ExportFormat"/> enum to the Power BI API <see cref="FileFormat"/>.</summary>
     private static FileFormat MapExportFormat(ExportFormat format) => format switch

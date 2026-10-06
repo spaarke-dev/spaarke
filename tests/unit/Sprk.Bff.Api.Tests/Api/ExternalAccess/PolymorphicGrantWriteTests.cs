@@ -486,12 +486,12 @@ public class PolymorphicGrantWriteTests
     }
 
     /// <summary>
-    /// The column → flag mapping of one READ row. A null sprk_accesspermission is Standard (today's behaviour) and
-    /// a null sprk_issecure is not secure; neither is ever unreadable — the row WAS read.
+    /// The column → flag mapping of one READ row whose <c>sprk_issecure</c> holds a value. A null
+    /// sprk_accesspermission is Standard (today's behaviour). An EMPTY sprk_issecure is pinned in EmptySecureFlagFailsClosedTests.
     /// </summary>
     [Theory]
     //          issecure  accesspermission  secure restricted limited
-    [InlineData(null, null, false, false, false)]
+    [InlineData(false, null, false, false, false)]
     [InlineData(false, 100000000, false, false, false)]
     [InlineData(false, 100000001, false, false, true)]
     [InlineData(false, 100000002, false, true, false)]
@@ -500,11 +500,33 @@ public class PolymorphicGrantWriteTests
     public void FlagsFrom_MapsTheRootColumns(
         bool? isSecure, int? accessPermission, bool secure, bool restricted, bool limited)
     {
-        var flags = ExternalParticipationService.FlagsFrom(isSecure, accessPermission);
+        // An ACTIVE row (statecode 0) — the state column is pinned on its own below (task 137).
+        var flags = ExternalParticipationService.FlagsFrom(isSecure, accessPermission, stateCode: 0);
 
         flags.Should().Be(new RootRecordFlags(secure, restricted, limited));
         flags.IsUnreadable.Should().BeFalse();
         flags.IsDirectOnly.Should().Be(secure || limited);
+    }
+
+    /// <summary>
+    /// Task 137 · C5: the root's own <c>statecode</c>. Only 0 is active; Inactive (1) and a NULL state (a row whose
+    /// state was not read — Dataverse never writes one) are INACTIVE, which removes every contact-sourced
+    /// contribution. The policy flags are untouched by it, and the flag read selects the column.
+    /// </summary>
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1, true)]
+    [InlineData(null, true)]
+    public void FlagsFrom_TheRootsOwnStateCode_InactiveOrUnknownRemovesContactAccess(int? stateCode, bool inactive)
+    {
+        var flags = ExternalParticipationService.FlagsFrom(isSecure: false, accessPermission: 100000000, stateCode);
+
+        flags.IsInactive.Should().Be(inactive);
+        flags.RemovesContactSourcedAccess.Should().Be(inactive);
+        flags.IsRestricted.Should().BeFalse();
+        flags.IsUnreadable.Should().BeFalse("the row WAS read");
+        ExternalParticipationService.RootFlagColumns.Split(',').Should().Contain("statecode",
+            "the inactive-root rule rides the existing batched flag read — no second round trip");
     }
 
     // =========================================================================

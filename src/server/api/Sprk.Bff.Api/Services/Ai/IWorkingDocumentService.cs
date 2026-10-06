@@ -34,21 +34,8 @@ public interface IWorkingDocumentService
         int outputTokens,
         CancellationToken cancellationToken);
 
-    /// <summary>
-    /// Save working document to SharePoint Embedded and create Document record.
-    /// </summary>
-    /// <param name="analysisId">The analysis record ID.</param>
-    /// <param name="fileName">Target file name.</param>
-    /// <param name="content">File content bytes.</param>
-    /// <param name="contentType">MIME content type.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Saved document result with IDs and URLs.</returns>
-    Task<SavedDocumentResult> SaveToSpeAsync(
-        Guid analysisId,
-        string fileName,
-        byte[] content,
-        string contentType,
-        CancellationToken cancellationToken);
+    // unified-access-control-r2 task 162 (owner round 10 item 1): SaveToSpeAsync was DELETED with its only
+    // caller, POST /api/ai/analysis/{analysisId}/save (no caller in the repo, not in any published API description).
 
     /// <summary>
     /// Create a new working version record for version history.

@@ -68,7 +68,10 @@ public class PlaybookExecutionTests
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,
                 mockHttpClientFactory.Object,
-                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+                Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
                 Mock.Of<ILogger<CreateTaskNodeExecutor>>()),
             new SendEmailNodeExecutor(
                 mockTemplateEngine.Object,
@@ -107,7 +110,10 @@ public class PlaybookExecutionTests
         var createTaskExecutor = new CreateTaskNodeExecutor(
             mockTemplateEngine.Object,
             mockHttpClientFactory.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             Mock.Of<ILogger<CreateTaskNodeExecutor>>());
 
         var executors = new List<INodeExecutor> { createTaskExecutor };
@@ -147,7 +153,10 @@ public class PlaybookExecutionTests
             new CreateTaskNodeExecutor(
                 mockTemplateEngine.Object,
                 mockHttpClientFactory.Object,
-                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+                new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+                Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+                Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
                 Mock.Of<ILogger<CreateTaskNodeExecutor>>()),
             new SendEmailNodeExecutor(
                 mockTemplateEngine.Object,
@@ -451,7 +460,10 @@ public class PlaybookExecutionTests
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
             entityServiceMock.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             loggerMock.Object);
 
         var context = CreateNodeContext(ExecutorType.CreateTask, @"{""subject"":""Review document"",""description"":""Please review""}");
@@ -475,7 +487,10 @@ public class PlaybookExecutionTests
         var executor = new CreateTaskNodeExecutor(
             templateEngineMock.Object,
             entityServiceMock.Object,
-            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+            Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
             loggerMock.Object);
 
         var context = CreateNodeContext(ExecutorType.CreateTask, @"{""description"":""No subject""}");

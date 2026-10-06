@@ -21,12 +21,12 @@ public class CreateDocumentRequest
     /// → default owner team" needs a BFF service (<c>IRecordOwnershipResolver</c>), and
     /// <c>Spaarke.Dataverse</c> must not depend on BFF services. Passing an already-resolved id mirrors the
     /// shipped precedent, <c>RecordCreationRequest.OwnerSystemUserId</c>.</para>
-    /// <para><b>Why it is nullable rather than required.</b> This is a shared contract with callers beyond the
-    /// BFF; making it required would be a breaking change to all of them. Null preserves the previous
-    /// behaviour (Dataverse defaults the owner to the calling identity). BFF callers MUST supply it — an
-    /// unresolved team is a refusal there, not a fallback, because app-only ownership is the defect task 080
-    /// exists to remove: measured 2026-09-22, ALL 512 existing rows sit in the ROOT business unit and are
-    /// unreachable by any child-BU user at Deep depth.</para>
+    /// <para><b>Required in practice, nullable in shape.</b> Since unified-access-control-r2 task 146 (#1034)
+    /// <c>DataverseServiceClientImpl.CreateDocumentAsync</c> REFUSES (throws, before any write) when this is null:
+    /// every caller resolves it, and "null keeps the calling identity" made the BFF application user the owner, in
+    /// the ROOT business unit (measured 2026-09-22, ALL 512 existing rows sat there, unreachable by any child-BU user
+    /// at Deep depth, and readable by every root-BU user — which is how a secure record's documents were never
+    /// isolated). It stays a nullable property so the JSON shape of this shared contract does not change.</para>
     /// <para>🔒 <b>Never bound from a request body</b> (<see cref="JsonIgnoreAttribute"/>). <c>POST /api/v1/documents</c>
     /// binds this class directly with <c>[FromBody]</c>, so without the attribute any caller could choose the team —
     /// and so the business unit — that owns the document it creates, including a secure business unit it has no
@@ -59,6 +59,15 @@ public class CreateDocumentRequest
     /// </remarks>
     [JsonIgnore]
     public Guid? Id { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the document (unified-access-control-r2 task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>: this create is app-only, so <c>createdby</c> is the BFF
+    /// application user. Resolved by the BFF from the request's own caller; <c>null</c> for a writer that acts for nobody
+    /// (inbound mail). 🔒 Never bound from a request body, for the same reason as <see cref="OwningTeamId"/>.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 /// <summary>
@@ -828,6 +837,21 @@ public class AnalysisOutputEntity
 
     /// <summary>Created date/time</summary>
     public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// The team that owns a NEW output (unified-access-control-r2 task 146) — the same team as its analysis, resolved by
+    /// the BFF's <c>IRecordOwnershipResolver</c>. Required by <c>CreateAnalysisOutputAsync</c>; never bound from a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the output (task 146 c1-r1, owner round 13 item 9), written as
+    /// <see cref="RecordCreatorPersonColumn.LogicalName"/>; <c>null</c> for a writer that acts for nobody. Never bound from
+    /// a body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════════════
@@ -943,14 +967,52 @@ public class CreateEventRequest
     /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
     public int? Priority { get; set; }
 
-    /// <summary>Regarding record type</summary>
+    // ── The ADR-024 regarding write set (unified-access-control-r2 task 159, #1098). Every value is RESOLVED BY
+    //    THE BFF (this library cannot reach CoreAncestorResolver or the record-type catalog) and passed here as
+    //    plain values; DataverseWebApiService.BuildCreateEventPayload only shapes them. Set all of them together
+    //    with RegardingRecordType/RegardingRecordId, or none.
+
+    /// <summary>Regarding record type (the API's 0-7 <see cref="Spaarke.Dataverse.RegardingRecordType"/>; names the typed lookup).</summary>
     public int? RegardingRecordType { get; set; }
 
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
+    /// <summary>Regarding record ID.</summary>
+    public Guid? RegardingRecordId { get; set; }
 
-    /// <summary>Regarding record name</summary>
+    /// <summary>Regarding record display name (server-resolved for matter/project, otherwise the request's).</summary>
     public string? RegardingRecordName { get; set; }
+
+    /// <summary>The regarding record's entity SET, from live metadata — the same set the caller's AppendTo was asked of.</summary>
+    public string? RegardingEntitySetName { get; set; }
+
+    /// <summary>The <c>sprk_recordtype_ref</c> row for the regarding type, or null when the environment has none.</summary>
+    public Guid? RegardingRecordTypeRefId { get; set; }
+
+    /// <summary><c>sprk_regardingrecordurl</c> — the relative model-driven record URL.</summary>
+    public string? RegardingRecordUrl { get; set; }
+
+    /// <summary><c>sprk_regardingrecordnumber</c> — the business-key number (matter/project), or null.</summary>
+    public string? RegardingRecordNumber { get; set; }
+
+    /// <summary>The FR-26 core-ancestor stamps to bind besides the target's own lookup (lookup attribute, entity set, id).</summary>
+    public IReadOnlyList<(string LookupAttribute, string EntitySetName, Guid RecordId)>? RegardingCoreStamps { get; set; }
+
+    /// <summary>
+    /// The team that will own the new <c>sprk_event</c> (unified-access-control-r2 task 146, write-path invariants
+    /// I-2/I-6): resolved by the BFF's <c>IRecordOwnershipResolver</c> from the regarding record — the named Secure team
+    /// when that record is secure. REQUIRED by <c>DataverseWebApiService.CreateEventAsync</c>, which refuses a create
+    /// without it: the write is app-only, so an unset owner would make the BFF application user own the event in the
+    /// root business unit, where any root-BU user with ordinary depth reads it. Same shape as
+    /// <see cref="CreateDocumentRequest.OwningTeamId"/>, and for the same reason never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? OwningTeamId { get; set; }
+
+    /// <summary>
+    /// The PERSON who asked for the event (task 146 c1-r1, owner round 13 item 9), bound as
+    /// <see cref="RecordCreatorPersonColumn.NavigationProperty"/>: the create is app-only. Never bound from a request body.
+    /// </summary>
+    [JsonIgnore]
+    public Guid? CreatedByPersonId { get; set; }
 
     /// <summary>
     /// The person the event is FOR (<c>sprk_assignedto</c>, a contact lookup). unified-access-control-r2 task 152 /
@@ -958,42 +1020,6 @@ public class CreateEventRequest
     /// who it is for — the BFF writes the acting user's LINKED contact here when the request names no one.
     /// </summary>
     public Guid? AssignedToContactId { get; set; }
-}
-
-/// <summary>
-/// Request model for updating an Event
-/// </summary>
-public class UpdateEventRequest
-{
-    /// <summary>Event name</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Description</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Event Type ID</summary>
-    public Guid? EventTypeId { get; set; }
-
-    /// <summary>Base date</summary>
-    public DateTime? BaseDate { get; set; }
-
-    /// <summary>Due date</summary>
-    public DateTime? DueDate { get; set; }
-
-    /// <summary>Priority: Low (0), Normal (1), High (2), Urgent (3)</summary>
-    public int? Priority { get; set; }
-
-    /// <summary>Status code</summary>
-    public int? StatusCode { get; set; }
-
-    /// <summary>Regarding record type</summary>
-    public int? RegardingRecordType { get; set; }
-
-    /// <summary>Regarding record ID</summary>
-    public string? RegardingRecordId { get; set; }
-
-    /// <summary>Regarding record name</summary>
-    public string? RegardingRecordName { get; set; }
 }
 
 /// <summary>
@@ -1021,36 +1047,6 @@ public class EventTypeEntity
 
     /// <summary>Requires base date: No (0), Yes (1)</summary>
     public int? RequiresBaseDate { get; set; }
-}
-
-/// <summary>
-/// Event Log entity model (sprk_eventlog)
-/// </summary>
-public class EventLogEntity
-{
-    /// <summary>Event Log ID (sprk_eventlogid)</summary>
-    public Guid Id { get; set; }
-
-    /// <summary>Name (sprk_eventlogname) - Primary field</summary>
-    public string? Name { get; set; }
-
-    /// <summary>Event lookup ID (_sprk_event_value)</summary>
-    public Guid EventId { get; set; }
-
-    /// <summary>Action: Created (0), Updated (1), Completed (2), Cancelled (3), Deleted (4)</summary>
-    public int Action { get; set; }
-
-    /// <summary>Description (sprk_description)</summary>
-    public string? Description { get; set; }
-
-    /// <summary>Created date/time</summary>
-    public DateTime CreatedOn { get; set; }
-
-    /// <summary>Created by user ID</summary>
-    public Guid? CreatedById { get; set; }
-
-    /// <summary>Created by user name</summary>
-    public string? CreatedByName { get; set; }
 }
 
 /// <summary>
@@ -1240,6 +1236,43 @@ public static class RegardingRecordType
         WorkAssignment => "sprk_regardingworkassignment",
         Budget => "sprk_regardingbudget",
         _ => null
+    };
+
+    // ── sprk_event's Web API write names (unified-access-control-r2 task 159, #1098) ──
+    // Read from live metadata (spaarkedev1 EntityDefinitions(LogicalName='sprk_event')/ManyToOneRelationships,
+    // 2026-10-03; projects/unified-access-control-r2/notes/task-159-events-authorization.md §0.2) and pinned by
+    // EventRegardingPayloadTests. A lookup is WRITTEN only as "{navigationProperty}@odata.bind" — never as the
+    // logical name (the Web API rejects it) and never as a "_x_value" key. Every navigation property here is
+    // PascalCase; none equals its logical name.
+
+    /// <summary>The navigation property of <c>sprk_event.sprk_regardingrecordtype</c> (lookup → <c>sprk_recordtype_ref</c>).</summary>
+    public const string EventRecordTypeNavigationProperty = "sprk_RegardingRecordType";
+
+    /// <summary><c>sprk_recordtype_ref</c>'s entity SET (live metadata), the target of <see cref="EventRecordTypeNavigationProperty"/>.</summary>
+    public const string RecordTypeRefEntitySet = "sprk_recordtype_refs";
+
+    /// <summary>
+    /// The <c>sprk_event</c> navigation property for a typed regarding lookup attribute, or null when unknown. Covers
+    /// the full live typed-lookup family (14) plus <c>sprk_regardingrecordtype</c>.
+    /// </summary>
+    public static string? GetEventNavigationProperty(string lookupAttribute) => lookupAttribute switch
+    {
+        "sprk_regardingaccount" => "sprk_RegardingAccount",
+        "sprk_regardingagreement" => "sprk_RegardingAgreement",
+        "sprk_regardinganalysis" => "sprk_RegardingAnalysis",
+        "sprk_regardingbudget" => "sprk_RegardingBudget",
+        "sprk_regardingcommunication" => "sprk_RegardingCommunication",
+        "sprk_regardingcontact" => "sprk_RegardingContact",
+        "sprk_regardingevent" => "sprk_RegardingEvent",
+        "sprk_regardinginvoice" => "sprk_RegardingInvoice",
+        "sprk_regardingmatter" => "sprk_RegardingMatter",
+        "sprk_regardingorganization" => "sprk_RegardingOrganization",
+        "sprk_regardingproject" => "sprk_RegardingProject",
+        "sprk_regardingreportcard" => "sprk_RegardingReportCard",
+        "sprk_regardingservicerequest" => "sprk_RegardingServiceRequest",
+        "sprk_regardingworkassignment" => "sprk_RegardingWorkAssignment",
+        "sprk_regardingrecordtype" => EventRecordTypeNavigationProperty,
+        _ => null,
     };
 
     // ── String-keyed helpers (FR-D9 "Set related record" — sprk_analysis regarding write) ──

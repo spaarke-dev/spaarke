@@ -55,6 +55,11 @@ public class RecordShareExpiryTests
     private static readonly Guid MemberB = Guid.Parse("77777777-7777-7777-7777-777777777777");
     private static readonly Guid FormerMember = Guid.Parse("88888888-8888-8888-8888-888888888888");
 
+    /// <summary>Task 140: the internal caller's Entra object id, its systemuser, and another systemuser (an earlier issuer).</summary>
+    private static readonly Guid CallerOid = Guid.Parse("0e140000-0000-0000-0000-0000000000a1");
+    private static readonly Guid CallerSystemUserId = Guid.Parse("5a140000-0000-0000-0000-0000000000a1");
+    private static readonly Guid OtherSystemUserId = Guid.Parse("5a140000-0000-0000-0000-0000000000b2");
+
     /// <summary>A FIXED clock: "today" is the UTC date 2026-09-10 in every test, whatever day they run.</summary>
     private static readonly DateTimeOffset Now = new(2026, 9, 10, 12, 0, 0, TimeSpan.Zero);
     private static readonly DateOnly Today = new(2026, 9, 10);
@@ -64,13 +69,20 @@ public class RecordShareExpiryTests
     /// Every column Dataverse exposes on <c>sprk_externalrecordaccess</c> (live metadata, task 016). A
     /// <c>$select</c> naming anything else is a 400 — the fake reproduces that rather than tolerating it.
     /// </summary>
+    /// <remarks>
+    /// Task 140 added <c>_sprk_grantedbycontact_value</c> (the contact-typed grant issuer, created by
+    /// <c>scripts/Deploy-ExternalRecordAccessContactGrantor.ps1</c>). This list going red when it was first selected is
+    /// exactly the deploy-order hazard that script documents: the column must exist before a BFF that reads it. Session 27
+    /// round 50 item 2 added <c>sprk_grantedbycontactid</c> (the issuer's id as text, created by the same script) under the
+    /// same gate.
+    /// </remarks>
     private static readonly HashSet<string> LiveColumns = new(StringComparer.OrdinalIgnoreCase)
     {
         "sprk_externalrecordaccessid", "sprk_name", "sprk_accesslevel", "sprk_expiresdate",
         "sprk_granteddate", "statecode", "statuscode",
         "_sprk_contact_value", "_sprk_organization_value", "_sprk_project_value",
         "_sprk_matter_value", "_sprk_workassignment_value", "_sprk_invoice_value",
-        "_sprk_grantedby_value", "_sprk_recordtype_value",
+        "_sprk_grantedby_value", "_sprk_grantedbycontact_value", "sprk_grantedbycontactid", "_sprk_recordtype_value",
         "createdon", "modifiedon", "ownerid"
     };
 
@@ -80,7 +92,8 @@ public class RecordShareExpiryTests
     private readonly Mock<ITenantCache> _cache = new();
 
     private readonly List<(string Entity, List<(Guid id, Dictionary<string, object> fields)> Updates)> _bulkUpdates = new();
-    private readonly List<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
+    // Concurrent: since task 137 the invalidation routine removes keys with bounded parallelism.
+    private readonly System.Collections.Concurrent.ConcurrentQueue<(string Tenant, string Resource, string Id, int Version)> _invalidated = new();
 
     public RecordShareExpiryTests()
     {
@@ -98,7 +111,7 @@ public class RecordShareExpiryTests
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<int>(),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .Callback<string, string, string, int, string, CancellationToken>(
-                (tenant, resource, id, version, _, _) => _invalidated.Add((tenant, resource, id, version)))
+                (tenant, resource, id, version, _, _) => _invalidated.Enqueue((tenant, resource, id, version)))
             .Returns(Task.CompletedTask);
     }
 
@@ -317,6 +330,37 @@ public class RecordShareExpiryTests
             new[] { ContactId, MemberA, MemberB }.Select(id => id.ToString()));
     }
 
+    /// <summary>
+    /// Task 137 (verifier r1 finding 8): an organization share whose organization is LARGER than the revoke path's
+    /// 200-member SPE bound has every ACTIVE member invalidated — the member walk is paged to completion through the
+    /// real routine, not capped (the old share-expiry path skipped an organization over 200 members silently). A
+    /// former member is still left alone.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_OnAnOrganizationOverTheTwoHundredMemberBound_InvalidatesEveryActiveMember()
+    {
+        _table.SeedOrganizationShare(OrganizationId, ExternalGrantRootType.Matter, MatterId);
+        var members = Enumerable.Range(1, ExternalOrganizationMembership.MaxMembersPerSweep + 51)
+            .Select(i => Guid.Parse($"dddddddd-0000-0000-0000-{i:D12}"))
+            .ToArray();
+        foreach (var member in members)
+        {
+            _table.SeedMembership(OrganizationId, member);
+        }
+
+        _table.SeedMembership(OrganizationId, FormerMember, stateCode: 1);
+        var participations = Participations();
+        participations.PageSize = 100;
+
+        var result = await Send(NewExpiry, participations: participations);
+
+        OkBody(result).UpdatedCount.Should().Be(1);
+        _invalidated.Select(i => i.Id).Should().BeEquivalentTo(members.Select(id => id.ToString()),
+            "every active member — all 251 — is invalidated, and the former member is not");
+        participations.PageReads.Select(p => p.Page).Should().Equal(new[] { 0, 1, 2 },
+            "251 members at 100 per page are read in three pages, to the end");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // The stored date
     // ─────────────────────────────────────────────────────────────────────────────
@@ -345,6 +389,121 @@ public class RecordShareExpiryTests
         var sent = (DateTime)((UpdateRequest)transaction.Requests.Single()).Target["sprk_expiresdate"];
         sent.Should().Be(new DateTime(2026, 12, 10, 0, 0, 0));
         sent.Kind.Should().Be(DateTimeKind.Unspecified);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Contact-issued shares are taken over (task 140; session 27 round 34 item 3)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Round 34 item 3: an internal Write holder who changes a CONTACT-issued share outside the grant core takes it over
+    /// exactly as <c>/grant</c> does — <c>sprk_grantedbycontact</c> cleared AND <c>sprk_grantedby</c> stamped with the
+    /// changing systemuser, in the SAME write as the expiry (the ONE transaction). Left stamped, the issuing contact could
+    /// revoke the operator's date, or lengthen it again with its own re-grant. The twins on the same record differ in one
+    /// input — the issuer: a systemuser-issued share and an organization share take the expiry and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_TakesOverEveryContactIssuedShare_InTheSameTransaction_AndOnlyThose()
+    {
+        _table.SystemUsersByOid[CallerOid] = CallerSystemUserId;
+        var contactIssued = _table.SeedContactShare(
+            ContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedByContact: OtherContactId);
+        var internallyIssued = _table.SeedContactShare(
+            UnrelatedContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedBySystemUser: OtherSystemUserId);
+        var firm = _table.SeedOrganizationShare(OrganizationId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60));
+
+        var result = await Send(NewExpiry, callerOid: CallerOid);
+
+        OkBody(result).UpdatedCount.Should().Be(3);
+        var updates = SingleBulkUpdate().Updates.ToDictionary(u => u.id, u => u.fields);
+
+        var takenOver = updates[contactIssued.Id];
+        takenOver.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid", "sprk_grantedby" },
+            "the take-over travels in the SAME write as the date — never a second, separately failing one");
+        takenOver["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value,
+            "DBNull.Value is the IGenericEntityService convention that CLEARS a column (a C# null would be skipped)");
+        takenOver["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value,
+            "the issuer's recorded provenance is cleared in the same write as its lookup (round 50 item 2)");
+        var stamp = takenOver["sprk_grantedby"].Should().BeOfType<Microsoft.Xrm.Sdk.EntityReference>().Subject;
+        stamp.LogicalName.Should().Be("systemuser");
+        stamp.Id.Should().Be(CallerSystemUserId, "the changing internal user now owns the decision");
+
+        updates[internallyIssued.Id].Keys.Should().Equal(new[] { "sprk_expiresdate" },
+            "a share an internal user issued is not re-stamped — only a contact-issued one is taken over");
+        updates[firm.Id].Keys.Should().Equal(new[] { "sprk_expiresdate" });
+
+        // What the SDK receives — through the REAL transaction builder: the issuer attribute present with a null value
+        // (the SDK's "clear"), the systemuser reference set, in the ONE ExecuteTransactionRequest.
+        var transaction = DataverseServiceClientImpl.BuildBulkUpdateTransaction(
+            "sprk_externalrecordaccess", SingleBulkUpdate().Updates);
+        var target = transaction.Requests.Cast<UpdateRequest>().Select(r => r.Target).Single(t => t.Id == contactIssued.Id);
+        target.Attributes.Should().ContainKey("sprk_grantedbycontact");
+        target["sprk_grantedbycontact"].Should().BeNull();
+        target.Attributes.Should().ContainKey("sprk_grantedbycontactid");
+        target["sprk_grantedbycontactid"].Should().BeNull();
+        target.GetAttributeValue<Microsoft.Xrm.Sdk.EntityReference>("sprk_grantedby").Id.Should().Be(CallerSystemUserId);
+    }
+
+    /// <summary>
+    /// Session 27 round 50 item 2: a share whose issuing CONTACT WAS DELETED — the lookup emptied by its RemoveLink cascade,
+    /// the issuer's id still recorded in <c>sprk_grantedbycontactid</c> — is contact-issued all the same, so the internal
+    /// change takes it over too: the provenance cleared and the caller stamped, in the same write. Left recorded, the
+    /// reconciliation job would later read the operator's share as a deleted contact's. The twin is the test above (the
+    /// lookup still set): the one input is whether the contact still exists.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_TakesOverAShareWhoseIssuingContactWasDeleted()
+    {
+        _table.SystemUsersByOid[CallerOid] = CallerSystemUserId;
+        var orphaned = _table.SeedContactShare(
+            ContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedByContact: OtherContactId);
+        orphaned.GrantedByContactId = null; // the contact was deleted: RemoveLink empties the lookup, the provenance stays
+
+        var result = await Send(NewExpiry, callerOid: CallerOid);
+
+        OkBody(result).UpdatedCount.Should().Be(1);
+        var fields = SingleBulkUpdate().Updates.Single(u => u.id == orphaned.Id).fields;
+        fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid", "sprk_grantedby" });
+        fields["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value);
+        fields["sprk_grantedby"].Should().BeOfType<Microsoft.Xrm.Sdk.EntityReference>().Which.Id.Should().Be(CallerSystemUserId);
+    }
+
+    /// <summary>
+    /// The systemuser stamp is audit; an unresolvable caller never blocks the write (the grant core's rule) — but the
+    /// contact issuer is STILL cleared, because that is what takes the decision out of the contact's hands. The twin of
+    /// the test above differing in one input: whether the caller's systemuser resolves.
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_WhenTheCallersSystemUserDoesNotResolve_StillClearsTheContactIssuer()
+    {
+        var contactIssued = _table.SeedContactShare(
+            ContactId, ExternalGrantRootType.Matter, MatterId, expires: Today.AddDays(60), grantedByContact: OtherContactId);
+
+        var result = await Send(NewExpiry, callerOid: CallerOid);
+
+        OkBody(result).UpdatedCount.Should().Be(1);
+        var fields = SingleBulkUpdate().Updates.Single(u => u.id == contactIssued.Id).fields;
+        fields.Keys.Should().BeEquivalentTo(new[] { "sprk_expiresdate", "sprk_grantedbycontact", "sprk_grantedbycontactid" });
+        fields["sprk_grantedbycontact"].Should().BeSameAs(DBNull.Value);
+        fields["sprk_grantedbycontactid"].Should().BeSameAs(DBNull.Value);
+        _table.SystemUserReads.Should().Equal(new[] { $"azureactivedirectoryobjectid eq {CallerOid}" },
+            "the caller's systemuser was looked up — by its Entra object id — and found nothing");
+    }
+
+    /// <summary>
+    /// With no contact-issued share on the record nothing is taken over, so the caller's systemuser is not even read —
+    /// the expiry write stays exactly what it was before task 140 (positive twin: the issuer is the one input).
+    /// </summary>
+    [Fact]
+    public async Task SetShareExpiry_WithNoContactIssuedShare_ReadsNoSystemUserAndWritesTheExpiryOnly()
+    {
+        _table.SystemUsersByOid[CallerOid] = CallerSystemUserId;
+        _table.SeedContactShare(ContactId, ExternalGrantRootType.Matter, MatterId, grantedBySystemUser: OtherSystemUserId);
+
+        await Send(NewExpiry, callerOid: CallerOid);
+
+        SingleBulkUpdate().Updates.Should().OnlyContain(u => u.fields.Count == 1 && u.fields.ContainsKey("sprk_expiresdate"));
+        _table.SystemUserReads.Should().BeEmpty();
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -430,25 +589,36 @@ public class RecordShareExpiryTests
     // Driving the real handler
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private Task<IResult> Send(DateOnly? expiry, string recordType = "matter") =>
+    private Task<IResult> Send(
+        DateOnly? expiry, string recordType = "matter",
+        GrantPolicyTestDoubles.MemberPagingParticipationService? participations = null,
+        Guid? callerOid = null) =>
         SetRecordShareExpiryEndpoint.Handle(
             new SetRecordShareExpiryRequest(recordType, MatterId, expiry),
             _client.Object,
             _dataverse.Object,
-            _cache.Object,
+            // Task 137: the ONE invalidation routine, run for real over this test's cache and the request's tid; only
+            // its organization-member page read is answered from the table (by the production filter).
+            participations ?? Participations(),
             new FakeTimeProvider(Now),
-            AuthenticatedContext(),
+            AuthenticatedContext(callerOid),
             NullLogger<Program>.Instance,
             CancellationToken.None);
+
+    private GrantPolicyTestDoubles.MemberPagingParticipationService Participations() =>
+        new(_cache.Object, AuthenticatedContext(), null) { MemberSource = _table.ActiveMembersOf };
 
     private (string Entity, List<(Guid id, Dictionary<string, object> fields)> Updates) SingleBulkUpdate() =>
         _bulkUpdates.Should().ContainSingle().Subject;
 
-    private static HttpContext AuthenticatedContext()
+    private static HttpContext AuthenticatedContext(Guid? callerOid = null)
     {
+        var claims = new List<Claim> { new("tid", TenantId) };
+        if (callerOid is { } oid)
+            claims.Add(new Claim("oid", oid.ToString()));
+
         var context = new DefaultHttpContext();
-        context.User = new ClaimsPrincipal(new ClaimsIdentity(
-            new[] { new Claim("tid", TenantId) }, authenticationType: "Test"));
+        context.User = new ClaimsPrincipal(new ClaimsIdentity(claims, authenticationType: "Test"));
         return context;
     }
 
@@ -481,10 +651,24 @@ public class RecordShareExpiryTests
         /// <summary>Set to make the share query fail outright.</summary>
         public Exception? QueryFailure { get; set; }
 
+        /// <summary>Task 140: Entra object id → systemuser id, for the take-over stamp's caller lookup.</summary>
+        public Dictionary<Guid, Guid> SystemUsersByOid { get; } = new();
+
+        /// <summary>Task 140: every <c>systemusers</c> <c>$filter</c> the handler sent.</summary>
+        public List<string> SystemUserReads { get; } = new();
+
         public ExternalGrantRow SeedContactShare(
             Guid contactId, ExternalGrantRootType rootType, Guid rootId,
-            DateOnly? expires = null, int stateCode = 0, Guid? organizationId = null)
-            => Seed(contactId, organizationId, rootType, rootId, expires, stateCode);
+            DateOnly? expires = null, int stateCode = 0, Guid? organizationId = null,
+            Guid? grantedByContact = null, Guid? grantedBySystemUser = null)
+        {
+            var row = Seed(contactId, organizationId, rootType, rootId, expires, stateCode);
+            row.GrantedByContactId = grantedByContact;
+            // As the BFF writes it (round 50 item 2): the issuer's id as text beside the lookup.
+            row.GrantedByContactProvenance = grantedByContact is { } issuer ? ExternalGrantLifecycle.ContactIssuerProvenance(issuer) : null;
+            row.GrantedBySystemUserId = grantedBySystemUser;
+            return row;
+        }
 
         public ExternalGrantRow SeedOrganizationShare(
             Guid organizationId, ExternalGrantRootType rootType, Guid rootId, DateOnly? expires = null)
@@ -492,6 +676,15 @@ public class RecordShareExpiryTests
 
         public void SeedMembership(Guid organizationId, Guid contactId, int stateCode = 0)
             => _memberships.Add((organizationId, contactId, stateCode));
+
+        /// <summary>
+        /// Task 137: the members the invalidation routine's page read returns — by INTERPRETING the production
+        /// <see cref="ExternalOrganizationMembership.ActiveMembersFilter"/>, as this table's own junction query does.
+        /// </summary>
+        public Guid[] ActiveMembersOf(Guid organizationId)
+            => MatchMembers(ExternalOrganizationMembership.ActiveMembersFilter(organizationId))
+                .Select(m => m.ContactId)
+                .ToArray();
 
         private ExternalGrantRow Seed(
             Guid? contactId, Guid? organizationId, ExternalGrantRootType rootType, Guid rootId,
@@ -545,6 +738,23 @@ public class RecordShareExpiryTests
                     MatchMembers(filter)
                         .Select(m => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = m.ContactId })
                         .ToList());
+
+            // Task 140: the take-over stamp's caller lookup (GrantExternalAccessEndpoint.ResolveGrantedBySystemUserIdAsync),
+            // answered by INTERPRETING its one clause — strict, like the share filter.
+            mock.Setup(c => c.QueryAsync<GrantExternalAccessEndpoint.SystemUserRow>(
+                    "systemusers", It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
+                {
+                    SystemUserReads.Add(filter ?? string.Empty);
+                    var oid = Regex.Match(filter ?? string.Empty, @"^azureactivedirectoryobjectid eq ([0-9a-fA-F-]{36})$");
+                    if (!oid.Success)
+                        throw UnknownClause(filter ?? string.Empty);
+
+                    return SystemUsersByOid.TryGetValue(Guid.Parse(oid.Groups[1].Value), out var systemUserId)
+                        ? new List<GrantExternalAccessEndpoint.SystemUserRow> { new() { systemuserid = systemUserId } }
+                        : new List<GrantExternalAccessEndpoint.SystemUserRow>();
+                });
 
             return mock;
         }

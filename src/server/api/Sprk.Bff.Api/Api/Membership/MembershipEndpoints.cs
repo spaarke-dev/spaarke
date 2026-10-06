@@ -42,8 +42,10 @@
 //   - projects/spaarke-platform-foundations-r3/design.md Part 1 § Endpoint contract
 //   - ADR-028 (Spaarke Auth v2 OBO — AAD oid is canonical identifier)
 //   - ADR-008 (endpoint-filter authorization, no global middleware)
-//   - ADR-009 (Redis cache TTL — 10-min for AAD-oid → systemuserid lookup, matching
-//     IdentityNormalizationService's 10-min identity cache TTL)
+//   - ADR-009 (Redis cache TTL — 10-min for AAD-oid → systemuserid lookup; it matched the
+//     identity cache TTL until unified-access-control-r2 task 132 cut that to 2 min. The oid →
+//     systemuserid mapping does not change with a team, business-unit or owner change, so it
+//     bounds none of them and keeps its 10 min.)
 //   - ADR-010 (DI minimalism — no new interface introduced for the one-use helper)
 //   - bff-extensions.md §A (BFF pre-merge checklist), §F.1 (unconditional registration
 //     — service AddMembership() + endpoint MapMembershipEndpoints() both unconditional)
@@ -78,8 +80,8 @@ public static class MembershipEndpoints
     /// <summary>Cache schema version per ADR-009.</summary>
     private const int CurrentUserCacheVersion = 1;
 
-    /// <summary>TTL for AAD-oid → systemuserid cache entries. Matches the
-    /// identity-normalization cache TTL (10 min) — a freshly disabled user
+    /// <summary>TTL for AAD-oid → systemuserid cache entries (10 min; the identity-normalization
+    /// cache it used to match is 2 min since task 132 — see the file header) — a freshly disabled user
     /// continues to look like an authenticated systemuser for at most 10 min,
     /// at which point the next request will re-resolve and surface the row's
     /// absence as 401.</summary>

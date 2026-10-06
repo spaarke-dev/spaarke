@@ -308,6 +308,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:924                DeleteDriveItemForConfigAsync       CLIENT  <-- NEW
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:1067               UploadFileToContainerForConfigAsync CLIENT  <-- NEW
     //   Services/Ai/WorkingDocumentService.cs:172                 UploadSmallAsync                    record*
+    //     ^ SITE DELETED 2026-10-03 (task 162, with POST /api/ai/analysis/{analysisId}/save). Kept in this
+    //       historical census for the same reason as the OBO row above.
     //   Services/Communication/CommunicationService.cs:2066       UploadSmallAsync                    config
     //   Services/Communication/IncomingCommunicationProcessor.cs:921   UploadSmallAsync               record
     //   Services/Communication/IncomingCommunicationProcessor.cs:1093  UploadSmallAsync               record
@@ -755,6 +757,49 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "Deliberately NOT the container derived from SaveRequest.TargetEntity: the destination is an "
             + "item that already exists, and a derived container could only disagree with it."),
 
+        // ── ADDED 2026-10-04 by unified-access-control-r2 task 166 f1 (round 21 item 1 (ii), round 26 item 3) ──
+        // The ONE BFF relocator that moves a document's file into the container its record derives (the
+        // legacy migration job, and task 150's Make Secure). Traced backwards: targetDrive <-
+        // RelocateIfMisplacedAsync <- RecordContainerResolver.DeriveDocumentContainersAsync(documentId) — the
+        // container set the DOCUMENT ROW's own links derive (owning record -> its container; a secure owner
+        // dominates; an undecided derivation REFUSES rather than guessing). The caller supplies only document
+        // ids (job: a keyset scan of sprk_document; Make Secure: the authorized record's documents) and, for
+        // Make Secure, an expected container that must be one the document's derivation ALLOWS, or the document
+        // is refused (reported Undecidable) and nothing moves.
+        new SinkSite("Services/Documents/DocumentContainerRelocator.cs", "UploadSmallAsync", 1,
+            Provenance.ServerDerivedRecord, "166",
+            "targetDrive <- DocumentContainerDerivation.PrimaryContainer (or a caller-expected container only "
+            + "when derivation.Allows it) <- RecordContainerResolver.DeriveDocumentContainersAsync(documentId) "
+            + "(the sprk_document row's own link columns resolved through ResolveForRecordAsync / the "
+            + "communication archive fallback)",
+            "The relocation COPY: writes the document's bytes app-only into the container its record derives, "
+            + "so a misplaced legacy file lands where the strict pointer rule will look for it (ADR-003 "
+            + "fail-closed: an undecided derivation is refused, never defaulted; ADR-002 WP-1: the server owns "
+            + "the invariant). The source's version history is REPLAYED oldest first (task 166 f1-v2, owner round "
+            + "45 item 1): the first version with ConflictBehavior.Rename so a flat container never overwrites another "
+            + "document's file, every later one with Replace onto the name Graph gave that copy, and each must land on "
+            + "the copy's own item id (else both are deleted). A source edited after its move is re-copied the same "
+            + "way into the document's CURRENT container (round 45 item 4). Each upload's size and the final content "
+            + "(size, and quickXorHash where Graph returns one) are verified BEFORE anything points at the copy."),
+
+        new SinkSite("Services/Documents/DocumentContainerRelocator.cs", "DeleteFileAsync", 1,
+            Provenance.ServerDerivedRecord, "166",
+            "(drive, item) of either the copy THIS relocation just created (a failed verify / re-point) or the "
+            + "source named by the sprk_document row's own sprk_graphdriveid / sprk_graphitemid — recorded, in the "
+            + "same update as the re-point, in the row's BFF-written relocation ledger (sprk_relocationpending, "
+            + "task 166 f1-v1) when the delete is owed to a repeat call",
+            "The relocation's two deletes share one helper: the unverified/unattached/partial COPY this same call "
+            + "created (a failed replay, verify or re-point), or the SOURCE after the row was re-pointed — and the "
+            + "source only when no row still uses it (another sprk_document, or a communication's own attachment "
+            + "record of a communication outside the moved file's container; an unreadable or undecidable answer "
+            + "keeps it), so a delete can never break another row (ADR-003; ADR-007). The source is deleted only "
+            + "while it still matches the WITNESS its ledger entry recorded when its copy was verified (size, and "
+            + "quickXorHash or else its version — task 166 f1-v2, owner round 45 item 4): an entry without one never "
+            + "deletes, and a source edited since is re-copied first, so a delete can never discard an edit or an "
+            + "unrelated file. A SOURCE delete runs only under the document's relocation lock, renewed and read back "
+            + "as this call's immediately before it (task 166 g, owner round 54 item 2: a move that lost its lock "
+            + "stops). The drive is never caller-named."),
+
         // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
         // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED
         // before the folder-removal change touched anything: task 076 added the record-keyed upload pair
@@ -809,18 +854,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "(caller-selectable fail/replace/rename), so a 'replace' here is an explicit caller choice "
             + "rather than the silent overwrite the path-keyed PUT performs."),
 
-        new SinkSite("Services/Ai/WorkingDocumentService.cs", "UploadSmallAsync", 1,
-            Provenance.ServerDerivedRecord, "",
-            "the matter's stamped sprk_containerid, read directly from the sprk_matter row",
-            "Analysis working documents go to the matter's own container — server-derived, so not a "
-            + "client-named write (ADR-003; ADR-013 AI boundary; ADR-007). FLAGGED, and pinned separately by "
-            + "TheSetOfSitesReadingAStampedContainerColumnDirectlyIsPinned: it reads sprk_containerid off "
-            + "the row instead of going through RecordContainerResolver, and SecureContainerDecision's own "
-            + "documentation states that stale stamps demonstrably exist because the creation wizard's "
-            + "business-unit cascade writes that column. For a SECURE matter the stamp is the right answer; "
-            + "for a non-secure one a stale stamp silently redirects content. Not a hole, but the one "
-            + "server-derived site whose correctness depends on data hygiene rather than on a resolver.",
-            DirectStampRead: true),
+        // Services/Ai/WorkingDocumentService.cs UploadSmallAsync #1 DELETED 2026-10-03 (unified-access-control-r2
+        // task 162, owner round 10 item 1): SaveToSpeAsync went with its only caller, POST
+        // /api/ai/analysis/{analysisId}/save (no caller in the repo, not published). It was the one site in the
+        // DirectStampRead set; that set is now EMPTY (Rule D below).
 
         // ---------------------------------------------------------------------------------------------
         // ServerDerivedConfig — legitimate only where there is no owning record.
@@ -1420,10 +1457,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             .Select(a => Key(a.File, a.Sink, a.Ordinal))
             .ToHashSet(StringComparer.Ordinal);
 
-        var expected = new HashSet<string>(StringComparer.Ordinal)
-        {
-            Key("Services/Ai/WorkingDocumentService.cs", "UploadSmallAsync", 1),
-        };
+        // EMPTY since 2026-10-03: its one member (Services/Ai/WorkingDocumentService.cs UploadSmallAsync #1) was
+        // DELETED with POST /api/ai/analysis/{analysisId}/save by unified-access-control-r2 task 162. The pin stays:
+        // a NEW direct stamp read must still be argued for here.
+        var expected = new HashSet<string>(StringComparer.Ordinal);
 
         var added = actual.Except(expected, StringComparer.Ordinal).ToList();
         var removed = expected.Except(actual, StringComparer.Ordinal).ToList();

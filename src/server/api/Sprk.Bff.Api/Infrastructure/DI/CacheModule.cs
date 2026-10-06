@@ -50,8 +50,23 @@ public static class CacheModule
             configuration,
             logging,
             environment,
-            (options, credential) => StackExchange.Redis.AzureCacheForRedis.ConfigureForAzureWithTokenCredentialAsync(options, credential),
-            options => StackExchange.Redis.ConnectionMultiplexer.Connect(options));
+            NetworkStepsForBootedHostTests?.ConfigureForManagedIdentity
+                ?? ((options, credential) => StackExchange.Redis.AzureCacheForRedis.ConfigureForAzureWithTokenCredentialAsync(options, credential)),
+            NetworkStepsForBootedHostTests?.Connect
+                ?? (options => StackExchange.Redis.ConnectionMultiplexer.Connect(options)));
+
+    /// <summary>
+    /// TEST SEAM for a host booted through <c>Program</c> (the same two network steps as the overload below, which a
+    /// <c>WebApplicationFactory</c> cannot reach: <c>Program.cs</c> calls this one at registration time). Spaarke.ArchTests'
+    /// <c>BootedBff</c> boots the BFF as Production to prove what Production maps (task 167 f2-v2). Since master T242 a
+    /// Production BFF reaches Redis ONLY through its managed identity over TLS, which a test process cannot reach, so that
+    /// boot substitutes these two steps for its loopback listener. <c>null</c> — the default, and always in production — runs
+    /// the real ones. Never set outside a test host; the mode selection above it (endpoint required, no connection string
+    /// outside Development/Testing) runs unchanged.
+    /// </summary>
+    internal static (Func<StackExchange.Redis.ConfigurationOptions, TokenCredential, Task> ConfigureForManagedIdentity,
+        Func<StackExchange.Redis.ConfigurationOptions, StackExchange.Redis.IConnectionMultiplexer> Connect)? NetworkStepsForBootedHostTests
+    { get; set; }
 
     /// <summary>
     /// Test seam: the two network steps of the Redis-on branch — authenticating with the managed-identity credential

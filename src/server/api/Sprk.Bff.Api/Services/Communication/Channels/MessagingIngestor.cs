@@ -229,6 +229,10 @@ public sealed class MessagingIngestor : ICommunicationChannelIngestor
             communication["sprk_attachmentcount"] = message.Attachments.Count;
         }
 
+        // Owner: none set, so the creating identity keeps the row. A chat message names no record at create, and owner
+        // round 10 item 8 (2026-10-03) ACCEPTED task 146's escalation E1: unfiled communications keep their creator as
+        // owner. It is filed only by joining a record thread, which re-derives its owner (ThreadResolver JOIN →
+        // IRecordOwnershipResolver.ReparentAsync). Census: a Permanent waiver in RecordOwnerAssignmentCensusTests.
         return await _genericEntityService.CreateAsync(communication, ct);
     }
 

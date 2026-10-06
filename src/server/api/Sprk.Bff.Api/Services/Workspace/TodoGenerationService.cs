@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Spaarke.Scheduling;
 using Sprk.Bff.Api.Services.Dataverse;
+using EventStatusCode = Sprk.Bff.Api.Api.Events.Dtos.EventStatusCode;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -207,6 +208,11 @@ public sealed class TodoGenerationService : IScheduledJob
     // ZERO To Dos (smart-todo-r5 INBOUND fix, 2026-08-17).
     private IEventDataverseService? _events;
 
+    // Lazily resolved alongside _dataverse (unified-access-control-r2 task 146): every generated to-do is owned by
+    // the team of the record it regards (or, for a standalone to-do, of the record its content is about) — the named
+    // Secure team when that record is secure. Never app-owned: with no record at all, the to-do is not created.
+    private Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver? _ownership;
+
     // ──────────────────────────────────────────────────────────────────────────
     // Constructor
     // ──────────────────────────────────────────────────────────────────────────
@@ -282,7 +288,7 @@ public sealed class TodoGenerationService : IScheduledJob
 
     private bool TryEnsureDependencies()
     {
-        if (_dataverse is not null && _events is not null && _regardingBuilder is not null)
+        if (_dataverse is not null && _events is not null && _regardingBuilder is not null && _ownership is not null)
         {
             return true;
         }
@@ -300,6 +306,10 @@ public sealed class TodoGenerationService : IScheduledJob
                 var coreAncestors = _serviceProvider.GetRequiredService<CoreAncestorResolver>();
                 _regardingBuilder = new TodoRegardingBuilder(commService, coreAncestors, builderLogger);
             }
+
+            // Task 146: every generated to-do's owner comes from the one resolver (CreateTodoAsync).
+            _ownership ??= _serviceProvider
+                .GetRequiredService<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
             return true;
         }
         catch (Exception ex)
@@ -405,8 +415,9 @@ public sealed class TodoGenerationService : IScheduledJob
                 top: 100,
                 ct: ct);
 
-            // Exclude completed/cancelled events.
-            overdueEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            // Exclude completed/cancelled events — by the LIVE sprk_event statuscodes (task 159: the old 5/6 are not
+            // values of this table, so nothing was ever excluded).
+            overdueEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled);
         }
         catch (Exception ex)
         {
@@ -573,8 +584,8 @@ public sealed class TodoGenerationService : IScheduledJob
                 top: 100,
                 ct: ct);
 
-            // Exclude completed/cancelled events.
-            upcomingEvents = items.Where(e => e.StatusCode != 5 && e.StatusCode != 6);
+            // Exclude completed/cancelled events — by the LIVE sprk_event statuscodes (task 159).
+            upcomingEvents = items.Where(e => e.StatusCode != EventStatusCode.Completed && e.StatusCode != EventStatusCode.Cancelled);
         }
         catch (Exception ex)
         {
@@ -753,10 +764,14 @@ public sealed class TodoGenerationService : IScheduledJob
                     continue;
                 }
 
-                // Standalone — no regarding parent. Task 152: the source event names the person — its assigned
-                // contact (triggering person), else its responsible internal contact.
+                // Standalone — no regarding parent. Its content (the title) IS the source event's, so the event is
+                // the OWNERSHIP source (task 146): a to-do naming a secure event is owned by the named Secure team.
+                // It is not written as a regarding — the to-do stays standalone, as before. Task 152: the source
+                // event also names the person — its assigned contact (triggering person), else its responsible
+                // internal contact.
                 await CreateTodoAsync(
                     name: todoTitle,
+                    ownershipSource: new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_event", task.Id),
                     triggeringContactId: task.AssignedToContactId,
                     assigneeParentEntity: "sprk_event",
                     assigneeParentId: task.Id,
@@ -831,8 +846,10 @@ public sealed class TodoGenerationService : IScheduledJob
     /// <param name="dueDate">Optional due date (<c>sprk_duedate</c>).</param>
     /// <param name="priorityScore">Optional priority score 0-100 (<c>sprk_priorityscore</c>).</param>
     /// <param name="effortScore">Optional effort score 0-100 (<c>sprk_effortscore</c>).</param>
-    /// <param name="ownerId">Optional owner (user or team) — written to <c>ownerid</c>.</param>
-    /// <param name="ownerEntityName">Owner entity logical name (e.g. <c>systemuser</c> or <c>team</c>). Required when <paramref name="ownerId"/> is set.</param>
+    /// <param name="ownershipSource">
+    /// For a STANDALONE to-do (no regarding), the record its content is about — the ownership parent (task 146). Not
+    /// written to the row. Ignored when a regarding is supplied (the regarding is the parent).
+    /// </param>
     /// <param name="assignedToContactId">A SUPPLIED assignee (contact). Never overwritten.</param>
     /// <param name="triggeringContactId">Task 152: the triggering person's contact, when the rule has one.</param>
     /// <param name="assigneeParentEntity">
@@ -841,6 +858,16 @@ public sealed class TodoGenerationService : IScheduledJob
     /// </param>
     /// <param name="assigneeParentId">Id for <paramref name="assigneeParentEntity"/>.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// <para><b>Owner (unified-access-control-r2 task 146).</b> The to-do is owned by the team the ONE resolver names
+    /// over every parent on the row — the regarding and its FR-26 core-ancestor stamps — or the
+    /// <paramref name="ownershipSource"/>: the named Secure team when any is secure, else the primary parent's
+    /// business-unit team. This is a background writer with NO acting user, so a to-do with neither a parent nor a
+    /// source is NOT created: <see cref="Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException"/> is thrown, and
+    /// each rule's own catch logs it with the reason and counts it, as for any failed row — the pass continues.</para>
+    /// <para>The former <c>ownerId</c>/<c>ownerEntityName</c> parameters were removed: no caller passed them
+    /// (word-add-in-r1 note 080 §6.5 item 3), and a second way to set the owner is a way around the resolver.</para>
+    /// </remarks>
     internal async Task<Guid> CreateTodoAsync(
         string name,
         string? regardingEntityName = null,
@@ -850,8 +877,7 @@ public sealed class TodoGenerationService : IScheduledJob
         DateTime? dueDate = null,
         int? priorityScore = null,
         int? effortScore = null,
-        Guid? ownerId = null,
-        string? ownerEntityName = null,
+        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent? ownershipSource = null,
         Guid? assignedToContactId = null,
         Guid? triggeringContactId = null,
         string? assigneeParentEntity = null,
@@ -877,14 +903,12 @@ public sealed class TodoGenerationService : IScheduledJob
         if (effortScore.HasValue)
             entity[FieldTodoEffortScore] = effortScore.Value;
 
-        if (ownerId.HasValue && !string.IsNullOrEmpty(ownerEntityName))
-            entity[FieldOwnerId] = new EntityReference(ownerEntityName, ownerId.Value);
-
         if (assignedToContactId is { } suppliedAssignee && suppliedAssignee != Guid.Empty)
             entity[AssignedToDefaults.AssignedToAttribute] = new EntityReference("contact", suppliedAssignee);
 
         // ADR-024: regarding fields applied atomically by the builder when present.
-        if (!string.IsNullOrEmpty(regardingEntityName) && regardingId.HasValue && regardingId.Value != Guid.Empty)
+        var hasRegarding = !string.IsNullOrEmpty(regardingEntityName) && regardingId.HasValue && regardingId.Value != Guid.Empty;
+        if (hasRegarding)
         {
             if (_regardingBuilder is null)
             {
@@ -895,11 +919,37 @@ public sealed class TodoGenerationService : IScheduledJob
 
             await _regardingBuilder.ApplyResolverFieldsAsync(
                 entity,
-                regardingEntityName,
-                regardingId.Value,
+                regardingEntityName!,
+                regardingId!.Value,
                 regardingDisplayName ?? string.Empty,
                 ct);
         }
+
+        // Task 146: owner from every parent now on the row (regarding + FR-26 stamps), or the standalone to-do's
+        // content source. Resolved AFTER the regarding fields so the stamps count. No acting user on this path.
+        if (_ownership is null)
+        {
+            throw new InvalidOperationException(
+                "IRecordOwnershipResolver not initialized. Service was called before ExecuteAsync completed lazy "
+                + "resolution of Dataverse dependencies; refusing to create an app-owned to-do (task 146).");
+        }
+
+        var primary = hasRegarding
+            ? new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(regardingEntityName!, regardingId!.Value)
+            : ownershipSource;
+        var ownerContext = Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(entity, primary);
+        if (!hasRegarding && ownershipSource is { IsSpecified: true } source)
+        {
+            ownerContext = ownerContext with { Parents = ownerContext.Parents.Append(source).ToArray() };
+        }
+
+        var owner = await _ownership.ResolveOwnerAsync(ownerContext, ct);
+        if (!owner.IsOwned)
+        {
+            throw new Sprk.Bff.Api.Services.Dataverse.RecordOwnerUnresolvedException(EntityTodo, owner);
+        }
+
+        entity[FieldOwnerId] = new EntityReference("team", owner.OwningTeamId!.Value);
 
         // Task 152 (#1044): name the person this to-do is FOR — after the regarding + core-ancestor stamp, so a parent
         // without responsible columns (an invoice) defers to its stamped core record.
@@ -1028,6 +1078,16 @@ public sealed class TodoGenerationService : IScheduledJob
     // ──────────────────────────────────────────────────────────────────────────
     // Test seam
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Internal test seam (task 146): injects the ownership resolver that <c>ExecuteAsync</c> otherwise resolves
+    /// lazily, so creation paths can run without the BackgroundService loop — the same shape as
+    /// <see cref="SetRegardingBuilderForTest"/>.
+    /// </summary>
+    internal void SetOwnershipResolverForTest(Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownership)
+    {
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+    }
 
     /// <summary>
     /// Internal test seam: allows unit tests to inject a pre-built

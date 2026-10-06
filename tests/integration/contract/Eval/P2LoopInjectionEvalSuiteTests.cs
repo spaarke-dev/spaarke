@@ -598,10 +598,14 @@ public class P2LoopInjectionEvalSuiteTests
             .Callback((string _, string body, bool _, CancellationToken _) => postedBody = body)
             .ReturnsAsync(() => Sprk.Bff.Api.Infrastructure.Dataverse.DataverseUserResponse.Ok(
                 201, JsonDocument.Parse($$"""{"sprk_eventid":"{{createdId:D}}"}""").RootElement.Clone()));
+        // Task 133: the last argument is the app-only creator-stamp seam. Strict: an sprk_event create stamps nothing.
         var handler = new Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler(
             dataverse.Object,
             Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance,
-            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"));
+            new Sprk.Bff.Api.Api.Agent.HandoffUrlBuilder("https://spaarkedev1.crm.dynamics.com"),
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+            new Mock<Spaarke.Dataverse.IFieldMappingDataverseService>(MockBehavior.Strict).Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.NothingSecure());
 
         var adapter = new ToolHandlerToAIFunctionAdapter(
             toolRow, handler,

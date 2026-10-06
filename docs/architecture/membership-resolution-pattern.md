@@ -125,7 +125,7 @@ Rules of the people surface:
   `member_skipped … reason=people_targeting_no_linked_contact` warning is logged. Never an email/UPN/name match.
 - **Mutually exclusive with `AccessConferringOnly`** — requesting both throws `ArgumentException`.
 - **Cache key.** `|p:1` is appended to the options hash only when set: every pre-existing key is byte-identical, and a
-  people-targeted call never shares a 5-minute entry with an AI-scoping call for the same user and entity.
+  people-targeted call never shares a cache entry (2 min since task 132) with an AI-scoping call for the same user and entity.
 - **Selecting is not authorizing.** Every consumer reads the rows it SHOWS under the caller's Dataverse security
   (`IImpersonatedCommunicationQuery`, MSCRMCallerID = caller), so a record FOR someone that they cannot open is
   trimmed by Dataverse. A failed caller-context read is reported as failed (the briefing's `failedChannels` /
@@ -154,7 +154,7 @@ linked contact; else the regarding parent's `sprk_assignedtointernal`, then `spr
 
 ## Identity Normalization (6-path, fail-isolated)
 
-`IdentityNormalizationService` (`Services/Ai/Membership/IdentityNormalizationService.cs:40`) resolves a `systemuserid` into the full `PersonIdentity` by querying 6 paths. Each path is independent: failure on one does NOT fail the others (per-path try/catch + warning log). Result cached in Redis (`CacheKeyPrefix = "membership:identity:"` at line 48) for 10 minutes per ADR-009.
+`IdentityNormalizationService` (`Services/Ai/Membership/IdentityNormalizationService.cs:40`) resolves a `systemuserid` into the full `PersonIdentity` by querying 6 paths. Each path is independent: failure on one does NOT fail the others (per-path try/catch + warning log). Result cached through `ITenantCache` (`tenant:{tid}:membership-identity:{systemUserId}:v2`) for **2 minutes** — and **never when a path FAILED** (unified-access-control-r2 task 132: a failed path is recorded on the identity, internal `PersonIdentity.Faults`, and such an identity is returned but not cached; it was 10 minutes and cached faults until then).
 
 | # | Source field type | Resolves via | Returned field |
 |---|---|---|---|
@@ -175,7 +175,7 @@ Steps 1–3 run in parallel via `Task.WhenAll`. Steps 4–5 are sequential after
 
 `MembershipResolverService` (`Services/Ai/Membership/MembershipResolverService.cs:64`) combines discovery + normalization + a single OR-joined FetchXml query against the target entity. Pipeline (algorithm doc-comment at `MembershipResolverService.cs:5-22`; cache key prefix at `:76`; TTL at `:79`):
 
-1. Cache key `membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}`, 5-min TTL (Phase 1A, FR-1A.8).
+1. Cache key `tenant:{tid}:membership-resolved:{systemUserId:D}:{entityType}:{optionsHash}:v5`, **2-min TTL** (was 5 until task 132); a response built over a faulted identity is not cached.
 2. On miss: discover descriptors → filter by `options.Roles` + `options.IdentityTypes` → resolve identity → build single `<filter type="or">` FetchXml with one `<condition>` per (descriptor, identity value) pair.
 3. Execute via `IGenericEntityService.RetrieveMultipleAsync(FetchExpression)`.
 4. Materialize: dedupe ids, sort ascending, build `byRole` map by re-classifying each result row against descriptors.
@@ -210,9 +210,9 @@ Phase 2 ships a materialized junction `sprk_userentityassociation` plus event-dr
 | Subscription host (Null peer) | `Services/Ai/Membership/NullMembershipJunctionUpdaterHost.cs:47` | ADR-032 hosted-service peer — no `ServiceBusClient` constructed; logs Info on start | **Active by default** |
 | Junction handler | `Services/Ai/Membership/MembershipJunctionUpdater.cs:76` | Idempotent retrieve-by-alternate-key + create/update/delete per FR-2P2.4; Scoped lifetime; **ALWAYS registered** (no kill-switch — reused by both subscription host AND recon job) | Always active |
 | Reconciliation backstop | `Services/Ai/Membership/MembershipReconciliationJob.cs:113` (algorithm header `:14-46`; topic-independence rationale `:51-60`) | Nightly recon scan of source-of-truth Lookups → synthesizes events → dispatches DIRECTLY to `IMembershipJunctionUpdater` (no topic dependency) | `Membership:Reconciliation:Enabled` defaults **true**; cron `0 2 * * *` daily 02:00 UTC |
-| Cache invalidator (real) | `Services/Ai/Membership/MembershipCacheInvalidator.cs:38` | Redis pub/sub publisher to channel `membership-cache-invalidate` (FR-2P2.8); mirrors `JobStatusService` convention | Gated by `Membership:CacheInvalidator:Enabled` (default **false**) **AND** `IConnectionMultiplexer` registered (Redis enabled) |
+| Cache invalidator (real) | `Services/Ai/Membership/MembershipCacheInvalidator.cs` | Redis pub/sub publisher to channel `membership-cache-invalidate` (FR-2P2.8) **and** — since task 132 — the BFF write-path access evictions (`InvalidateUserAccessAsync`, `InvalidateRecordOwnerChangeAsync`, `InvalidateRecordShareChangeAsync` — the last called, through `IRecordShareWriteObserver`, by `DataverseWebApiService` on every share write it makes; SCAN + DEL, every tenant, only for a cache that can hold the type) | Registered whenever **`Redis:Enabled=true`**; the junction PUBLISH (and the subscriber) additionally need `Membership:CacheInvalidator:Enabled=true`. The old gate (`Enabled` AND an `IConnectionMultiplexer` already registered) could never select it: `AddMembership` runs before `AddCacheModule` (task 132) |
 | Cache subscriber | `Services/Ai/Membership/MembershipCacheInvalidationSubscriber.cs` | Hosted service that subscribes on `StartAsync`, evicts matching `membership:resolved:{personId:D}:{entityLogicalName}:*` entries via Redis SCAN+DEL | Registered alongside real invalidator |
-| Cache invalidator (Null peer) | `Services/Ai/Membership/NullMembershipCacheInvalidator.cs:28` | ADR-032 P2 — logs once at construction; debug-only per-call log | **Active by default** |
+| Cache invalidator (Null peer) | `Services/Ai/Membership/NullMembershipCacheInvalidator.cs` | ADR-032 P2 — logs once at construction (Warning: every invalidation inert); debug-only per-call log | Only when Redis is NOT the cache (in-memory — Development/Testing) |
 | Cache invalidation message | `Services/Ai/Membership/MembershipCacheInvalidationMessage.cs` | Wire payload for the Redis channel | n/a |
 | DI module | `Infrastructure/DI/MembershipModule.cs:65` (`AddMembership(services, configuration)` at `:73-75`; bootstrap hosted service at `:313`) | Unconditional resolver/discovery/identity registrations; SYMMETRIC kill-switched registrations for publisher/host/invalidator; recon job seeds `BackgroundJobDefinition` row | n/a |
 
@@ -229,14 +229,14 @@ MembershipEndpoints.GetMyMembershipsAsync (MembershipEndpoints.cs:138)
     │ 2. ResolveSystemUserIdAsync(oid, ...)               (:377)
     │     ├── Redis hit  → cached systemuserid
     │     └── Redis miss → systemuser.azureactivedirectoryobjectid=oid
-    │                       (10-min TTL, ADR-028)
+    │                       (10-min TTL, ADR-028 — oid → systemuserid only)
     │ 3. Build MembershipResolveOptions from query CSV   (:243)
     ▼
 IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
     │ MembershipResolverService.cs:64
     │
     │ Cache key: membership:resolved:{systemUserId:D}:{entityType}:{optionsHash}
-    │  └── 5-min TTL (Phase 1A, FR-1A.8)
+    │  └── 2-min TTL (task 132; never caches a response built over a faulted identity)
     │
     ▼ Cache MISS:
     ├─→ IMembershipFieldDiscoveryService.DiscoverAsync(entityType)
@@ -248,7 +248,7 @@ IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
     │
     ├─→ IIdentityNormalizationService.ResolveAsync(systemUserId)
     │     │ IdentityNormalizationService.cs:40
-    │     │ Cache key: membership:identity:{systemUserId}  (10-min TTL)
+    │     │ Cache key: tenant:{tid}:membership-identity:{systemUserId}:v2  (2-min TTL; faulted → not cached)
     │     │ 6 paths in parallel/sequential per the contract
     │     ▼
     │   PersonIdentity { systemUserId, contactId?, teamIds[]?, BU, accountId?, orgIds[]? }
@@ -261,7 +261,7 @@ IMembershipResolverService.ResolveAsync(systemUserId, entityType, options, ct)
           ▼
         MembershipResponse {entityType, personIdentity, ids[], byRole, count, cacheExpiresAt, continuationToken?}
           ▼
-        Cache write (5-min TTL) — failure is fail-open
+        Cache write (2-min TTL) unless faulted — a cache failure is fail-open
           ▼
         HTTP 200 OK (camelCase JSON locked at type level)
 ```
@@ -311,7 +311,7 @@ Azure Service Bus topic: sprk-membership-changes  (Bicep task 071; operator-depl
     │       │            ▼
     │       │   SCAN + DEL `{instanceName}membership:resolved:{personId:D}:{entity}:*`
     │       │            (next read repopulates from junction / FetchXml)
-    │       └── Null (default) → debug-log no-op (5-min TTL is correctness backstop)
+    │       └── channel switch off (default) → debug-log no-op (2-min TTL is correctness backstop)
     │
     └── (Future subscriptions: cache warmers, Teams notifiers, etc. — none shipped in R3)
 
@@ -437,7 +437,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 | `MembershipJunctionUpdaterHost` (real impl) | ✅ Code present | Null peer active (host disabled) | Null peer active | Flip `Membership:JunctionUpdater:Enabled=true` after topic deploy |
 | `MembershipJunctionUpdater` (handler) | ✅ Always registered | ✅ Resolvable (used by recon job) | ✅ Resolvable | No kill-switch |
 | `MembershipReconciliationJob` + bootstrap | ✅ Always registered | ✅ Running (`Enabled=true` default; cron `0 2 * * *`) | ✅ Running | Independent of topic deploy |
-| `MembershipCacheInvalidator` (real impl) | ✅ Code present | Null peer active (default `Enabled=false`) | Null peer active | Requires BOTH `Membership:CacheInvalidator:Enabled=true` AND Redis registered |
+| `MembershipCacheInvalidator` (real impl) | ✅ Code present | Real impl active wherever Redis is (write-path evictions on; junction publish off by default) | Real impl active (Redis is mandatory in deployed environments) | `Redis:Enabled=true`; the junction publish also needs `Membership:CacheInvalidator:Enabled=true` (task 132) |
 | `MembershipCacheInvalidationSubscriber` (hosted service) | ✅ Code present | Not running (Null invalidator path) | Not running | Registered only when invalidator real impl wins |
 
 ### Feature flag matrix
@@ -446,7 +446,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 |---|---|---|---|---|
 | `Membership:EventPublisher:Enabled` | `false` | `MembershipEventPublisherOptions.cs:38` | `MembershipEventPublisher` registered; publishes to Service Bus topic | `NullMembershipEventPublisher` registered; logs Info, no SB interaction |
 | `Membership:JunctionUpdater:Enabled` | `false` | `MembershipJunctionUpdaterOptions.cs:65` | `MembershipJunctionUpdaterHost` BackgroundService runs; consumes subscription | `NullMembershipJunctionUpdaterHost` runs; logs once on start, no SB interaction |
-| `Membership:CacheInvalidator:Enabled` | `false` (also requires `IConnectionMultiplexer` registered) | `MembershipCacheInvalidatorOptions.cs:47` | `MembershipCacheInvalidator` + `MembershipCacheInvalidationSubscriber` registered | `NullMembershipCacheInvalidator` registered; debug-only logs, no Redis interaction |
+| `Membership:CacheInvalidator:Enabled` | `false` | `MembershipCacheInvalidatorOptions.cs` | junction PUBLISH on + `MembershipCacheInvalidationSubscriber` registered | junction publish is a logged no-op; the BFF write-path access evictions run regardless (task 132). With Redis off, `NullMembershipCacheInvalidator` is registered either way |
 | `Membership:Reconciliation:Enabled` | **`true`** | `MembershipReconciliationOptions.cs:73` | Job runs on configured cron (default `0 2 * * *` daily 02:00 UTC) | Job seeded but disabled in `BackgroundJobDefinition` row; can be re-enabled via admin endpoint |
 | `Membership:OrganizationLookup:UserLookupField` | (empty) | `MembershipOptions.cs` | `OrganizationMembershipResolver` queries `sprk_organization` filtered by the configured field | Returns empty `organizationIds[]` + Info log ONCE per process |
 
@@ -465,7 +465,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 - **p95 ≤ 300ms** for `/api/users/me/memberships/{entityType}` (spec NFR-04 / AC-1A.5).
 - **Measurement**: App Insights server-side request telemetry (owner clarification 2026-06-20 — NOT synthetic load test).
 - **In-process canary**: Task 056's perf test runs in CI against a mocked Dataverse; current measurement p95 = 1 ms (well under budget — the budget exists for production Dataverse latency).
-- **Cache hit ratios**: discovery cache 60-min TTL; identity cache 10-min TTL; resolved cache 5-min TTL Phase 1A (longer + pub/sub-invalidated Phase 2 when read-path swap ships).
+- **Cache hit ratios**: discovery cache 60-min TTL; identity cache 2-min TTL; resolved cache 2-min TTL (both were longer until task 132 cut them to the owner's "minutes" bound; BFF team / BU / owner writes evict them).
 
 ---
 
@@ -476,7 +476,7 @@ This table reflects what is **shipped in the BFF binary today** vs what requires
 | Event publish failure (Service Bus down) | Q2 fire-and-forget — mutation succeeds; structured Warning log with correlationId (NFR-08). Nightly `MembershipReconciliationJob` is the backstop (max 24h staleness). |
 | Topic unavailable (operator hasn't deployed task 071) | ADR-032 Null-Object peers — `NullMembershipEventPublisher` + `NullMembershipJunctionUpdaterHost` + `NullMembershipCacheInvalidator` register when feature flags off. BFF still ships. Phase 1A endpoint unaffected. |
 | Junction row drift (event lost, mid-edit failure) | Recon job dispatches `Updated` events directly to `IMembershipJunctionUpdater` (no topic). Handler is idempotent (retrieve-by-alternate-key + create/update/delete) — duplicate dispatch is safe. |
-| Cache stale after junction write | `MembershipCacheInvalidator` publishes to Redis channel `membership-cache-invalidate`. Subscriber clears `membership:resolved:{personId:D}:{entity}:*` via SCAN+DEL. If pub/sub fails, 5-min TTL is the correctness backstop — pub/sub is latency optimization, not correctness. |
+| Cache stale after junction write | `MembershipCacheInvalidator` publishes to Redis channel `membership-cache-invalidate` (channel switch on). Subscriber clears `tenant:*:membership-resolved:{personId:D}:{entity}:*` via SCAN+DEL. If pub/sub fails, the 2-min TTL is the correctness backstop — pub/sub is latency optimization, not correctness. |
 | Redis unavailable | Cache read/write failures fail-open (warn + continue). Discovery + identity + resolved paths all re-execute against Dataverse. Endpoint stays available (degraded latency). |
 | Org-membership unset (`OrganizationLookup:UserLookupField` empty) | `OrganizationMembershipResolver` returns empty list + Info log ONCE per process (operator setup pending; not an error). |
 | `includeRelated` > 1 hop | `400 BadRequest` with ProblemDetails `type="transitive-chain-too-deep"` (Q3 cap). Pre-validated at `MembershipResolverService.cs:142-159` before any I/O. |
@@ -564,9 +564,9 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 | User endpoint group | `Api/Membership/MembershipEndpoints.cs` | `:89` `MapMembershipEndpoints`; `:92-94` group + `RequireAuthorization()`; `:102` `MapGet("/{entityType}", ...)`; `:138` `GetMyMembershipsAsync` handler; `:344` `ExtractAadObjectId`; `:377` `ResolveSystemUserIdAsync` (AAD-oid → systemuserid + 10-min cache) |
 | Admin endpoint group | `Api/Admin/MembershipAdminEndpoints.cs` | `:42` `MapAdminMembershipEndpoints`; `:44-46` group + `RequireAuthorization("SystemAdmin")`; `:58` GET discovered; `:77` POST refresh-metadata; `:102` `DiscoverEntityAsync`; `:161` `RefreshMetadataAsync` |
 | Endpoint mapping wire-up | `Infrastructure/DI/EndpointMappingExtensions.cs` | `:275` `MapMembershipApi()`; `:283` `MapAdminMembershipEndpoints()` |
-| Orchestrator | `Services/Ai/Membership/MembershipResolverService.cs` | `:64` type; `:76` cache key prefix; `:79` 5-min `CacheTtl`; algorithm doc-comment `:5-22`; `:118` `ResolveAsync`; 1-hop depth pre-validation `:142-159` |
+| Orchestrator | `Services/Ai/Membership/MembershipResolverService.cs` | `:64` type; `CacheResource` cache key resource; 2-min `CacheTtl` (task 132); algorithm doc-comment `:5-22`; `:118` `ResolveAsync`; 1-hop depth pre-validation `:142-159` |
 | Discovery service | `Services/Ai/Membership/MembershipFieldDiscoveryService.cs` | `:59` type; `:69` cache key prefix (`"membership:discovery:"`); algorithm `:12-23` (header comment); `:79-81` trailing-digits regex |
-| Identity normalization | `Services/Ai/Membership/IdentityNormalizationService.cs` | `:40` type; `:48` cache key prefix (`"membership:identity:"`); `:50` 10-min TTL; 6-path contract `:7-15` (header comment) |
+| Identity normalization | `Services/Ai/Membership/IdentityNormalizationService.cs` | `:43` type; `CacheResource` (`"membership-identity"`); 2-min `CacheTtl`, `CacheVersion` 2 (task 132); 6-path contract `:7-15` (header comment) |
 | Organization-lookup resolver | `Services/Ai/Membership/OrganizationMembershipResolver.cs` | `:53-54` type (dual-interface impl); `:57` `OrganizationEntityLogicalName`; failure-soft latch `:70` |
 | Options | `Services/Ai/Membership/MembershipOptions.cs` | binds `Membership:*` section |
 | DTOs | `Services/Ai/Membership/Models/MembershipResponse.cs` · `Models/PersonIdentity.cs` · `Models/MembershipDescriptor.cs` | camelCase JSON locked at type level |
@@ -627,7 +627,7 @@ All paths relative to `src/server/api/Sprk.Bff.Api/` unless noted. Every line ci
 | **Mapping `sprk_assignedlawfirm*` to `Contact`** | Wrong (was an error in design.md). They are Lookup → `sprk_organization` → `identityType="Organization"` per Q4. Handled by per-entity `FieldRoleOverrides`. |
 | **Synchronous wait on event publish** | Q2 forbids it. Mutation succeeds independent of publish (`_ = membershipEventPublisher.PublishAsync(...)`). Recon job is the backstop. |
 | **Reusing `ServiceBusJobProcessor` queue for membership events** | Forbidden (D3). Use the new topic `sprk-membership-changes` with subscription-per-consumer. |
-| **Flipping `CacheInvalidator:Enabled=true` without Redis** | The DI module guards this: real impl only wins when BOTH the flag AND `IConnectionMultiplexer` is registered (`MembershipModule.cs:180-186`). Null peer wins otherwise — flip is silently ineffective. |
+| **Flipping `CacheInvalidator:Enabled=true` without Redis** | The DI module selects the real impl on `Redis:Enabled` (task 132); with Redis off the Null peer wins and logs that every invalidation is inert. ⚠️ Before task 132 the gate was `Enabled` AND an already-registered `IConnectionMultiplexer` — never true, because `AddMembership` runs before `AddCacheModule`, so the flip was ineffective EVERYWHERE, Redis or not. |
 | **Asymmetric registration** | Forbidden per `bff-extensions.md` §F.1. All three kill-switched services use SYMMETRIC registration (exactly one impl always bound) so minimal-API endpoints unconditionally inject the interface. |
 
 ---

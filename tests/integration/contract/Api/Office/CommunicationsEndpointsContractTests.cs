@@ -129,14 +129,11 @@ public class CommunicationsEndpointsContractTests : IClassFixture<OfficeCommunic
     // GET /api/office/communications/by-message-id/{internetMessageId}/suggestions
     // (task 042 / FR-B2 — engine-predicted pre-selection for the add-in picker)
     //
-    // NOTE: the 200 happy path is intentionally NOT covered here. It runs the real
-    // engine evaluate path (CommunicationService.ReconstructEnvelopeAsync +
-    // IncomingAssociationResolver.EvaluateAsync — non-virtual singletons); mocking
-    // them to force a 200 would be a B7/B15 scaffolding antipattern (tests/CLAUDE.md).
-    // That evaluate path is already covered by the engine's own tests + the
-    // POST /api/communications/{id}/suggest-associations contract this endpoint reuses.
-    // The net-new behavior worth protecting here is auth + the message-id→404 fallback
-    // (the FR-B2 "email not captured → picker with no pre-selection" contract).
+    // The 200 path runs the REAL engine evaluate path (CommunicationService.ReconstructEnvelopeAsync +
+    // IncomingAssociationResolver.EvaluateAsync) — nothing in it is mocked. Task 161 drives it through the
+    // engine's own DI plug-in point instead: one deterministic IAssociationRung (ScriptedRung) whose matches are
+    // fixed, so the test can name which candidate the caller may read. That is a module boundary, not a mock of
+    // the engine, and it is what proves the payload carries no candidate the caller cannot read.
     // ────────────────────────────────────────────────────────────────────────
 
     [Fact]
@@ -174,6 +171,69 @@ public class CommunicationsEndpointsContractTests : IClassFixture<OfficeCommunic
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
         var payload = await response.Content.ReadFromJsonAsync<JsonElement>();
         payload.GetProperty("errorCode").GetString().Should().Be("OFFICE_COMM_NOT_FOUND");
+    }
+
+    [Fact]
+    public async Task GetSuggestions_ACandidateTheCallerCannotRead_IsAbsentEverywhere_ReadableOnesKeepNamesAndFiling()
+    {
+        // unified-access-control-r2 task 161 — task 127's criterion ("no candidate the caller cannot read — neither
+        // name nor id") was not met: the route dropped the NAME of an unreadable candidate but returned its id,
+        // entity, confidence and provenance. It now shares SuggestionCandidateAccess with the suggest route.
+        var messageId = "<trim-161@contoso.com>";
+        var communicationId = Guid.NewGuid();
+        var readable = Guid.NewGuid();
+        var hidden = Guid.NewGuid();
+        _factory.Rung.Reset();
+        _factory.SetupUserQuery(
+            Uri.EscapeDataString(messageId),
+            "{\"value\":[{\"sprk_communicationid\":\"" + communicationId + "\",\"sprk_subject\":\"Re: Acme\"}]}");
+        _factory.EntityServiceMock
+            .Setup(s => s.RetrieveAsync("sprk_communication", communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_communication", communicationId)
+            {
+                ["sprk_subject"] = "Re: Acme",
+                ["sprk_from"] = "client@outside.com",
+                ["sprk_to"] = "caller@contoso.com",
+            });
+        foreach (var target in new[] { readable, hidden })
+        {
+            _factory.Rung.Matches.Add(new Sprk.Bff.Api.Services.Communication.Engine.RungMatch
+            {
+                Rung = Sprk.Bff.Api.Services.Communication.Engine.RungKind.ExplicitReference,
+                RegardingFieldName = "sprk_regardingmatter",
+                Target = new EntityReference("sprk_matter", target),
+                Confidence = 0.95,
+                Provenance = $"explicit reference to matter {target}",
+            });
+        }
+        _factory.Rung.Matches.Add(new Sprk.Bff.Api.Services.Communication.Engine.RungMatch
+        {
+            Rung = Sprk.Bff.Api.Services.Communication.Engine.RungKind.ExplicitReference,
+            Category = "deadline",
+            Confidence = 0.6,
+            Provenance = $"deadline clause linked to {hidden}",
+        });
+        _factory.SetupUserQuery($"sprk_matters({readable})", "{\"sprk_mattername\":\"Acme v Widgets\"}");
+        _factory.UserClientMock
+            .Setup(c => c.GetAsync(It.Is<string>(p => p.Contains($"sprk_matters({hidden})")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Fail(403, DataverseUserClientErrorCodes.AccessDenied, "denied"));
+
+        var response = await _client.GetAsync(
+            $"/api/office/communications/by-message-id/{Uri.EscapeDataString(messageId)}/suggestions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var text = await response.Content.ReadAsStringAsync();
+        text.Should().NotContain(hidden.ToString(), "neither the candidate, its name, its filing verdict nor a signal naming it");
+        var payload = JsonDocument.Parse(text).RootElement;
+        var suggestions = payload.GetProperty("suggestions");
+        suggestions.GetProperty("candidates").EnumerateArray()
+            .Should().ContainSingle().Which.GetProperty("targetId").GetString().Should().Be(readable.ToString());
+        suggestions.GetProperty("status").GetString().Should().Be("Resolved",
+            "decided without the hidden record — with both, the engine would answer Ambiguous");
+        payload.GetProperty("names").GetProperty(readable.ToString()).GetString().Should().Be("Acme v Widgets");
+        payload.GetProperty("filingAccess").TryGetProperty(readable.ToString(), out _).Should().BeTrue(
+            "a readable, named candidate still carries its filing verdict (task 084)");
+        _factory.Rung.Reset();
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -283,6 +343,12 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
     /// </para>
     /// </summary>
     public Mock<IDataverseUserClient> UserClientMock { get; } = new();
+
+    /// <summary>
+    /// Task 161: the Association Engine's DI plug-in point, replaced by ONE deterministic rung so a test can name the
+    /// candidates the engine proposes. Empty by default — the engine then proposes nothing.
+    /// </summary>
+    public Sprk.Bff.Api.Tests.Api.Communication.ScriptedRung Rung { get; } = new();
 
     /// <summary>
     /// Default for any delegated GET a test has not programmed: an empty, SUCCESSFUL page.
@@ -448,6 +514,9 @@ public sealed class OfficeCommunicationsTestWebAppFactory : WebApplicationFactor
             // typed HttpClient and every read fails closed against no Dataverse.
             services.RemoveAll<IDataverseUserClient>();
             services.AddSingleton(UserClientMock.Object);
+
+            services.RemoveAll<Sprk.Bff.Api.Services.Communication.Engine.IAssociationRung>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Communication.Engine.IAssociationRung>(Rung);
 
             // Replace IDataverseService to avoid real Dataverse boot. This mirrors the
             // shape used by OfficeTestWebAppFactory.

@@ -27,6 +27,10 @@ namespace Sprk.Bff.Api.Api.Filters;
 /// <para>Now a route supplies either a fixed (route key, entity set, operation) or a resolver that reads the
 /// SAME source its handler binds and returns the full list of checks. There is no fallback: a route whose
 /// declaration yields no check is denied.</para>
+/// <para><b>Not finance-only.</b> It is the one filter that authorizes several BODY-declared ids per route, so
+/// the analysis routes (task 162) reuse it rather than adding another filter (CLAUDE.md §11).
+/// (<c>POST /api/ai/document-intelligence/associate-record</c>, its first non-finance user under task 146 r1, was deleted
+/// by task 164.)</para>
 /// </remarks>
 public static class FinanceAuthorizationFilterExtensions
 {
@@ -249,11 +253,10 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     public const string NoTargetReasonCode = "sdap.access.deny.no_target";
 
     /// <summary>
-    /// The ONE reasonCode of the uniform 404. Deliberately the same for an absent record and for an
-    /// unreadable one; distinguishing them in any channel would confirm the existence of records the caller
-    /// cannot see.
+    /// The ONE reasonCode of the uniform 404 — forwards to <see cref="ProblemDetailsHelper.RecordUnavailableReasonCode"/>
+    /// (moved there by task 159 so the events surface shares it; value unchanged).
     /// </summary>
-    public const string RecordUnavailableReasonCode = "sdap.access.deny.record_unavailable";
+    public const string RecordUnavailableReasonCode = ProblemDetailsHelper.RecordUnavailableReasonCode;
 
     private readonly AuthorizationService _authorizationService;
     private readonly Func<EndpointFilterInvocationContext, FinanceAuthorizationTargets> _resolveTargets;
@@ -276,18 +279,10 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     /// The uniform "not found" response shared by the recalculate filter denial AND the recalculate handlers'
     /// <see cref="KeyNotFoundException"/> branch, so the three cases (absent, unreadable, deleted between check
     /// and compute) are byte-identical apart from the correlation id. It never contains the requested id.
+    /// Forwards to <see cref="ProblemDetailsHelper.UniformRecordNotFound"/> (moved there by task 159, bytes unchanged).
     /// </summary>
     public static IResult UniformRecordNotFound(HttpContext httpContext) =>
-        Results.Problem(
-            title: "Not Found",
-            detail: "The requested record was not found.",
-            statusCode: StatusCodes.Status404NotFound,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-            extensions: new Dictionary<string, object?>
-            {
-                ["reasonCode"] = RecordUnavailableReasonCode,
-                ["correlationId"] = httpContext.TraceIdentifier,
-            });
+        ProblemDetailsHelper.UniformRecordNotFound(httpContext);
 
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {

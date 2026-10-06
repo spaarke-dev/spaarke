@@ -3,6 +3,17 @@
 > **Date**: 2026-07-05 · **Task**: 012 (STANDARD rigor, read-only) · **Gate material for**: task 014 (G-P0)
 > **Scope**: every path from AI code (`Services/Ai/Handlers/**`, `Services/Ai/Chat/Tools/**`, `Services/Ai/LinearConsumers/**`, AI services on the request path) to a Dataverse client, classified user-OBO / user-delegated / app-only / no-Dataverse, with file:line evidence.
 > All paths relative to `src/server/api/Sprk.Bff.Api/` unless prefixed. NFR-07: identifiers and code locations only — no tokens, no record content.
+>
+> **Amended 2026-10-02 (spec "Amendment A-UAC146", CLAUDE.md §6.5 path B, owner round 7 item 3):** `dataverse.create_record`
+> and `email.draft` now CREATE app-only after an as-the-caller rights check (the G5 pattern), owned by the team
+> `IRecordOwnershipResolver` names, so this audit's "user-OBO" classification of those two creates is superseded by
+> design. Reads and deletes are unchanged, and an update's PATCH still runs as the caller. One update step is no longer
+> user-OBO: when `dataverse.update_record` re-files a CHILD row (a lookup set or cleared onto a project, matter, work
+> assignment or other ownership parent), `RecordOwnershipResolver.ReparentAsync` reads app-only, assigns the owner
+> app-only, and on a failed assignment restores the filing app-only. **Amended again 2026-10-03 (owner round 13 item 7):**
+> that step is folded into the same path-B amendment ("as round 8 did for 156's re-stamp"); task 146's path-A record (task
+> note §12c) is superseded for it. Record: `projects/unified-access-control-r2/notes/task-146-server-child-writers.md` §12c,
+> §13, §14, §17.
 
 ---
 
@@ -36,10 +47,17 @@ All six inject **only** `IDataverseUserClient` + `ILogger` (no second Dataverse 
 | `dataverse.read_query` | `Handlers/DataverseReadQueryHandler.cs` | user-OBO | ctor `:44-46` → same | **PASS** |
 | `dataverse.search_data` | `Handlers/DataverseSearchDataHandler.cs` | user-OBO | ctor `:51-53` → same | **PASS** |
 | `dataverse.create_record` | `Handlers/DataverseCreateRecordHandler.cs` | user-OBO | ctor `:51-53` → same | **PASS** |
-| `dataverse.update_record` | `Handlers/DataverseUpdateRecordHandler.cs` | user-OBO | ctor `:51-53` → same (`If-Match: *` update-only, `DataverseUserClient.cs:207-211`) | **PASS** |
+| `dataverse.update_record` | `Handlers/DataverseUpdateRecordHandler.cs` | user-OBO (the caller's PATCH); one app-only step since 2026-10-03, see the amendment below | ctor `:51-53` → same (`If-Match: *` update-only, `DataverseUserClient.cs:207-211`) | **PASS** (amended 2026-10-03) |
 | `dataverse.delete_record` | `Handlers/DataverseDeleteRecordHandler.cs` | user-OBO | ctor `:49-51` → same | **PASS** |
 
 Helpers in `Handlers/Dataverse/` (`DataverseSqlQueryTranslator`, `DataverseWriteItemMapper`, `DataverseRecordCitations`, `DataverseToolNames`) hold no Dataverse client — pure translation/mapping. **No fallback path exists**: `DataverseUserClient` contains no `TokenCredential`, `DefaultAzureCredential`, or client-credentials flow (verified by read of the full file), and missing config/user context fails closed (`:100-106`, `:142-172`).
+
+> **Amended 2026-10-03 (spec "Amendment A-UAC156", CLAUDE.md §6.5 path B, unified-access-control-r2 owner decisions
+> round 8 item 1).** `dataverse.update_record` is no longer user-OBO end to end. Its PATCH still runs as the caller.
+> After that PATCH succeeds, `Services/Dataverse/CoreAncestorAfterWriteRestamp.cs` re-stamps APP-ONLY the core-ancestor
+> copies the write moved, in the same operation. It writes stamp columns only, with values derived from the data. So this
+> section's "inject only `IDataverseUserClient` + `ILogger`" no longer holds for this handler, by design. Record:
+> `projects/unified-access-control-r2/notes/task-156-stamp-freshness.md`, "Owner round 8".
 
 ### 3B. All other tool handlers in `Services/Ai/Handlers/**` (audit item 2)
 

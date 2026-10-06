@@ -18,10 +18,12 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// <para>
 /// The tab WRITE path (upsert / pin / close) was retired by AIR2-075 together with the
 /// orphaned Get/Update/Close Workspace Tab chat tools and the SendWorkspaceArtifact legacy
-/// artifact variants. This service now exposes the read path only — consumed by
-/// <c>GET /api/workspace/state</c> restore and the <c>SprkChatAgentFactory</c> workspace-state
-/// system-prompt block. Any durable rows returned are pre-existing (pinned) tabs; nothing in
-/// the BFF writes new tab state.
+/// artifact variants. This service now exposes the read path only — consumed by the
+/// <c>SprkChatAgentFactory</c> workspace-state system-prompt block and the assistant suggestion
+/// service. (<c>GET /api/workspace/state</c>, which
+/// read it for ANY session id with no owner check and had no client, was deleted by
+/// unified-access-control-r2 task 166.) Any durable rows returned are pre-existing (pinned) tabs;
+/// nothing in the BFF writes new tab state.
 /// </para>
 ///
 /// <para>

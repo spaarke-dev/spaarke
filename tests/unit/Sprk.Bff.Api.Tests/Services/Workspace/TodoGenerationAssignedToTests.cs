@@ -37,6 +37,7 @@ public class TodoGenerationAssignedToTests
     private readonly Mock<ICommunicationDataverseService> _comm = new(MockBehavior.Loose);
     private readonly CapturingLogger<TodoGenerationService> _logger = new();
     private readonly List<Entity> _created = new();
+    private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _ownership = new();
 
     public TodoGenerationAssignedToTests()
     {
@@ -48,7 +49,7 @@ public class TodoGenerationAssignedToTests
         _dataverse.Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_todo"), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
         _events.Setup(e => e.QueryEventsAsync(
-                It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
+                It.IsAny<int?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<int?>(), It.IsAny<int?>(),
                 It.IsAny<DateTime?>(), It.IsAny<DateTime?>(), It.IsAny<int>(), It.IsAny<int>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Array.Empty<EventEntity>(), 0));
     }
@@ -59,6 +60,9 @@ public class TodoGenerationAssignedToTests
         services.AddSingleton(_dataverse.Object);
         services.AddSingleton(_events.Object);
         services.AddSingleton(_comm.Object);
+        // Task 146 (merged after 152): every generated to-do's OWNER comes from the one resolver; the double owns it by
+        // a fixed team so these tests stay about the person it is FOR (sprk_assignedto).
+        services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(_ownership);
         var svc = new TodoGenerationService(
             services.BuildServiceProvider(),
             _logger,
@@ -72,6 +76,7 @@ public class TodoGenerationAssignedToTests
             _comm.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<TodoRegardingBuilder>>()));
+        svc.SetOwnershipResolverForTest(_ownership);
         return svc;
     }
 
@@ -129,8 +134,11 @@ public class TodoGenerationAssignedToTests
 
         var todo = _created.Single();
         todo.Contains("sprk_assignedto").Should().BeFalse();
-        todo.Attributes.Values.OfType<EntityReference>().Should().NotContain(r => r.LogicalName == "team",
-            "a team is never named as the person a to-do is for");
+        todo.Attributes.Where(a => a.Key != "ownerid").Select(a => a.Value).OfType<EntityReference>()
+            .Should().NotContain(r => r.LogicalName == "team", "a team is never named as the person a to-do is for");
+        todo.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(
+            Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId,
+            "the OWNER is the record's team (task 146) — a different column from the person it is for");
         _logger.Entries.Should().Contain(e => e.Level == LogLevel.Warning && e.Message.Contains("todo_unassigned"));
         _dataverse.Verify(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "contact"), It.IsAny<CancellationToken>()),
             Times.Never, "no email/name lookup of a contact");

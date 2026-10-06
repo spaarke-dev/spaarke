@@ -80,6 +80,30 @@ because it converts an unknown into a gate signature on a merge.
 
 Performed by a Dataverse System Administrator.
 
+### The variant in use: an EXISTING non-admin test user (owner directive, task 034 amendment 2)
+
+Do **not** create a new systemuser, do **not** move a user between business units and do **not** build a
+dedicated canary role for this. Point the canary at an existing, enabled, non-admin test user who sits in
+a child business unit, and derive the expected set (Test 2) **independently of the impersonated read**:
+
+1. Confirm the user holds **no Organization-depth Read on `sprk_matter`**, directly or through a team
+   (the 2026-09-09 hazard: a root-BU default team carrying System Administrator makes both reads equal —
+   a confident false pass). Record the user's roles and their `prvReadsprk_matter` depth masks.
+2. Confirm hierarchy security is off (`organization.ishierarchicalsecuritymodelenabled = false`) or account
+   for it.
+3. Derive `SPAARKE_CANARY_SEEDED_MATTER_IDS` app-only from what that depth grants: for **Deep** (4), the
+   matters whose `owningbusinessunit` is the user's business unit or a descendant; for Local (2) the
+   user's own business unit only; for Basic (1) the matters the user owns — **plus** any
+   `principalobjectaccess` rows (Read bit) for the user and each of their teams. Never copy the
+   impersonated result into the expected set: that makes Test 2 a tautology and is a failed gate.
+4. Confirm the org holds strictly more matters than the expected set, or "strictly fewer" is unsatisfiable.
+5. The BFF's Dataverse application users must hold `prvActOnBehalfOfAnotherUser` (System Administrator
+   carries it at Global depth); never grant it to a Spaarke role as a workaround.
+
+The dedicated-role recipe below remains valid for an environment that has no suitable existing user.
+
+### The dedicated-role recipe (alternative)
+
 1. **Create a custom security role** — suggested name `Spaarke Impersonation Canary`. Its **only**
    privilege is **User-level (basic) Read on `sprk_matter`**. No Business Unit / Parent-Child /
    Organization depth on anything, and no privileges on any other entity. The role is what makes the
@@ -104,6 +128,10 @@ export SPAARKE_CANARY_SYSTEMUSERID="<canary systemuserid GUID>"
 export SPAARKE_CANARY_SEEDED_MATTER_IDS="<guid>,<guid>,<guid>"   # the K seeded matters
 # export SPAARKE_CANARY_MI_CLIENT_ID="<user-assigned MI client id>"  # optional
 export SPAARKE_CANARY_REQUIRED=true      # makes missing provisioning a FAILURE, not a non-run
+export AZURE_TOKEN_CREDENTIALS=AzureCliCredential   # REQUIRED: the test assembly otherwise restricts the
+                                                    # credential chain to EnvironmentCredential (TestOutboundNetworkGuard,
+                                                    # Layer 1) and every live test fails with CredentialUnavailableException
+export SPAARKE_TESTS_ALLOW_OUTBOUND=1               # lifts the test host's outbound-HTTP block (Layer 2)
 
 az login   # the ambient credential must map to the BFF Dataverse application user
 
@@ -135,22 +163,21 @@ files would have blinded the gate to the one file a deployment actually renders.
 **Net effect**: task 036 cannot ship the impersonated root-set path enabled-by-default without the
 canary being provisioned and run. That is the mechanical half of "034 is a blocking merge gate for 036".
 
-## ⚠️ What is NOT yet wired (open decision — task 034 escalation)
+## The live layer is a MANUAL gate (decided — task 034 amendment 1)
 
-**No pipeline in this repo can reach Dataverse.** `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml` and
-`nightly-health.yml` hold no environment credential, no canary identity, and no seeded org. So the LIVE
-canary (Tests 1–4) runs **only when an operator runs it**, and the automated gate is limited to the
-perturbation layer plus the config tripwire.
+**No Dataverse test runs in CI** (owner, 2026-09-10; a standing directive since 2026-09-30). Neither a
+scheduled canary with a federated credential nor Dataverse secrets in CI is built. The gate has two halves:
 
-Two options, neither of which task 034 may choose unilaterally:
+- **Mechanical, in CI (blocking):** the perturbation layer and the config tripwire above. The FR-20 flag
+  cannot be enabled in checked-in configuration.
+- **Manual, before task 036 merges and before every FR-20 rollout:** an operator runs the four live tests
+  with `SPAARKE_CANARY_REQUIRED=true` (and the two variables above), and the run is recorded — both set
+  sizes, the canary user's roles, and how the expected set was derived — in
+  `projects/unified-access-control-r2/notes/task-034-negative-canary.md`. All four must PASS; a NOT RUN is
+  not a pass, and equal sets (INERT) are a failed gate.
 
-- **(A) Scheduled canary + required manual gate.** Add a `nightly-health.yml` job with federated
-  credentials to the dev environment; the FR-20 rollout checklist requires a green canary run recorded
-  in the PR. Cost: one federated credential and a canary identity per environment.
-- **(B) Provision Dataverse secrets into CI.** Full blocking check on every PR. Cost: a standing
-  Dataverse credential in GitHub Actions — a materially larger blast radius than (A), on a repo whose
-  auth-v4 work has been *removing* standing secrets.
+**One-time inversion check:** point `SPAARKE_CANARY_SYSTEMUSERID` at an admin user. Tests 1 and 4 must FAIL
+with "IMPERSONATION IS INERT". If they pass, the canary cannot see the failure it exists to catch.
 
-Until one is chosen, the FR-20 flag must stay `false` in checked-in configuration (which the tripwire
-enforces) and every rollout must cite an operator-run canary. Recorded in
-`projects/unified-access-control-r2/notes/task-034-negative-canary.md`.
+First manual run: 2026-10-03, dev, canary `uac.child.user@demo.spaarke.com` — all four PASS, impersonated
+59 vs app-only 61; inversion check FAILED as designed (61 = 61, INERT).

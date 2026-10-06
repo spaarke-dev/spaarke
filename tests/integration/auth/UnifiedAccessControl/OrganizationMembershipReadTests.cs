@@ -496,30 +496,44 @@ public class OrganizationMembershipReadTests
     }
 
     /// <summary>
-    /// A caller who abandons the request mid-junction-read loses only the org-grant term — never the
-    /// direct grants beside it.
+    /// A caller who abandons the request mid-junction-read gets the cancellation back — not a grant set — and
+    /// nothing is cached, so the contact's direct grants are not lost beyond the abandoned request.
     /// </summary>
     /// <remarks>
-    /// Pins a regression this task would otherwise have introduced (its code-review finding W3). The
-    /// junction query also runs INSIDE the grant-set read, whose catch-all turns any escaping exception into
-    /// an EMPTY grant set — direct grants included — that is then cached. So the query reports the caller's
-    /// cancellation as an unreadable read rather than rethrowing it; only the evaluator's entry rethrows.
+    /// <para>Task 109's code-review finding W3 pinned the OPPOSITE here ("keeps the direct grants"): the grant-set
+    /// read's catch-all used to turn any escaping exception into an EMPTY grant set that was then cached, so the
+    /// junction query reported the caller's cancellation as Failed instead of rethrowing it. Task 132 (C12) made that
+    /// catch rethrow the caller's cancellation and stopped any faulted set from being cached, which removed W3's
+    /// premise — and left a window where a client abort during the junction read RETURNED a faulted set instead of
+    /// propagating (task 132 criterion 3; verifier round r1). The query now rethrows.</para>
+    /// <para>W3's real concern — a client abort must never cache "no access at all" — is what the last two assertions
+    /// keep: no entry is written, and the next request reads the direct grants. The cancel is fired only once the
+    /// junction request is in flight (no timer), so the window under test is exactly the junction read.</para>
     /// </remarks>
     [Fact]
-    public async Task GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_KeepsTheDirectGrants()
+    public async Task GetGrantSetAsync_CallerCancelsDuringTheJunctionRead_PropagatesTheCancellation_AndCachesNothing()
     {
         await using var dataverse = await FakeDataverse.StartAsync();
         SeedWorld(dataverse);
         dataverse.JunctionHangs = true;
-        var participations = RealParticipationService(dataverse);
+        var cache = RealCache();
+        var participations = RealParticipationService(dataverse, cache: cache);
+        using var abandoned = new CancellationTokenSource();
 
-        using var abandoned = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
-        var grants = await participations.GetGrantSetAsync(ContactId, abandoned.Token);
+        var call = participations.GetGrantSetAsync(ContactId, abandoned.Token);
+        await dataverse.JunctionRequestSeen.Task; // the junction read is in flight — the grant query already answered
+        abandoned.Cancel();
 
-        grants.Projects.Select(p => p.ProjectId).Should().Contain(DirectProject,
-            "a cancelled membership read must cost the org-grant term only, not the contact's own grants");
-        grants.Projects.Select(p => p.ProjectId).Should().NotContain(CurrentOrgProject,
-            "and the org-grant term contributes nothing — the read was not completed");
+        await call.Invoking(async c => await c).Should().ThrowAsync<OperationCanceledException>(
+            "a client abort is the caller's cancellation — not a grant set, faulted or otherwise");
+        (await cache.GetStringAsync(RequestTenant, ExternalParticipationService.ExternalAccessResource,
+                ContactId.ToString(), ExternalParticipationService.CacheVersion))
+            .Should().BeNull("an abandoned read is never stored as the contact's grant set");
+
+        dataverse.JunctionHangs = false;
+        var next = await participations.GetGrantSetAsync(ContactId, CancellationToken.None);
+        next.Projects.Select(p => p.ProjectId).Should().Contain(DirectProject,
+            "the contact's direct grants are lost to the abandoned request only — the next request reads them");
     }
 
     /// <summary>
@@ -571,6 +585,378 @@ public class OrganizationMembershipReadTests
         denyList.SubjectOrganizationsSeen.Should().BeEquivalentTo(
             new[] { OrgCurrent, OrgEnded, OrgNotStarted, OrgInactive },
             "the veto reads the WALL set from the same response");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Task 137 (#1060, defect C5) — over the same real transport
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    public static TheoryData<string> BothContactPlanes => new() { "ciam", "workforce" };
+
+    /// <summary>
+    /// Task 137 verifies task 109 on BOTH contact planes (#1006 read half, #999, D-10): through the real read, the
+    /// CIAM principal and the workforce contact-only composition hold exactly the direct grant and the org grant of
+    /// the CURRENT membership of an ACTIVE organization — never the ended, the not-yet-started or the
+    /// inactive-organization one, nor a contact grant carrying an inactive firm.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task Task109Guards_OnBothPlanes_ConferOnlyThroughCurrentMembershipsOfActiveOrganizations(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+
+        var projects = await world.ProjectIdsAsync(plane);
+
+        projects.Should().BeEquivalentTo(new[] { DirectProject, CurrentOrgProject },
+            $"{plane}: ended (#999 / D-2), not-yet-started (D-10) and inactive-organization (#1006) memberships confer " +
+            "no org grant, and a contact grant whose firm is inactive confers nothing");
+    }
+
+    /// <summary>
+    /// Task 137 verifies task 109's other half on the CIAM plane: the ethical wall's ORGANIZATION axis keeps binding a
+    /// FORMER member (ended, not yet started, inactive organization) — the wall set is statecode-only.
+    /// </summary>
+    [Theory]
+    [InlineData("ended")]
+    [InlineData("not-yet-started")]
+    [InlineData("inactive-organization")]
+    public async Task Task109Guards_OnTheCiamPlane_TheOrgKeyedWallStillBindsAFormerMember(string membership)
+    {
+        var wallOrg = membership switch { "ended" => OrgEnded, "not-yet-started" => OrgNotStarted, _ => OrgInactive };
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse, new OrgKeyedDenyList((wallOrg, DirectProject)));
+
+        var projects = await world.ProjectIdsAsync("ciam");
+
+        projects.Should().NotContain(DirectProject, $"CIAM: a {membership} membership is still a wall subject");
+        projects.Should().Contain(CurrentOrgProject, "records the wall does not name are unaffected");
+    }
+
+    /// <summary>
+    /// C5: a contact deactivated AFTER sign-in loses every contact-sourced record on its NEXT request — on both planes —
+    /// while the grant cache is WARM (the second request reads no grant row) and the identity layer still says
+    /// "active" (the CIAM identity store keeps the contact active; the workforce principal is pre-resolved, as a warm
+    /// 10-minute identity cache would hand it over). Only the live contact-state read changed.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task InactiveContact_AfterSignIn_LosesEveryRecordOnTheNextRequest_WithWarmCaches(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse, cache: RealCache());
+
+        var before = await world.ProjectIdsAsync(plane);
+        before.Should().BeEquivalentTo(new[] { DirectProject, CurrentOrgProject }, "control: the active contact's access");
+        var grantReads = GrantReads(dataverse);
+
+        dataverse.ContactStateCode = 1; // deactivated in Dataverse — nothing else changes
+
+        var after = await world.ProjectIdsAsync(plane);
+
+        after.Should().BeEmpty($"{plane}: an inactive contact confers nothing through any contact-sourced term");
+        GrantReads(dataverse).Should().Be(grantReads,
+            "the grant set came from the WARM cache — the live state read, not a cache expiry, removed the access");
+        dataverse.Requests.Count(r => r.Collection.StartsWith("contacts(", StringComparison.Ordinal)).Should().Be(2,
+            "the contact's state is read live once per request, never cached across requests");
+    }
+
+    /// <summary>C5, fail closed: a contact-state read that faults confers nothing on either plane (the control is healthy).</summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task ContactStateReadFaults_ConfersNothing(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+        (await world.ProjectIdsAsync(plane)).Should().NotBeEmpty("control: a readable active contact keeps its access");
+
+        dataverse.ContactStateFault = HttpStatusCode.InternalServerError;
+
+        (await world.ProjectIdsAsync(plane)).Should().BeEmpty($"{plane}: an unreadable contact state is not Active");
+    }
+
+    /// <summary>
+    /// C5, fail closed (ADR-003 constraint "a missing row is treated as INACTIVE"): a contact-state read that answers
+    /// 404 — the contact row is gone — confers nothing on either plane. The twin of
+    /// <see cref="ContactStateReadFaults_ConfersNothing"/>: 404 has its own branch in the production read, so a regression
+    /// that maps it to Active would otherwise go unnoticed (task 137 r3, verifier finding 1).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task ContactStateReadAnswers404_TheMissingRowConfersNothing(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+        (await world.ProjectIdsAsync(plane)).Should().NotBeEmpty("control: a readable active contact keeps its access");
+
+        dataverse.ContactStateFault = HttpStatusCode.NotFound;
+
+        (await world.ProjectIdsAsync(plane)).Should().BeEmpty($"{plane}: a missing contact row is not Active");
+        dataverse.Requests.Count(r => r.Collection.StartsWith("contacts(", StringComparison.Ordinal)).Should().Be(2,
+            "the 404 came from the live contact-state read itself, once per request");
+    }
+
+    /// <summary>
+    /// C5: an INACTIVE root confers nothing to a contact on either plane — the state rides the existing batched flag
+    /// read — and reactivating it restores the access with no other change (a read-time rule, not a grant write).
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(BothContactPlanes))]
+    public async Task InactiveProject_ConfersNothing_AndReactivationRestoresIt(string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+
+        dataverse.InactiveProjects.Add(DirectProject);
+        var inactive = await world.ProjectIdsAsync(plane);
+
+        inactive.Should().NotContain(DirectProject, $"{plane}: an active grant on an inactive project confers nothing");
+        inactive.Should().Contain(CurrentOrgProject, "only the inactive root is affected");
+        dataverse.Requests.Where(r => r.Collection == "sprk_projects" && r.Select.Contains("sprk_issecure")).Should().NotBeEmpty().And.OnlyContain(
+            r => r.Select.Split(',', StringSplitOptions.None).Contains("statecode"),
+            "the root's state is selected by the SAME batched flag read");
+
+        dataverse.InactiveProjects.Clear();
+        (await world.ProjectIdsAsync(plane)).Should().Contain(DirectProject, "reactivation restores access — no data repair");
+    }
+
+    // ── Task 150 (round 26 item 2(a)): an EMPTY sprk_issecure over the REAL flag read ─────────────────
+    //
+    // EmptySecureFlagFailsClosedTests pins the row mapping (FlagsFrom). These pin the WIRE PATH: the production
+    // GetRootRecordFlagsAsync deserializing a row whose field-secured flag the BFF identity could not read, whichever
+    // shape Dataverse sends it in, and the read-time evaluator acting on the answer. A call site that defaulted the
+    // flag before the mapping (`row.sprk_issecure ?? false`) passes every mapping test and fails these.
+
+    public static TheoryData<string> EmptySecureFlagShapes => new() { "omitted", "null" };
+
+    public static TheoryData<string, string> EmptySecureFlagShapesOnBothPlanes => new()
+    {
+        { "omitted", "ciam" },
+        { "omitted", "workforce" },
+        { "null", "ciam" },
+        { "null", "workforce" },
+    };
+
+    private static EmptyFlagShape ShapeOf(string shape)
+        => shape == "omitted" ? EmptyFlagShape.Omitted : EmptyFlagShape.Null;
+
+    [Theory]
+    [MemberData(nameof(EmptySecureFlagShapes))]
+    public async Task GetRootRecordFlagsAsync_TheRealReadOfAnEmptySecureFlag_IsUnreadable(string shape)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        dataverse.EmptySecureFlags[DirectProject] = ShapeOf(shape);
+        var participations = RealParticipationService(dataverse);
+
+        var flags = await participations.GetRootRecordFlagsAsync(
+            AccessibleRecordSetService.ProjectEntity, new[] { DirectProject, CurrentOrgProject }, CancellationToken.None);
+
+        flags[DirectProject].Should().Be(RootRecordFlags.Unreadable,
+            $"a flag {shape} on the wire is a masked value, and unknown is the fail-closed answer (round 17 item 3)");
+        flags[CurrentOrgProject].IsUnreadable.Should().BeFalse("control: a row whose flag reads false is mapped as stored");
+        flags[CurrentOrgProject].IsSecure.Should().BeFalse();
+
+        var flagRead = dataverse.Requests.Single(r => r.Collection == "sprk_projects");
+        flagRead.Select.Split(',').Should().Contain("sprk_issecure", "the flag was asked for — it came back empty");
+    }
+
+    [Theory]
+    [MemberData(nameof(EmptySecureFlagShapesOnBothPlanes))]
+    public async Task ComposeAsync_ARecordWhoseSecureFlagReadsEmptyOnTheWire_IsSuppressed(string shape, string plane)
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        SeedWorld(dataverse);
+        var world = new RequestScopedWorld(dataverse);
+        (await world.ProjectIdsAsync(plane)).Should().Contain(DirectProject,
+            "control: with its flag readable the directly granted project is accessible");
+
+        dataverse.EmptySecureFlags[DirectProject] = ShapeOf(shape);
+        var masked = await world.ProjectIdsAsync(plane);
+
+        masked.Should().NotContain(DirectProject,
+            $"{plane}: an empty flag is Unreadable — every contact-sourced right on the record is removed");
+        masked.Should().Contain(CurrentOrgProject, "only the record whose flag came back empty is affected");
+    }
+
+    // ── Task 137 r2: the PRODUCTION organization-member page read, over the transport ─────────────────
+
+    private static readonly Guid FanOutOrg = Guid.Parse("0f000000-0000-0000-0000-000000000137");
+    private static readonly Guid OtherOrg = Guid.Parse("0f000000-0000-0000-0000-000000000138");
+    private const string RequestTenant = "11111111-2222-3333-4444-555555555555";
+
+    /// <summary>
+    /// Task 137 r2 (verifier finding 1): the ONE invalidation routine's organization fan-out, through the REAL
+    /// <c>ReadOrganizationMemberPageAsync</c> — every other fan-out test substitutes that read. An organization of
+    /// 1,203 active members is three server pages of 500: the request asks for 500 a page (<c>Prefer</c>), sends
+    /// exactly <see cref="ExternalOrganizationMembership.ActiveMembersFilter"/> on every page, follows the server's
+    /// opaque <c>@odata.nextLink</c> verbatim, and every member's cached grant set is removed — nobody else's.
+    /// </summary>
+    /// <remarks>
+    /// A defect in this read is otherwise invisible: the routine catches it, logs a warning and lets the members
+    /// fall back to the 60-second TTL, so a broken read and a working one look the same to every write endpoint.
+    /// The fake server honours <c>odata.maxpagesize</c> as Dataverse does (absent, it answers one page of up to
+    /// 5,000), and its skip tokens are unguessable, so the page count and the tokens are the client's own doing.
+    /// </remarks>
+    [Fact]
+    public async Task OrgFanOut_TheRealMemberPageRead_PagesTheActiveMembersFilterToTheEnd_AndInvalidatesEveryMember()
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        var members = Enumerable.Range(1, 1203).Select(i => new Guid($"c0000000-0000-0000-0000-{i:D12}")).ToArray();
+        var otherMember = Guid.Parse("c0000000-0000-0000-ffff-000000000001");
+        dataverse.OrganizationMembers[FanOutOrg] = members;
+        dataverse.OrganizationMembers[OtherOrg] = new[] { otherMember };
+
+        var cache = RealCache();
+        foreach (var contact in members.Append(otherMember))
+        {
+            await SeedGrantSetAsync(cache, contact);
+        }
+
+        var sut = RealParticipationService(dataverse, cache: cache);
+
+        var result = await sut.InvalidateGrantSetsAsync(Array.Empty<Guid>(), new[] { FanOutOrg }, CancellationToken.None);
+
+        result.OrganizationsNotFullyExpanded.Should().BeEmpty("all three pages were read");
+        result.ContactCount.Should().Be(members.Length);
+        result.RemovalsSucceeded.Should().Be(members.Length, "one tenant (the request's tid) × every member");
+        result.RemovalsFailed.Should().Be(0);
+
+        foreach (var contact in members)
+        {
+            (await CachedGrantSetAsync(cache, contact)).Should().BeNull($"member {contact} of the organization is invalidated");
+        }
+
+        (await CachedGrantSetAsync(cache, otherMember)).Should().NotBeNull("another organization's member is untouched");
+
+        var reads = MemberPageReads(dataverse);
+        reads.Should().HaveCount(3, "1,203 members at 500 a page — the client asked for 500 and followed every nextLink");
+        reads.Should().OnlyContain(
+            r => r.Filter == ExternalOrganizationMembership.ActiveMembersFilter(FanOutOrg),
+            "every page — the first and each nextLink — carries exactly the shared ACTIVE-members $filter");
+        reads.Should().OnlyContain(r => r.Select == ExternalOrganizationMembership.MemberSelect);
+        reads.Should().OnlyContain(r => r.Prefer == $"odata.maxpagesize={ExternalParticipationService.OrganizationMemberPageSize}");
+        reads.Select(r => r.SkipToken).Should().Equal(
+            new[] { "" }.Concat(dataverse.IssuedSkipTokens),
+            "page one is the built query; every later page is the server's own @odata.nextLink, sent back verbatim");
+    }
+
+    /// <summary>
+    /// Task 137 r2: a member page the server FAILS is a fault, never an empty page — the organization is reported as
+    /// not fully expanded, the members already read are invalidated, the rest keep their entry (to the TTL) and the
+    /// routine does not throw. Over the real read, so <c>EnsureSuccessStatusCode</c> is what decides it.
+    /// </summary>
+    [Fact]
+    public async Task OrgFanOut_TheRealMemberPageRead_AFailedSecondPage_ReportsTheGap_AndKeepsWhatWasRead()
+    {
+        await using var dataverse = await FakeDataverse.StartAsync();
+        var members = Enumerable.Range(1, 700).Select(i => new Guid($"c1000000-0000-0000-0000-{i:D12}")).ToArray();
+        dataverse.OrganizationMembers[FanOutOrg] = members;
+        dataverse.MemberPageFaultAt = 1;
+
+        var cache = RealCache();
+        foreach (var contact in members)
+        {
+            await SeedGrantSetAsync(cache, contact);
+        }
+
+        var sut = RealParticipationService(dataverse, cache: cache);
+
+        var result = await sut.InvalidateGrantSetsAsync(Array.Empty<Guid>(), new[] { FanOutOrg }, CancellationToken.None);
+
+        result.OrganizationsNotFullyExpanded.Should().Equal(new[] { FanOutOrg }, "a failed page is a gap, reported");
+        result.ContactCount.Should().Be(500, "page one's members were read and invalidated");
+        MemberPageReads(dataverse).Should().HaveCount(2, "the walk stopped at the failed page");
+
+        foreach (var contact in members.Take(500))
+        {
+            (await CachedGrantSetAsync(cache, contact)).Should().BeNull();
+        }
+
+        foreach (var contact in members.Skip(500))
+        {
+            (await CachedGrantSetAsync(cache, contact)).Should().NotBeNull("an unread member expires on the TTL instead");
+        }
+    }
+
+    private static List<SeenRequest> MemberPageReads(FakeDataverse dataverse)
+        => dataverse.Requests
+            .Where(r => r.Collection == ExternalOrganizationMembership.EntitySet
+                        && r.Filter.StartsWith("_sprk_organization_value eq ", StringComparison.Ordinal))
+            .ToList();
+
+    private static Task SeedGrantSetAsync(ITenantCache cache, Guid contactId)
+        => cache.SetAsync(RequestTenant, ExternalParticipationService.ExternalAccessResource, contactId.ToString(),
+            ExternalParticipationService.CacheVersion, new List<int> { 1 }, TimeSpan.FromMinutes(5));
+
+    private static Task<List<int>?> CachedGrantSetAsync(ITenantCache cache, Guid contactId)
+        => cache.GetAsync<List<int>>(RequestTenant, ExternalParticipationService.ExternalAccessResource,
+            contactId.ToString(), ExternalParticipationService.CacheVersion);
+
+    private static int GrantReads(FakeDataverse dataverse)
+        => dataverse.Requests.Count(r => r.Collection == "sprk_externalrecordaccesses");
+
+    private static TenantCache RealCache()
+        => new(new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions())), NullLogger<TenantCache>.Instance);
+
+    /// <summary>
+    /// The real participation service and evaluator over the fake transport, where every call of
+    /// <see cref="ProjectIdsAsync"/> is a NEW request (a fresh <see cref="HttpContext"/> carrying the tid), so nothing
+    /// request-scoped leaks between them — exactly as two HTTP requests would not share one.
+    /// </summary>
+    private sealed class RequestScopedWorld
+    {
+        private readonly HttpContextAccessor _accessor = new();
+        private readonly AccessibleRecordSetService _evaluator;
+
+        public RequestScopedWorld(FakeDataverse dataverse, INoAccessListReader? denyList = null, ITenantCache? cache = null)
+        {
+            var participations = new ExternalParticipationService(
+                dataverse.CreateClient(TimeSpan.FromSeconds(30)),
+                cache ?? Mock.Of<ITenantCache>(),
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?> { ["Dataverse:ServiceUrl"] = FakeServiceUrl })
+                    .Build(),
+                new StaticTokenCredential(),
+                _accessor,
+                NullLogger<ExternalParticipationService>.Instance);
+            _evaluator = RealEvaluator(participations, denyList ?? new OrgKeyedDenyList(), StandingReader().Object);
+        }
+
+        public async Task<IReadOnlyCollection<Guid>> ProjectIdsAsync(string plane)
+        {
+            _accessor.HttpContext = new DefaultHttpContext
+            {
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    new[]
+                    {
+                        new Claim("tid", "11111111-2222-3333-4444-555555555555"),
+                        new Claim("oid", CiamOid),
+                        new Claim("iss", "https://spaarketest.ciamlogin.com/tid/v2.0"),
+                    },
+                    "test")),
+            };
+
+            if (plane == "workforce")
+            {
+                var set = await _evaluator.ComposeAsync(
+                    ContactPrincipal(), AccessibleRecordSetService.ProjectEntity, CancellationToken.None);
+                return set.RecordIds.ToList();
+            }
+
+            var identities = new InMemoryContactIdentityStore();
+            identities.AddContact(ContactId, oid: CiamOid, plane: IdentityPlaneMarker.External);
+            var strategy = new CiamContactPrincipalStrategy(
+                IdentityBindingTestKit.Binder(identities), _evaluator, NullLogger<CiamContactPrincipalStrategy>.Instance);
+            var resolution = await strategy.ResolveAsync(_accessor.HttpContext, CancellationToken.None);
+            resolution.IsResolved.Should().BeTrue("precondition: the CIAM identity layer still resolves the contact");
+            return resolution.Principal!.GetAccessibleProjectIds().ToList();
+        }
     }
 
     // ── world ────────────────────────────────────────────────────────────────────────────────────
@@ -651,7 +1037,9 @@ public class OrganizationMembershipReadTests
         // No walk produces records here — org baselines are NotHeld — so the resolver contributes nothing.
         var membership = new Mock<IMembershipResolverService>();
         return new AccessibleRecordSetService(
-            membership.Object, participations, standing, denyList, NullLogger<AccessibleRecordSetService>.Instance);
+            membership.Object, participations, standing, denyList,
+            Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
+            NullLogger<AccessibleRecordSetService>.Instance);
     }
 
     private static Mock<ISubjectStandingGrantReader> StandingReader()
@@ -691,12 +1079,24 @@ public class OrganizationMembershipReadTests
             "builder emits it — a date term appended at the call site would narrow the ethical wall (D-2 part 2, D-10)");
     }
 
+    /// <summary>The two shapes a masked (field-secured, unreadable) <c>sprk_issecure</c> arrives in.</summary>
+    private enum EmptyFlagShape
+    {
+        /// <summary>The property is absent from the row.</summary>
+        Omitted,
+
+        /// <summary>The property is present with a JSON null.</summary>
+        Null,
+    }
+
     private sealed record MembershipSpec(Guid OrganizationId, DateOnly? Start, DateOnly? End);
 
     private sealed record GrantSpec(Guid ProjectId, Guid? OrganizationId);
 
-    /// <summary>One request as the server received it, decoded.</summary>
-    private sealed record SeenRequest(string Collection, string Filter, string Select, string Expand)
+    /// <summary>One request as the server received it, decoded (task 137 r2: plus its <c>Prefer</c> header and
+    /// <c>$skiptoken</c>, for the organization-member page read).</summary>
+    private sealed record SeenRequest(
+        string Collection, string Filter, string Select, string Expand, string Prefer = "", string SkipToken = "")
     {
         public bool IsOrgGrantQuery =>
             Collection == "sprk_externalrecordaccesses" && Filter.Contains("_sprk_contact_value eq null", StringComparison.Ordinal);
@@ -733,6 +1133,23 @@ public class OrganizationMembershipReadTests
                 DeniedRecordIds = denied,
                 DenyingEntryIds = denied.ToDictionary(id => id, _ => (IReadOnlyList<Guid>)Array.Empty<Guid>()),
             });
+        }
+
+        /// <summary>
+        /// Task 143: the three-subject overload the systemuser plane calls. The entries here are organization-subject,
+        /// so a denial is reported with that subject kind — what the systemuser plane splits on (owner N3).
+        /// </summary>
+        public async Task<NoAccessListResult> GetDeniedRecordsAsync(
+            NoAccessSubjects subjects, IReadOnlyCollection<NoAccessCandidateRecord> candidates, CancellationToken ct = default)
+        {
+            var result = await GetDeniedRecordsAsync(
+                subjects.ContactIds.FirstOrDefault(), subjects.OrganizationIds, candidates, ct);
+            return new NoAccessListResult
+            {
+                DeniedRecordIds = result.DeniedRecordIds,
+                DenyingEntryIds = result.DenyingEntryIds,
+                DenyingSubjectKinds = result.DeniedRecordIds.ToDictionary(id => id, _ => NoAccessSubjectKinds.Organization),
+            };
         }
     }
 
@@ -832,6 +1249,9 @@ public class OrganizationMembershipReadTests
         /// <summary>The junction request never answers, so the client's timeout fires.</summary>
         public bool JunctionHangs { get; set; }
 
+        /// <summary>Completes when a junction request arrives — so a test can act while that read is in flight.</summary>
+        public TaskCompletionSource JunctionRequestSeen { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public IReadOnlyList<SeenRequest> Requests
         {
             get { lock (_gate) { return _requests.ToList(); } }
@@ -872,12 +1292,18 @@ public class OrganizationMembershipReadTests
         {
             var filter = context.Request.Query["$filter"].ToString();
             var seen = new SeenRequest(
-                collection, filter, context.Request.Query["$select"].ToString(), context.Request.Query["$expand"].ToString());
+                collection, filter, context.Request.Query["$select"].ToString(), context.Request.Query["$expand"].ToString(),
+                context.Request.Headers["Prefer"].ToString(), context.Request.Query["$skiptoken"].ToString());
             lock (_gate) { _requests.Add(seen); }
 
             switch (collection)
             {
+                case "sprk_contactorganizations" when filter.StartsWith("_sprk_organization_value eq ", StringComparison.Ordinal):
+                    await WriteMemberPageAsync(context, filter, seen);
+                    return;
+
                 case "sprk_contactorganizations":
+                    JunctionRequestSeen.TrySetResult();
                     if (JunctionHangs)
                     {
                         try { await Task.Delay(TimeSpan.FromSeconds(10), context.RequestAborted); }
@@ -918,20 +1344,136 @@ public class OrganizationMembershipReadTests
                     var ids = Regex.Matches(filter, @"sprk_projectid eq ([0-9a-fA-F-]{36})")
                         .Select(m => m.Groups[1].Value)
                         .Distinct();
-                    await WriteValueAsync(context, ids.Select(id => new Dictionary<string, object?>
+                    await WriteValueAsync(context, ids.Select(id =>
                     {
-                        ["sprk_projectid"] = id,
-                        ["sprk_issecure"] = false,
-                        ["sprk_accesspermission"] = 100000000,
-                        ["_sprk_assignedlawfirm1_value"] = null,
-                        ["_sprk_assignedlawfirm2_value"] = null,
+                        var row = new Dictionary<string, object?>
+                        {
+                            ["sprk_projectid"] = id,
+                            ["sprk_issecure"] = false,
+                            ["sprk_accesspermission"] = 100000000,
+                            // Task 137: the root's own state rides the flag read (the live column, Active = 0).
+                            ["statecode"] = InactiveProjects.Contains(Guid.Parse(id)) ? 1 : 0,
+                            ["_sprk_assignedlawfirm1_value"] = null,
+                            ["_sprk_assignedlawfirm2_value"] = null,
+                        };
+
+                        // Task 150: a field-secured column the caller cannot read is masked — Dataverse leaves the
+                        // property out of the row, or returns it as null. Both shapes are served as they arrive live.
+                        if (EmptySecureFlags.TryGetValue(Guid.Parse(id), out var shape))
+                        {
+                            if (shape == EmptyFlagShape.Omitted)
+                            {
+                                row.Remove("sprk_issecure");
+                            }
+                            else
+                            {
+                                row["sprk_issecure"] = null;
+                            }
+                        }
+
+                        return row;
                     }));
+                    return;
+
+                case var single when single.StartsWith("contacts(", StringComparison.Ordinal):
+                    // Task 137: the LIVE contact-state read — contacts({id})?$select=statecode, one row.
+                    if (ContactStateFault is { } contactFault)
+                    {
+                        context.Response.StatusCode = (int)contactFault;
+                        return;
+                    }
+
+                    await context.Response.WriteAsJsonAsync(new Dictionary<string, object?> { ["statecode"] = ContactStateCode });
                     return;
 
                 default:
                     context.Response.StatusCode = StatusCodes.Status404NotFound;
                     return;
             }
+        }
+
+        /// <summary>Task 137: the contact's own <c>statecode</c> the live read returns (Active by default).</summary>
+        public int? ContactStateCode { get; set; } = 0;
+
+        /// <summary>Task 137: non-null — the contact-state read answers with this status.</summary>
+        public HttpStatusCode? ContactStateFault { get; set; }
+
+        /// <summary>Task 137: projects whose own <c>statecode</c> is Inactive.</summary>
+        public HashSet<Guid> InactiveProjects { get; } = new();
+
+        /// <summary>
+        /// Task 150 (round 26 item 2(a)): projects whose <c>sprk_issecure</c> comes back EMPTY, in the given shape —
+        /// what field-level security does to a column the reading identity may not read. Absent: <c>false</c>.
+        /// </summary>
+        public Dictionary<Guid, EmptyFlagShape> EmptySecureFlags { get; } = new();
+
+        /// <summary>Task 137 r2: each organization's ACTIVE member contacts (the organization -> members read).</summary>
+        public Dictionary<Guid, Guid[]> OrganizationMembers { get; } = new();
+
+        /// <summary>Task 137 r2: non-null — the member page with this zero-based index answers 503.</summary>
+        public int? MemberPageFaultAt { get; set; }
+
+        /// <summary>Task 137 r2: every <c>$skiptoken</c> this server put in an <c>@odata.nextLink</c>, in order.</summary>
+        public List<string> IssuedSkipTokens { get; } = new();
+
+        private readonly Dictionary<string, int> _skipTokenOffsets = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Task 137 r2: one page of an organization's members, as Dataverse pages it — <c>Prefer:
+        /// odata.maxpagesize</c> honoured (absent, Dataverse's own 5,000), and the next page addressed by an ABSOLUTE
+        /// <c>@odata.nextLink</c> repeating the query plus an opaque <c>$skiptoken</c>. The token is unguessable, so a
+        /// client that pages correctly is one that sends the server's link back.
+        /// </summary>
+        private async Task WriteMemberPageAsync(HttpContext context, string filter, SeenRequest seen)
+        {
+            var organizationId = Guid.Parse(Regex.Match(filter, @"^_sprk_organization_value eq ([0-9a-fA-F-]{36})").Groups[1].Value);
+            var all = OrganizationMembers.TryGetValue(organizationId, out var ids) ? ids : Array.Empty<Guid>();
+
+            int offset;
+            lock (_gate)
+            {
+                if (seen.SkipToken.Length == 0)
+                {
+                    offset = 0;
+                }
+                else if (!_skipTokenOffsets.TryGetValue(seen.SkipToken, out offset))
+                {
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest; // a token this server never issued
+                    return;
+                }
+            }
+
+            var pageSizeMatch = Regex.Match(seen.Prefer, @"odata\.maxpagesize=(\d+)");
+            var pageSize = pageSizeMatch.Success ? int.Parse(pageSizeMatch.Groups[1].Value) : 5000;
+            if (MemberPageFaultAt is { } faultAt && offset / pageSize == faultAt)
+            {
+                context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+                return;
+            }
+
+            var body = new Dictionary<string, object?>
+            {
+                ["value"] = all.Skip(offset).Take(pageSize)
+                    .Select(id => new Dictionary<string, object?> { ["_sprk_contact_value"] = id })
+                    .ToList(),
+            };
+
+            if (offset + pageSize < all.Length)
+            {
+                var token = $"cookie-{Guid.NewGuid():N}";
+                lock (_gate)
+                {
+                    _skipTokenOffsets[token] = offset + pageSize;
+                    IssuedSkipTokens.Add(token);
+                }
+
+                body["@odata.nextLink"] =
+                    $"{context.Request.Scheme}://{context.Request.Host}{context.Request.Path}" +
+                    $"?$filter={Uri.EscapeDataString(filter)}&$select={Uri.EscapeDataString(seen.Select)}" +
+                    $"&$skiptoken={Uri.EscapeDataString(token)}";
+            }
+
+            await context.Response.WriteAsJsonAsync(body);
         }
 
         private Dictionary<string, object?> Organization(Guid organizationId) => new()

@@ -19,6 +19,8 @@
  * @see eventService.cascade.test.ts (sibling FR-WIZ-05 BU-cascade coverage)
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { EventService } from '../eventService';
 import type { ICreateEventFormState } from '../formTypes';
@@ -188,7 +190,7 @@ describe('EventService — ADR-024 resolver migration', () => {
 
   it('writes the entity-specific lookup AND all 5 resolver fields for a Matter parent', async () => {
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     const result = await service.createEvent(
       makeForm({ regardingRecordId: MATTER_ID_RAW, regardingRecordName: 'picker-provided fallback' }),
@@ -214,7 +216,7 @@ describe('EventService — ADR-024 resolver migration', () => {
 
   it('populates only ONE entity-specific regarding lookup (ADR-024 mutual exclusion)', async () => {
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     await service.createEvent(
       makeForm({ regardingRecordId: MATTER_ID_RAW, regardingRecordName: 'x' }),
@@ -236,7 +238,7 @@ describe('EventService — ADR-024 resolver migration', () => {
 
   it('writes NO resolver fields when no regarding parent is supplied', async () => {
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     const result = await service.createEvent(makeForm(), undefined, NO_CASCADE);
 
@@ -251,7 +253,7 @@ describe('EventService — ADR-024 resolver migration', () => {
 
   it('graceful degradation (NFR-06): missing catalog still links + falls back on name, skips number/type, never throws', async () => {
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     // sprk_project is intentionally absent from CATALOG.
     const result = await service.createEvent(

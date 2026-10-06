@@ -57,6 +57,8 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Tests.AccessControl.IdentityBinding;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
@@ -178,6 +180,44 @@ public sealed class ExternalAccessContractTests : IClassFixture<ExternalAccessCo
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         var body = await response.Content.ReadAsByteArrayAsync();
         body.Should().Equal(payload, "an authorized, in-project download streams the app-only SPE bytes");
+    }
+
+    [Fact]
+    public async Task DocumentVersions_OfAMovedFile_ReportTheOriginalDates_AndNoAuthor_ToAnExternalParticipant()
+    {
+        // unified-access-control-r2 task 166 f1-v2, owner round 45 item 1: a relocation replays a file's history; Graph
+        // dates each replayed version at the move. The relocation's record keeps the ORIGINAL date, and the history an
+        // external participant sees is unchanged by the move — which includes never being shown who wrote a version.
+        var original = new DateTimeOffset(2024, 2, 3, 4, 5, 6, TimeSpan.Zero);
+        var replayedAt = new DateTimeOffset(2026, 10, 5, 12, 0, 0, TimeSpan.Zero);
+        _fixture.StorageResolverMock
+            .Setup(r => r.GetSpePointersAsync(DocumentX, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(("b!drive-ext-2", "item-ext-2"));
+        _fixture.SpeFileOperationsMock
+            .Setup(s => s.ListFileVersionsAsync("b!drive-ext-2", "item-ext-2", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<VersionInfoDto>
+            {
+                new("2.0", null, replayedAt.AddMinutes(1), 200, "SharePoint App"),
+                new("1.0", null, replayedAt, 100, "SharePoint App"),
+            });
+        _fixture.DataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_document", DocumentX, It.Is<string[]>(c => c.Contains(RelocatedVersionHistory.Column)), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.Entity("sprk_document", DocumentX)
+            {
+                [RelocatedVersionHistory.Column] =
+                    $$"""{"v":1,"item":"item-ext-2","versions":[{"id":"1.0","by":"Alice Original","at":"{{original:O}}","size":100}]}""",
+            });
+
+        using var client = _fixture.CreateAuthenticatedClient(accessibleProjects: new[] { ProjectA }, documentProjectId: ProjectA);
+
+        var response = await client.GetAsync($"/api/v1/external/projects/{ProjectA}/documents/{DocumentX}/versions");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "body was: {0}", await response.Content.ReadAsStringAsync());
+        var body = System.Text.Json.Nodes.JsonNode.Parse(await response.Content.ReadAsStringAsync())!;
+        var versions = body["versions"]!.AsArray();
+        var replayed = versions.Single(v => v!["versionId"]!.GetValue<string>() == "1.0")!;
+        DateTimeOffset.Parse(replayed["createdAt"]!.GetValue<string>()).Should().Be(original, "the replayed version's ORIGINAL date");
+        versions.Should().OnlyContain(v => v!["createdByName"] == null, "no author is shown on the external surface");
     }
 
     // ================================================================================
@@ -817,6 +857,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
     public Mock<ITenantCache> TenantCacheMock { get; } = new(MockBehavior.Loose);
     public StubDataverseWebApiClient Dataverse { get; } = new();
 
+    /// <summary>The app-only Dataverse seam (<c>IDataverseService</c>, also <c>IGenericEntityService</c>).</summary>
+    public Mock<IDataverseService> DataverseServiceMock { get; } = new(MockBehavior.Loose);
+
     /// <summary>
     /// The identity-binding row store (task 141). CIAM contact resolution and the invite path read it; a CIAM
     /// caller's contact is header-driven on top of it (<see cref="HeaderDrivenIdentityStore"/>).
@@ -974,10 +1017,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             services.RemoveAll<IGraphClientFactory>();
             services.AddSingleton<IGraphClientFactory, FakeGraphClientFactory>();
 
-            var dataverseServiceMock = new Mock<IDataverseService>();
-            dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            DataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
-            services.AddSingleton(dataverseServiceMock.Object);
+            services.AddSingleton(DataverseServiceMock.Object);
 
             // ── Module-boundary doubles ──────────────────────────────────────────
             services.RemoveAll<IDocumentStorageResolver>();
@@ -996,6 +1038,32 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             // their wire contract can be asserted without a Dataverse.
             services.RemoveAll<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>();
             services.AddSingleton<Sprk.Bff.Api.Services.Access.IDataverseRecordShareService>(RecordShares);
+
+            // Task 149: the share routes fan out to a secure record's children through the secure-child synchronizer.
+            // The contract here is the routes' wire shape, so it runs over an environment with no Secure Record BU (no
+            // record is secure): the fan-out reads nothing more and writes nothing. The fan-out itself is pinned in
+            // SecureChildShareMirrorTests.
+            var noSecureRecords = Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.WithoutSecureBusinessUnit();
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureChildShareSynchronizer>();
+            services.AddSingleton(Sprk.Bff.Api.Tests.DataMutation.ExternalAccess.SecureChildShareWorld.SynchronizerOver(
+                () => noSecureRecords, RecordShares));
+
+            // Task 158 r1 (owner round 30): the share routes also fan out to the secure work assignments and projects filed
+            // under the record (both directions), and a fan-out that cannot run is now children_incomplete. The contract
+            // here is the routes' wire shape: the inheritance reads a Dataverse with no rows and an empty provenance ledger,
+            // so nothing is filed under anything. The fan-out itself is pinned in SecureRootInheritanceTests.
+            services.RemoveAll<Sprk.Bff.Api.Services.Access.SecureRootInheritance>();
+            services.AddScoped(_ => Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing());
+
+            // Task 158 r1c-v2 (round 39 item 2): the No Access guard also walks what a work assignment or project is filed
+            // under, through IGenericEntityService — here the same Dataverse with no rows, so nothing is filed under anything
+            // and only the record's own list applies (the production guard otherwise, over this fixture's deny list).
+            services.RemoveAll<SecureShareNoAccessGuard>();
+            services.AddScoped(sp => new SecureShareNoAccessGuard(
+                sp.GetRequiredService<ExternalParticipationService>(), sp.GetRequiredService<INoAccessListReader>(),
+                sp.GetRequiredService<IContactIdentityStore>(),
+                Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.NoFilingRows(),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<SecureShareNoAccessGuard>.Instance));
 
             // Fixed clock for grant-expiry decisions (task 097).
             services.RemoveAll<TimeProvider>();
@@ -1018,7 +1086,11 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
             // Replace the Dataverse-backed external services with header-driven stubs (virtual seams).
             services.RemoveAll<ExternalParticipationService>();
             services.AddScoped<ExternalParticipationService>(sp =>
-                new StubExternalParticipationService(sp.GetRequiredService<IHttpContextAccessor>()));
+                new StubExternalParticipationService(
+                    sp.GetRequiredService<IHttpContextAccessor>(),
+                    // Task 137: the grant-write paths invalidate through this service's ONE routine, which runs for real
+                    // over the fixture's ITenantCache — so the RemoveAsync verifications read what production removed.
+                    sp.GetRequiredService<ITenantCache>()));
 
             services.RemoveAll<ExternalDataService>();
             services.AddScoped<ExternalDataService>(sp =>
@@ -1176,8 +1248,8 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
 {
     private readonly IHttpContextAccessor _accessor;
 
-    public StubExternalParticipationService(IHttpContextAccessor accessor)
-        : base(new HttpClient(), Mock.Of<ITenantCache>(), new ConfigurationBuilder().Build(),
+    public StubExternalParticipationService(IHttpContextAccessor accessor, ITenantCache? cache = null)
+        : base(new HttpClient(), cache ?? Mock.Of<ITenantCache>(), new ConfigurationBuilder().Build(),
                Mock.Of<TokenCredential>(), accessor, NullLogger<ExternalParticipationService>.Instance)
     {
         _accessor = accessor;
@@ -1221,6 +1293,11 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
     // this double would compose to nothing. "Belongs to no organization / references none" is the honest
     // default for contract tests that assert what an ENTITLED caller gets; the vetoes themselves are owned by
     // UnifiedEvaluatorSeamTests.
+    // Task 137: the contact's live state. Active, so this double's grants compose exactly as before;
+    // the inactive-contact guard itself is pinned by UnifiedEvaluatorSeamTests (task 137 section).
+    internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+        => Task.FromResult(ContactRecordState.Active);
+
     internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(
         Guid contactId, CancellationToken ct = default)
         => Task.FromResult(ActiveOrgMemberships.None);

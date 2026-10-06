@@ -27,6 +27,7 @@
  *            ADR-028 (function-based auth contract), ADR-039/BFF §10 (surface identity in code).
  */
 
+import { getBffBaseUrl } from "../config/runtimeConfig";
 import * as React from "react";
 import { TaskListSquareLtrRegular } from "@fluentui/react-icons";
 import type {
@@ -39,6 +40,7 @@ import {
   ReconciliationWorkspace,
   RECONCILIATION_VIEWS,
   buildResolveReview,
+  bffRefile,
   resolveRegarding,
   type EmailWorkspaceWebApi,
 } from "@spaarke/communication-components";
@@ -58,7 +60,11 @@ const ReconciliationSectionMount: React.FC = () => {
   // confirmed row in-place — so the host callback is a no-op (kept for the review contract).
   const handleAssociationsChanged = React.useCallback(() => {}, []);
   const resolveReview = React.useMemo(
-    () => (webApi ? buildResolveReview(webApi, handleAssociationsChanged) : undefined),
+    // UAC-r2 task 147 r1 (owner round 28 item 1): regarding writes re-file through the BFF.
+    () =>
+      webApi
+        ? buildResolveReview(webApi, handleAssociationsChanged, bffRefile(authenticatedFetch, getBffBaseUrl()))
+        : undefined,
     [webApi, handleAssociationsChanged],
   );
 

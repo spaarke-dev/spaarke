@@ -213,7 +213,58 @@ public class DataverseWebApiClient : IDisposable
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task DeleteAsync(string entitySetName, Guid id, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// PATCHes a row ONLY IF it is still at <paramref name="etag"/> — the <c>@odata.etag</c> it was read with — by sending
+    /// <c>If-Match</c>. A write that landed in between makes this one fail instead of silently overwriting it, and a
+    /// specific ETag never matches a missing row, so this never creates (unlike <see cref="UpdateAsync"/>, which upserts).
+    /// </summary>
+    /// <remarks>
+    /// The contract of <c>DataverseWebApiService.UpdateRecordFieldsIfUnchangedAsync</c> (a Dataverse row's ETag is
+    /// <c>W/"&lt;versionnumber&gt;"</c>), on the client the external-access grant code already reads and writes with.
+    /// Added by unified-access-control-r2 task 140 (session 27 round 42 item 1): a contact's write to a grant row must not
+    /// land over an internal user's take-over that committed after the contact's "is this row mine?" check. There is no
+    /// retry here — what a changed row means is the caller's decision.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="etag"/> is empty: a conditional write cannot be made without the
+    /// version it is conditional on, so nothing is sent (fail closed).</exception>
+    /// <exception cref="System.Data.DBConcurrencyException">HTTP 412: the row changed since it was read; nothing was
+    /// written.</exception>
+    /// <exception cref="KeyNotFoundException">HTTP 404: the row no longer exists; nothing was created.</exception>
+    public virtual async Task UpdateIfMatchAsync(
+        string entitySetName, Guid id, object entity, string etag, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(etag))
+            throw new ArgumentException("A conditional update needs the row's ETag as it was read; nothing was sent.", nameof(etag));
+
+        var url = $"{entitySetName}({id})";
+
+        _logger.LogDebug("PATCH {Url} (If-Match {ETag})", url, etag);
+
+        using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Patch, url, cancellationToken);
+        if (!request.Headers.TryAddWithoutValidation("If-Match", etag))
+            throw new ArgumentException($"'{etag}' cannot be sent as an If-Match value; nothing was sent.", nameof(etag));
+        request.Content = JsonContent.Create(entity);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+
+        if (response.StatusCode == System.Net.HttpStatusCode.PreconditionFailed)
+        {
+            _logger.LogWarning("Conditional PATCH refused: {Url} changed since it was read ({ETag}); nothing was written", url, etag);
+            throw new System.Data.DBConcurrencyException($"{url} changed since it was read; the update was not applied.");
+        }
+
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Conditional PATCH refused: {Url} does not exist; nothing was created", url);
+            throw new KeyNotFoundException($"{url} was not found; nothing was created.");
+        }
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    // virtual: test seam only (unified-access-control-r2 task 165 asserts "no delete ran"), the same seam
+    // RetrieveAsync / CreateAsync / UpdateAsync / QueryAsync already carry. No behaviour change.
+    public virtual async Task DeleteAsync(string entitySetName, Guid id, CancellationToken cancellationToken = default)
     {
         var url = $"{entitySetName}({id})";
 

@@ -113,6 +113,7 @@ public sealed class ProvisioningRun
     /// <c>app-user-created</c>). See <see cref="GateEntry"/> + <see cref="GateState"/>.
     /// </summary>
     [JsonPropertyName("gateStates")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<GateEntry>))] // gate ids persist verbatim (task 165)
     public IDictionary<string, GateEntry> GateStates { get; set; }
         = new Dictionary<string, GateEntry>(StringComparer.Ordinal);
 
@@ -163,9 +164,15 @@ public sealed class ProvisioningRun
     /// distinct from <see cref="AttemptCount"/> (a whole-run I6
     /// crash-recovery counter, not per-handler).
     /// </summary>
+    /// <remarks>
+    /// Keys persist VERBATIM (unified-access-control-r2 task 165): the Cosmos SDK's camelCase option lowered them ("H9" ->
+    /// "h9"), so the next lookup missed and every retry re-used attempt 1 — the same MessageId, dropped by Service Bus
+    /// duplicate detection. Case-insensitive so a run persisted before the fix ("h9") still counts.
+    /// </remarks>
     [JsonPropertyName("handlerRetryAttempts")]
+    [Newtonsoft.Json.JsonConverter(typeof(NewtonsoftVerbatimKeysDictionaryConverter<int>), true)]
     public IDictionary<string, int> HandlerRetryAttempts { get; set; }
-        = new Dictionary<string, int>(StringComparer.Ordinal);
+        = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// UTC timestamp at which this run document was created. Named

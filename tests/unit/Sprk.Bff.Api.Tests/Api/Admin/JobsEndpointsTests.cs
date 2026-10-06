@@ -532,6 +532,32 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         details[1].StartedOn.Should().BeAfter(details[2].StartedOn);
     }
 
+    /// <summary>
+    /// unified-access-control-r2 task 148: a run's own report (JobRunResult.ResultJson, FR-2.8) reaches the admin client
+    /// verbatim — the secure-child backfill's dry run, apply and verify read it from here.
+    /// </summary>
+    [Fact]
+    public async Task GetJobHistory_CarriesEachRunsResultJsonVerbatim()
+    {
+        using var client = _fixture.CreateAdminClient();
+        ResetSchedulingState();
+
+        var jobId = $"report-{Guid.NewGuid():N}";
+        _fixture.Registry.Register(new FakeScheduledJob(jobId, "Report Job", "Has a report"));
+        _fixture.Store.AddOrReplaceJob(new BackgroundJobDefinition(
+            jobId, "Report Job", "Has a report", true, "0 * * * *", null));
+        const string report = "{\"mode\":\"report-only\",\"wouldChange\":3,\"passComplete\":true}";
+        SeedCompletedRun(jobId, DateTimeOffset.UtcNow.AddMinutes(-2), success: true, resultJson: report);
+        SeedCompletedRun(jobId, DateTimeOffset.UtcNow.AddMinutes(-1), success: true);
+
+        var details = await client.GetFromJsonAsync<List<JobRunDetail>>($"/api/admin/jobs/{jobId}/history");
+
+        details.Should().NotBeNull();
+        details!.Should().HaveCount(2);
+        details![0].ResultJson.Should().BeNull("a run that reported nothing carries nothing");
+        details![1].ResultJson.Should().Be(report);
+    }
+
     [Fact]
     public async Task GetJobHistory_UsesDefaultLimit50_WhenNoQueryString()
     {
@@ -762,7 +788,8 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
         registryJobs!.GetType().GetMethod("Clear")!.Invoke(registryJobs, null);
     }
 
-    private void SeedCompletedRun(string jobId, DateTimeOffset startedAt, bool success, string? errorMessage = null)
+    private void SeedCompletedRun(
+        string jobId, DateTimeOffset startedAt, bool success, string? errorMessage = null, string? resultJson = null)
     {
         var runId = Guid.NewGuid();
         _fixture.Store.SeedRunRecord(new InMemoryBackgroundJobStore.RunRecord(
@@ -777,7 +804,8 @@ public sealed class JobsEndpointsTests : IClassFixture<AdminJobsTestFixture>
                 Success: success,
                 ErrorMessage: success ? null : (errorMessage ?? "test-failure"),
                 ProcessedItems: success ? 5 : null,
-                Duration: TimeSpan.FromSeconds(1))));
+                Duration: TimeSpan.FromSeconds(1),
+                ResultJson: resultJson)));
     }
 
     /// <summary>Runs until <c>release</c> completes — keeps a job "already running" for the 409 test.</summary>

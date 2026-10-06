@@ -106,6 +106,7 @@ public sealed class CreateTaskApplySeamTests
 
         return new CommunicationCreateTaskApplyService(
             _callerResolver.Object, _generic.Object, _actionSeam.Object, _envelopeReader.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             NullLogger<CommunicationCreateTaskApplyService>.Instance);
     }
 

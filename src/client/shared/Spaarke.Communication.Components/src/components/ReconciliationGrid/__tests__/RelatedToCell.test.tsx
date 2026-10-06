@@ -57,6 +57,8 @@ function makeWriteContext(): IResolverWriteContext {
     } as unknown as IResolverWriteContext['webApi'],
     hostEntity: 'sprk_communication',
     hostRecordId: HOST_ID,
+    // UAC-r2 task 147 r1: the regarding write is a re-file through the BFF (communications filing route).
+    refileThroughBff: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -150,8 +152,8 @@ describe('RelatedToCell', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /Acme v Beta/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Confirm' }));
 
-    await waitFor(() => expect(review.writeContext.webApi.updateRecord).toHaveBeenCalled());
-    const call = (review.writeContext.webApi.updateRecord as jest.Mock).mock.calls[0];
+    await waitFor(() => expect(review.writeContext.refileThroughBff).toHaveBeenCalled());
+    const call = (review.writeContext.refileThroughBff as jest.Mock).mock.calls[0];
     expect(call[0]).toBe('sprk_communication');
     expect(call[1]).toBe(HOST_ID); // hostRecordId === communicationId — the single write path
     await waitFor(() => expect(onConfirmed).toHaveBeenCalled());

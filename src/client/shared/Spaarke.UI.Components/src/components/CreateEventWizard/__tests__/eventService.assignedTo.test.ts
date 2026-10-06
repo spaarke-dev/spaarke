@@ -10,6 +10,8 @@
  * @see eventService.ts — the "Assigned To (contact)" binding block
  * @see eventService.resolver.test.ts — sibling ADR-024 regarding-lookup coverage
  */
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { EventService } from '../eventService';
 import type { ICreateEventFormState } from '../formTypes';
@@ -101,7 +103,7 @@ describe('EventService — Assigned To (contact) binding', () => {
   it('binds assignedToId onto the contact-targeted sprk_assignedto lookup', async () => {
     stubFetchNavPropsWithAssignedTo();
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     const result = await service.createEvent(
       makeForm({ assignedToId: CONTACT_ID_RAW, assignedToName: 'Jane Attorney' }),
@@ -117,7 +119,7 @@ describe('EventService — Assigned To (contact) binding', () => {
   it('P6 grounding-optional companion: creates the event successfully with NO assignee', async () => {
     stubFetchNavPropsWithAssignedTo();
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     const result = await service.createEvent(makeForm(), undefined, NO_CASCADE);
 
@@ -130,7 +132,7 @@ describe('EventService — Assigned To (contact) binding', () => {
   it('degrades gracefully (warns, never throws) when the assignedto nav-prop is not discoverable', async () => {
     stubFetchNavPropsWithoutAssignedTo();
     const ds = makeDataService();
-    const service = new EventService(ds);
+    const service = new EventService(ds, bffChildWriteFetch(ds), FAKE_BFF_BASE_URL);
 
     const result = await service.createEvent(
       makeForm({ assignedToId: CONTACT_ID_RAW, assignedToName: 'Jane Attorney' }),

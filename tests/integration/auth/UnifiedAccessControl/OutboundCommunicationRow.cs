@@ -80,6 +80,7 @@ internal static class OutboundCommunicationRow
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
             CoreAncestorResolverFixtures.Inert(),
+            new RecordOwnershipResolverDouble(), // task 146: the row's owner (not under test here)
             NullLogger<CommunicationService>.Instance);
 
         await service.SendAsync(new SendCommunicationRequest

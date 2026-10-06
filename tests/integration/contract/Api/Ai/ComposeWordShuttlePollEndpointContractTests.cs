@@ -125,6 +125,7 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         _fixture.SpeMock
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string c, CancellationToken _) => c); // a `b!` drive id resolves to itself
+        ArrangeCallerCanSee(driveId, documentSpeId);
 
         _fixture.SpeMock
             .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
@@ -136,6 +137,22 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
             .Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(docxBytes.ToArray()));
+    }
+
+    /// <summary>
+    /// uac-r2 task 166 (S-65): check-changes is authorized by an OBO metadata read of the named item in the named
+    /// container BEFORE the app-only delta. This arranges SPE answering that read for THIS item in THIS drive only —
+    /// any other item or drive answers null (Graph's "not visible to you").
+    /// </summary>
+    private void ArrangeCallerCanSee(string driveId, string documentSpeId)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, documentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: documentSpeId, Name: "contract.docx", ParentId: null, Size: 64,
+                CreatedDateTime: now, LastModifiedDateTime: now, ETag: "\"v1\"",
+                IsFolder: false, WebUrl: null, DriveId: driveId));
     }
 
     private static object BuildReanchorBody(string driveId) => new
@@ -204,6 +221,7 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         _fixture.SpeMock
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string c, CancellationToken _) => c);
+        ArrangeCallerCanSee(driveId, documentSpeId);
         _fixture.SpeMock
             .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpeDeltaResult(Array.Empty<SpeDriveChange>(), DeltaLink: "delta-token-empty"));
@@ -218,6 +236,134 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         var check = await checkResponse.Content.ReadFromJsonAsync<CheckChangesWire>();
         check!.Changed.Should().BeFalse(
             "no net SPE delta ⇒ the poll reports no change — proving Changed=true in the positive test is load-bearing");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 2b. uac-r2 task 166 (S-65) — check-changes is authorized BEFORE the app-only delta runs.
+    //
+    // EnumerateChangesAsync runs an APP-ONLY delta over the container the body names and creates/advances the
+    // SHARED per-container delta + eTag state. A caller who cannot see the named item gets ONE 404, and the
+    // delta never runs, so no state is created or advanced for them.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string> InvisibleShapes => new() { "not-visible", "visibility-read-throws", "container-unresolvable" };
+
+    [Theory]
+    [MemberData(nameof(InvisibleShapes))]
+    public async Task Poll_WhenTheCallerCannotSeeTheItem_Returns404_AndNeverRunsTheDeltaOrTouchesState(string shape)
+    {
+        var driveId = $"b!word-shuttle-deny-{shape}";
+        const string documentSpeId = "spe-item-someone-elses";
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string c, CancellationToken _) => shape == "container-unresolvable" ? null! : c);
+        if (shape == "visibility-read-throws")
+        {
+            _fixture.SpeMock
+                .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ThrowsAsync(new InvalidOperationException("Graph 403 accessDenied"));
+        }
+        // "not-visible": GetFileMetadataAsUserAsync is not arranged — the loose mock answers null, Graph's
+        // "you cannot see this item".
+        _fixture.SpeMock
+            .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SpeDeltaResult(
+                new[] { new SpeDriveChange(ItemId: documentSpeId, Name: "secret-filename.docx", ETag: "\"v9\"", Deleted: false) },
+                DeltaLink: "delta-token-x"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/document/{documentSpeId}/check-changes", new { containerId = driveId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain(Sprk.Bff.Api.Api.ComposeSyncEndpoints.DocumentNotVisibleReasonCode);
+        body.Should().NotContain("secret-filename").And.NotContain(documentSpeId);
+        _fixture.SpeMock.Verify(
+            s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the app-only delta must not run for a caller who cannot see the item");
+
+        using var scope = _fixture.Services.CreateScope();
+        var orchestrator = scope.ServiceProvider.GetRequiredService<SpeSyncOrchestrator>();
+        (await orchestrator.GetStateAsync(driveId, CancellationToken.None)).Should().BeNull(
+            "no per-container delta / eTag state may be created or advanced for a refused caller");
+    }
+
+    [Fact]
+    public async Task Poll_InvisibleAndThrowingVisibilityRead_AreTheSameResponse()
+    {
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string c, CancellationToken _) => c);
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), "b!throws", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Graph 403 accessDenied"));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var invisible = await client.PostAsJsonAsync("/api/compose/document/spe-a/check-changes", new { containerId = "b!invisible" });
+        var throwing = await client.PostAsJsonAsync("/api/compose/document/spe-a/check-changes", new { containerId = "b!throws" });
+
+        invisible.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        throwing.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        Normalize(await invisible.Content.ReadAsStringAsync()).Should().Be(Normalize(await throwing.Content.ReadAsStringAsync()));
+    }
+
+    /// <summary>
+    /// S-65, both outcomes in one test (the route ledger's "ProvenByTest" credit): the OBO metadata read of the named
+    /// item in the named container AS THE CALLER precedes the app-only delta. An item that read cannot see is the
+    /// uniform 404 and the delta never runs; a visible item is 200 and the delta runs for it.
+    /// </summary>
+    [Fact]
+    public async Task ProvenByTest_CheckChanges_AnItemTheCallerCannotSeeIs404_AVisibleItemIs200()
+    {
+        const string deniedDriveId = "b!word-shuttle-proof-denied";
+        const string allowedDriveId = "b!word-shuttle-proof-allowed";
+        const string invisibleItem = "spe-item-proof-invisible";
+        const string visibleItem = "spe-item-proof-visible";
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string c, CancellationToken _) => c);
+        ArrangeCallerCanSee(allowedDriveId, visibleItem); // the invisible item is never arranged: the OBO read answers null
+        _fixture.SpeMock
+            .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string drive, string? _, CancellationToken _) => new SpeDeltaResult(
+                new[] { new SpeDriveChange(ItemId: drive == allowedDriveId ? visibleItem : invisibleItem, Name: "contract.docx", ETag: "\"v2\"", Deleted: false) },
+                DeltaLink: "delta-token-proof"));
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var denied = await client.PostAsJsonAsync(
+            $"/api/compose/document/{invisibleItem}/check-changes", new { containerId = deniedDriveId });
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await denied.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ComposeSyncEndpoints.DocumentNotVisibleReasonCode);
+        _fixture.SpeMock.Verify(
+            s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the app-only delta must not run for an item the caller cannot see");
+
+        var allowed = await client.PostAsJsonAsync(
+            $"/api/compose/document/{visibleItem}/check-changes", new { containerId = allowedDriveId });
+
+        allowed.StatusCode.Should().Be(HttpStatusCode.OK, await allowed.Content.ReadAsStringAsync());
+        var check = await allowed.Content.ReadFromJsonAsync<CheckChangesWire>();
+        check!.DocumentSpeId.Should().Be(visibleItem);
+        check.Changed.Should().BeTrue("the delta ran for the visible item and surfaced its change");
+        _fixture.SpeMock.Verify(
+            s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), deniedDriveId, invisibleItem, It.IsAny<CancellationToken>()),
+            Times.Once, "the refusal came from the caller's own OBO read of that item in that container");
+    }
+
+    private static string Normalize(string problemJson)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(problemJson)!.AsObject();
+        node.Remove("correlationId");
+        node.Remove("traceId");
+        return node.ToJsonString();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -269,6 +415,73 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
             "opening the document fired the EnsureSubscriptionAsync origin call (gap 3.2) — the container is tracked");
         state!.FallbackToPolling.Should().BeTrue(
             "with no webhook secrets (task 056 / DEF-03) the origin call degrades to poll-fallback — the webhook-DELIVERY leg is ✅◐ E2E-pending on 056");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // 3b. uac-r2 task 166 r1 (S-80 family, F6) — pull-annotations and reanchor-annotations take the tenant from
+    //     the CALLER's claim. The body's tenantId is obsolete: a body without it is accepted, and a token without a
+    //     tid claim is refused with 401 BEFORE any SPE download. (The verifier seeded the 401's removal and nothing
+    //     went red — these are the tests that now notice.)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    public static TheoryData<string> AnnotationRoutes => new() { "pull-annotations", "reanchor-annotations" };
+
+    private static object AnnotationBodyWithoutTenant(string route, string driveId) => route == "pull-annotations"
+        ? (object)new { driveId }
+        : new
+        {
+            driveId,
+            priorAnchors = new[]
+            {
+                new { id = "anchor-1", type = "comment", textPattern = PriorAnchorText, paragraphHint = 1, preview = "Reviewer note" },
+            },
+        };
+
+    [Theory]
+    [MemberData(nameof(AnnotationRoutes))]
+    public async Task AnnotationRoute_ABodyWithNoTenantId_IsAccepted(string route)
+    {
+        const string driveId = "b!word-shuttle-annotations-166";
+        const string documentSpeId = "spe-item-annotations-166";
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, documentSpeId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(BuildDocx(UpdatedParagraphs)));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/document/{documentSpeId}/{route}", AnnotationBodyWithoutTenant(route, driveId));
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "tenantId is obsolete on the body — no longer required, never read (the tenant is the tid claim)");
+    }
+
+    [Theory]
+    [MemberData(nameof(AnnotationRoutes))]
+    public async Task AnnotationRoute_ATokenWithNoTidClaim_Is401_AndDownloadsNothing(string route)
+    {
+        const string driveId = "b!word-shuttle-annotations-notid";
+        const string documentSpeId = "spe-item-annotations-notid";
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(BuildDocx(UpdatedParagraphs)));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        client.DefaultRequestHeaders.Add(WordShuttlePollFakeAuthHandler.OmitTidHeader, "1");
+        var response = await client.PostAsJsonAsync(
+            $"/api/compose/document/{documentSpeId}/{route}",
+            new
+            {
+                driveId,
+                tenantId = TenantId, // a body tenant does NOT stand in for the missing claim
+                priorAnchors = Array.Empty<object>(),
+            });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        _fixture.SpeMock.Verify(
+            s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "no SPE download happens for a caller whose tenant cannot be established");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -464,6 +677,10 @@ internal sealed class WordShuttlePollFakeAuthHandler : AuthenticationHandler<Aut
 {
     public const string SchemeName = "WordShuttlePollFakeAuth";
 
+    /// <summary>uac-r2 task 166 r1: a request carrying this header authenticates WITHOUT a tid claim — an Entra
+    /// principal whose tenant cannot be established.</summary>
+    public const string OmitTidHeader = "X-Test-Omit-Tid";
+
     public WordShuttlePollFakeAuthHandler(
         IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger,
@@ -486,10 +703,13 @@ internal sealed class WordShuttlePollFakeAuthHandler : AuthenticationHandler<Aut
         var claims = new List<Claim>
         {
             new("oid", oid),
-            new("tid", "tenant-word-shuttle-001"),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"Word-Shuttle Test User {oid}"),
         };
+        if (!Request.Headers.ContainsKey(OmitTidHeader))
+        {
+            claims.Add(new("tid", "tenant-word-shuttle-001"));
+        }
 
         var identity = new ClaimsIdentity(claims, SchemeName);
         var principal = new ClaimsPrincipal(identity);

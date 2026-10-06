@@ -120,6 +120,17 @@ public class PlaybookRunContext
     public Guid? UserId { get; init; }
 
     /// <summary>
+    /// The Entra object id (<c>oid</c>) of the HTTP caller who started this run, recorded by
+    /// <see cref="PlaybookOrchestrationService.ExecuteAsync"/>; <c>null</c> for an app-only (scheduler) run.
+    /// </summary>
+    /// <remarks>
+    /// unified-access-control-r2 task 164 (sweep #78): the agent status route compares it with the caller. It is a
+    /// SEPARATE property on purpose: <see cref="UserId"/> holds a Dataverse systemuserid that feeds the FetchXML
+    /// <c>eq-userid</c> substitution, and an Entra oid there would run queries for no one (or the wrong one).
+    /// </remarks>
+    public string? StartedByOid { get; init; }
+
+    /// <summary>
     /// User-specific preferences for notification delivery (e.g., quiet hours, channel opt-outs).
     /// Populated from the user's sprk_userpreferences record. Null when not applicable.
     /// </summary>
@@ -290,7 +301,8 @@ public class PlaybookRunContext
             CurrentNodeId = CurrentNodeId,
             ErrorMessage = ErrorMessage,
             Metrics = GetMetrics(totalNodes),
-            Outputs = NodeOutputs
+            Outputs = NodeOutputs,
+            StartedByOid = StartedByOid
         };
     }
 

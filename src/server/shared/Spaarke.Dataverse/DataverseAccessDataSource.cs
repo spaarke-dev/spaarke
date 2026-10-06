@@ -216,7 +216,13 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// <param name="userAccessToken">User's bearer token from Authorization header</param>
     /// <param name="ct">Cancellation token</param>
     /// <returns>Dataverse access token for the user</returns>
-    private async Task<string> GetDataverseTokenViaOBOAsync(string userAccessToken, CancellationToken ct = default)
+    /// <remarks>
+    /// <c>internal virtual</c> as a test seam (unified-access-control-r2 task 132), the subclass-seam convention the
+    /// BFF's own data sources use. The MSAL exchange is the one step a test cannot drive offline; overriding ONLY it
+    /// leaves every Dataverse read, and the fault-versus-answer classification over their responses, running as
+    /// production code. Behaviour is unchanged by the modifier.
+    /// </remarks>
+    internal virtual async Task<string> GetDataverseTokenViaOBOAsync(string userAccessToken, CancellationToken ct = default)
     {
         if (!OboAvailable)
         {
@@ -304,10 +310,14 @@ public class DataverseAccessDataSource : IAccessDataSource
             }
 
             // Map Azure AD Object ID to Dataverse systemuserid
-            var dataverseUserId = await LookupDataverseUserIdAsync(userId, ct);
-            if (string.IsNullOrEmpty(dataverseUserId))
+            var lookup = await LookupDataverseUserIdAsync(userId, ct);
+            if (string.IsNullOrEmpty(lookup.SystemUserId))
             {
-                _logger.LogWarning("Could not find Dataverse user for Azure AD OID {AzureAdOid}. Returning None access.", userId);
+                // Task 132 (C12): "no such user" (the lookup SUCCEEDED and found no row) is an answer and may be
+                // cached; a lookup that could not be completed is a fault and may not. Both deny this request.
+                _logger.LogWarning(
+                    "Could not find Dataverse user for Azure AD OID {AzureAdOid} (lookup faulted: {Faulted}). Returning None access.",
+                    userId, lookup.Faulted);
                 return new AccessSnapshot
                 {
                     UserId = userId,
@@ -315,10 +325,12 @@ public class DataverseAccessDataSource : IAccessDataSource
                     AccessRights = AccessRights.None,
                     TeamMemberships = Array.Empty<string>(),
                     Roles = Array.Empty<string>(),
-                    CachedAt = DateTimeOffset.UtcNow
+                    CachedAt = DateTimeOffset.UtcNow,
+                    Faulted = lookup.Faulted
                 };
             }
 
+            var dataverseUserId = lookup.SystemUserId;
             _logger.LogDebug("Mapped Azure AD OID {AzureAdOid} to Dataverse systemuserid {DataverseUserId}", userId, dataverseUserId);
 
             // Query user permissions from Dataverse using the Dataverse user ID
@@ -331,22 +343,35 @@ public class DataverseAccessDataSource : IAccessDataSource
             var roles = await QueryUserRolesAsync(dataverseUserId, ct);
 
             // Determine granular access rights based on permissions
-            var accessRights = DetermineAccessLevel(permissions);
+            var accessRights = DetermineAccessLevel(permissions.Records);
+
+            // Task 132 (C12): one fault anywhere — a degraded (probe-derived) or faulted permission read, or a failed
+            // team or role sub-read — makes the whole snapshot uncacheable. The rights returned are unchanged.
+            var faulted = permissions.Faulted || teams.Faulted || roles.Faulted;
 
             var snapshot = new AccessSnapshot
             {
                 UserId = userId,
                 ResourceId = resourceId,
                 AccessRights = accessRights,
-                TeamMemberships = teams,
-                Roles = roles,
-                CachedAt = DateTimeOffset.UtcNow
+                TeamMemberships = teams.Values,
+                Roles = roles.Values,
+                CachedAt = DateTimeOffset.UtcNow,
+                Faulted = faulted
             };
 
-            _logger.LogInformation("Access snapshot retrieved for user {UserId}: AccessRights={AccessRights}, Teams={TeamCount}, Roles={RoleCount}",
-                userId, accessRights, teams.Count(), roles.Count());
+            _logger.LogInformation(
+                "Access snapshot retrieved for user {UserId}: AccessRights={AccessRights}, Teams={TeamCount}, Roles={RoleCount}, Faulted={Faulted}",
+                userId, accessRights, teams.Values.Count, roles.Values.Count, faulted);
 
             return snapshot;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Task 132 (C12): the CALLER cancelled. Propagate — turning a client abort into an ordinary-looking
+            // None is what made it cacheable. An HttpClient TIMEOUT also surfaces as OperationCanceledException, but
+            // with the caller's token NOT cancelled: that falls through to the fault arm below.
+            throw;
         }
         catch (Exception ex)
         {
@@ -356,7 +381,7 @@ public class DataverseAccessDataSource : IAccessDataSource
                 userId,
                 resourceId);
 
-            // Fail-closed security: Return None on errors
+            // Fail-closed security: Return None on errors — FAULTED, so it is never cached (task 132).
             return new AccessSnapshot
             {
                 UserId = userId,
@@ -364,13 +389,17 @@ public class DataverseAccessDataSource : IAccessDataSource
                 AccessRights = AccessRights.None,
                 TeamMemberships = Array.Empty<string>(),
                 Roles = Array.Empty<string>(),
-                CachedAt = DateTimeOffset.UtcNow
+                CachedAt = DateTimeOffset.UtcNow,
+                Faulted = true
             };
         }
     }
 
     /// <summary>The entity set targeted by the document-scoped <see cref="GetUserAccessAsync"/> path.</summary>
-    private const string DocumentEntitySetName = "sprk_documents";
+    /// <remarks>Public since unified-access-control-r2 task 132's share-change eviction: the BFF's snapshot decorator keys
+    /// a document snapshot WITHOUT the set (the path is document-only), so an owner or share change on a record of this
+    /// set must also evict that key — and it learns "this set is the document path" from here, not from a copy.</remarks>
+    public const string DocumentEntitySetName = "sprk_documents";
 
     /// <inheritdoc />
     public async Task<AccessSnapshot> GetRecordAccessAsync(
@@ -383,11 +412,13 @@ public class DataverseAccessDataSource : IAccessDataSource
         ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
         ArgumentException.ThrowIfNullOrWhiteSpace(entitySetName, nameof(entitySetName));
 
-        AccessSnapshot Denied(string reason)
+        // faulted (task 132 · C12): true when the denial comes from a read that could not be completed rather than
+        // from Dataverse's answer. Both deny this request; only an answer may be cached.
+        AccessSnapshot Denied(string reason, bool faulted = false)
         {
             _logger.LogWarning(
-                "[UAC-DIAG] RECORD-ACCESS DENIED ({Reason}): User={UserId}, EntitySet={EntitySet}, Record={RecordId}",
-                reason, userId, entitySetName, recordId);
+                "[UAC-DIAG] RECORD-ACCESS DENIED ({Reason}): User={UserId}, EntitySet={EntitySet}, Record={RecordId}, Faulted={Faulted}",
+                reason, userId, entitySetName, recordId, faulted);
 
             return new AccessSnapshot
             {
@@ -396,7 +427,8 @@ public class DataverseAccessDataSource : IAccessDataSource
                 AccessRights = AccessRights.None,
                 TeamMemberships = Array.Empty<string>(),
                 Roles = Array.Empty<string>(),
-                CachedAt = DateTimeOffset.UtcNow
+                CachedAt = DateTimeOffset.UtcNow,
+                Faulted = faulted
             };
         }
 
@@ -423,16 +455,22 @@ public class DataverseAccessDataSource : IAccessDataSource
             // shared across concurrent requests, so setting it here would race another caller's identity
             // onto this request. RetrievePrincipalAccess is bound to the principal, so a wrong
             // systemuserid would silently authorize the wrong person.
-            var dataverseUserId = await LookupDataverseUserIdAsync(dataverseToken, userId, ct);
-            if (string.IsNullOrEmpty(dataverseUserId))
+            var lookup = await LookupDataverseUserIdAsync(dataverseToken, userId, ct);
+            if (string.IsNullOrEmpty(lookup.SystemUserId))
             {
-                return Denied("caller_not_a_dataverse_user");
+                // Found no systemuser = an answer (cached); could not look = a fault (never cached). Task 132.
+                return lookup.Faulted
+                    ? Denied("caller_lookup_faulted", faulted: true)
+                    : Denied("caller_not_a_dataverse_user");
             }
+
+            var dataverseUserId = lookup.SystemUserId;
 
             // AUTHORITATIVE: Dataverse's own answer for this principal on this record.
             var rights = await TryRetrievePrincipalAccessAsync(
                 dataverseUserId, entitySetName, recordId.ToString(), dataverseToken, ct);
 
+            var faulted = false;
             if (rights is null)
             {
                 // RetrievePrincipalAccess gave no answer. Degrade to the retrieval probe, which grants
@@ -444,13 +482,19 @@ public class DataverseAccessDataSource : IAccessDataSource
                 // user nothing gets reverted, and reverting reopens the disclosure this closes — so the
                 // safe-looking choice is the less safe one. The probe cannot over-grant: Read only,
                 // conditional on Dataverse permitting the read.
-                var probed = await ProbeRecordReadAccessAsync(entitySetName, recordId, dataverseToken, ct);
-                rights = probed ? AccessRights.Read : AccessRights.None;
+                //
+                // Task 132 (C12): what the probe returns is classified, not just mapped. A readable record gives a
+                // DEGRADED Read — right for this request, but caching it would pin a Write holder at Read for the
+                // TTL, so it is marked faulted. A 403/404 is Dataverse's answer ("you cannot read this") and may be
+                // cached. Any other status, or a thrown probe, is a fault.
+                var probe = await ProbeRecordReadAccessAsync(entitySetName, recordId, dataverseToken, ct);
+                rights = probe == ProbeOutcome.Readable ? AccessRights.Read : AccessRights.None;
+                faulted = probe != ProbeOutcome.Refused;
             }
 
             _logger.LogInformation(
-                "[UAC-DIAG] RECORD-ACCESS: User={UserId}, EntitySet={EntitySet}, Record={RecordId}, Rights={Rights}",
-                userId, entitySetName, recordId, rights.Value);
+                "[UAC-DIAG] RECORD-ACCESS: User={UserId}, EntitySet={EntitySet}, Record={RecordId}, Rights={Rights}, Faulted={Faulted}",
+                userId, entitySetName, recordId, rights.Value, faulted);
 
             return new AccessSnapshot
             {
@@ -459,8 +503,14 @@ public class DataverseAccessDataSource : IAccessDataSource
                 AccessRights = rights.Value,
                 TeamMemberships = Array.Empty<string>(),
                 Roles = Array.Empty<string>(),
-                CachedAt = DateTimeOffset.UtcNow
+                CachedAt = DateTimeOffset.UtcNow,
+                Faulted = faulted
             };
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Task 132: the caller cancelled — propagate. A timeout (token NOT cancelled) is a fault, below.
+            throw;
         }
         catch (Exception ex)
         {
@@ -470,16 +520,40 @@ public class DataverseAccessDataSource : IAccessDataSource
                          "Record={RecordId}. Fail-closed: returning AccessRights.None",
                 userId, entitySetName, recordId);
 
-            return Denied("exception");
+            return Denied("exception", faulted: true);
         }
     }
 
+    /// <summary>What a retrieval probe established (task 132 · C12).</summary>
+    internal enum ProbeOutcome
+    {
+        /// <summary>The probe could not be completed: a status other than 2xx/403/404, or an exception.</summary>
+        Faulted = 0,
+
+        /// <summary>2xx: the caller can retrieve the record, so Dataverse granted at least Read.</summary>
+        Readable,
+
+        /// <summary>403 or 404: Dataverse's answer is that the caller cannot read the record.</summary>
+        Refused,
+    }
+
     /// <summary>
-    /// Entity-agnostic retrieval probe: <c>true</c> iff the caller can retrieve the record, which means
+    /// Classifies a probe response: 2xx is readable, 403/404 is Dataverse's refusal, anything else is a fault
+    /// (task 132 · C12). The ONE rule both probes use, so they cannot classify the same status differently.
+    /// </summary>
+    internal static ProbeOutcome ClassifyProbeStatus(System.Net.HttpStatusCode status)
+        => (int)status is >= 200 and <= 299
+            ? ProbeOutcome.Readable
+            : status is System.Net.HttpStatusCode.Forbidden or System.Net.HttpStatusCode.NotFound
+                ? ProbeOutcome.Refused
+                : ProbeOutcome.Faulted;
+
+    /// <summary>
+    /// Entity-agnostic retrieval probe: whether the caller can retrieve the record, which means
     /// Dataverse granted at least Read. Selects <c>createdon</c> because every Dataverse table has it —
     /// this avoids needing each entity's primary-key attribute name, which would have to be guessed.
     /// </summary>
-    private async Task<bool> ProbeRecordReadAccessAsync(
+    private async Task<ProbeOutcome> ProbeRecordReadAccessAsync(
         string entitySetName,
         Guid recordId,
         string dataverseToken,
@@ -495,35 +569,49 @@ public class DataverseAccessDataSource : IAccessDataSource
             };
 
             var response = await _httpClient.SendAsync(requestMessage, ct);
+            var outcome = ClassifyProbeStatus(response.StatusCode);
 
-            if (response.IsSuccessStatusCode)
+            if (outcome != ProbeOutcome.Readable)
             {
-                return true;
+                _logger.LogWarning(
+                    "[UAC-DIAG] RECORD-PROBE {Outcome}: {StatusCode} for EntitySet={EntitySet}, Record={RecordId}",
+                    outcome, response.StatusCode, entitySetName, recordId);
             }
 
-            _logger.LogWarning(
-                "[UAC-DIAG] RECORD-PROBE denied: {StatusCode} for EntitySet={EntitySet}, Record={RecordId}",
-                response.StatusCode, entitySetName, recordId);
-
-            return false;
+            return outcome;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 exception: ex,
                 message: "[UAC-DIAG] RECORD-PROBE threw for EntitySet={EntitySet}, Record={RecordId}. " +
-                         "Fail-closed: no access.",
+                         "Fail-closed: no access (faulted).",
                 entitySetName, recordId);
 
-            return false;
+            return ProbeOutcome.Faulted;
         }
+    }
+
+    /// <summary>
+    /// The outcome of an oid → systemuserid lookup (task 132 · C12). <see cref="SystemUserId"/> null with
+    /// <see cref="Faulted"/> false means the lookup SUCCEEDED and found no systemuser — an answer; null with
+    /// <see cref="Faulted"/> true means it could not be completed.
+    /// </summary>
+    private readonly record struct UserLookup(string? SystemUserId, bool Faulted)
+    {
+        public static UserLookup NotFound => new(null, false);
+        public static UserLookup Fault => new(null, true);
     }
 
     /// <summary>
     /// Looks up the Dataverse systemuserid for an Azure AD Object ID using an EXPLICIT token, so the
     /// call does not depend on (or mutate) <c>_httpClient.DefaultRequestHeaders</c>.
     /// </summary>
-    private async Task<string?> LookupDataverseUserIdAsync(
+    private async Task<UserLookup> LookupDataverseUserIdAsync(
         string dataverseToken,
         string azureAdObjectId,
         CancellationToken ct)
@@ -544,27 +632,39 @@ public class DataverseAccessDataSource : IAccessDataSource
                 _logger.LogWarning(
                     "[UAC-DIAG] systemuser lookup failed: {StatusCode} for AzureAdOid={AzureAdOid}",
                     response.StatusCode, azureAdObjectId);
-                return null;
+                return UserLookup.Fault;
             }
 
             using var doc = System.Text.Json.JsonDocument.Parse(
                 await response.Content.ReadAsStringAsync(ct));
 
             if (!doc.RootElement.TryGetProperty("value", out var value)
-                || value.GetArrayLength() == 0)
+                || value.ValueKind != System.Text.Json.JsonValueKind.Array)
             {
-                return null;
+                // A 2xx without a value array is not a Dataverse answer.
+                return UserLookup.Fault;
             }
 
-            return value[0].TryGetProperty("systemuserid", out var id) ? id.GetString() : null;
+            if (value.GetArrayLength() == 0)
+            {
+                return UserLookup.NotFound;
+            }
+
+            return value[0].TryGetProperty("systemuserid", out var id) && !string.IsNullOrEmpty(id.GetString())
+                ? new UserLookup(id.GetString(), false)
+                : UserLookup.Fault;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 exception: ex,
-                message: "[UAC-DIAG] systemuser lookup threw for AzureAdOid={AzureAdOid}. Fail-closed: null.",
+                message: "[UAC-DIAG] systemuser lookup threw for AzureAdOid={AzureAdOid}. Fail-closed: null (faulted).",
                 azureAdObjectId);
-            return null;
+            return UserLookup.Fault;
         }
     }
 
@@ -573,8 +673,8 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// </summary>
     /// <param name="azureAdObjectId">Azure AD Object ID (from token 'oid' claim)</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>Dataverse systemuserid, or null if not found</returns>
-    private async Task<string?> LookupDataverseUserIdAsync(string azureAdObjectId, CancellationToken ct)
+    /// <returns>The lookup outcome — found, not found (an answer), or faulted (task 132).</returns>
+    private async Task<UserLookup> LookupDataverseUserIdAsync(string azureAdObjectId, CancellationToken ct)
     {
         try
         {
@@ -588,15 +688,21 @@ public class DataverseAccessDataSource : IAccessDataSource
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to lookup Dataverse user: {StatusCode}", response.StatusCode);
-                return null;
+                return UserLookup.Fault;
             }
 
             var result = await response.Content.ReadFromJsonAsync<ODataResponse<SystemUserDto>>(ct);
 
-            if (result?.Value == null || !result.Value.Any())
+            if (result?.Value == null)
+            {
+                // A 2xx without a value array is not a Dataverse answer.
+                return UserLookup.Fault;
+            }
+
+            if (!result.Value.Any())
             {
                 _logger.LogWarning("No Dataverse user found for Azure AD OID {AzureAdOid}", azureAdObjectId);
-                return null;
+                return UserLookup.NotFound;
             }
 
             var user = result.Value.First();
@@ -605,12 +711,16 @@ public class DataverseAccessDataSource : IAccessDataSource
             _logger.LogInformation("Found Dataverse user (systemuserid: {SystemUserId}) for Azure AD OID {AzureAdOid}",
                 user.SystemUserId, azureAdObjectId);
 
-            return user.SystemUserId;
+            return string.IsNullOrEmpty(user.SystemUserId) ? UserLookup.Fault : new UserLookup(user.SystemUserId, false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(exception: ex, message: "Error looking up Dataverse user for Azure AD OID {AzureAdOid}", azureAdObjectId);
-            return null;
+            return UserLookup.Fault;
         }
     }
 
@@ -650,7 +760,7 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// <para><b>Fail-closed.</b> No path infers rights from anything but Dataverse's answer. Errors
     /// yield no rights (an empty record list → <see cref="AccessRights.None"/>).</para>
     /// </remarks>
-    private async Task<List<PermissionRecord>> QueryUserPermissionsAsync(
+    private async Task<PermissionRead> QueryUserPermissionsAsync(
         string userId,
         string resourceId,
         string dataverseToken,
@@ -669,22 +779,33 @@ public class DataverseAccessDataSource : IAccessDataSource
                 _logger.LogInformation(
                     "[UAC-DIAG] RetrievePrincipalAccess: no rights. User={UserId}, Resource={ResourceId}",
                     userId, resourceId);
-                return new List<PermissionRecord>();
+                return new PermissionRead(new List<PermissionRecord>(), Faulted: false);
             }
 
             _logger.LogInformation(
                 "[UAC-DIAG] RetrievePrincipalAccess SUCCESS: User={UserId}, Resource={ResourceId}, GrantedAccess={AccessRights}",
                 userId, resourceId, principalRights.Value);
 
-            return new List<PermissionRecord>
-            {
-                new PermissionRecord(userId, resourceId, principalRights.Value)
-            };
+            return new PermissionRead(
+                new List<PermissionRecord> { new PermissionRecord(userId, resourceId, principalRights.Value) },
+                Faulted: false);
         }
 
         // FALLBACK: RetrievePrincipalAccess was unusable. Degrade to the original read probe, which
         // grants at most Read and only when the principal can actually retrieve the record.
         return await QueryReadAccessByProbeAsync(userId, resourceId, dataverseToken, ct);
+    }
+
+    /// <summary>
+    /// The permission records for one principal on one document, and whether they are a complete answer
+    /// (task 132 · C12): <see cref="Faulted"/> is true for a probe-derived (degraded) Read or a failed probe.
+    /// </summary>
+    private readonly record struct PermissionRead(List<PermissionRecord> Records, bool Faulted);
+
+    /// <summary>A sub-read's values, and whether the read could be completed (task 132 · C12).</summary>
+    private readonly record struct SubRead(IReadOnlyList<string> Values, bool Faulted)
+    {
+        public static SubRead Fault => new(Array.Empty<string>(), true);
     }
 
     /// <summary>
@@ -756,6 +877,11 @@ public class DataverseAccessDataSource : IAccessDataSource
             // Dataverse answered, and the answer was nothing. MapDataverseAccessRights returns None.
             return MapDataverseAccessRights(principalAccess.AccessRights);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Task 132: the caller cancelled — propagate rather than degrading to the probe.
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(
@@ -773,7 +899,14 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// If the principal can retrieve the record, they have at least Read; otherwise nothing.
     /// Grants at most <see cref="AccessRights.Read"/> — it cannot observe Write/Delete/Share.
     /// </summary>
-    private async Task<List<PermissionRecord>> QueryReadAccessByProbeAsync(
+    /// <remarks>
+    /// Task 132 (C12): the outcome is classified by <see cref="ClassifyProbeStatus"/>, the rule the record probe
+    /// uses too. A retrievable document gives a DEGRADED Read (faulted — never cached, because it would pin a
+    /// Write holder at Read); a 403/404 is Dataverse's answer (cacheable None); any other status or a thrown
+    /// probe is a fault (uncacheable None). Before this, every non-2xx — a 429 or a 500 included — was "no
+    /// access" exactly like a 403.
+    /// </remarks>
+    private async Task<PermissionRead> QueryReadAccessByProbeAsync(
         string userId,
         string resourceId,
         string dataverseToken,
@@ -799,8 +932,9 @@ public class DataverseAccessDataSource : IAccessDataSource
             };
 
             var response = await _httpClient.SendAsync(requestMessage, ct);
+            var outcome = ClassifyProbeStatus(response.StatusCode);
 
-            if (!response.IsSuccessStatusCode)
+            if (outcome != ProbeOutcome.Readable)
             {
                 // Capture response body for diagnostics
                 var responseBody = await response.Content.ReadAsStringAsync(ct);
@@ -810,8 +944,7 @@ public class DataverseAccessDataSource : IAccessDataSource
                     response.StatusCode, userId, resourceId, responseBody);
 
                 // 403 or 404 means no access
-                if (response.StatusCode == System.Net.HttpStatusCode.Forbidden ||
-                    response.StatusCode == System.Net.HttpStatusCode.NotFound)
+                if (outcome == ProbeOutcome.Refused)
                 {
                     // Log specific failure reason for diagnostics
                     var failureReason = response.StatusCode == System.Net.HttpStatusCode.NotFound
@@ -822,11 +955,11 @@ public class DataverseAccessDataSource : IAccessDataSource
                         "[UAC-DIAG] Access denied: {FailureReason}, User={UserId}, Resource={ResourceId}",
                         failureReason, userId, resourceId);
 
-                    return new List<PermissionRecord>();
+                    return new PermissionRead(new List<PermissionRecord>(), Faulted: false);
                 }
 
-                // Other errors - log and return empty (fail-closed)
-                return new List<PermissionRecord>();
+                // Other errors - log and return empty (fail-closed), FAULTED so it is never cached.
+                return new PermissionRead(new List<PermissionRecord>(), Faulted: true);
             }
 
             // Success: the principal can retrieve the document, so they hold at least Read.
@@ -834,20 +967,27 @@ public class DataverseAccessDataSource : IAccessDataSource
                 "[UAC-DIAG] Document query SUCCESS (fallback probe): User={UserId}, Resource={ResourceId}, GrantedAccess=Read",
                 userId, resourceId);
 
-            return new List<PermissionRecord>
-            {
-                // Read only. This probe cannot observe Write/Delete/Create/Share — it only knows the
-                // record was retrievable. The old comment here claimed "Dataverse will enforce
-                // Write/Delete separately"; on the SPA/Teams surface that is false, because the BFF
-                // filter IS the enforcement point (finding A-20). RetrievePrincipalAccess above is the
-                // path that answers the full question; reaching here means it was unavailable.
-                new PermissionRecord(userId, resourceId, AccessRights.Read)
-            };
+            return new PermissionRead(
+                new List<PermissionRecord>
+                {
+                    // Read only. This probe cannot observe Write/Delete/Create/Share — it only knows the
+                    // record was retrievable. The old comment here claimed "Dataverse will enforce
+                    // Write/Delete separately"; on the SPA/Teams surface that is false, because the BFF
+                    // filter IS the enforcement point (finding A-20). RetrievePrincipalAccess above is the
+                    // path that answers the full question; reaching here means it was unavailable.
+                    new PermissionRecord(userId, resourceId, AccessRights.Read)
+                },
+                // DEGRADED: right for this request, never cached (task 132).
+                Faulted: true);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(exception: ex, message: "Error querying Dataverse access for {UserId} on {ResourceId}", userId, resourceId);
-            return new List<PermissionRecord>();
+            return new PermissionRead(new List<PermissionRecord>(), Faulted: true);
         }
     }
 
@@ -867,7 +1007,9 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// <summary>
     /// Queries user's team memberships.
     /// </summary>
-    private async Task<IEnumerable<string>> QueryUserTeamMembershipsAsync(string userId, CancellationToken ct)
+    /// <remarks>Task 132 (C12): a failed read still yields an empty list for this request, but is marked faulted so
+    /// the snapshot carrying it is never cached; a successful read of zero teams is an answer.</remarks>
+    private async Task<SubRead> QueryUserTeamMembershipsAsync(string userId, CancellationToken ct)
     {
         try
         {
@@ -881,29 +1023,34 @@ public class DataverseAccessDataSource : IAccessDataSource
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to query team memberships: {StatusCode}", response.StatusCode);
-                return Array.Empty<string>();
+                return SubRead.Fault;
             }
 
             var result = await response.Content.ReadFromJsonAsync<ODataResponse<TeamDto>>(ct);
 
             if (result?.Value == null)
             {
-                return Array.Empty<string>();
+                return SubRead.Fault;
             }
 
-            return result.Value.Select(t => t.TeamId ?? t.Name ?? "unknown").ToList();
+            return new SubRead(result.Value.Select(t => t.TeamId ?? t.Name ?? "unknown").ToList(), Faulted: false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(exception: ex, message: "Error querying team memberships for {UserId}", userId);
-            return Array.Empty<string>();
+            return SubRead.Fault;
         }
     }
 
     /// <summary>
     /// Queries user's security roles.
     /// </summary>
-    private async Task<IEnumerable<string>> QueryUserRolesAsync(string userId, CancellationToken ct)
+    /// <remarks>Task 132 (C12): classified exactly as <see cref="QueryUserTeamMembershipsAsync"/>.</remarks>
+    private async Task<SubRead> QueryUserRolesAsync(string userId, CancellationToken ct)
     {
         try
         {
@@ -917,22 +1064,26 @@ public class DataverseAccessDataSource : IAccessDataSource
             if (!response.IsSuccessStatusCode)
             {
                 _logger.LogWarning("Failed to query user roles: {StatusCode}", response.StatusCode);
-                return Array.Empty<string>();
+                return SubRead.Fault;
             }
 
             var result = await response.Content.ReadFromJsonAsync<ODataResponse<RoleDto>>(ct);
 
             if (result?.Value == null)
             {
-                return Array.Empty<string>();
+                return SubRead.Fault;
             }
 
-            return result.Value.Select(r => r.Name ?? "unknown").ToList();
+            return new SubRead(result.Value.Select(r => r.Name ?? "unknown").ToList(), Faulted: false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(exception: ex, message: "Error querying user roles for {UserId}", userId);
-            return Array.Empty<string>();
+            return SubRead.Fault;
         }
     }
 

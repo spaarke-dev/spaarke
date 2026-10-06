@@ -284,6 +284,32 @@ internal sealed class DelegationRuleFilter : IEndpointFilter
                 // code-before-config ordering exists to prevent.
                 case RecordAccessGateQuery gate:
                     return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(gate.RecordType, gate.RecordId));
+
+                // ── /no-access/enforce (task 143) ────────────────────────────────
+                // The target is the No Access ENTRY itself, so the caller must hold Write on the entry (owner O2: the
+                // access-administrator role). An absent entry and one the caller cannot write both answer the probe
+                // with no Write, so both are this filter's 403 — indistinguishable, never a 404. The removals the
+                // handler then makes on each covered record are bounded by the entry AUTHOR's Write on that record
+                // (owner N5), decided inside the enforcer. Without this case every caller would be denied.
+                case NoAccessEnforceRequest enforce:
+                    return enforce.EntryId is { } entryId && entryId != Guid.Empty
+                        ? new DelegationTarget(NoAccessEnforceEndpoint.EntrySet, entryId)
+                        : null;
+
+                // ── /assigned-access/sync, /assigned-access, /assigned-access/dismiss (task 142) ──
+                // The Assigned-To routes change (or, for the list, disclose) who can reach a record, so they take the same
+                // Write-on-the-record check as /share-user — the post-save script, a wizard and the "Update Access" ribbon
+                // command all call them as the user. Each target comes from the SAME explicit-root resolver its handler
+                // uses, so the record authorized is the record materialized. Without these cases the default branch below
+                // would deny every caller — the filter "attached" but never reaching the request type.
+                case AssignedAccessSyncRequest sync:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(sync.RecordType, sync.RecordId));
+
+                case AssignedAccessListQuery assignedList:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(assignedList.RecordType, assignedList.RecordId));
+
+                case AssignedAccessDismissRequest dismiss:
+                    return FromGrantRoot(GrantExternalAccessEndpoint.ResolveExplicitRoot(dismiss.RecordType, dismiss.RecordId));
             }
         }
 

@@ -49,6 +49,8 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
         _factory.EntityServiceMock.Invocations.Clear();
         _factory.CallerResolverMock.Invocations.Clear();
         _client = factory.CreateClient();
+        // Task 161: the record gate asks every rights question with the caller's own token.
+        _client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "caller-token");
     }
 
     [Fact]
@@ -93,11 +95,14 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
     }
 
     [Fact]
-    public async Task CreateRecordThread_WithValidRegarding_Returns200_CreatesRecordAnchoredThreadOwnedByCaller()
+    public async Task CreateRecordThread_WithValidRegarding_Returns200_CreatesRecordAnchoredThreadOwnedByTheRecordsTeam()
     {
         var recordId = Guid.NewGuid();
         var newThreadId = Guid.NewGuid();
         _factory.ResolveCaller(CallerSystemUserId);
+        // Task 161: AppendTo on the matter, and its OWN name as the caller reads it.
+        _factory.Probe.Grant("sprk_matters", recordId, AccessRights.Read | AccessRights.AppendTo);
+        _factory.Query.Visible("sprk_matters", recordId, """{ "sprk_mattername": "Acme v Widgets" }""");
 
         DataverseEntity? created = null;
         _factory.EntityServiceMock
@@ -112,7 +117,7 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
                 name = "  Discovery strategy  ",
                 regardingEntityType = "sprk_matter",
                 regardingRecordId = recordId,
-                regardingRecordName = "Acme v Widgets",
+                regardingRecordName = "A name the caller made up",
             });
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -123,8 +128,13 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
         created!.LogicalName.Should().Be("sprk_communicationthread");
         ((string)created["sprk_name"]).Should().Be("Discovery strategy"); // trimmed
         created.GetAttributeValue<OptionSetValue>("sprk_threadtype").Value.Should().Be(ThreadTypeRecordAnchored);
-        // Owner = the server-resolved caller so the new thread is visible in the caller's all-mode list.
-        created.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(CallerSystemUserId);
+        // unified-access-control-r2 task 146 / owner S6: a RECORD thread is a child of its record — owned by the
+        // record's team as the ONE resolver answers it (the named Secure team for a secure matter), never the caller.
+        created.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team");
+        created.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(
+            Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
+        _factory.Ownership.Requests.Should().Contain(r =>
+            r.TargetEntityLogicalName == "sprk_matter" && r.TargetRecordId == recordId);
         // TYPED ADR-024 regarding lookup — the exact field the by-regarding read filters on (sprk_matter →
         // sprk_regardingmatter via RegardingFieldMap). RB (R3 UAT 2026-07-24): the create previously wrote a
         // NON-EXISTENT 'sprk_regardingrecordtype' text attribute → Dataverse InvalidOperationException (500).
@@ -134,7 +144,9 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
         created.Contains("sprk_regardingrecordtype").Should().BeFalse();
         // Denormalized display pointers (these text attributes DO exist on the thread).
         ((string)created["sprk_regardingrecordid"]).Should().Be(recordId.ToString());
+        // The record's own name, read as the caller — never the body's text (task 161).
         ((string)created["sprk_regardingrecordname"]).Should().Be("Acme v Widgets");
+        created.Attributes.Values.OfType<string>().Should().NotContain("A name the caller made up");
         // A user-provided name is Edited so the auto re-derive never overwrites it.
         ((bool)created["sprk_nameisautoderived"]).Should().BeFalse();
     }
@@ -147,8 +159,17 @@ public class CommunicationCreateRecordThreadContractTests : IClassFixture<Commun
 /// </summary>
 public sealed class CommunicationCreateThreadTestWebAppFactory : WebApplicationFactory<Program>
 {
+    /// <summary>Task 146: the owner resolver double (every create resolves its owner).</summary>
+    public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
     public Mock<ICallerSystemUserResolver> CallerResolverMock { get; } = new();
+
+    /// <summary>Task 161: AppendTo on the regarding record, asked as the caller.</summary>
+    public RecordingProbe Probe { get; } = new();
+
+    /// <summary>Task 161: the regarding record's own name, read as the caller.</summary>
+    public FakeImpersonatedQuery Query { get; } = new();
 
     private readonly bool _disableAuth;
 
@@ -268,9 +289,16 @@ public sealed class CommunicationCreateThreadTestWebAppFactory : WebApplicationF
             services.RemoveAll<IHostedService>();
 
             services.RemoveAll<IGenericEntityService>();
+            // Task 146: every create resolves its owner — the resolver at its module boundary.
+            services.RemoveAll<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver>(Ownership);
             services.AddSingleton(EntityServiceMock.Object);
             services.RemoveAll<ICallerSystemUserResolver>();
             services.AddScoped(_ => CallerResolverMock.Object);
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+            services.AddSingleton<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>(Probe);
+            services.RemoveAll<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>();
+            services.AddSingleton<Sprk.Bff.Api.Services.Communication.IImpersonatedCommunicationQuery>(Query);
 
             var dataverseServiceMock = new Mock<IDataverseService>();
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);

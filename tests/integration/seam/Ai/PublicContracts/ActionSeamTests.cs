@@ -70,7 +70,10 @@ public class ActionSeamTests
         _entityServiceMock.Object,
         _fieldMappingMock.Object,
         _scopeFactoryMock.Object,
-        Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+        Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+        new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+        Sprk.Bff.Api.Tests.TestInfrastructure.IdentityNormalizationFixtures.NoLinkedContact(),
+        Moq.Mock.Of<Spaarke.Dataverse.ICommunicationDataverseService>(),
         NullLogger<ActionSeam>.Instance);
 
     // ── CreateNotification: parity + negative case ────────────────────────────────────────────
@@ -234,12 +237,20 @@ public class ActionSeamTests
             // the sprk_event default is Draft(1) and DailyBriefingCollector's task channels filter on
             // statuscode = Open -- so a Draft task is invisible to the briefing meant to surface it.
             "sprk_eventname", "sprk_eventtype_ref", "sprk_description", "sprk_duedate", "sprk_regardingmatter", "ownerid",
-            "statuscode"
+            "statuscode",
+            // The ADR-024 regarding pair, added by unified-access-control-r2 task 156 (owner decisions round 8 item 2,
+            // F-051-6): id, name and url (the record type too when a sprk_recordtype_ref row is found; the mock finds none).
+            "sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl"
         });
         captured.GetAttributeValue<EntityReference>("sprk_eventtype_ref").Id.Should().Be(
             Guid.Parse("124f5fc9-98ff-f011-8406-7c1e525abd8b"), "event type = Task");
         captured.GetAttributeValue<EntityReference>("sprk_regardingmatter").Id.Should().Be(regardingId);
-        captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(ownerId);
+        // unified-access-control-r2 task 146: owned by the record's team (the resolver's answer), not the supplied
+        // user (task 152 carries the assignee in Assigned To; owner B2).
+        captured.GetAttributeValue<EntityReference>("ownerid").LogicalName.Should().Be("team");
+        captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(
+            Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
+        captured.GetAttributeValue<EntityReference>("ownerid").Id.Should().NotBe(ownerId);
     }
 
     [Fact]

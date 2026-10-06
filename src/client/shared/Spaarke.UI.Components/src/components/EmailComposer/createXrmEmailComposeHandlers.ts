@@ -293,24 +293,34 @@ export function createXrmEmailComposeHandlers(options?: {
           if (!meta) throw new Error(uploadResult.errors[0]?.error ?? 'File upload failed.');
 
           // Create the governed `sprk_document` UNASSOCIATED (the email may have no persisted
-          // regarding yet). Canonical container field is `sprk_graphdriveid`; `sprk_containerid`
-          // stays NULL on the document (design INV). Mirrors DocumentRecordService's unassociated payload.
+          // regarding yet). Mirrors DocumentRecordService's unassociated payload.
+          //
+          // 🔴 NO SPE POINTER in the create payload (unified-access-control-r2 task 166 f1; owner round 21
+          // item 1 (i)): `sprk_graphdriveid` / `sprk_graphitemid` are field-secured, writable by the BFF only.
+          // The BFF attaches the uploaded file below — after checking that this caller created the row and
+          // uploaded the file, and that the file is in the row's derived container — and stamps the pointer,
+          // `sprk_hasfile` and `sprk_filepath` itself.
           const payload: Record<string, unknown> = {
             sprk_documentname: meta.name,
             sprk_filename: meta.name,
             sprk_filesize: meta.size,
-            sprk_graphitemid: meta.id,
-            // The drive the SERVER put the bytes in, read off the upload response — not a container
-            // this client chose. These were the same value before only by coincidence.
-            sprk_graphdriveid: meta.driveId,
-            sprk_filepath: meta.webUrl ?? null,
-            sprk_hasfile: true,
           };
           if (bu.searchIndexName) payload.sprk_searchindexname = bu.searchIndexName;
           if (bu.searchIndexId) {
             payload['sprk_AI_Search_Index@odata.bind'] = `/sprk_aisearchindexes(${bu.searchIndexId})`;
           }
           const documentId = await svc.createEntityRecord('sprk_document', payload);
+          try {
+            await svc.attachUploadedFile(documentId, meta);
+          } catch (attachErr) {
+            // Never leave a "document" with no file behind; the attach failure is what the user sees.
+            try {
+              await xrm.WebApi.deleteRecord('sprk_document', documentId);
+            } catch (deleteErr) {
+              console.warn('[EmailCompose] could not remove the document whose file was not attached:', deleteErr);
+            }
+            throw attachErr;
+          }
 
           return { documentId, driveItemId: meta.id, linkUrl: meta.webUrl };
         }

@@ -767,8 +767,21 @@ public class OfficeTestWebAppFactory : WebApplicationFactory<Program>
             // ComposeServiceCollaborators.Probe() is CallerRecordAccessProbe's own designated test seam
             // (its type doc: "public virtual precisely so tests can substitute the authorization answer
             // without mocking its HttpClient transport" — ADR-038 §4), already built for exactly this.
+            //
+            // uac-r2 task 166 (owner G5 / amendment (c) + S-69): the To Do and quick-create routes now ALSO ask the
+            // caller's table Create privilege through the same probe (CallerHoldsPrivilegeAsync — its virtual
+            // seam). This shared host models a caller who holds it, so every pre-existing Office test keeps its
+            // meaning; the "not held" cases live in OfficeTodoSourceAuthorizationContractTests and
+            // OfficeQuickCreateContractTests.
             services.RemoveAll<CallerRecordAccessProbe>();
-            services.AddScoped(_ => ComposeServiceCollaborators.Probe().Object);
+            services.AddScoped(_ =>
+            {
+                var probe = ComposeServiceCollaborators.Probe();
+                probe.Setup(p => p.CallerHoldsPrivilegeAsync(
+                        It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(true);
+                return probe.Object;
+            });
         });
     }
 }
@@ -796,9 +809,14 @@ public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions
             return Task.FromResult(AuthenticateResult.Fail("Test: unauthenticated caller"));
         }
 
+        // Task 146 c1-r1: a test may sign in with a real (GUID) object id — the shape production oids have — to see the
+        // caller recorded as a row's creator person. Requests without the header keep the fixed text oid, as before.
+        var oid = Request.Headers.TryGetValue("X-Test-Oid", out var suppliedOid) && !string.IsNullOrEmpty(suppliedOid)
+            ? suppliedOid.ToString()
+            : "test-user-oid";
         var claims = new[]
         {
-            new Claim("oid", "test-user-oid"),
+            new Claim("oid", oid),
             new Claim(ClaimTypes.NameIdentifier, "test-user-id"),
             new Claim(ClaimTypes.Email, "test@example.com"),
             new Claim("tid", "test-tenant-id")
@@ -1263,6 +1281,9 @@ public sealed class OfficeVersionSaveWorld
     /// </summary>
     public List<Guid?> CreatedDocumentOwningTeams { get; } = new();
 
+    /// <summary>The creator person each <c>CreateDocumentAsync</c> was given, in order (task 146 c1-r1).</summary>
+    public List<Guid?> CreatedDocumentPersons { get; } = new();
+
     /// <summary>
     /// SECURE records by LOGICAL name + id → the record's own SPE container (task 080 review, F1). Empty by default,
     /// which keeps every other test's registry answer "nothing is securable", exactly as before. When populated, the
@@ -1291,6 +1312,7 @@ public sealed class OfficeVersionSaveWorld
             CreatedDocumentNames.Add(request.Name);
             CreatedDocumentDescriptions.Add(request.Description);
             CreatedDocumentOwningTeams.Add(request.OwningTeamId);
+            CreatedDocumentPersons.Add(request.CreatedByPersonId);
             // FR-02 (task 014): Dataverse accepts a caller-supplied primary key on Create, and the Office
             // document-create path now supplies one so the row's id matches the id stamped into the bytes it
             // uploaded. Honouring it here is what lets a test read the stamp out of the stored item and compare

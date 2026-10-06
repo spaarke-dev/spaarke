@@ -257,7 +257,7 @@ public sealed class GrantCacheRoundTripSeamTests
     /// <summary>
     /// Properties deliberately NOT carried by the cache, each with its reason. Anything public that is not
     /// settable must be named here too, so a new get-only property is a conscious classification rather
-    /// than a silent skip. Task 132's never-cached fault flag is the expected next entry.
+    /// than a silent skip.
     /// </summary>
     private static readonly IReadOnlyDictionary<(Type Type, string Property), string> NotCarriedByDesign =
         new Dictionary<(Type, string), string>
@@ -266,7 +266,31 @@ public sealed class GrantCacheRoundTripSeamTests
             // own, so they round-trip exactly when their source lists do.
             [(typeof(ExternalGrantSet), nameof(ExternalGrantSet.Matters))] = "derived view over MatterGrants",
             [(typeof(ExternalGrantSet), nameof(ExternalGrantSet.WorkAssignments))] = "derived view over WorkAssignmentGrants",
+            // Task 132 (C12): a faulted set is never written, so the flag is always false on a hit — pinned by
+            // GetGrantSetAsync_ACacheHit_NeverReportsFaulted below.
+            [(typeof(ExternalGrantSet), nameof(ExternalGrantSet.Faulted))] =
+                "a faulted set is never written, so the flag is always false on a hit",
         };
+
+    /// <summary>
+    /// Task 132 (C12) — the other half of the <see cref="ExternalGrantSet.Faulted"/> exclusion above: whatever was
+    /// cached, a HIT reports a complete answer. The flag is not part of the cached shape, so a hit can only ever restore
+    /// it as false — which is the truth, because the only write path skips a faulted set.
+    /// </summary>
+    [Fact]
+    public async Task GetGrantSetAsync_ACacheHit_NeverReportsFaulted()
+    {
+        var world = new CacheWorld(Grant(ProjectEntity, RecordId, ExternalAccessLevel.ViewOnly, ExternalAccessLevel.ViewOnly));
+
+        var miss = await world.Participations.GetGrantSetAsync(ContactId);
+        (await world.ReadCachedEntryAsync()).Should().NotBeNull("precondition: a clean miss writes the entry");
+        var hit = await world.Participations.GetGrantSetAsync(ContactId);
+
+        world.Participations.QueryCount.Should().Be(1, "the second read is a cache HIT");
+        miss.Faulted.Should().BeFalse("precondition: the read that was cached was complete");
+        hit.Faulted.Should().BeFalse("a hit is always a complete answer — a faulted set is never written");
+        hit.Projects.Select(p => p.ProjectId).Should().Equal(new[] { RecordId });
+    }
 
     [Fact]
     public async Task GetGrantSetAsync_EveryPublicSettableGrantProperty_SurvivesTheRoundTripThroughTheProductionCache()
@@ -512,9 +536,16 @@ public sealed class GrantCacheRoundTripSeamTests
                     It.IsAny<Guid?>(), It.IsAny<IReadOnlyCollection<Guid>>(),
                     It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(NoAccessListResult.Empty);
+            // Task 143: the systemuser plane asks through the three-subject overload; nobody is walled here either.
+            denyList
+                .Setup(d => d.GetDeniedRecordsAsync(
+                    It.IsAny<NoAccessSubjects>(),
+                    It.IsAny<IReadOnlyCollection<NoAccessCandidateRecord>>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(NoAccessListResult.Empty);
 
             Composer = new AccessibleRecordSetService(
                 membership.Object, Participations, standing.Object, denyList.Object,
+                Sprk.Bff.Api.Tests.Infrastructure.ExternalAccess.AccessibleRecordSetTestFactory.UnlinkedIdentityStore(),
                 NullLogger<AccessibleRecordSetService>.Instance);
         }
 
@@ -569,6 +600,11 @@ public sealed class GrantCacheRoundTripSeamTests
                     : RootRecordFlags.None);
             return Task.FromResult(flags);
         }
+
+        // Task 137: the contact's live state. Active, so this double's grants compose exactly as before;
+        // the inactive-contact guard itself is pinned by UnifiedEvaluatorSeamTests (task 137 section).
+        internal override Task<ContactRecordState> QueryContactStateAsync(Guid contactId, CancellationToken ct)
+            => Task.FromResult(ContactRecordState.Active);
 
         internal override Task<ActiveOrgMemberships> ReadOrganizationMembershipsAsync(Guid contactId, CancellationToken ct = default)
             => Task.FromResult(ActiveOrgMemberships.None);
