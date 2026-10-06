@@ -44,12 +44,22 @@ describe('getXrm capability guard — repository', () => {
 const ROOT = '/fx/src';
 const IMPORT = "import { getXrm } from '@spaarke/ui-components';\nimport * as React from 'react';\n";
 
+// A stub `@spaarke/ui-components` package, so fixture imports resolve by symbol like the repo's.
+const UI_DIR = '/fx/ui';
+const UI_STUB: SourceInput[] = [
+  { fileName: `${UI_DIR}/src/index.ts`, text: "export * from './utils/xrmContext';\n" },
+  {
+    fileName: `${UI_DIR}/src/utils/xrmContext.ts`,
+    text: 'export function getXrm(required?: any): any {\n  return required;\n}\n',
+  },
+];
+
 function run(files: Record<string, string>) {
   const inputs: SourceInput[] = Object.entries(files).map(([name, text]) => ({
     fileName: path.join(ROOT, name),
     text,
   }));
-  return analyze(inputs, ROOT);
+  return analyze([...UI_STUB, ...inputs], ROOT, { packages: { '@spaarke/ui-components': UI_DIR } });
 }
 
 const FIRING: Array<[string, string, string]> = [
@@ -167,6 +177,137 @@ describe('getXrm capability guard — fixtures fire', () => {
   it('an unfollowable escape is reported as a blind spot, not passed silently', () => {
     const r = run({ 'a.ts': IMPORT + 'const bag = { xrm: getXrm() };\nconsole.log(bag);' });
     expect(r.blindSpots.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Round 6 (review R5-1): shapes that used to pass SILENTLY. Each must now be a
+// violation or a reported blind spot.
+// ---------------------------------------------------------------------------
+
+const R6_VIOLATIONS: Array<[string, Record<string, string>, string]> = [
+  [
+    'forwarding function that uses the value in its own body',
+    { 'a.ts': IMPORT + "function f(cap: any) {\n  getXrm(cap)!.Navigation.openForm({});\n}\nf('navigation');" },
+    'Navigation.openForm',
+  ],
+  [
+    'class property initialiser',
+    {
+      'a.ts':
+        IMPORT +
+        "class K {\n  private x: any = getXrm('navigation');\n  go() {\n    this.x.Navigation.openForm({});\n  }\n}",
+    },
+    'Navigation.openForm',
+  ],
+  [
+    'default parameter value',
+    { 'a.ts': IMPORT + "function d(x: any = getXrm('navigation')) {\n  x.Navigation.openForm({});\n}" },
+    'Navigation.openForm',
+  ],
+  [
+    'object-literal method wrapper (svc.get())',
+    {
+      'a.ts':
+        IMPORT +
+        "const svc = {\n  get() {\n    return getXrm('navigation');\n  },\n};\nsvc.get()!.Navigation.openForm({});",
+    },
+    'Navigation.openForm',
+  ],
+  [
+    'class method called on an instance (new S().get())',
+    {
+      'a.ts':
+        IMPORT +
+        "class S {\n  get() {\n    return getXrm('navigation');\n  }\n}\nnew S().get()!.Navigation.openForm({});",
+    },
+    'Navigation.openForm',
+  ],
+  ['comma operator', { 'a.ts': IMPORT + "(0, getXrm('navigation'))!.Navigation.openForm({});" }, 'Navigation.openForm'],
+  [
+    'namespace import (import * as ui; ui.getXrm)',
+    { 'a.ts': "import * as ui from '@spaarke/ui-components';\nui.getXrm('navigation')!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'const g = getXrm',
+    { 'a.ts': IMPORT + "const g = getXrm;\ng('navigation')!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'renamed re-export (export { getXrm as lookupXrm })',
+    {
+      'barrel.ts': "export { getXrm as lookupXrm } from '@spaarke/ui-components';\n",
+      'a.ts': "import { lookupXrm } from './barrel';\nlookupXrm('navigation')!.Navigation.openForm({});",
+    },
+    'Navigation.openForm',
+  ],
+  [
+    'unscanned module: renamed named import',
+    { 'a.ts': "import { getXrm as gx } from '@acme/ui-components';\ngx('navigation')!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'unscanned module: namespace import',
+    { 'a.ts': "import * as ui from '@acme/ui-components';\nui.getXrm('navigation')!.Navigation.openForm({});" },
+    'Navigation.openForm',
+  ],
+  [
+    'wrapper whose returns request different capabilities (no union across returns)',
+    {
+      'a.ts':
+        IMPORT +
+        "function w(b: boolean) {\n  if (b) return getXrm('openForm');\n  return getXrm('navigation');\n}\nw(true)!.Navigation.openForm({});",
+    },
+    'Navigation.openForm',
+  ],
+];
+
+const R6_BLIND_SPOTS: Array<[string, string, RegExp]> = [
+  [
+    'negated predicate',
+    'getXrm((x: any) => !x.Navigation?.openForm)!.Navigation.openForm({});',
+    /predicate guarantees no member/,
+  ],
+  [
+    '|| true predicate',
+    "getXrm((x: any) => typeof x.Navigation?.navigateTo === 'function' || true)!.Navigation.openForm({});",
+    /predicate guarantees no member/,
+  ],
+  [
+    'let capability reassigned later',
+    "let cap: any = 'openForm';\ncap = 'navigation';\ngetXrm(cap)!.Navigation.openForm({});",
+    /reassigned/,
+  ],
+  ['getXrm passed as a value', '[1].map(getXrm);', /getXrm referenced other than by a call/],
+  ['unrecognised context (template literal)', 'const s = `${getXrm()}`;', /unrecognised context/],
+  ['member outside the checked roots', 'getXrm()!.Device.captureImage();', /outside the checked roots/],
+  [
+    'wrapper referenced other than by a call',
+    "function w() {\n  return getXrm('navigation');\n}\nconst h = [w];",
+    /wrapper w referenced other than by a call/,
+  ],
+];
+
+describe('getXrm capability guard — round 6 shapes fire (R5-1)', () => {
+  it.each(R6_VIOLATIONS)('%s', (_name, files, use) => {
+    const r = run(files);
+    expect(r.violations.map(v => v.use)).toContain(use);
+  });
+
+  it.each(R6_BLIND_SPOTS)('%s → blind spot', (_name, body, reason) => {
+    const r = run({ 'a.ts': IMPORT + body });
+    expect(r.blindSpots.map(b => b.reason).some(x => reason.test(x))).toBe(true);
+  });
+
+  it('an || predicate is credited with the union of its disjuncts and NOTED on the site (R5-5)', () => {
+    const r = run({
+      'a.ts':
+        IMPORT +
+        "const x = getXrm((p: any) => typeof p.Navigation?.openForm === 'function' || typeof p.Navigation?.navigateTo === 'function');\nif (x?.Navigation?.openForm) x.Navigation.openForm({});",
+    });
+    expect(r.violations).toEqual([]);
+    expect(r.sites.flatMap(s => s.notes)).toContain('|| predicate — union of the disjuncts');
   });
 });
 

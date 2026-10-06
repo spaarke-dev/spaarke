@@ -1,73 +1,90 @@
 /**
  * xrmCapabilityAnalyzer — AST check that every `getXrm(...)` value is used only
- * for what its requested capability covers (task 081 round 5, review R4-2).
+ * for what its requested capability covers (task 081 rounds 5–6, reviews R4-2 / R5-1).
  *
  * Not a test file itself: `xrmCapabilityUsage.guard.test.ts` runs it over the
  * repository's `src/`, and over synthetic fixtures that prove each tracked
  * shape fires.
  *
- * ## Model
- * A value ORIGINATES at a call of `getXrm` (any import alias of it, or the
- * definition in `xrmContext.ts`) or at a call of a WRAPPER — any function or
- * method, in this file or another scanned file, that returns such a value
- * (`getXrmForPicker`, `getXrmWithWebApiAnd`, `resolveXrm`,
- * `this.getXrm()`, a local `getXrm = (cap) => shared(cap)` …). A wrapper that
- * forwards one of its parameters as the capability takes the capability from
- * each of its call sites.
+ * ## Default: anything not understood is a BLIND SPOT
+ * Every context a value reaches is either FOLLOWED (listed below), an explicit
+ * NOT-A-USE (listed below), or reported as a blind spot. There is no silent
+ * catch-all.
  *
- * The value is followed through: parentheses, `!`, `as` / `<T>` / `satisfies`,
- * `await`, both sides of `??` / `||`, both branches of `?:`; `const` / `let` /
- * `var` aliases and plain `=` assignments (by symbol, anywhere in the file);
- * `this.x = …` fields (within the class); object destructuring (incl.
- * renames and nested patterns); `useState(…)` / `useState(() => …)` tuples
- * (element 0, and values passed to the element-1 setter); `useMemo(() => …)`;
- * returns (making the function a wrapper); and call ARGUMENTS into helper
- * functions resolved in the same file or, by import name, in another scanned
- * file (the parameter is followed like an alias). A root object taken off the
- * value (`const nav = xrm.Navigation`, `const { Utility } = xrm`) is followed the
- * same way.
+ * ## Origins
+ * Modules are resolved: relative imports to scanned files, workspace package
+ * names (`@spaarke/ui-components`, `…/sub/path`) to that package's `src/`. So the
+ * type checker resolves symbols across files, through barrels, renamed
+ * re-exports and namespace imports. A value ORIGINATES at:
+ * - a call of anything whose resolved symbol is `getXrm` (the function in
+ *   `xrmContext.ts`): a named / renamed / namespace import, a re-export, a
+ *   `const g = getXrm` alias. A `getXrm` imported from a module that is NOT
+ *   scanned is recognised by its original name and a `ui-components` /
+ *   `xrmContext` specifier. Any other reference to `getXrm` (passed, stored) is
+ *   a blind spot.
+ * - a call of a WRAPPER: a function, method or object-literal method that
+ *   RETURNS such a value, found by resolved symbol at every call site
+ *   (`this.m()`, `svc.m()`, `new S().m()`, imports). Each `return` is its own
+ *   origin (no union across returns). A wrapper referenced other than by a
+ *   call is a blind spot.
+ * - FORWARDING: when the capability is a parameter of the enclosing function
+ *   (`function f(cap) { getXrm(cap)… }`), the value is analysed ONCE PER CALL
+ *   SITE of that function, with the caller's argument (or the default) bound —
+ *   through chains of such functions. Uses inside the function body are checked
+ *   with each caller's capability; a `return` of the value continues at that
+ *   call site.
  *
- * A USE is `Root.member` with Root ∈ WebApi / Navigation / Utility / App / Page
- * / userSettings, by dot or by string-literal bracket access; a bare root
- * (`if (!xrm?.Navigation)`) is `Root.?`. Not uses: React dependency arrays
- * (`[xrm]`), the receiver of `.bind` / `.call` / `.apply`. A value passed to
- * `new X(…)` is followed into X's constructor and its `this.field` uses.
+ * ## Followed
+ * Parentheses, `!`, `as` / `<T>` / `satisfies`, `await`, the right side of `,`,
+ * both sides of `??` / `||`, both branches of `?:`, the right side of `&&`;
+ * `const` / `let` / `var` aliases, `=` assignments, default parameter values,
+ * class property initialisers and `this.f = …` fields (every reference to the
+ * resolved symbol, in any file); object destructuring (renames, nesting);
+ * `useState(…)` / `useState(() => …)` (element 0 and values passed to its
+ * setter); `useMemo(() => …)`; returns; call ARGUMENTS into functions resolved by
+ * symbol (the parameter is followed like an alias); `new X(…)` into X's
+ * constructor parameter (and the `this.field` it sets).
  *
- * `WebApi` is treated as ATOMIC: a frame has the whole object or none, so any
- * WebApi check (the default, 'webApi', or a predicate on one WebApi method)
- * covers `WebApi.*`, and a WebApi object handed anywhere is a `WebApi.*` use.
+ * ## Not a use (explicit allow-list)
+ * A condition (`if` / `while` / `for` / `?:` test), `!x`, `typeof x`, a
+ * comparison (`===`, `!==`, `==`, `!=`, `instanceof`, `in`), a type position
+ * (`x is T`, `typeof x` in a type), the left side of
+ * `&&` or `,`, an expression statement, `void`, an import / export specifier, a
+ * React dependency array (`[xrm]` as the last argument of a hook), the receiver
+ * of `.bind` / `.call` / `.apply`, an argument to `console.*`.
  *
- * COVERAGE of the requested capability:
+ * ## A USE and its COVERAGE
+ * A use is `Root.member` with Root ∈ WebApi / Navigation / Utility / App / Page
+ * / userSettings (dot or string-literal bracket); a bare root
+ * (`if (!xrm?.Navigation)`) is `Root.?`. Any other member of an Xrm value
+ * (`xrm.Device`, `xrm.Panel` …) is a blind spot. `WebApi` is ATOMIC: any WebApi
+ * check covers `WebApi.*`, and a WebApi object handed anywhere is a `WebApi.*`
+ * use.
  *   webApi → WebApi.* · navigation → Navigation.navigateTo · openForm →
  *   Navigation.openForm · openUrl → Navigation.openUrl · utility, clientUrl →
  *   Utility.getGlobalContext · lookupObjects → Utility.lookupObjects ·
  *   metadata → Utility.getEntityMetadata · pageContext → Utility.getPageContext
- *   · sidePanes → App.sidePanes · page → Page.* · a predicate covers exactly
- *   the `param.Root.member` chains it reads (also inside a helper it calls with
- *   the parameter); `!!x.Root` proves presence only (`Root.?`). A list
- *   covers the union. A `?:` capability or a `??`/`||` fallback between two
- *   lookups is treated as the UNION of the alternatives (the code then checks
- *   which member exists before calling it) — recorded per site.
+ *   · sidePanes → App.sidePanes · page → Page.* · a list covers the union.
+ * A PREDICATE covers what its body GUARANTEES when it returns true:
+ * `typeof x.R.m === 'function'`, `!!x.R.m`, `x.R.m != null` → `R.m`; `!!x.R` →
+ * `R.?` only; `A && B` → both; `!A` → nothing; `A || B` → the union of the
+ * disjuncts only when EVERY disjunct guarantees something (noted per site), else
+ * nothing; a predicate that guarantees nothing is a blind spot. A predicate that
+ * passes its parameter to a helper (`x => !!read(x)`) covers passing the value to
+ * that same helper.
+ * A capability that is a `let` / `var` reassigned anywhere, a spread, or any
+ * other non-literal expression is a blind spot.
  *
- * ## Blind spots (reported, never silently passed)
- * The value escaping into anything not followed above: an object / array
- * literal, a JSX prop, a `new` expression whose class is not found, a call
- * whose callee cannot be resolved to a function declaration in a scanned file
- * (e.g. a method on some other object, a function from a non-scanned package),
- * a non-literal bracket access, a capability that is not a literal / list /
- * predicate / forwarded parameter. Each is listed in the result's `blindSpots`.
- *
- * ## Not detected (assumptions, not reported)
- * - Cross-file resolution is by imported NAME inside the imported module or
- *   package directory (no type checker across files); if one package exports
- *   several functions with that name, the first exported one is used.
- * - `?:` / `??` / `||` alternatives and predicates combined with `||` are
- *   credited with the UNION of their members; that the code calls only the
- *   member its branch guaranteed is not checked.
- * - `WebApi` is assumed atomic (above).
- * - Members outside the roots above (`Xrm.Device`, `Xrm.Panel`, …), `this.x`
- *   read outside its class, and module variables read from another file are
- *   not followed (no `export const x = getXrm(…)` exists in `src/`).
+ * ## Remaining limits (assumptions, not reported)
+ * 1. UNION credit, recorded as a note on each such site: a `?:` capability, a
+ *    `??` / `||` fallback between two lookups, an `||` predicate. That the code
+ *    calls only the member its branch guaranteed is not checked.
+ * 2. `WebApi` is assumed atomic.
+ * 3. A value passed to the helper its predicate calls is treated as covered.
+ * 4. A `getXrm` imported from an UNSCANNED module is matched by name and
+ *    specifier (calls INTO unscanned modules are blind spots, not passes).
+ * 5. Out of scope: reads of `window.Xrm` / `parent.Xrm` that never go through
+ *    `getXrm`.
  */
 
 import * as fs from 'fs';
@@ -94,6 +111,11 @@ export const CAPABILITY_COVERAGE: Record<string, string[]> = {
 export interface SourceInput {
   fileName: string;
   text: string;
+}
+
+export interface AnalyzeOptions {
+  /** Package name → package directory (its `src/` is the entry), in addition to those found via package.json. */
+  packages?: Record<string, string>;
 }
 
 export interface XrmSite {
@@ -131,16 +153,26 @@ export interface AnalysisResult {
 
 // ---------------------------------------------------------------------------
 
-type Coverage = { entries: Set<string>; unknown: boolean; text: string; notes: string[]; forwarded?: boolean };
+type Coverage = {
+  entries: Set<string>;
+  /** Helpers a predicate passes its parameter to: passing the value to one of them is covered. */
+  helpers: Set<ts.Node>;
+  unknown: boolean;
+  unknownReason?: string;
+  /** Parameters the capability still refers to (resolved per call site of their function). */
+  forwardParams: Set<ts.ParameterDeclaration>;
+  text: string;
+  notes: string[];
+};
 
 /** Parameter bindings while evaluating a forwarded capability expression. */
-type Env = Map<ts.Symbol, { expr: ts.Expression; env: Env }>;
+type Env = Map<ts.Symbol, { expr: ts.Expression | undefined }>; // undefined: argument omitted, no default
 const EMPTY_ENV: Env = new Map();
 
-/** A capability expression still referring to the enclosing function's parameters. */
-interface ForwardTemplate {
-  expr: ts.Expression | undefined;
-  env: Env;
+/** One level of forwarding: the value's capability came from `fn`'s parameters, bound at `call`. */
+interface ChainLink {
+  fn: ts.FunctionLikeDeclaration;
+  call: ts.CallExpression;
 }
 
 interface Origin {
@@ -149,17 +181,8 @@ interface Origin {
   root?: string;
   cov: Coverage;
   site: XrmSite;
-  /** Set when the capability is a parameter of the enclosing function (resolved per call site). */
-  forward?: ForwardTemplate;
-}
-
-interface WrapperInfo {
-  kind: 'xrm' | 'root';
-  root?: string;
-  /** Fixed: coverage resolved at the definition. */
-  fixed?: { cov: Coverage; site: XrmSite };
-  /** Forwarding: the capability expression, evaluated at each call site with its arguments bound. */
-  forward?: ForwardTemplate;
+  /** Innermost first: returning from chain[0].fn continues at chain[0].call. */
+  chain: ChainLink[];
 }
 
 const TRANSPARENT = new Set([
@@ -171,6 +194,17 @@ const TRANSPARENT = new Set([
   ts.SyntaxKind.AwaitExpression,
 ]);
 
+const COMPARISONS = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+  ts.SyntaxKind.InstanceOfKeyword,
+  ts.SyntaxKind.InKeyword,
+]);
+
+const HOOKS_WITH_DEPS = /^use(Effect|LayoutEffect|Memo|Callback|ImperativeHandle)$/;
+
 function lineOf(node: ts.Node): number {
   const sf = node.getSourceFile();
   return sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1;
@@ -180,6 +214,10 @@ function rel(fileName: string, root: string): string {
   return path.relative(root, fileName).replace(/\\/g, '/');
 }
 
+function norm(p: string): string {
+  return path.resolve(p).replace(/\\/g, '/');
+}
+
 function calleeName(call: ts.CallExpression): string | undefined {
   const e = call.expression;
   if (ts.isIdentifier(e)) return e.text;
@@ -187,30 +225,77 @@ function calleeName(call: ts.CallExpression): string | undefined {
   return undefined;
 }
 
-export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult {
-  const texts = new Map(inputs.map(i => [path.resolve(i.fileName).replace(/\\/g, '/'), i.text]));
+function skipT(e: ts.Expression): ts.Expression {
+  while (TRANSPARENT.has(e.kind)) e = (e as ts.ParenthesizedExpression).expression;
+  return e;
+}
+
+function newCov(text: string): Coverage {
+  return { entries: new Set(), helpers: new Set(), unknown: false, forwardParams: new Set(), text, notes: [] };
+}
+
+export function analyze(inputs: SourceInput[], displayRoot = '', opts: AnalyzeOptions = {}): AnalysisResult {
+  const texts = new Map(inputs.map(i => [norm(i.fileName), i.text]));
   const fileNames = [...texts.keys()];
+
+  // ---- workspace packages (name → dir) for module resolution
+  const pkgRoots = new Map<string, string>();
+  for (const [name, dir] of Object.entries(opts.packages ?? {})) pkgRoots.set(name, norm(dir));
+  const seenPkgDirs = new Set<string>();
+  for (const f of fileNames) {
+    const m = /^(.*?\/(?:client\/shared|client\/pcf|client\/code-pages|solutions)\/[^/]+)\//.exec(f);
+    if (m && !seenPkgDirs.has(m[1])) {
+      seenPkgDirs.add(m[1]);
+      try {
+        const name = JSON.parse(fs.readFileSync(path.join(m[1], 'package.json'), 'utf8')).name as string;
+        if (name && !pkgRoots.has(name)) pkgRoots.set(name, m[1]);
+      } catch {
+        /* no package.json */
+      }
+    }
+  }
+  const tryFile = (base: string): string | undefined => {
+    for (const ext of ['', '.ts', '.tsx', '/index.ts', '/index.tsx']) if (texts.has(base + ext)) return base + ext;
+    return undefined;
+  };
+  function resolveModule(spec: string, from: string): string | undefined {
+    if (spec.startsWith('.')) return tryFile(norm(path.resolve(path.dirname(from), spec)));
+    for (const [name, dir] of pkgRoots) {
+      if (spec === name) return tryFile(`${dir}/src/index`) ?? tryFile(`${dir}/index`);
+      if (spec.startsWith(name + '/')) {
+        const sub = spec.slice(name.length + 1);
+        return tryFile(`${dir}/src/${sub}`) ?? tryFile(`${dir}/${sub}`);
+      }
+    }
+    return undefined;
+  }
+
   const options: ts.CompilerOptions = {
-    noResolve: true,
     noLib: true,
     types: [],
     jsx: ts.JsxEmit.Preserve,
     target: ts.ScriptTarget.ES2020,
     allowJs: false,
+    noEmit: true,
   };
   const host = ts.createCompilerHost(options);
   host.getSourceFile = (fileName, lang) => {
-    const key = path.resolve(fileName).replace(/\\/g, '/');
+    const key = norm(fileName);
     const text = texts.get(key);
     return text === undefined
       ? undefined
       : ts.createSourceFile(key, text, lang, true, key.endsWith('x') ? ts.ScriptKind.TSX : ts.ScriptKind.TS);
   };
-  host.fileExists = f => texts.has(path.resolve(f).replace(/\\/g, '/'));
-  host.readFile = f => texts.get(path.resolve(f).replace(/\\/g, '/'));
+  host.fileExists = f => texts.has(norm(f));
+  host.readFile = f => texts.get(norm(f));
+  host.resolveModuleNames = (names, containing) =>
+    names.map(n => {
+      const r = resolveModule(n, norm(containing));
+      return r ? { resolvedFileName: r, extension: r.endsWith('x') ? ts.Extension.Tsx : ts.Extension.Ts } : undefined;
+    });
   const program = ts.createProgram(fileNames, options, host);
   const checker = program.getTypeChecker();
-  const sources = new Map(program.getSourceFiles().map(sf => [sf.fileName, sf]));
+  const sources = program.getSourceFiles();
   const disp = (f: string) => (displayRoot ? rel(f, displayRoot) : path.basename(f));
 
   const sites: XrmSite[] = [];
@@ -218,269 +303,396 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
   const blindSpots: XrmBlindSpot[] = [];
   let nextId = 1;
 
-  // ---- identifier → symbol index per file (for alias reference search)
-  const idIndex = new Map<string, Array<[ts.Identifier, ts.Symbol | undefined]>>();
-  function identifiersOf(sf: ts.SourceFile): Array<[ts.Identifier, ts.Symbol | undefined]> {
-    let list = idIndex.get(sf.fileName);
-    if (!list) {
-      list = [];
-      const visit = (n: ts.Node) => {
-        if (ts.isIdentifier(n)) {
-          // `{ webApi }`: the shorthand's name resolves to the PROPERTY symbol; the
-          // variable it reads is the shorthand assignment's value symbol.
-          const sym =
-            ts.isShorthandPropertyAssignment(n.parent) && n.parent.name === n
-              ? checker.getShorthandAssignmentValueSymbol(n.parent)
-              : checker.getSymbolAtLocation(n);
-          list!.push([n, sym]);
-        }
-        ts.forEachChild(n, visit);
-      };
-      visit(sf);
-      idIndex.set(sf.fileName, list);
-    }
-    return list;
-  }
-  function referencesOf(sym: ts.Symbol, sf: ts.SourceFile, exclude?: ts.Node): ts.Identifier[] {
-    return identifiersOf(sf)
-      .filter(([id, s]) => s === sym && id !== exclude)
-      .map(([id]) => id);
-  }
-
-  // ---- exported functions by name per package/file (for cross-file helper + wrapper resolution)
-  const pkgRoots = new Map<string, string>(); // package name → src dir
-  for (const f of fileNames) {
-    const m = /^(.*?\/(?:client\/shared|client\/pcf|client\/code-pages|solutions)\/[^/]+)\//.exec(f);
-    if (m && !pkgRoots.has(m[1])) {
-      const pj = path.join(m[1], 'package.json');
+  // ---- symbols
+  function dealias(sym: ts.Symbol | undefined): ts.Symbol | undefined {
+    let s = sym;
+    for (let i = 0; s && s.flags & ts.SymbolFlags.Alias && i < 10; i++) {
       try {
-        const name = JSON.parse(fs.readFileSync(pj, 'utf8')).name as string;
-        if (name) pkgRoots.set(name, m[1]);
+        const next = checker.getAliasedSymbol(s);
+        if (!next || next === s || !next.declarations?.length) return s; // unresolved module: keep the alias
+        s = next;
       } catch {
-        /* fixtures / no package.json */
+        return s;
       }
     }
+    return s;
   }
-  const fnDecls = new Map<string, Array<ts.FunctionLikeDeclaration>>(); // name → decls (any file)
-  const classDecls = new Map<string, ts.ClassDeclaration[]>();
-  for (const sf of sources.values()) {
+  function symbolOf(id: ts.Identifier): ts.Symbol | undefined {
+    // `{ webApi }`: the shorthand's name resolves to the PROPERTY; the variable read is the value symbol.
+    if (ts.isShorthandPropertyAssignment(id.parent) && id.parent.name === id)
+      return dealias(checker.getShorthandAssignmentValueSymbol(id.parent));
+    return dealias(checker.getSymbolAtLocation(id));
+  }
+
+  // ---- global identifier index: dealiased symbol → references (any file)
+  const refIndex = new Map<ts.Symbol, ts.Identifier[]>();
+  const getXrmNamed: ts.Identifier[] = [];
+  for (const sf of sources) {
     const visit = (n: ts.Node) => {
-      if (ts.isClassDeclaration(n) && n.name) classDecls.set(n.name.text, [...(classDecls.get(n.name.text) ?? []), n]);
-      if (ts.isFunctionDeclaration(n) && n.name) push(n.name.text, n);
-      else if (
-        ts.isVariableDeclaration(n) &&
-        ts.isIdentifier(n.name) &&
-        n.initializer &&
-        (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))
-      )
-        push(n.name.text, n.initializer);
+      if (ts.isIdentifier(n)) {
+        const s = symbolOf(n);
+        if (s) {
+          const l = refIndex.get(s);
+          if (l) l.push(n);
+          else refIndex.set(s, [n]);
+        }
+        if (n.text === 'getXrm') getXrmNamed.push(n);
+      }
       ts.forEachChild(n, visit);
     };
     visit(sf);
   }
-  function push(name: string, d: ts.FunctionLikeDeclaration) {
-    const l = fnDecls.get(name) ?? [];
-    l.push(d);
-    fnDecls.set(name, l);
+  function referencesOf(sym: ts.Symbol | undefined, exclude?: ts.Node): ts.Identifier[] {
+    if (!sym) return [];
+    return (refIndex.get(sym) ?? []).filter(id => id !== exclude);
   }
 
-  /** Resolve an identifier callee to a function declaration (same file by symbol; other file by import). */
-  function resolveFunction(callee: ts.Expression): ts.FunctionLikeDeclaration | undefined {
-    if (ts.isPropertyAccessExpression(callee) && callee.expression.kind === ts.SyntaxKind.ThisKeyword) {
-      const cls = findAncestor(callee, ts.isClassLike);
-      const m = cls?.members.find(
-        mm =>
-          (ts.isMethodDeclaration(mm) || ts.isPropertyDeclaration(mm)) &&
-          mm.name &&
-          ts.isIdentifier(mm.name) &&
-          mm.name.text === callee.name.text
-      );
-      if (m && ts.isMethodDeclaration(m)) return m;
-      if (
-        m &&
-        ts.isPropertyDeclaration(m) &&
-        m.initializer &&
-        (ts.isArrowFunction(m.initializer) || ts.isFunctionExpression(m.initializer))
-      )
-        return m.initializer;
-      return undefined;
-    }
-    if (!ts.isIdentifier(callee)) return undefined;
-    const sym = checker.getSymbolAtLocation(callee);
-    const decl = sym?.declarations?.[0];
-    if (!decl) return undefined;
-    if (ts.isFunctionDeclaration(decl)) return decl;
-    if (
-      ts.isVariableDeclaration(decl) &&
-      decl.initializer &&
-      (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
-    )
-      return decl.initializer;
-    if (ts.isImportSpecifier(decl)) {
-      const original = (decl.propertyName ?? decl.name).text;
-      const spec = (decl.parent.parent.parent.moduleSpecifier as ts.StringLiteral).text;
-      const candidates = fnDecls.get(original) ?? [];
-      const from = decl.getSourceFile().fileName;
-      const target = resolveModuleDir(spec, from);
-      const hit = candidates.filter(c => !target || c.getSourceFile().fileName.startsWith(target));
-      return hit.length === 1 ? hit[0] : hit.length > 1 ? hit.find(h => isExported(h)) : undefined;
-    }
-    return undefined;
-  }
-  function resolveModuleDir(spec: string, from: string): string | undefined {
-    if (spec.startsWith('.')) {
-      const base = path.resolve(path.dirname(from), spec).replace(/\\/g, '/');
-      for (const ext of ['.ts', '.tsx', '/index.ts', '/index.tsx']) if (texts.has(base + ext)) return base + ext;
-      return base;
-    }
-    for (const [name, dir] of pkgRoots) if (spec === name || spec.startsWith(name + '/')) return dir;
-    return undefined;
-  }
-  function isExported(d: ts.Node): boolean {
-    const n = ts.isFunctionDeclaration(d) ? d : d.parent?.parent?.parent;
-    return (
-      !!n &&
-      !!ts.getCombinedModifierFlags(n as ts.Declaration) &&
-      (ts.getCombinedModifierFlags(n as ts.Declaration) & ts.ModifierFlags.Export) !== 0
-    );
-  }
   function findAncestor<T extends ts.Node>(n: ts.Node, pred: (x: ts.Node) => x is T): T | undefined {
     let p: ts.Node | undefined = n.parent;
     while (p && !pred(p)) p = p.parent;
     return p as T | undefined;
   }
 
-  // ---- getXrm identification
-  function isGetXrmCallee(callee: ts.Expression): boolean {
-    if (!ts.isIdentifier(callee)) return false;
-    const sym = checker.getSymbolAtLocation(callee);
-    const decl = sym?.declarations?.[0];
-    if (!decl) return false;
-    if (ts.isImportSpecifier(decl)) {
-      const original = (decl.propertyName ?? decl.name).text;
-      const spec = (decl.parent.parent.parent.moduleSpecifier as ts.StringLiteral).text;
-      return original === 'getXrm' && /ui-components|xrmContext/.test(spec);
+  /** The function-like node a (dealiased) symbol names, if any. */
+  function functionOfSymbol(sym: ts.Symbol | undefined): ts.FunctionLikeDeclaration | undefined {
+    if (!sym?.declarations?.length) return undefined;
+    const withBody = sym.declarations.find(
+      d => (ts.isFunctionDeclaration(d) || ts.isMethodDeclaration(d)) && d.body
+    ) as ts.FunctionLikeDeclaration | undefined;
+    if (withBody) return withBody;
+    for (const d of sym.declarations) {
+      if (
+        (ts.isVariableDeclaration(d) || ts.isPropertyDeclaration(d) || ts.isPropertyAssignment(d)) &&
+        d.initializer &&
+        (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))
+      )
+        return d.initializer;
     }
+    return undefined;
+  }
+  /** Resolve a callee to its function by symbol (identifier, `a.b`, `this.m`, `new S().m`). */
+  function resolveFunction(callee: ts.Expression): ts.FunctionLikeDeclaration | undefined {
+    const e = skipT(callee);
+    if (ts.isIdentifier(e)) return functionOfSymbol(symbolOf(e));
+    if (ts.isPropertyAccessExpression(e)) return functionOfSymbol(dealias(checker.getSymbolAtLocation(e.name)));
+    return undefined;
+  }
+  function fnKey(fn: ts.FunctionLikeDeclaration): ts.Symbol | undefined {
+    if ((ts.isFunctionDeclaration(fn) || ts.isMethodDeclaration(fn)) && fn.name)
+      return dealias(checker.getSymbolAtLocation(fn.name));
+    const p = fn.parent;
+    if ((ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isPropertyAssignment(p)) && p.name)
+      return dealias(checker.getSymbolAtLocation(p.name));
+    return undefined;
+  }
+  function fnName(fn: ts.FunctionLikeDeclaration): string {
+    if (fn.name && ts.isIdentifier(fn.name)) return fn.name.text;
+    const p = fn.parent;
+    if (
+      (ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p) || ts.isPropertyAssignment(p)) &&
+      ts.isIdentifier(p.name)
+    )
+      return p.name.text;
+    return '(function)';
+  }
+
+  /** Where `id` (a reference to a function's symbol) sits: a call, a declaration / specifier, or an escape. */
+  function classifyRef(id: ts.Identifier): { call?: ts.CallExpression; skip?: boolean } {
+    const p = id.parent;
+    if (ts.isCallExpression(p) && p.expression === id) return { call: p };
+    if (ts.isPropertyAccessExpression(p) && p.name === id) {
+      const pp = p.parent;
+      if (ts.isCallExpression(pp) && pp.expression === p) return { call: pp };
+    }
+    if (
+      ts.isImportSpecifier(p) ||
+      ts.isExportSpecifier(p) ||
+      ts.isImportClause(p) ||
+      ts.isNamespaceImport(p) ||
+      ts.isExportAssignment(p) ||
+      ((ts.isFunctionDeclaration(p) ||
+        ts.isMethodDeclaration(p) ||
+        ts.isVariableDeclaration(p) ||
+        ts.isPropertyDeclaration(p) ||
+        ts.isPropertyAssignment(p) ||
+        ts.isParameter(p)) &&
+        p.name === id)
+    )
+      return { skip: true };
+    // React dependency array (`useCallback(…, [fn])`).
+    if (
+      ts.isArrayLiteralExpression(p) &&
+      ts.isCallExpression(p.parent) &&
+      p.parent.arguments[p.parent.arguments.length - 1] === p &&
+      HOOKS_WITH_DEPS.test(calleeName(p.parent) ?? '')
+    )
+      return { skip: true };
+    return {};
+  }
+  function usesOfFunction(fn: ts.FunctionLikeDeclaration): { calls: ts.CallExpression[]; escapes: ts.Node[] } {
+    const calls: ts.CallExpression[] = [];
+    const escapes: ts.Node[] = [];
+    const key = fnKey(fn);
+    let ids = referencesOf(key);
+    if (ts.isMethodDeclaration(fn) || ts.isPropertyAssignment(fn.parent) || ts.isPropertyDeclaration(fn.parent)) {
+      // `svc.get` / `new S().get` can resolve to a TRANSIENT property symbol (a widened or
+      // instantiated type's member): match those through their declarations.
+      const name = fnName(fn);
+      for (const [s, l] of refIndex)
+        if (s !== key && s.name === name && functionOfSymbol(s) === fn) ids = ids.concat(l);
+    }
+    for (const id of ids) {
+      const c = classifyRef(id);
+      if (c.call) calls.push(c.call);
+      else if (!c.skip) escapes.push(id);
+    }
+    return { calls, escapes };
+  }
+
+  // ---- getXrm identification (by resolved symbol)
+  function isGetXrmDecl(d: ts.Declaration | undefined): boolean {
     return (
-      ts.isFunctionDeclaration(decl) &&
-      decl.name?.text === 'getXrm' &&
-      /xrmContext\.tsx?$/.test(decl.getSourceFile().fileName)
+      !!d &&
+      ts.isFunctionDeclaration(d) &&
+      d.name?.text === 'getXrm' &&
+      /xrmContext\.tsx?$/.test(d.getSourceFile().fileName)
     );
+  }
+  const getXrmMemo = new Map<ts.Symbol, boolean>();
+  function isGetXrmSymbol(sym: ts.Symbol | undefined, depth = 0): boolean {
+    if (!sym || depth > 6) return false;
+    const memo = getXrmMemo.get(sym);
+    if (memo !== undefined) return memo;
+    getXrmMemo.set(sym, false);
+    let r = false;
+    const d = sym.declarations?.[0];
+    if (sym.declarations?.some(x => isGetXrmDecl(x))) r = true;
+    else if (d && ts.isImportSpecifier(d) && sym.flags & ts.SymbolFlags.Alias) {
+      // Unresolved (unscanned) module: original name + specifier.
+      const original = (d.propertyName ?? d.name).text;
+      const spec = (d.parent.parent.parent.moduleSpecifier as ts.StringLiteral).text;
+      r = original === 'getXrm' && /ui-components|xrmContext/.test(spec);
+    } else if (d && ts.isVariableDeclaration(d) && d.initializer) {
+      const init = skipT(d.initializer);
+      if (ts.isIdentifier(init)) r = isGetXrmSymbol(symbolOf(init), depth + 1);
+      else if (ts.isPropertyAccessExpression(init))
+        r = isGetXrmSymbol(dealias(checker.getSymbolAtLocation(init.name)), depth + 1) || isNsGetXrm(init);
+    }
+    getXrmMemo.set(sym, r);
+    return r;
+  }
+  /** `ui.getXrm` where `ui` is a namespace import of an unscanned ui-components / xrmContext module. */
+  function isNsGetXrm(pa: ts.PropertyAccessExpression): boolean {
+    if (pa.name.text !== 'getXrm' || !ts.isIdentifier(pa.expression)) return false;
+    const d = checker.getSymbolAtLocation(pa.expression)?.declarations?.[0];
+    if (!d || !ts.isNamespaceImport(d)) return false;
+    const spec = (d.parent.parent.moduleSpecifier as ts.StringLiteral).text;
+    return /ui-components|xrmContext/.test(spec);
+  }
+  function isGetXrmCallee(callee: ts.Expression): boolean {
+    const e = skipT(callee);
+    if (ts.isIdentifier(e)) return isGetXrmSymbol(symbolOf(e));
+    if (ts.isPropertyAccessExpression(e))
+      return isGetXrmSymbol(dealias(checker.getSymbolAtLocation(e.name))) || isNsGetXrm(e);
+    return false;
   }
 
   // ---- capability resolution
-  function predicateCoverage(fn: ts.FunctionLikeDeclaration, depth = 0): Set<string> {
-    const out = new Set<string>();
-    const p = fn.parameters[0];
-    if (!p || !ts.isIdentifier(p.name) || !fn.body || depth > 3) return out;
-    const pname = p.name.text;
-    const visit = (n: ts.Node) => {
-      // A predicate that delegates to a helper (`x => !!read(x)`): the helper's reads.
-      if (
-        ts.isCallExpression(n) &&
-        n.arguments.some(a => ts.isIdentifier(skipT(a)) && (skipT(a) as ts.Identifier).text === pname)
-      ) {
-        const helper = resolveFunction(n.expression);
-        if (helper) predicateCoverage(helper, depth + 1).forEach(x => out.add(x));
-      }
-      if (
-        ts.isPropertyAccessExpression(n) &&
-        ts.isIdentifier(n.expression) &&
-        n.expression.text === pname &&
-        n.name.text === 'WebApi'
-      ) {
-        out.add('WebApi.*'); // WebApi is atomic: a frame has the whole object or none
-      } else if (
-        ts.isPropertyAccessExpression(n) &&
-        ts.isIdentifier(n.expression) &&
-        n.expression.text === pname &&
-        ROOTS.has(n.name.text)
-      ) {
-        let parent: ts.Node = n.parent;
-        while (TRANSPARENT.has(parent.kind)) parent = parent.parent;
-        if (
-          (ts.isPropertyAccessExpression(parent) && parent.expression === n) ||
-          (ts.isPropertyAccessExpression(parent) && skipT(parent.expression) === n)
-        )
-          out.add(`${n.name.text}.${(parent as ts.PropertyAccessExpression).name.text}`);
-        else out.add(`${n.name.text}.?`); // `!!x.Root` proves presence, not any method
-      }
-      ts.forEachChild(n, visit);
-    };
-    visit(fn.body);
-    return out;
+  function chainGuarantee(e: ts.Expression, pSym: ts.Symbol): string | undefined {
+    // Walk x.R.m(...)?.… down to the parameter; report the first two segments.
+    const segs: string[] = [];
+    let cur: ts.Expression = skipT(e);
+    for (;;) {
+      if (ts.isCallExpression(cur)) cur = skipT(cur.expression);
+      else if (ts.isPropertyAccessExpression(cur)) {
+        segs.unshift(cur.name.text);
+        cur = skipT(cur.expression);
+      } else if (ts.isElementAccessExpression(cur) && ts.isStringLiteralLike(cur.argumentExpression)) {
+        segs.unshift(cur.argumentExpression.text);
+        cur = skipT(cur.expression);
+      } else break;
+    }
+    if (!ts.isIdentifier(cur) || checker.getSymbolAtLocation(cur) !== pSym || !segs.length) return undefined;
+    const [root, member] = segs;
+    if (!ROOTS.has(root)) return undefined;
+    if (root === 'WebApi') return 'WebApi.*';
+    return member ? `${root}.${member}` : `${root}.?`;
   }
-  function skipT(e: ts.Expression): ts.Expression {
-    while (TRANSPARENT.has(e.kind)) e = (e as ts.ParenthesizedExpression).expression;
-    return e;
+  /** What a predicate body guarantees about its parameter when TRUTHY. */
+  function guarantee(e: ts.Expression, pSym: ts.Symbol, out: Coverage, depth: number): Set<string> {
+    const g = new Set<string>();
+    if (depth > 12) return g;
+    e = skipT(e);
+    if (ts.isBinaryExpression(e)) {
+      const op = e.operatorToken.kind;
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
+        guarantee(e.left, pSym, out, depth + 1).forEach(x => g.add(x));
+        guarantee(e.right, pSym, out, depth + 1).forEach(x => g.add(x));
+        return g;
+      }
+      if (op === ts.SyntaxKind.BarBarToken) {
+        const l = guarantee(e.left, pSym, out, depth + 1);
+        const r = guarantee(e.right, pSym, out, depth + 1);
+        if (l.size && r.size) {
+          l.forEach(x => g.add(x));
+          r.forEach(x => g.add(x));
+          const note = '|| predicate — union of the disjuncts';
+          if (!out.notes.includes(note)) out.notes.push(note);
+        }
+        return g;
+      }
+      if (COMPARISONS.has(op) && op !== ts.SyntaxKind.InstanceOfKeyword && op !== ts.SyntaxKind.InKeyword) {
+        const positive = op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsToken;
+        for (const [a, b] of [
+          [e.left, e.right],
+          [e.right, e.left],
+        ] as const) {
+          const sa = skipT(a);
+          const sb = skipT(b);
+          if (ts.isTypeOfExpression(sa) && ts.isStringLiteralLike(sb)) {
+            const ok = positive ? sb.text !== 'undefined' : sb.text === 'undefined';
+            const c = ok ? chainGuarantee(sa.expression, pSym) : undefined;
+            if (c) g.add(c);
+            return g;
+          }
+          const nullish = sb.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(sb) && sb.text === 'undefined');
+          if (nullish && !positive) {
+            const c = chainGuarantee(sa, pSym);
+            if (c) g.add(c);
+            return g;
+          }
+        }
+        return g;
+      }
+      return g;
+    }
+    if (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.ExclamationToken) {
+      const inner = skipT(e.operand);
+      if (ts.isPrefixUnaryExpression(inner) && inner.operator === ts.SyntaxKind.ExclamationToken)
+        return guarantee(inner.operand, pSym, out, depth + 1);
+      return g; // a negation guarantees no member
+    }
+    if (ts.isCallExpression(e)) {
+      if (ts.isIdentifier(e.expression) && e.expression.text === 'Boolean' && e.arguments[0])
+        return guarantee(e.arguments[0], pSym, out, depth + 1);
+      const passesParam = e.arguments.some(a => {
+        const s = skipT(a);
+        return ts.isIdentifier(s) && checker.getSymbolAtLocation(s) === pSym;
+      });
+      if (passesParam) {
+        const helper = resolveFunction(e.expression);
+        if (helper) {
+          out.helpers.add(helper);
+          g.add(`helper:${fnName(helper)}`);
+        }
+        return g;
+      }
+    }
+    const c = chainGuarantee(e, pSym);
+    if (c) g.add(c);
+    return g;
+  }
+  function predicateCoverage(fn: ts.ArrowFunction | ts.FunctionExpression, cov: Coverage) {
+    const p = fn.parameters[0];
+    const pSym = p && ts.isIdentifier(p.name) ? checker.getSymbolAtLocation(p.name) : undefined;
+    if (!pSym || !fn.body) return;
+    const returns: ts.Expression[] = [];
+    if (!ts.isBlock(fn.body)) returns.push(fn.body);
+    else {
+      const visit = (n: ts.Node) => {
+        if (ts.isReturnStatement(n) && n.expression) returns.push(n.expression);
+        if (!ts.isFunctionLike(n)) ts.forEachChild(n, visit);
+      };
+      ts.forEachChild(fn.body, visit);
+    }
+    let acc: Set<string> | undefined;
+    for (const r of returns) {
+      const g = guarantee(r, pSym, cov, 0);
+      acc = acc ? new Set([...acc].filter(x => g.has(x))) : g;
+    }
+    for (const x of acc ?? []) if (!x.startsWith('helper:')) cov.entries.add(x);
+  }
+  function isReassigned(sym: ts.Symbol, decl: ts.Node): boolean {
+    return referencesOf(sym, (decl as ts.VariableDeclaration).name).some(id => {
+      const p = id.parent;
+      return (
+        ts.isBinaryExpression(p) &&
+        p.left === id &&
+        p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
+        p.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+      );
+    });
   }
   function resolveCoverage(arg: ts.Expression | undefined, env: Env = EMPTY_ENV, depth = 0): Coverage {
-    const cov: Coverage = { entries: new Set(), unknown: false, text: arg ? arg.getText() : '(default)', notes: [] };
+    const cov = newCov(arg ? arg.getText() : '(default)');
     if (!arg) {
       CAPABILITY_COVERAGE.webApi.forEach(e => cov.entries.add(e));
       return cov;
     }
-    if (depth > 8) {
+    const unknown = (why: string) => {
       cov.unknown = true;
+      cov.unknownReason ??= why;
+    };
+    if (depth > 8) {
+      unknown('capability nested too deeply');
       return cov;
     }
     const e = skipT(arg);
     const merge = (sub: Coverage) => {
       sub.entries.forEach(x => cov.entries.add(x));
-      if (sub.unknown) cov.unknown = true;
-      if (sub.forwarded) cov.forwarded = true;
+      sub.helpers.forEach(x => cov.helpers.add(x));
+      sub.forwardParams.forEach(x => cov.forwardParams.add(x));
+      if (sub.unknown) unknown(sub.unknownReason ?? 'unresolvable');
       sub.notes.forEach(n => cov.notes.includes(n) || cov.notes.push(n));
     };
-    const addCap = (name: string) => {
-      const c = CAPABILITY_COVERAGE[name];
+    if (ts.isStringLiteralLike(e)) {
+      const c = CAPABILITY_COVERAGE[e.text];
       if (c) c.forEach(x => cov.entries.add(x));
-      else cov.unknown = true;
-    };
-    if (ts.isStringLiteralLike(e)) addCap(e.text);
-    else if (ts.isArrayLiteralExpression(e)) {
-      for (const el of e.elements) merge(resolveCoverage(ts.isSpreadElement(el) ? el.expression : el, env, depth + 1));
+      else unknown(`unknown capability '${e.text}'`);
+    } else if (ts.isArrayLiteralExpression(e)) {
+      for (const el of e.elements) {
+        if (ts.isSpreadElement(el)) unknown('spread in a capability list');
+        else merge(resolveCoverage(el, env, depth + 1));
+      }
     } else if (ts.isArrowFunction(e) || ts.isFunctionExpression(e)) {
-      predicateCoverage(e).forEach(x => cov.entries.add(x));
-      if (cov.entries.size === 0) cov.unknown = true;
+      predicateCoverage(e, cov);
+      if (cov.entries.size === 0 && cov.helpers.size === 0) unknown('predicate guarantees no member');
     } else if (ts.isConditionalExpression(e)) {
       merge(resolveCoverage(e.whenTrue, env, depth + 1));
       merge(resolveCoverage(e.whenFalse, env, depth + 1));
       cov.notes.push('capability chosen by ?: — union of branches');
     } else if (ts.isIdentifier(e)) {
-      const sym = checker.getSymbolAtLocation(e);
+      const sym = symbolOf(e);
       const bound = sym && env.get(sym);
       const decl = sym?.declarations?.[0];
-      if (bound)
-        merge(resolveCoverage(bound.expr, env, depth + 1)); // param symbols are unique: one env suffices
-      else if (decl && ts.isParameter(decl)) cov.forwarded = true;
-      else if (decl && ts.isVariableDeclaration(decl) && decl.initializer)
-        merge(resolveCoverage(decl.initializer, env, depth + 1));
-      else cov.unknown = true;
-    } else cov.unknown = true;
+      if (bound) merge(resolveCoverage(bound.expr, env, depth + 1));
+      else if (decl && ts.isParameter(decl) && ts.isIdentifier(decl.name)) cov.forwardParams.add(decl);
+      else if (decl && ts.isVariableDeclaration(decl) && decl.initializer) {
+        const isConst = !!(ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const);
+        if (!isConst && isReassigned(sym!, decl)) unknown(`capability variable '${e.text}' is reassigned`);
+        else merge(resolveCoverage(decl.initializer, env, depth + 1));
+      } else unknown(`capability '${e.text}' not statically resolvable`);
+    } else unknown('capability not statically resolvable');
     return cov;
   }
 
   function covers(cov: Coverage, use: string): boolean {
-    if (cov.unknown) return true;
+    if (cov.unknown) return true; // already reported as a blind spot at the site
     const [root, member] = use.split('.');
     for (const ent of cov.entries) {
       const [r, m] = ent.split('.');
       if (r !== root) continue;
       if (m === '*' || member === '?' || m === member) return true;
-      if (m === '?' && member === '?') return true;
     }
     return false;
   }
 
   // ---- propagation
   const seen = new Set<string>();
-  const wrappers = new Map<ts.Node, WrapperInfo>();
-  const pendingWrapperCalls: Array<() => void> = [];
 
   function record(o: Origin, node: ts.Node, use: string) {
-    const tag = `${use}`;
     const covered = covers(o.cov, use);
-    const label = covered ? tag : `${tag} ✗`;
+    const label = covered ? use : `${use} ✗`;
     if (!o.site.uses.includes(label)) o.site.uses.push(label);
     if (!covered)
       violations.push({
@@ -491,7 +703,7 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
         requested: o.site.requested,
       });
   }
-  function blind(o: Origin, node: ts.Node, reason: string) {
+  function blind(o: { site: XrmSite }, node: ts.Node, reason: string) {
     blindSpots.push({
       file: disp(node.getSourceFile().fileName),
       line: lineOf(node),
@@ -501,10 +713,21 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
     const n = `blind: ${reason}`;
     if (!o.site.notes.includes(n)) o.site.notes.push(n);
   }
+  const fork = (o: Origin, patch: Partial<Origin> = {}): Origin => ({ ...o, id: nextId++, ...patch });
 
   function propagateAlias(sym: ts.Symbol | undefined, declName: ts.Node, o: Origin) {
-    if (!sym) return;
-    for (const ref of referencesOf(sym, declName.getSourceFile(), declName as ts.Identifier)) propagate(ref, o);
+    for (const ref of referencesOf(sym, declName)) propagate(ref, o);
+  }
+  /** Every reference to a property/field symbol (`this.f`, `inst.f`), in any file. */
+  function propagateMember(sym: ts.Symbol | undefined, declName: ts.Node, o: Origin) {
+    for (const ref of referencesOf(sym, declName)) {
+      const p = ref.parent;
+      if ((ts.isPropertyAccessExpression(p) && p.name === ref) || ts.isElementAccessExpression(p)) {
+        const pp = p.parent;
+        if (ts.isBinaryExpression(pp) && pp.left === p && pp.operatorToken.kind === ts.SyntaxKind.EqualsToken) continue; // a write, not a read
+        propagate(p as ts.Expression, o);
+      } else if (!classifyRef(ref).skip) blind(o, ref, 'field referenced other than by member access');
+    }
   }
 
   function bindPattern(pattern: ts.BindingName, o: Origin) {
@@ -514,6 +737,10 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
     }
     if (ts.isObjectBindingPattern(pattern)) {
       for (const el of pattern.elements) {
+        if (el.dotDotDotToken) {
+          blind(o, el, 'rest element in destructuring');
+          continue;
+        }
         const prop = el.propertyName
           ? ts.isIdentifier(el.propertyName) || ts.isStringLiteral(el.propertyName)
             ? el.propertyName.text
@@ -526,10 +753,8 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
           continue;
         }
         if (o.kind === 'xrm') {
-          if (ROOTS.has(prop)) {
-            const ro: Origin = { ...o, id: nextId++, kind: 'root', root: prop };
-            bindPattern(el.name, ro);
-          }
+          if (ROOTS.has(prop)) bindPattern(el.name, fork(o, { kind: 'root', root: prop }));
+          else blind(o, el, `member '${prop}' outside the checked roots`);
         } else {
           record(o, el, `${o.root}.${prop}`);
         }
@@ -553,25 +778,30 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
         parent = parent.parent;
         continue;
       }
+      if (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+        if (parent.left === cur) return; // discarded: not a use
+        cur = parent;
+        parent = parent.parent;
+        continue;
+      }
       if (
         ts.isBinaryExpression(parent) &&
         [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(parent.operatorToken.kind)
       ) {
-        // Fallback: the value may come from either side. When the other side is
-        // another lookup, the code downstream is checked against the UNION of
-        // both coverages (it tests which member exists before calling it).
+        // The value may come from either side. When the other side is another
+        // lookup, downstream code is checked against the UNION (noted).
         const other = skipT(parent.left === cur ? parent.right : parent.left);
         if (ts.isCallExpression(other) && isGetXrmCallee(other.expression)) {
           const oc = resolveCoverage(other.arguments[0]);
           const union: Coverage = {
+            ...o.cov,
             entries: new Set([...o.cov.entries, ...oc.entries]),
+            helpers: new Set([...o.cov.helpers, ...oc.helpers]),
             unknown: o.cov.unknown || oc.unknown,
-            text: o.cov.text,
-            notes: o.cov.notes,
           };
           const note = `?? fallback to ${oc.text} — union of both`;
           if (!o.site.notes.includes(note)) o.site.notes.push(note);
-          o = { ...o, id: nextId++, cov: union };
+          o = fork(o, { cov: union });
         }
         cur = parent;
         parent = parent.parent;
@@ -604,8 +834,11 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
         return;
       }
       if (o.kind === 'xrm') {
-        if (!ROOTS.has(name)) return; // e.g. xrm.foo — not an Xrm API root
-        const ro: Origin = { ...o, id: nextId++, kind: 'root', root: name };
+        if (!ROOTS.has(name)) {
+          blind(o, parent, `member '${name}' outside the checked roots`);
+          return;
+        }
+        const ro = fork(o, { kind: 'root', root: name });
         // Bare root use (e.g. `if (!xrm?.Navigation)`) unless a member follows.
         let p2: ts.Node = parent.parent;
         let c2: ts.Node = parent;
@@ -638,47 +871,67 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
       return;
     }
 
+    // Default parameter value.
+    if (ts.isParameter(parent) && parent.initializer === cur) {
+      bindPattern(parent.name, o);
+      return;
+    }
+
+    // Class property initialiser: every reference to the field, in any file.
+    if (ts.isPropertyDeclaration(parent) && parent.initializer === cur) {
+      propagateMember(dealias(checker.getSymbolAtLocation(parent.name)), parent.name, o);
+      return;
+    }
+
     // Assignment.
     if (
       ts.isBinaryExpression(parent) &&
       parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       parent.right === cur
     ) {
-      const left = parent.left;
+      const left = skipT(parent.left);
       if (ts.isIdentifier(left)) {
-        const sym = checker.getSymbolAtLocation(left);
-        const decl = sym?.declarations?.[0];
-        if (sym && decl) for (const ref of referencesOf(sym, decl.getSourceFile())) if (ref !== left) propagate(ref, o);
+        propagateAlias(symbolOf(left), left, o);
         return;
       }
-      if (ts.isPropertyAccessExpression(left) && left.expression.kind === ts.SyntaxKind.ThisKeyword) {
-        const cls = findAncestor(left, ts.isClassLike);
-        const field = left.name.text;
-        const visit = (n: ts.Node) => {
-          if (
-            ts.isPropertyAccessExpression(n) &&
-            n.expression.kind === ts.SyntaxKind.ThisKeyword &&
-            n.name.text === field &&
-            n !== left
-          )
-            propagate(n, o);
-          ts.forEachChild(n, visit);
-        };
-        if (cls) visit(cls);
-        return;
+      if (ts.isPropertyAccessExpression(left)) {
+        const sym = dealias(checker.getSymbolAtLocation(left.name));
+        if (sym?.declarations?.length) {
+          propagateMember(sym, left.name, o);
+          return;
+        }
+        if (left.expression.kind === ts.SyntaxKind.ThisKeyword) {
+          // Undeclared field (`this.f = …` in JS-style code): every `this.f` in the class.
+          const cls = findAncestor(left, ts.isClassLike);
+          const visit = (n: ts.Node) => {
+            if (
+              ts.isPropertyAccessExpression(n) &&
+              n.expression.kind === ts.SyntaxKind.ThisKeyword &&
+              n.name.text === left.name.text &&
+              n !== left
+            )
+              propagate(n, o);
+            ts.forEachChild(n, visit);
+          };
+          if (cls) visit(cls);
+          return;
+        }
       }
       blind(o, parent, 'assigned to a property of another object');
       return;
     }
 
-    // Returned from a function → the function is a wrapper; follow its calls.
+    // Returned from a function.
     if (
       ts.isReturnStatement(parent) ||
       ((ts.isArrowFunction(parent) || ts.isFunctionExpression(parent)) && parent.body === cur)
     ) {
       const fn = ts.isReturnStatement(parent) ? findAncestor(parent, ts.isFunctionLike) : (parent as ts.ArrowFunction);
-      if (!fn) return;
-      // useMemo(() => X) / useState(() => X) / useCallback(() => X)() — the call's value.
+      if (!fn) {
+        blind(o, parent, 'returned outside a function');
+        return;
+      }
+      // useMemo(() => X) / useState(() => X) — the call's value.
       if (
         (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn)) &&
         ts.isCallExpression(fn.parent) &&
@@ -692,7 +945,65 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
         blind(o, fn, `returned from a callback passed to ${hook ?? 'a call'}`);
         return;
       }
-      registerWrapper(fn as ts.FunctionLikeDeclaration, o);
+      if (o.chain.length) {
+        // Forwarding: continue at the call site that bound this function's capability.
+        if (fn === o.chain[0].fn) {
+          propagate(o.chain[0].call, fork(o, { chain: o.chain.slice(1) }));
+          return;
+        }
+        blind(o, parent, 'returned from a nested function inside a forwarding function');
+        return;
+      }
+      followReturn(fn as ts.FunctionLikeDeclaration, o);
+      return;
+    }
+
+    // Passed as an argument.
+    if (ts.isCallExpression(parent) && parent.arguments.includes(cur as ts.Expression)) {
+      const callee = skipT(parent.expression);
+      // `fn.bind(xrm.Navigation)` / `.call(...)` / `.apply(...)`: the receiver, not an escape.
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        ['bind', 'call', 'apply'].includes(callee.name.text) &&
+        parent.arguments[0] === cur
+      )
+        return;
+      // Logging is not a use.
+      if (
+        ts.isPropertyAccessExpression(callee) &&
+        ts.isIdentifier(callee.expression) &&
+        callee.expression.text === 'console'
+      )
+        return;
+      // React dependency array handled below; useState(x).
+      const idx = parent.arguments.indexOf(cur as ts.Expression);
+      if (ts.isIdentifier(callee)) {
+        const setter = setters.get(symbolOf(callee) as ts.Symbol);
+        if (setter) {
+          if (setter.state && ts.isBindingElement(setter.state)) bindPattern(setter.state.name, o);
+          return;
+        }
+      }
+      if (calleeName(parent) === 'useState') {
+        propagate(parent, o);
+        return;
+      }
+      const fn = resolveFunction(callee);
+      if (fn && o.cov.helpers.has(fn)) {
+        // The predicate selected a frame on which this same helper answers.
+        const label = `helper ${fnName(fn)}(…)`;
+        if (!o.site.uses.includes(label)) o.site.uses.push(label);
+        return;
+      }
+      if (fn && fn.parameters[idx] && !fn.parameters[idx].dotDotDotToken) {
+        bindPattern(fn.parameters[idx].name, o);
+        return;
+      }
+      if (o.kind === 'root' && o.root === 'WebApi') {
+        record(o, parent, 'WebApi.*'); // a WebApi object handed to a data helper (atomic)
+        return;
+      }
+      blind(o, parent, `passed to unresolved call ${callee.getText().slice(0, 60)}`);
       return;
     }
 
@@ -701,51 +1012,9 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
       ts.isArrayLiteralExpression(parent) &&
       ts.isCallExpression(parent.parent) &&
       parent.parent.arguments[parent.parent.arguments.length - 1] === parent &&
-      /^use(Effect|LayoutEffect|Memo|Callback|ImperativeHandle)$/.test(calleeName(parent.parent) ?? '')
-    ) {
+      HOOKS_WITH_DEPS.test(calleeName(parent.parent) ?? '')
+    )
       return;
-    }
-
-    // Passed as an argument.
-    if (ts.isCallExpression(parent) && parent.arguments.includes(cur as ts.Expression)) {
-      // `fn.bind(xrm.Navigation)` / `.call(...)` / `.apply(...)`: the receiver, not an escape.
-      if (
-        ts.isPropertyAccessExpression(parent.expression) &&
-        ['bind', 'call', 'apply'].includes(parent.expression.name.text) &&
-        parent.arguments[0] === cur
-      ) {
-        return;
-      }
-      const idx = parent.arguments.indexOf(cur as ts.Expression);
-      const callee = parent.expression;
-      if (ts.isIdentifier(callee)) {
-        const sym = checker.getSymbolAtLocation(callee);
-        const setter = sym && setters.get(sym);
-        if (setter) {
-          if (setter.state && ts.isBindingElement(setter.state)) bindPattern(setter.state.name, o);
-          return;
-        }
-      }
-      const name = calleeName(parent);
-      if (name === 'useState') {
-        propagate(parent, o);
-        return;
-      }
-      const fn = resolveFunction(callee);
-      if (fn && fn.parameters[idx]) {
-        const p = fn.parameters[idx];
-        if (ts.isIdentifier(p.name)) propagateAlias(checker.getSymbolAtLocation(p.name), p.name, o);
-        else bindPattern(p.name, o);
-        return;
-      }
-      if (o.kind === 'root' && o.root === 'WebApi') {
-        // A WebApi object handed to a data helper: any WebApi member (atomic).
-        record(o, parent, 'WebApi.*');
-        return;
-      }
-      blind(o, parent, `passed to unresolved call ${callee.getText().slice(0, 60)}`);
-      return;
-    }
 
     if (
       o.kind === 'root' &&
@@ -761,8 +1030,7 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
       return;
     }
     if (ts.isNewExpression(parent) && parent.arguments?.includes(cur as ts.Expression)) {
-      const idx = parent.arguments.indexOf(cur as ts.Expression);
-      const ctorParam = resolveConstructorParam(parent.expression, idx);
+      const ctorParam = resolveConstructorParam(parent.expression, parent.arguments.indexOf(cur as ts.Expression));
       if (ctorParam) {
         followConstructorParam(ctorParam, o);
         return;
@@ -770,6 +1038,25 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
       blind(o, parent, `passed to new ${parent.expression.getText().slice(0, 40)}`);
       return;
     }
+
+    // ---- explicit NOT-A-USE contexts
+    if (
+      (parent.kind >= ts.SyntaxKind.FirstTypeNode && parent.kind <= ts.SyntaxKind.LastTypeNode) || // a type position
+      ((ts.isIfStatement(parent) || ts.isWhileStatement(parent) || ts.isDoStatement(parent)) &&
+        parent.expression === cur) ||
+      (ts.isForStatement(parent) && parent.condition === cur) ||
+      (ts.isConditionalExpression(parent) && parent.condition === cur) ||
+      (ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.ExclamationToken) ||
+      ts.isTypeOfExpression(parent) ||
+      ts.isVoidExpression(parent) ||
+      ts.isExpressionStatement(parent) ||
+      (ts.isBinaryExpression(parent) &&
+        (COMPARISONS.has(parent.operatorToken.kind) ||
+          (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && parent.left === cur)))
+    )
+      return;
+
+    // ---- everything else is a blind spot
     if (
       ts.isShorthandPropertyAssignment(parent) ||
       ts.isPropertyAssignment(parent) ||
@@ -783,7 +1070,7 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
       blind(o, parent, 'passed as a JSX prop');
       return;
     }
-    // Conditions, comparisons, typeof, logging, etc.: not an API use.
+    blind(o, parent, `unrecognised context: ${ts.SyntaxKind[parent.kind]}`);
   }
 
   /** Whether the value at `c2` flows further (so a bare-root record would be premature). */
@@ -794,68 +1081,45 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
       ts.isReturnStatement(p2) ||
       (ts.isCallExpression(p2) && p2.arguments.includes(c2 as ts.Expression)) ||
       (ts.isBinaryExpression(p2) &&
-        [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(p2.operatorToken.kind)) ||
+        [ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.CommaToken].includes(
+          p2.operatorToken.kind
+        )) ||
+      (ts.isConditionalExpression(p2) && p2.condition !== c2) ||
+      (ts.isBinaryExpression(p2) &&
+        p2.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken &&
+        p2.right === c2) ||
       ((ts.isArrowFunction(p2) || ts.isFunctionExpression(p2)) && p2.body === c2)
     );
   }
 
-  /** `new X(…)` → X's constructor parameter `idx` (class in this file, or by import name in a scanned file). */
+  /** `new X(…)` → X's constructor parameter `idx` (resolved by symbol). */
   function resolveConstructorParam(expr: ts.Expression, idx: number): ts.ParameterDeclaration | undefined {
-    if (!ts.isIdentifier(expr)) return undefined;
-    const sym = checker.getSymbolAtLocation(expr);
-    let decl = sym?.declarations?.[0];
-    if (decl && ts.isImportSpecifier(decl)) {
-      const original = (decl.propertyName ?? decl.name).text;
-      const spec = (decl.parent.parent.parent.moduleSpecifier as ts.StringLiteral).text;
-      const dir = resolveModuleDir(spec, decl.getSourceFile().fileName);
-      decl = classDecls.get(original)?.find(c => !dir || c.getSourceFile().fileName.startsWith(dir));
-    }
-    if (!decl || !ts.isClassDeclaration(decl)) return undefined;
-    const ctor = decl.members.find(ts.isConstructorDeclaration);
+    const e = skipT(expr);
+    const sym = ts.isIdentifier(e) ? symbolOf(e) : undefined;
+    const decl = sym?.declarations?.find(ts.isClassDeclaration);
+    const ctor = decl?.members.find(ts.isConstructorDeclaration);
     return ctor?.parameters[idx];
   }
-  /** Follow a constructor parameter: as an alias inside the constructor, and via `this.field` (parameter property or `this.f = p`). */
+  /** Follow a constructor parameter: as an alias inside the constructor, and via the field it sets. */
   function followConstructorParam(p: ts.ParameterDeclaration, o: Origin) {
-    if (!ts.isIdentifier(p.name)) return;
-    const cls = findAncestor(p, ts.isClassLike);
-    const fields = new Set<string>();
-    if (
-      ts.getCombinedModifierFlags(p) &
-      (ts.ModifierFlags.Private | ts.ModifierFlags.Public | ts.ModifierFlags.Protected | ts.ModifierFlags.Readonly)
-    )
-      fields.add(p.name.text);
-    const sym = checker.getSymbolAtLocation(p.name);
-    if (sym) {
-      for (const ref of referencesOf(sym, p.getSourceFile(), p.name)) {
-        let par: ts.Node = ref.parent;
-        while (TRANSPARENT.has(par.kind)) par = par.parent;
-        if (
-          ts.isBinaryExpression(par) &&
-          par.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-          ts.isPropertyAccessExpression(par.left) &&
-          par.left.expression.kind === ts.SyntaxKind.ThisKeyword
-        )
-          fields.add(par.left.name.text);
-        else propagate(ref, o);
-      }
+    if (!ts.isIdentifier(p.name)) {
+      bindPattern(p.name, o);
+      return;
     }
-    const visit = (n: ts.Node) => {
-      if (
-        ts.isPropertyAccessExpression(n) &&
-        n.expression.kind === ts.SyntaxKind.ThisKeyword &&
-        fields.has(n.name.text)
-      ) {
-        const par = n.parent;
-        if (!(ts.isBinaryExpression(par) && par.left === n)) propagate(n, o);
-      }
-      ts.forEachChild(n, visit);
-    };
-    if (cls) visit(cls);
+    const isParamProperty =
+      ts.getCombinedModifierFlags(p) &
+      (ts.ModifierFlags.Private | ts.ModifierFlags.Public | ts.ModifierFlags.Protected | ts.ModifierFlags.Readonly);
+    if (isParamProperty) {
+      // The parameter-property's field symbol: references are `this.x` / `inst.x`.
+      const syms = checker.getSymbolsOfParameterPropertyDeclaration(p, p.name.text);
+      for (const s of syms) if (s.flags & ts.SymbolFlags.Property) propagateMember(s, p.name, o);
+    }
+    propagateAlias(checker.getSymbolAtLocation(p.name), p.name, o);
   }
 
   /** Every `const [state, setState] = useState(…)` setter → its state binding (pre-pass). */
   const setters = new Map<ts.Symbol, { state: ts.ArrayBindingElement | undefined }>();
-  for (const sf of sources.values()) {
+  for (const sf of sources) {
     const visit = (n: ts.Node) => {
       if (
         ts.isVariableDeclaration(n) &&
@@ -875,111 +1139,115 @@ export function analyze(inputs: SourceInput[], displayRoot = ''): AnalysisResult
     visit(sf);
   }
 
-  function registerWrapper(fn: ts.FunctionLikeDeclaration, o: Origin) {
-    const info: WrapperInfo = { kind: o.kind, root: o.root };
-    if (o.forward) info.forward = o.forward;
-    else info.fixed = { cov: o.cov, site: o.site };
-    const prev = wrappers.get(fn);
-    if (prev) {
-      // A wrapper with several returns: union fixed coverage.
-      if (prev.fixed && info.fixed) info.fixed.cov.entries.forEach(e => prev.fixed!.cov.entries.add(e));
-      return;
-    }
-    wrappers.set(fn, info);
-    pendingWrapperCalls.push(() => followWrapperCalls(fn, info));
+  /** A fixed-capability value returned from `fn`: each return is followed at every call site of `fn`. */
+  const followedReturns = new Set<string>();
+  function followReturn(fn: ts.FunctionLikeDeclaration, o: Origin) {
+    const k = `${fn.getSourceFile().fileName}:${fn.pos}:${o.site.file}:${o.site.line}:${o.cov.text}:${o.kind}:${o.root ?? ''}`;
+    if (followedReturns.has(k)) return;
+    followedReturns.add(k);
+    const { calls, escapes } = usesOfFunction(fn);
+    for (const e of escapes) blind(o, e, `wrapper ${fnName(fn)} referenced other than by a call`);
+    for (const c of calls) propagate(c, fork(o));
   }
 
-  function wrapperName(fn: ts.FunctionLikeDeclaration): string {
-    if (fn.name && ts.isIdentifier(fn.name)) return fn.name.text;
-    if (ts.isVariableDeclaration(fn.parent) && ts.isIdentifier(fn.parent.name)) return fn.parent.name.text;
-    return '(wrapper)';
-  }
-
-  function followWrapperCalls(fn: ts.FunctionLikeDeclaration, info: WrapperInfo) {
-    for (const sf of sources.values()) {
-      const visit = (n: ts.Node) => {
-        if (ts.isCallExpression(n) && resolveFunction(n.expression) === fn) {
-          if (info.fixed) {
-            propagate(n, {
-              id: nextId++,
-              kind: info.kind,
-              root: info.root,
-              cov: info.fixed.cov,
-              site: info.fixed.site,
-            });
-          } else if (info.forward) {
-            // Bind the wrapper's parameters to this call's arguments (or defaults).
-            const env: Env = new Map(info.forward.env);
-            fn.parameters.forEach((prm, i) => {
-              const s2 = ts.isIdentifier(prm.name) ? checker.getSymbolAtLocation(prm.name) : undefined;
-              const a = n.arguments[i] ?? prm.initializer;
-              if (s2 && a) env.set(s2, { expr: a, env: EMPTY_ENV });
-            });
-            seedOrigin(
-              n,
-              info.forward.expr,
-              env,
-              info.kind,
-              info.root,
-              `${wrapperName(fn)}(${n.arguments.map(a => a.getText()).join(', ')})`
-            );
-          }
-        }
-        ts.forEachChild(n, visit);
-      };
-      visit(sf);
-    }
-  }
-
-  function newSite(call: ts.CallExpression, cov: Coverage, requested: string): XrmSite {
+  function newSite(at: ts.Node, cov: Coverage, requested: string, push = true): XrmSite {
     const site: XrmSite = {
-      file: disp(call.getSourceFile().fileName),
-      line: lineOf(call),
+      file: disp(at.getSourceFile().fileName),
+      line: lineOf(at),
       requested,
-      coverage: cov.forwarded
+      coverage: cov.forwardParams.size
         ? ['(forwarded — resolved per call site)']
         : cov.unknown
           ? ['UNKNOWN']
-          : [...cov.entries].sort(),
+          : [...cov.entries, ...[...cov.helpers].map(h => `helper ${fnName(h as ts.FunctionLikeDeclaration)}`)].sort(),
       uses: [],
       notes: [...cov.notes],
     };
-    sites.push(site);
+    if (push) sites.push(site);
     return site;
   }
 
-  /** Start an origin at `call` whose capability is `expr` evaluated in `env`. */
-  function seedOrigin(
+  /** Start an origin at the getXrm `call` whose capability is `expr`, evaluated in `env` (forwarding `chain`). */
+  function seed(
     call: ts.CallExpression,
     expr: ts.Expression | undefined,
     env: Env,
-    kind: 'xrm' | 'root',
-    root: string | undefined,
-    requested: string
+    chain: ChainLink[],
+    requested: string,
+    depth: number
   ) {
     const cov = resolveCoverage(expr, env);
-    const site = newSite(call, cov, requested);
-    if (cov.forwarded) {
-      // Still a parameter of the enclosing function: unchecked here, resolved where that function is called.
-      propagate(call, { id: nextId++, kind, root, cov: { ...cov, unknown: true }, site, forward: { expr, env } });
+    if (cov.forwardParams.size) {
+      const fns = new Set([...cov.forwardParams].map(p => p.parent as ts.FunctionLikeDeclaration));
+      // The definition is one inventory row; deeper forwarding levels are not.
+      const def = newSite(chain.length ? chain[chain.length - 1].call : call, cov, requested, depth === 0);
+      if (fns.size !== 1 || depth > 6) {
+        blind(
+          { site: def },
+          call,
+          fns.size !== 1 ? 'capability forwarded from several functions' : 'forwarding too deep'
+        );
+        return;
+      }
+      const [fn] = fns;
+      def.notes.push(`forward: ${fnName(fn)} — checked once per call site`);
+      const { calls, escapes } = usesOfFunction(fn);
+      for (const e of escapes)
+        blind({ site: def }, e, `forwarding function ${fnName(fn)} referenced other than by a call`);
+      if (!calls.length) def.notes.push('no call site found');
+      for (const c of calls) {
+        const env2: Env = new Map(env);
+        fn.parameters.forEach((prm, i) => {
+          const s2 = ts.isIdentifier(prm.name) ? checker.getSymbolAtLocation(prm.name) : undefined;
+          if (s2) env2.set(s2, { expr: c.arguments[i] ?? prm.initializer });
+        });
+        seed(
+          call,
+          expr,
+          env2,
+          [...chain, { fn, call: c }],
+          `${fnName(fn)}(${c.arguments.map(a => a.getText()).join(', ')})`,
+          depth + 1
+        );
+      }
       return;
     }
-    if (cov.unknown) blind({ id: 0, kind, cov, site }, call, 'capability not statically resolvable');
-    propagate(call, { id: nextId++, kind, root, cov, site });
+    const site = newSite(chain.length ? chain[chain.length - 1].call : call, cov, requested);
+    if (cov.unknown) blind({ site }, call, cov.unknownReason ?? 'capability not statically resolvable');
+    propagate(call, { id: nextId++, kind: 'xrm', cov, site, chain });
   }
 
-  // ---- seed: every direct getXrm call
-  for (const sf of sources.values()) {
-    const visit = (n: ts.Node) => {
-      if (ts.isCallExpression(n) && isGetXrmCallee(n.expression)) {
-        const arg = n.arguments[0];
-        seedOrigin(n, arg, EMPTY_ENV, 'xrm', undefined, arg ? arg.getText() : '(default)');
-      }
-      ts.forEachChild(n, visit);
+  // ---- seed: every reference to getXrm (by resolved symbol)
+  const seededCalls = new Set<ts.CallExpression>();
+  const getXrmRefs = new Set<ts.Identifier>(getXrmNamed);
+  for (const [sym, ids] of refIndex) if (isGetXrmSymbol(sym)) ids.forEach(id => getXrmRefs.add(id));
+  for (const id of getXrmRefs) {
+    const sym = symbolOf(id);
+    const p = id.parent;
+    const isNs = ts.isPropertyAccessExpression(p) && p.name === id && isNsGetXrm(p);
+    if (!isGetXrmSymbol(sym) && !isNs) continue;
+    const c = classifyRef(id);
+    if (c.call) {
+      if (seededCalls.has(c.call)) continue;
+      seededCalls.add(c.call);
+      const arg = c.call.arguments[0];
+      seed(c.call, arg, EMPTY_ENV, [], arg ? arg.getText() : '(default)', 0);
+      continue;
+    }
+    if (c.skip) continue;
+    if (ts.isVariableDeclaration(p) && p.initializer === id) continue; // `const g = getXrm` (followed by symbol)
+    if (ts.isPropertyAccessExpression(p) && p.name === id && ts.isVariableDeclaration(p.parent)) continue; // `const g = ui.getXrm`
+    const pseudo: XrmSite = {
+      file: disp(id.getSourceFile().fileName),
+      line: lineOf(id),
+      requested: '(reference)',
+      coverage: ['UNKNOWN'],
+      uses: [],
+      notes: [],
     };
-    visit(sf);
+    sites.push(pseudo);
+    blind({ site: pseudo }, id, 'getXrm referenced other than by a call');
   }
-  while (pendingWrapperCalls.length) pendingWrapperCalls.shift()!();
 
   for (const s of sites) s.uses.sort();
   return { sites, violations, blindSpots };
