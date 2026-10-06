@@ -163,7 +163,12 @@ public class GrantProvenanceBackfillScriptTests
         var helper = Path.Combine(RepoRoot(), "scripts", "common", "GrantProvenanceBackfill.ps1");
         File.Exists(helper).Should().BeTrue($"{helper} is the backfill the schema script dot-sources");
 
-        var script = "$ErrorActionPreference = 'Stop'\n" + $". '{helper.Replace("'", "''", StringComparison.Ordinal)}'\n" + body;
+        // Import Microsoft.PowerShell.Utility explicitly: the test bodies name [Microsoft.PowerShell.Commands.HttpResponseException]
+        // (that module's assembly) BEFORE any Utility cmdlet runs, and a type literal never triggers module auto-loading. Left
+        // implicit, whether the assembly is already loaded depends on pwsh's startup on the runner — the ubuntu office-scope
+        // job failed both such tests with "Unable to find type" on one run and passed them on another (2026-10-06).
+        var script = "$ErrorActionPreference = 'Stop'\nImport-Module Microsoft.PowerShell.Utility\n"
+            + $". '{helper.Replace("'", "''", StringComparison.Ordinal)}'\n" + body;
         var start = new ProcessStartInfo("pwsh")
         {
             RedirectStandardOutput = true,
