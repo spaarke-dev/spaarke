@@ -287,10 +287,10 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
 
         byte[]? persisted = null;
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -377,9 +377,9 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
             .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(resolvedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BuildFileHandle(mintedSpeItemId, resolvedDriveId, size: 2048, eTag: "\"v1-etag\""));
 
         // No existing row → create fires. Capture the created entity to assert the persisted marker.

@@ -556,6 +556,31 @@ public class RecordKeyedUploadRouteChildRecordTests : IClassFixture<RecordKeyedU
                 "a child of a secure record is secure — its bytes belong in the secure project's own container");
     }
 
+    [Fact(DisplayName = "Task 171: POST upload-session for a to-do under a SECURE project opens an APP-ONLY session on the PROJECT's own container (the 2026-10-06 upload403 path)")]
+    public async Task UploadSession_TodoUnderASecureProject_OpensAnAppOnlySessionOnTheProjectsOwnContainer()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderSecureProject}/upload-session?path=big.pdf",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().ContainSingle()
+            .Which.Should().Be("session:" + RecordKeyedUploadRouteFixture.SecureProjectContainer,
+                "the secure container has no members by design, so only an app-only session can be created on it — and "
+                + "the container is the one derived from the authorized record, never the caller's");
+    }
+
+    [Fact(DisplayName = "Task 171: POST upload-session for a to-do under an UNPROVISIONED secure project is refused and opens NO session")]
+    public async Task UploadSession_TodoUnderAnUnprovisionedSecureProject_OpensNoSession()
+    {
+        var response = await _fixture.Client().PostAsync(
+            $"/api/obo/records/sprk_todo/{RecordKeyedUploadRouteFixture.TodoUnderUnprovisionedSecureProject}/upload-session?path=big.pdf",
+            content: null);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict, await response.Content.ReadAsStringAsync());
+        _fixture.Uploads.Should().BeEmpty("an app-only session is opened only on a container derived from the authorized record");
+    }
+
     [Fact(DisplayName = "Task 155: the same route for a to-do under a NON-secure project stores the file in the to-do's OWN business-unit container — no 409")]
     public async Task Put_TodoUnderANonSecureProject_StoresInItsBusinessUnitContainer()
     {
@@ -1066,18 +1091,30 @@ public sealed class RecordKeyedUploadRouteFixture : CustomWebAppFactory
             _uploads = uploads;
         }
 
-        public override Task<FileHandleDto?> UploadSmallAsUserAsync(
-            HttpContext ctx,
-            string containerId,
+        // Task 171: the record-keyed routes write APP-ONLY (the record filter decided; the container came from the
+        // record). The OBO members are no longer on the facade, so a route that regressed to OBO would not compile.
+        public override Task<FileHandleDto?> UploadSmallAsync(
+            string driveId,
             string path,
             Stream content,
             ConflictBehavior conflictBehavior,
             CancellationToken ct = default)
         {
-            _uploads.Enqueue(containerId);
+            _uploads.Enqueue(driveId);
             var now = DateTimeOffset.UtcNow;
             return Task.FromResult<FileHandleDto?>(new FileHandleDto(
-                "item-155", path, null, 3, now, now, null, false, null, containerId));
+                "item-155", path, null, 3, now, now, null, false, null, driveId));
+        }
+
+        public override Task<UploadSessionResponse?> CreateUploadSessionAsync(
+            string driveId,
+            string path,
+            ConflictBehavior conflictBehavior,
+            CancellationToken ct = default)
+        {
+            _uploads.Enqueue("session:" + driveId);
+            return Task.FromResult<UploadSessionResponse?>(
+                new UploadSessionResponse("https://example.invalid/upload-session", DateTimeOffset.UtcNow.AddHours(1)));
         }
     }
 }

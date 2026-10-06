@@ -1,0 +1,180 @@
+using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Xrm.Sdk;
+using Moq;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Services.Documents;
+using Xunit;
+using Membership = Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService;
+
+namespace Sprk.Bff.Api.Tests.Services.Documents;
+
+/// <summary>
+/// unified-access-control-r2 task 171 (owner rounds 69 + 70) — the just-in-time Office-edit grant. Pinned: a grant is
+/// made ONLY on a secure record's own container and ONLY for a caller Dataverse says holds Write on that record; a
+/// business-unit container never gets one (standing writers there); a caller who already holds a role is reused, never
+/// granted twice; a Write holder whose grant cannot be made gets 503, never a URL that cannot work.
+/// </summary>
+/// <remarks>Mocking boundary (ADR-038 §4): the grant primitive (<see cref="Membership"/>, virtual), the caller-rights
+/// probe (virtual) and <see cref="IGenericEntityService"/>. The container classification is named at the service's own
+/// virtual seam because <see cref="RecordContainerResolver"/> is sealed (ADR-010).</remarks>
+public class OfficeEditAccessServiceTests
+{
+    private const string SecureDrive = "b!secure-project-own-container";
+    private const string Upn = "writer@contoso.example";
+    private static readonly Guid DocumentId = Guid.Parse("17100000-0000-4000-8000-000000000001");
+    private static readonly Guid ProjectId = Guid.Parse("17100000-0000-4000-8000-000000000002");
+    private static readonly Guid SystemUserId = Guid.Parse("17100000-0000-4000-8000-000000000003");
+    private static readonly Guid ObjectId = Guid.Parse("17100000-0000-4000-8000-000000000004");
+
+    private readonly Mock<Membership> _membership =
+        new(Mock.Of<IGraphClientFactory>(), NullLogger<Membership>.Instance) { CallBase = false };
+    private readonly Mock<IGenericEntityService> _entities = new();
+
+    public OfficeEditAccessServiceTests()
+    {
+        _entities.Setup(e => e.RetrieveAsync("systemuser", SystemUserId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("systemuser", SystemUserId)
+            {
+                ["domainname"] = Upn,
+                ["azureactivedirectoryobjectid"] = ObjectId,
+            });
+        _membership.Setup(m => m.ReadAccessAsync(SecureDrive, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess([], RolesComplete: true, new Dictionary<string, string>()));
+    }
+
+    private Sut Build(OwningSecureRecord? secureOwner, AccessRights rights)
+        => new(secureOwner, new StubProbe(rights, SystemUserId), _membership.Object, _entities.Object);
+
+    private static DefaultHttpContext Http()
+    {
+        var http = new DefaultHttpContext();
+        http.Request.Headers.Authorization = "Bearer caller-token";
+        return http;
+    }
+
+    [Fact(DisplayName = "Task 171: a Write holder on a SECURE record's container is granted exactly one marked JIT writer role")]
+    public async Task SecureContainer_WriteHolder_IsGrantedAJitWriterRole()
+    {
+        _membership.Setup(m => m.GrantMarkedWriterAsync(
+                SecureDrive, Membership.JitWriterMarkerPrefix, SystemUserId, Upn, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.MarkedGrantOutcome.Granted);
+
+        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Read | AccessRights.Write)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(true, "writer-jit"));
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            SecureDrive, Membership.JitWriterMarkerPrefix, SystemUserId, Upn, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact(DisplayName = "Task 171: a Read-only caller on a secure container gets NO grant (view only)")]
+    public async Task SecureContainer_ReadOnlyCaller_GetsNoGrant()
+    {
+        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Read)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(false, "none"));
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        _membership.Verify(m => m.ReadAccessAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Task 171: a repeat edit-open by a caller who already holds a role reuses it — no second grant")]
+    public async Task SecureContainer_CallerAlreadyMember_ReusesTheRole()
+    {
+        _membership.Setup(m => m.ReadAccessAsync(SecureDrive, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Membership.ContainerAccess(
+                [new Membership.ContainerUserRole("perm-1", ["writer"], Upn, ObjectId.ToString())],
+                RolesComplete: true,
+                new Dictionary<string, string> { [Membership.MarkerKey(Membership.JitWriterMarkerPrefix, SystemUserId)] = "perm-1" }));
+
+        var result = await Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Write)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(true, "member"));
+        _membership.Verify(m => m.GrantMarkedWriterAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact(DisplayName = "Task 171: a BUSINESS-UNIT container never gets a JIT grant — internal users there are standing writers")]
+    public async Task BusinessUnitContainer_NeverGrants()
+    {
+        var result = await Build(secureOwner: null, AccessRights.Write)
+            .PrepareAsync(DocumentId, "b!business-unit-container", Http());
+
+        result.Should().Be(new OfficeEditAccess(true, "standing"));
+        _membership.VerifyNoOtherCalls();
+    }
+
+    [Fact(DisplayName = "Task 171: a Write holder whose grant cannot be made gets 503 edit_access_unavailable — never a URL that cannot work")]
+    public async Task SecureContainer_GrantFails_Is503()
+    {
+        _membership.Setup(m => m.GrantMarkedWriterAsync(
+                SecureDrive, Membership.JitWriterMarkerPrefix, SystemUserId, Upn, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Membership.MarkedGrantOutcome.Failed);
+
+        var act = () => Build(new OwningSecureRecord("sprk_project", ProjectId), AccessRights.Write)
+            .PrepareAsync(DocumentId, SecureDrive, Http());
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(503);
+    }
+
+    [Fact(DisplayName = "Task 171: a container that cannot be classified grants nothing")]
+    public async Task UnclassifiableContainer_GrantsNothing()
+    {
+        var sut = new Sut(new InvalidOperationException("Dataverse down"), new StubProbe(AccessRights.Write, SystemUserId),
+            _membership.Object, _entities.Object);
+
+        var result = await sut.PrepareAsync(DocumentId, SecureDrive, Http());
+
+        result.Should().Be(new OfficeEditAccess(false, "unknown"));
+        _membership.VerifyNoOtherCalls();
+    }
+
+    private sealed class Sut : OfficeEditAccessService
+    {
+        private readonly OwningSecureRecord? _owner;
+        private readonly Exception? _fault;
+
+        public Sut(OwningSecureRecord? owner, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities)
+            : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities,
+                NullLogger<OfficeEditAccessService>.Instance)
+            => _owner = owner;
+
+        public Sut(Exception fault, CallerRecordAccessProbe probe, Membership membership, IGenericEntityService entities)
+            : base(TestRecordContainerResolver.ForBusinessUnitContainers(), probe, membership, entities,
+                NullLogger<OfficeEditAccessService>.Instance)
+            => _fault = fault;
+
+        protected override Task<OwningSecureRecord?> ResolveSecureOwnerAsync(string driveId, CancellationToken ct)
+            => _fault is null ? Task.FromResult(_owner) : Task.FromException<OwningSecureRecord?>(_fault);
+    }
+
+    private sealed class StubProbe : CallerRecordAccessProbe
+    {
+        private readonly AccessRights _rights;
+        private readonly Guid _systemUserId;
+
+        public StubProbe(AccessRights rights, Guid systemUserId)
+            : base(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
+        {
+            _rights = rights;
+            _systemUserId = systemUserId;
+        }
+
+        public override Task<AccessRights> GetCallerRightsAsync(
+            string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+            => Task.FromResult(callerBearerToken is null || entitySet != "sprk_projects" ? AccessRights.None : _rights);
+
+        public override Task<Guid?> GetCallerSystemUserIdAsync(string? callerBearerToken, CancellationToken ct = default)
+            => Task.FromResult<Guid?>(_systemUserId);
+    }
+}

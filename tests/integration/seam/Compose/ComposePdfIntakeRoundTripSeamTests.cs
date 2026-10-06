@@ -182,10 +182,10 @@ public sealed class ComposePdfIntakeRoundTripSeamTests : IClassFixture<ComposeFi
             .Setup(s => s.ResolveDriveIdAsync(containerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(mintedDriveId);
         _fixture.SpeMock
-            .Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), mintedDriveId, It.IsAny<string>(),
-                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+            .Setup(s => s.UploadSmallAsync(
+                mintedDriveId, It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);

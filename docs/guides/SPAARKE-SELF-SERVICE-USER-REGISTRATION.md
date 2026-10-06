@@ -70,7 +70,11 @@ The Spaarke Self-Service Registration system automates demo user provisioning. P
    - Step 5: Assign 3 licenses (Power Apps Plan 2 Trial, Fabric Free, Power Automate Free)
    - Step 6: Create systemuser in Demo Dataverse Business Unit
    - Step 7: Add systemuser to Demo Team (inherits `Spaarke Demo User` security role)
-   - Step 8: Grant SPE container Writer access (non-fatal if fails)
+   - Step 8: Grant SPE container Writer access (non-fatal if fails). *Since unified-access-control-r2 task 171
+     (owner rounds 69 + 70) this step is redundant and kept only as a head start: viewing, uploading, Compose and AI
+     run app-only behind Dataverse and need no container role at all, and `SpeContainerMembershipSyncJob` adds every
+     enabled internal user of a business unit as a writer on that unit's container within ~5 minutes (Office edit).
+     The sync never removes the role Step 8 granted (it removes only roles it created); expiry still revokes it.*
    - Step 9: Send welcome email to applicant's work email
 
 8. **Record is updated** to status `Provisioned` with demo username, Entra object ID, provisioned date, and expiration date (default: 14 days).
@@ -588,11 +592,21 @@ User = new SharePointIdentity
 
 ### User can't see documents after provisioning
 
-**Cause**: SPE container permission was not granted (Step 8 is non-fatal and may have been skipped).
+**Since task 171 (2026-10-06)** viewing documents needs NO container permission — preview, download, versions,
+Compose and AI run app-only after the user's Dataverse rights are checked. A user who cannot SEE a document is missing
+Dataverse rights (role, team, or share), not an SPE role.
+
+### User can't open a document in Word / Excel (Office edit)
+
+**Cause**: Office edit runs as the user, so it needs the user's own writer role on the business unit's container.
+Step 8 grants it; if Step 8 was skipped, `SpeContainerMembershipSyncJob` grants it on its next run (every 5 minutes)
+provided the user is enabled, a person, not flagged `sprk_isexternal = true`, and in a business unit whose
+`sprk_containerid` is stamped.
 
 **Fix**:
 1. Check provisioning logs for "SPE container access grant failed (non-fatal)"
-2. Manually grant Writer access via Graph API:
+2. Wait one sync interval, or trigger it: `POST /api/admin/jobs/spe-container-membership-sync/trigger` (SystemAdmin).
+3. Only if neither applies, manually grant Writer access via Graph API (a hand-granted role is never removed by the sync):
 ```
 POST /storage/fileStorage/containers/{containerId}/permissions
 {

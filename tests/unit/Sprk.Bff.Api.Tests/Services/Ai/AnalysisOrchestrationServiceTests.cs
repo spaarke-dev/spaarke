@@ -66,6 +66,7 @@ public class AnalysisOrchestrationServiceTests
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             speFileOperationsMock.Object,
+            TestRecordContainerResolver.ForBusinessUnitContainers(c => true),
             textExtractorMock.Object,
             tenantCacheMock.Object,
             httpContextAccessorMock.Object,

@@ -21,10 +21,12 @@ public static class ComposeDocumentAuthorizationFilterExtensions
         return builder.AddEndpointFilter(async (context, next) =>
         {
             var services = context.HttpContext.RequestServices;
+            // The authorization service and the resolver are resolved only when a row is found (a Path B request needs
+            // neither), so a host that serves only row-less items needs only the Dataverse row lookup.
             var filter = new ComposeDocumentAuthorizationFilter(
-                services.GetRequiredService<AuthorizationService>(),
+                () => services.GetRequiredService<AuthorizationService>(),
                 services.GetRequiredService<IGenericEntityService>(),
-                services.GetRequiredService<RecordContainerResolver>(),
+                () => services.GetRequiredService<RecordContainerResolver>(),
                 services.GetRequiredService<ILogger<ComposeDocumentAuthorizationFilter>>(),
                 operation);
             return await filter.InvokeAsync(context, next);
@@ -50,24 +52,24 @@ public static class ComposeDocumentAuthorizationFilterExtensions
 /// authorize, so the request passes through unmarked and the Compose byte calls keep the caller's OBO identity — SPE
 /// still decides, exactly as before (task 171 escalation trigger 2: reported to the owner, not converted).</para>
 /// <para><b>Fail closed.</b> A lookup that faults is a 503 — never a pass-through to the unmarked path for a document
-/// that may well have a row. A denied caller gets <see cref="DocumentAuthorizationFilter"/>'s 403; an unverifiable
-/// pointer gets the resolver's 409 <c>document_storage_unverified</c>. Neither reaches Graph.</para>
+/// that may well have a row. A denied caller gets <see cref="DocumentAuthorizationFilter"/>'s 403 before any Graph call;
+/// an unverifiable pointer leaves the request unmarked (the caller's own OBO identity — SPE decides, as before; never wider).</para>
 /// </remarks>
 public sealed class ComposeDocumentAuthorizationFilter : IEndpointFilter
 {
     private const string DocumentSpeIdRouteKey = "documentSpeId";
     private const string DocumentIdRouteKey = "documentId";
 
-    private readonly AuthorizationService _authorizationService;
+    private readonly Func<AuthorizationService> _authorizationService;
     private readonly IGenericEntityService _entities;
-    private readonly RecordContainerResolver _containerResolver;
+    private readonly Func<RecordContainerResolver> _containerResolver;
     private readonly ILogger<ComposeDocumentAuthorizationFilter> _logger;
     private readonly string _operation;
 
     public ComposeDocumentAuthorizationFilter(
-        AuthorizationService authorizationService,
+        Func<AuthorizationService> authorizationService,
         IGenericEntityService entities,
-        RecordContainerResolver containerResolver,
+        Func<RecordContainerResolver> containerResolver,
         ILogger<ComposeDocumentAuthorizationFilter> logger,
         string operation)
     {
@@ -132,16 +134,24 @@ public sealed class ComposeDocumentAuthorizationFilter : IEndpointFilter
         // ADR-044: bare-lowercase "D" — the value becomes an OData key predicate in the access data source.
         routeValues[DocumentIdRouteKey] = documentId.ToString("D");
 
-        return await new DocumentAuthorizationFilter(_authorizationService, _operation).InvokeAsync(context, async inner =>
+        return await new DocumentAuthorizationFilter(_authorizationService(), _operation).InvokeAsync(context, async inner =>
         {
-            if (!string.IsNullOrWhiteSpace(rowDrive))
+            // The app-only path needs BOTH the Dataverse decision just made AND a verified pointer. A pointer that does
+            // not verify leaves the request UNMARKED: the Compose byte calls then keep the caller's own (OBO) identity, so
+            // SPE still decides for that item exactly as before task 171 — never wider, and a legitimate document whose
+            // creator facts the check cannot match is not newly broken for a caller who holds a container role.
+            if (!string.IsNullOrWhiteSpace(rowDrive)
+                && await _containerResolver()
+                    .IsDocumentPointerContainerAllowedAsync(documentId, rowDrive, itemId, httpContext.RequestAborted)
+                    .ConfigureAwait(false))
             {
-                // Followed AS THE APPLICATION from here, so the row's pointer must verify (409 otherwise, before Graph).
-                await _containerResolver
-                    .EnsureDocumentPointerContainerAsync(documentId, rowDrive, itemId, httpContext.RequestAborted)
-                    .ConfigureAwait(false);
-
                 httpContext.Items[ComposeBrokeredDocument.ItemKey] = new ComposeBrokeredDocument(documentId, rowDrive, itemId);
+            }
+            else
+            {
+                _logger.LogWarning(
+                    "[COMPOSE-AUTH] Document {DocumentId}'s storage pointer could not be verified; the request keeps the "
+                    + "caller's own SharePoint Embedded identity.", documentId);
             }
 
             return await next(inner);

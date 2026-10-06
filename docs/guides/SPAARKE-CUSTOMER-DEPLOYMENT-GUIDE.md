@@ -973,6 +973,33 @@ Container ID persisted to Dataverse env-var (`sprk_SharePointEmbeddedContainerId
 **Lead-time**: none per customer. The container type and its owning app are a one-time setup; H0's `SpeOwnerCredential`
 check confirms the owner entry, the owning-app token and the registration before any resource is created.
 
+**Users and container roles — no per-user step (unified-access-control-r2 task 171, owner rounds 69 + 70).** Do NOT add
+users to any container by hand. Document access follows Dataverse:
+
+- **Every non-edit byte path is broker-only.** Upload, preview, download, versions, Compose and AI run **app-only** after
+  the BFF checks the caller's Dataverse rights on the record — on the environment/root, business-unit and per-record
+  secure containers alike, and for contacts. This needs the BFF identity's `full` application permission on the
+  container type (the registration step in the topology runbook), nothing per user.
+- **Office edit (web and desktop) runs as the user**, so it needs the user's own role:
+  - **Business-unit / environment containers:** every enabled, internal (`sprk_isexternal` not true) person user of the
+    unit(s) whose `sprk_containerid` names the container is kept as a **writer** by the scheduled job
+    `spe-container-membership-sync` (**every 5 minutes**; enabled by default). New, enabled or moved-in users are added;
+    disabled, moved-out or flagged-external users lose the role — but only a role the job created. Owner and hand-granted
+    roles are never touched. Disable it without a redeploy: `POST /api/admin/jobs/spe-container-membership-sync/disable`.
+  - **Per-record secure containers:** no standing members. A user with **Write** on the secure record gets a
+    **just-in-time writer** role when they choose Open in Word/Excel; the same job removes it once Dataverse answers that
+    they no longer have Write (unshare, No Access, Restricted + flagged external, disabled user). A removed role stops new
+    opens and saves within minutes; a copy already open in desktop Office stays readable until it is closed.
+- **Recommended once per container type:** set `isSharingRestricted = true` on the container type registration so that a
+  writer cannot re-share a file from Office outside Dataverse (under the default "open" model any member with edit can).
+  This is a container-type setting change — an operator decision, not done by any handler.
+
+**Trade-off to tell the customer (owner question pending, 2026-10-06).** Because the BFF writes app-only, SharePoint's own
+**"Modified by"** on a file and its SPE version history shows the **Spaarke application**, not the person. The person is
+recorded in Spaarke: a new document's row carries its creator (`createdby`, or `sprk_createdbyperson` for a row the BFF
+created), and every save is authorized as that person and logged. There is **no per-version "modified by person" column**
+in Dataverse today, so the person behind each later version is in the BFF logs, not on the row.
+
 ### 7.6 Phase 6 — BFF Deployment (H9)
 
 **H9** (`H9BffDeployHandler`) deploys the CI-published BFF artifact — nothing is built at provision time. In order:

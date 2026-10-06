@@ -122,12 +122,10 @@ public class CommunicationAttachmentTextServiceTests
         public Harness DownloadReturns(Func<Stream?> stream)
         {
             Spe
-                .Setup(s => s.DownloadFileAsUserAsync(
-                    It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(stream);
             Spe
-                .Setup(s => s.GetFileMetadataAsUserAsync(
-                    It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Setup(s => s.GetFileMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new FileHandleDto(
                     Id: ItemId, Name: "f", ParentId: null, Size: 1,
                     CreatedDateTime: DateTimeOffset.UnixEpoch, LastModifiedDateTime: DateTimeOffset.UnixEpoch,
@@ -145,8 +143,13 @@ public class CommunicationAttachmentTextServiceTests
             return this;
         }
 
+        // Task 171: the bytes are read app-only after the document-pointer check. By default every b! container is a
+        // business-unit container of the owner's subtree and every item was uploaded by the row's creator.
+        public Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver ContainerResolver { get; set; } =
+            TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("b!", StringComparison.Ordinal));
+
         public CommunicationAttachmentTextService Build() =>
-            new(Query.Object, Resolver.Object, Spe.Object, Extractor.Object,
+            new(Query.Object, Resolver.Object, Spe.Object, ContainerResolver, Extractor.Object,
                 Mock.Of<ILogger<CommunicationAttachmentTextService>>());
     }
 
@@ -176,6 +179,26 @@ public class CommunicationAttachmentTextServiceTests
         item.Method.Should().Be("DocumentIntelligence");
     }
 
+    [Fact(DisplayName = "Task 171: an attachment whose document pointer cannot be verified is not extractable and its bytes are never read app-only")]
+    public async Task GetAttachmentText_WhenPointerUnverifiable_ReturnsNotExtractableAndSkipsDownload()
+    {
+        var doc = Guid.NewGuid();
+        var harness = new Harness()
+            .Attachments(AttachmentRow(Guid.NewGuid(), doc, "brief.pdf"))
+            .Documents(DocumentRow(doc, "brief.pdf"))
+            .Supported(true)
+            .DownloadReturns(() => Bytes());
+        // No container is a business-unit container of the owner's subtree: the pointer check refuses.
+        harness.ContainerResolver = TestRecordContainerResolver.ForBusinessUnitContainers();
+
+        var result = await Run(harness);
+
+        result.Attachments.Should().ContainSingle().Which.Extractable.Should().BeFalse();
+        harness.Spe.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the BFF follows the row's pointer as the application only after the pointer is verified");
+    }
+
     [Fact]
     public async Task GetAttachmentText_WhenFileTypeUnsupported_ReturnsNotExtractableAndSkipsDownload()
     {
@@ -190,7 +213,7 @@ public class CommunicationAttachmentTextServiceTests
         result.Attachments.Should().ContainSingle().Which.Extractable.Should().BeFalse();
         // Unsupported types must never trigger an SPE download.
         harness.Spe.Verify(
-            s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -251,7 +274,7 @@ public class CommunicationAttachmentTextServiceTests
 
         result.Attachments.Should().ContainSingle().Which.Extractable.Should().BeFalse();
         harness.Spe.Verify(
-            s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
 
@@ -269,13 +292,13 @@ public class CommunicationAttachmentTextServiceTests
                 DocumentRow(badDoc, "bad.pdf", driveId: "b!bad", itemId: "bad"))
             .Supported();
         harness.Spe
-            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(s => s.GetFileMetadataAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((FileHandleDto?)null);
         harness.Spe
-            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), "b!ok", "ok", It.IsAny<CancellationToken>()))
+            .Setup(s => s.DownloadFileAsync("b!ok", "ok", It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => Bytes());
         harness.Spe
-            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), "b!bad", "bad", It.IsAny<CancellationToken>()))
+            .Setup(s => s.DownloadFileAsync("b!bad", "bad", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("transient SPE failure"));
         harness.Extracts(TextExtractionResult.Succeeded("good text", TextExtractionMethod.Native));
 

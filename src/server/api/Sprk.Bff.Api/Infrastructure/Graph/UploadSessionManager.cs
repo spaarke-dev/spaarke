@@ -148,14 +148,10 @@ public class UploadSessionManager
     // (tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs) is what keeps the
     // routes from coming back and reviving them.
     //
-    // NOT deleted, and do not confuse them with these: the OBO twins CreateUploadSessionAsUserAsync /
-    // UploadChunkAsUserAsync below are LIVE.
-    //
-    // ⚠️ CORRECTED 2026-08-29. This comment used to cite "OBOEndpoints.cs:119/172" as their call sites.
-    // Task 076 DELETED those two routes and replaced them with the record-keyed upload-session route, so
-    // the citation had been stale since. The live caller is the POST
-    // /api/obo/records/{entityLogicalName}/{recordId:guid}/upload-session handler. Line-numbered
-    // cross-file references rot exactly this way; name the ROUTE, not the line.
+    // ⚠️ UPDATED 2026-10-06 (task 171). The OBO upload-session twin that this note used to call LIVE is replaced by the
+    // app-only CreateUploadSessionAsync below (its one caller is the record-keyed upload-session route, which authorizes
+    // the caller on the owning record first). UploadChunkAsUserAsync remains, uncalled: it never used the caller's
+    // identity (the client PUTs chunks straight to Graph's pre-authenticated session URL).
     // ---------------------------------------------------------------------------------------------
 
 

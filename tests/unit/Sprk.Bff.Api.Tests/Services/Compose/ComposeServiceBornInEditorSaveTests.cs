@@ -93,9 +93,9 @@ public sealed class ComposeServiceBornInEditorSaveTests
         _spe.Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResolvedDriveId);
 
-        _spe.Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+        _spe.Setup(s => s.UploadSmallAsync(
+                ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, Stream, Sprk.Bff.Api.Models.ConflictBehavior, CancellationToken>((_, _, stream, _, _) =>
             {
                 using var buffer = new MemoryStream();
                 stream.CopyTo(buffer);
@@ -267,8 +267,8 @@ public sealed class ComposeServiceBornInEditorSaveTests
         _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
                 It.IsAny<HttpContext>(), ExistingDriveId, ExistingSpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
             Times.Once);
-        _spe.Verify(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+        _spe.Verify(s => s.UploadSmallAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()),
             Times.Never);
         _spe.Verify(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
 

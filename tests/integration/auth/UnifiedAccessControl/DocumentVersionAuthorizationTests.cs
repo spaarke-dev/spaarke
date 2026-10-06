@@ -11,6 +11,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Documents;
@@ -319,6 +320,13 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
             services.RemoveAll<IDocumentDataverseService>();
             services.AddSingleton<IDocumentDataverseService>(new VersionedDocumentDataverseService());
 
+            // Task 171: the version reads are APP-ONLY now, so the route verifies the row's pointer first. A pointer world
+            // in which every b! container is a business-unit container of the document owner's subtree and every item was
+            // uploaded by the row's creator lets the allowed paths reach the facade; the pointer check's own refusals are
+            // pinned by its own suite.
+            services.RemoveAll<RecordContainerResolver>();
+            services.AddScoped(_ => TestRecordContainerResolver.ForBusinessUnitContainers(c => c.StartsWith("b!", StringComparison.Ordinal)));
+
             // The document's relocation record (task 166 f1-v2, owner round 45 item 1): its version "3.0" was REPLAYED by a
             // relocation, so the route must report the ORIGINAL author and date the relocation recorded, not Graph's.
             var entities = new Mock<IGenericEntityService>();
@@ -411,8 +419,10 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
             _byteReads = byteReads;
         }
 
-        public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(
-            HttpContext ctx, string driveId, string itemId, CancellationToken ct = default)
+        // Task 171: the routes read APP-ONLY (broker) after the per-document gate and the pointer check — so the
+        // app-only members are the modelled, recorded ones, and the OBO members below are deliberately unmodelled.
+        public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+            string driveId, string itemId, CancellationToken ct = default)
         {
             _listReads.Add((driveId, itemId));
             return Task.FromResult<IReadOnlyList<VersionInfoDto>?>(new List<VersionInfoDto>
@@ -423,8 +433,8 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
             });
         }
 
-        public Task<Stream?> DownloadFileVersionAsUserAsync(
-            HttpContext ctx, string driveId, string itemId, string versionId, CancellationToken ct = default)
+        public Task<Stream?> DownloadFileVersionAsync(
+            string driveId, string itemId, string versionId, CancellationToken ct = default)
         {
             _byteReads.Add((driveId, itemId, versionId));
             return Task.FromResult<Stream?>(
@@ -442,16 +452,16 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
         public Task<FileHandleDto?> GetFileMetadataAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<SpeItemCreator?> GetItemCreatorAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<SpeItemCreator?>>();
         public Task<Stream?> DownloadFileAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
-        // Deliberately UNMODELLED, not recorded. These are the INTERNAL OBO version routes; the
-        // app-only overload exists only for the external-access surface (unified-access-control-r2).
-        // If an internal route ever reaches this, it has silently dropped from the caller's delegated
-        // permission to the broker identity — a privilege escalation — and this throws instead of
-        // quietly returning a version list.
-        public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<IReadOnlyList<VersionInfoDto>?>>();
+        // Deliberately UNMODELLED (task 171): the version routes no longer read as the user. If one ever reaches an OBO
+        // member again, access would once more depend on the caller holding a container role — which per-record secure
+        // containers never grant — so this throws instead of quietly returning a version list.
+        public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<IReadOnlyList<VersionInfoDto>?>>();
+        public Task<Stream?> DownloadFileVersionAsUserAsync(HttpContext ctx, string driveId, string itemId, string versionId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
+        public Task<FileHandleDto?> GetFileMetadataUncachedAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<Stream?> DownloadFileAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
         public Task<string?> GetCurrentVersionIdAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<string?>>();
-        public Task<FileHandleDto?> UploadSmallAsUserAsync(HttpContext ctx, string containerId, string path, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
-        public Task<FileHandleDto?> UploadSmallAsUserAsync(HttpContext ctx, string containerId, string path, Stream content, Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
+        public Task<string?> GetCurrentVersionIdAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<string?>>();
+        public Task<FileHandleDto?> ReplaceFileContentAsync(string driveId, string itemId, Stream content, string? ifMatch, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> UploadSmallAsync(string driveId, string path, Stream content, Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> UploadSmallAsync(string driveId, string path, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(HttpContext ctx, string driveId, string itemId, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();

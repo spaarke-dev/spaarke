@@ -220,8 +220,8 @@ public sealed class ComposeServiceCreateOnSaveTests
     {
         _spe.Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResolvedDriveId);
-        _spe.Setup(s => s.UploadSmallAsUserAsync(
-                It.IsAny<HttpContext>(), ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+        _spe.Setup(s => s.UploadSmallAsync(
+                ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(NewDriveItem());
     }
 
@@ -268,8 +268,8 @@ public sealed class ComposeServiceCreateOnSaveTests
         var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // Fork B: the drive-item was created (not replaced).
-        _spe.Verify(s => s.UploadSmallAsUserAsync(
-            It.IsAny<HttpContext>(), ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
+        _spe.Verify(s => s.UploadSmallAsync(
+            ResolvedDriveId, It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Once);
         _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
             It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
 
@@ -526,8 +526,8 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
-        _spe.Verify(s => s.UploadSmallAsUserAsync(
-            It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
+        _spe.Verify(s => s.UploadSmallAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Never);
         _dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
         // task 013 (FR-07d): promote's create path is now an atomic upsert — assert it is likewise not reached.
         _dataverse.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -596,8 +596,8 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
             It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
-        _spe.Verify(s => s.UploadSmallAsUserAsync(
-            It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
+        _spe.Verify(s => s.UploadSmallAsync(
+            It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<Sprk.Bff.Api.Models.ConflictBehavior>(), It.IsAny<CancellationToken>()), Times.Never);
         ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
     }
 

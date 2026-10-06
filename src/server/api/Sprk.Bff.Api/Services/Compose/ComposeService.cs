@@ -1348,12 +1348,14 @@ public class ComposeService : IComposeService
     /// "didn't work". Both outcomes write nothing.</para>
     /// </remarks>
     /// <summary>
-    /// Task 171: before a create-on-save transient-key HIT replaces the matched document's file app-only, the caller must
-    /// hold WRITE on that <c>sprk_document</c> (Dataverse's answer, asked as the caller — the same question every other
-    /// Compose write is now authorized by) and the row's storage pointer must verify. A refusal is the 403 a denied OBO
-    /// write produced before (<see cref="UnauthorizedAccessException"/>), so the endpoint's mapping is unchanged.
+    /// Task 171: before a create-on-save transient-key HIT replaces the matched document's file, the caller must hold
+    /// WRITE on that <c>sprk_document</c> (Dataverse's answer, asked as the caller — the same question every other Compose
+    /// write is now authorized by). A refusal is the 403 a denied OBO write produced before
+    /// (<see cref="UnauthorizedAccessException"/>), so the endpoint's mapping is unchanged. Returns whether the replace
+    /// may run APP-ONLY: only when the row's storage pointer also verifies — otherwise it keeps the caller's own (OBO)
+    /// identity, the same rule <c>ComposeDocumentAuthorizationFilter</c> applies to every other Compose route.
     /// </summary>
-    private async Task AuthorizeTransientKeyReplaceAsync(
+    private async Task<bool> AuthorizeTransientKeyReplaceAsync(
         ComposeRecordResolution.TransientKeyMatch match, HttpContext httpContext, CancellationToken cancellationToken)
     {
         var rights = await _accessProbe
@@ -1367,8 +1369,8 @@ public class ComposeService : IComposeService
             throw new UnauthorizedAccessException("The caller may not write the document this draft key belongs to.");
         }
 
-        await _containerResolver
-            .EnsureDocumentPointerContainerAsync(match.RecordId, match.DriveId, match.SpeId, cancellationToken)
+        return await _containerResolver
+            .IsDocumentPointerContainerAllowedAsync(match.RecordId, match.DriveId, match.SpeId, cancellationToken)
             .ConfigureAwait(false);
     }
 
@@ -2053,12 +2055,14 @@ public class ComposeService : IComposeService
                 // WRITE on the matched sprk_document (Dataverse, as the caller) and the row's pointer must verify.
                 // Under OBO, SPE's own write check on the item stood here; it held only for a caller with a container
                 // role, which every secure container's users lack.
-                await AuthorizeTransientKeyReplaceAsync(match, httpContext, cancellationToken).ConfigureAwait(false);
+                var brokered = await AuthorizeTransientKeyReplaceAsync(match, httpContext, cancellationToken).ConfigureAwait(false);
 
                 using var replaceStream = new MemoryStream(contentToPersist, writable: false);
-                var replaced = await _spe.ReplaceFileContentAsync(
-                        match.DriveId!, match.SpeId!, replaceStream, ifMatch: null, cancellationToken)
-                    .ConfigureAwait(false);
+                var replaced = brokered
+                    ? await _spe.ReplaceFileContentAsync(match.DriveId!, match.SpeId!, replaceStream, ifMatch: null, cancellationToken)
+                        .ConfigureAwait(false)
+                    : await _spe.ReplaceFileContentAsUserAsync(httpContext, match.DriveId!, match.SpeId!, replaceStream, cancellationToken)
+                        .ConfigureAwait(false);
 
                 if (replaced is null || string.IsNullOrEmpty(replaced.Id))
                 {

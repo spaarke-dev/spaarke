@@ -59,7 +59,7 @@ public class SpeUploadPathIsFlatGuardTests
     /// existing item by ID and cannot mint a folder, so they are out of scope.
     /// </summary>
     private static readonly Regex PathTakingSinkCall = new(
-        @"(?<![A-Za-z0-9_])(?:UploadSmallAsync|UploadSmallAsUserAsync|CreateUploadSessionAsUserAsync)\s*\(",
+        @"(?<![A-Za-z0-9_])(?:UploadSmallAsync|UploadSmallToStagingAsUserAsync|CreateUploadSessionAsync)\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>
@@ -166,16 +166,17 @@ public class SpeUploadPathIsFlatGuardTests
     /// <summary>The path parameter's ZERO-BASED position in each sink's argument list, from the facade
     /// signatures in <c>Infrastructure/Graph/ISpeFileOperations.cs</c> and <c>UploadSessionManager.cs</c>:
     /// <c>UploadSmallAsync(driveId, path, content, ct)</c>;
-    /// <c>UploadSmallAsUserAsync(ctx, containerId, path, content, ct)</c>;
-    /// <c>CreateUploadSessionAsUserAsync(ctx, driveId, path, conflictBehavior, ct)</c>. Pinned by
+    /// <c>UploadSmallToStagingAsUserAsync(ctx, containerId, path, content, ct)</c>;
+    /// <c>CreateUploadSessionAsync(driveId, path, conflictBehavior, ct)</c> (task 171: the OBO upload and upload-session
+    /// members became app-only; only the staging upload keeps the caller's identity). Pinned by
     /// <see cref="SinkSignaturePositionsStillMatchTheFacade"/> so a signature change cannot silently make
     /// this rule inspect the wrong argument.</summary>
     private static readonly IReadOnlyDictionary<string, int> PathArgumentIndex =
         new Dictionary<string, int>(StringComparer.Ordinal)
         {
             ["UploadSmallAsync"] = 1,
-            ["UploadSmallAsUserAsync"] = 2,
-            ["CreateUploadSessionAsUserAsync"] = 2,
+            ["UploadSmallToStagingAsUserAsync"] = 2,
+            ["CreateUploadSessionAsync"] = 1,
         };
 
     /// <summary>The one sanctioned sanitizer. A site is compliant only if its path local runs through it.</summary>
@@ -280,7 +281,7 @@ public class SpeUploadPathIsFlatGuardTests
         //     name-only rule would have called it compliant. This is Api/Ai/ChatWordExportEndpoints.cs.
         Assert.NotEmpty(ScanArgumentsInText("Api/Fake/A.cs", """
             var uploadPath = request.Filename;
-            var r = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, uploadPath, s, ct);
+            var r = await speFileStore.UploadSmallAsync(driveId, uploadPath, s, ct);
             """));
 
         // (2) The id-carrying composition WITHOUT the sanitizer — "{id}_a/b.docx" still mints "{id}_a", so
@@ -294,7 +295,7 @@ public class SpeUploadPathIsFlatGuardTests
         //     straight to the sink. Services/Compose/ComposeService.cs and
         //     Services/Email/EmailAttachmentProcessor.cs both did this, and a name-keyed scan saw neither.
         Assert.NotEmpty(ScanArgumentsInText("Services/Fake/C.cs", """
-            var created = await _spe.UploadSmallAsUserAsync(httpContext, driveId, fileName, createStream, ct);
+            var created = await _spe.UploadSmallAsync(driveId, fileName, createStream, ct);
             """));
 
         // (4) A member access, which is a pass-through wearing a different hat.
@@ -312,7 +313,7 @@ public class SpeUploadPathIsFlatGuardTests
         // (6) The upload-SESSION sink counts too — it reserves the destination item at a path.
         Assert.NotEmpty(ScanArgumentsInText("Api/Fake/F.cs", """
             var path = name;
-            var s = await speFileStore.CreateUploadSessionAsUserAsync(ctx, driveId, path, behavior, ct);
+            var s = await speFileStore.CreateUploadSessionAsync(driveId, path, behavior, ct);
             """));
     }
 
@@ -324,7 +325,7 @@ public class SpeUploadPathIsFlatGuardTests
         // (1) The plain sanctioned shape.
         Assert.Empty(ScanArgumentsInText("Api/Fake/G.cs", """
             var uploadPath = SpeUploadPath.SanitizeFileName(request.Filename);
-            var r = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, uploadPath, s, ct);
+            var r = await speFileStore.UploadSmallAsync(driveId, uploadPath, s, ct);
             """));
 
         // (2) The id-carrying sanctioned shape — uniqueness in the name, sanitizer inside the hole.
@@ -337,8 +338,7 @@ public class SpeUploadPathIsFlatGuardTests
         //     these as having no path argument at all and the rule would read as green while seeing nothing.
         Assert.Empty(ScanArgumentsInText("Services/Fake/I.cs", """
             var stagingPath = SpeUploadPath.SanitizeFileName(fileName);
-            var uploadResult = await _speFileStore.UploadSmallAsUserAsync(
-                httpContext,
+            var uploadResult = await _speFileStore.UploadSmallAsync(
                 stagingContainerId,
                 stagingPath,
                 buffer,
@@ -392,7 +392,7 @@ public class SpeUploadPathIsFlatGuardTests
         // Constant prefix (was Api/Ai/ChatWordExportEndpoints.cs).
         Assert.NotEmpty(ScanText("Api/Fake/A.cs", """
             var uploadPath = $"exports/{request.Filename}";
-            var r = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, uploadPath, s, ct);
+            var r = await speFileStore.UploadSmallAsync(driveId, uploadPath, s, ct);
             """));
 
         // Constant + derived GUID, LEADING SLASH (was Services/Communication/CommunicationService.cs).
@@ -410,13 +410,13 @@ public class SpeUploadPathIsFlatGuardTests
         // A bare trailing slash is still a folder — the sneakiest regression shape.
         Assert.NotEmpty(ScanText("Services/Fake/D.cs", """
             var stagingPath = $"ai-prefill/{requestId}/";
-            await speFileStore.UploadSmallAsUserAsync(httpContext, staging, stagingPath, buffer, ct);
+            await speFileStore.UploadSmallAsync(staging, stagingPath, buffer, ct);
             """));
 
         // The upload-session sink counts too: it reserves the destination item at a path.
         Assert.NotEmpty(ScanText("Api/Fake/E.cs", """
             var path = $"exports/{name}";
-            var session = await speFileStore.CreateUploadSessionAsUserAsync(ctx, driveId, path, behavior, ct);
+            var session = await speFileStore.CreateUploadSessionAsync(driveId, path, behavior, ct);
             """));
     }
 
@@ -435,7 +435,7 @@ public class SpeUploadPathIsFlatGuardTests
         // (2) A pass-through of a plain filename with no literal at all.
         Assert.Empty(ScanText("Api/Fake/G.cs", """
             var uploadPath = request.Filename;
-            var r = await speFileStore.UploadSmallAsUserAsync(ctx, driveId, uploadPath, s, ct);
+            var r = await speFileStore.UploadSmallAsync(driveId, uploadPath, s, ct);
             """));
 
         // (3) PROSE must not count. Nearly every one of these files now carries a doc comment EXPLAINING
@@ -511,7 +511,7 @@ public class SpeUploadPathIsFlatGuardTests
 
     /// <summary>A call to a path-taking sink, capturing the sink name and the offset of its open paren.</summary>
     private static readonly Regex SinkCallWithArgs = new(
-        @"(?<![A-Za-z0-9_])(?<sink>UploadSmallAsync|UploadSmallAsUserAsync|CreateUploadSessionAsUserAsync)\s*\(",
+        @"(?<![A-Za-z0-9_])(?<sink>UploadSmallAsync|UploadSmallToStagingAsUserAsync|CreateUploadSessionAsync)\s*\(",
         RegexOptions.Compiled);
 
     /// <summary>A local declaration, capturing its name and its whole initializer up to the statement end.
