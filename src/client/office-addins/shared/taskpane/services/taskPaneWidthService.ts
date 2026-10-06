@@ -70,6 +70,17 @@ const WEB_MAX_WIDTH_PX = 500;
 /** Fractions of the screen's available width tried after the 3x request (Windows/Mac allow up to 50% of the Word window). */
 const SCREEN_FRACTION_STEPS: readonly number[] = [0.5, 0.4, 0.3];
 
+/**
+ * Window-based sizing (task 104, UAT round 7 item 1). `window.outerWidth` is the top-level browser window's width
+ * (MDN: "the width of the outside of the browser window"), so in the Word-on-the-web iframe it is the browser window.
+ * In a desktop WebView2 task pane it is expected to be about the pane itself, so it is used only when it is
+ * meaningfully (>= WINDOW_WIDTH_MIN_RATIO x) wider than the pane; otherwise the screen fractions above apply.
+ * Office's documented desktop limit is 50% of the window, which is also the web cap here.
+ */
+const WINDOW_MAX_FRACTION = 0.5;
+const WINDOW_FRACTION_STEPS: readonly number[] = [0.4, 0.3];
+const WINDOW_WIDTH_MIN_RATIO = 1.5;
+
 /** How long to wait for the host to apply a width before treating the request as ignored. */
 const RESIZE_SETTLE_TIMEOUT_MS = 300;
 
@@ -104,17 +115,29 @@ export function isTaskPaneResizeSupported(): boolean {
 export function expandCandidateWidths(
   platform: string | undefined,
   currentWidth: number,
-  screenWidth: number = typeof window !== 'undefined' ? (window.screen?.availWidth ?? 0) : 0
+  screenWidth: number = typeof window !== 'undefined' ? (window.screen?.availWidth ?? 0) : 0,
+  windowWidth: number = typeof window !== 'undefined' ? (window.outerWidth ?? 0) : 0
 ): number[] {
   if (!platform) return [];
   const base = DEFAULT_WIDTH_BY_PLATFORM[platform];
   if (base === undefined) return [];
-  const candidates = [base * TASK_PANE_EXPAND_FACTOR];
-  if (Number.isFinite(screenWidth) && screenWidth > 0) {
-    for (const fraction of SCREEN_FRACTION_STEPS) candidates.push(Math.floor(screenWidth * fraction));
-  }
-  if (platform === 'OfficeOnline') candidates.push(WEB_MAX_WIDTH_PX);
   const floor = Number.isFinite(currentWidth) ? currentWidth + RESIZE_TOLERANCE_PX : 0;
+  const pane = Number.isFinite(currentWidth) ? currentWidth : 0;
+  let candidates: number[];
+  if (Number.isFinite(windowWidth) && windowWidth >= pane * WINDOW_WIDTH_MIN_RATIO && windowWidth > 0) {
+    // Window-based: nothing above WINDOW_MAX_FRACTION of the window (and never above 3x the default).
+    const cap = Math.min(base * TASK_PANE_EXPAND_FACTOR, Math.floor(windowWidth * WINDOW_MAX_FRACTION));
+    candidates = [cap];
+    for (const fraction of WINDOW_FRACTION_STEPS) candidates.push(Math.floor(windowWidth * fraction));
+    if (platform === 'OfficeOnline' && WEB_MAX_WIDTH_PX <= cap) candidates.push(WEB_MAX_WIDTH_PX);
+    candidates = candidates.filter(width => width <= cap);
+  } else {
+    candidates = [base * TASK_PANE_EXPAND_FACTOR];
+    if (Number.isFinite(screenWidth) && screenWidth > 0) {
+      for (const fraction of SCREEN_FRACTION_STEPS) candidates.push(Math.floor(screenWidth * fraction));
+    }
+    if (platform === 'OfficeOnline') candidates.push(WEB_MAX_WIDTH_PX);
+  }
   return Array.from(new Set(candidates))
     .filter(width => width > floor)
     .sort((a, b) => b - a);
@@ -145,6 +168,7 @@ export async function expandTaskPane(): Promise<number | null> {
     const setWidth = getSetWidth();
     if (!setWidth) return null;
     const candidates = expandCandidateWidths(String(Office.context.platform), window.innerWidth);
+    // window.outerWidth / screen.availWidth are read inside expandCandidateWidths (window first, screen fallback).
     for (const width of candidates) {
       const before = window.innerWidth;
       setWidth(width);
