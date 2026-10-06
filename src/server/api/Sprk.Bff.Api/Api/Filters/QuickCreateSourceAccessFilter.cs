@@ -13,8 +13,9 @@ public static class QuickCreateSourceAccessFilterExtensions
 {
     /// <summary>
     /// Authorize the CALLER's Read right on the quick-create record context
-    /// (<see cref="QuickCreateRequest.SourceEntityType"/> / <see cref="QuickCreateRequest.SourceRecordId"/>) before
-    /// the handler runs. Apply after <c>AddOfficeAuthFilter()</c>.
+    /// (<see cref="QuickCreateRequest.SourceEntityType"/> / <see cref="QuickCreateRequest.SourceRecordId"/>) and on the
+    /// Assigned To contact (<see cref="QuickCreateRequest.AssignedToContactId"/>, task 100) before the handler runs.
+    /// Apply after <c>AddOfficeAuthFilter()</c>.
     /// </summary>
     public static TBuilder AddQuickCreateSourceAccessFilter<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder
@@ -55,6 +56,13 @@ public static class QuickCreateSourceAccessFilterExtensions
 /// rights all deny 403 before any read happens. The probe itself collapses every "could not answer" to
 /// <see cref="AccessRights.None"/>, so this filter inherits that fail-closed posture. A client abort propagates as
 /// cancellation rather than being reported as a denial.</para>
+///
+/// <para><b>The Assigned To contact (task 100).</b> The same filter also requires Read on
+/// <see cref="QuickCreateRequest.AssignedToContactId"/> — the second caller-named id the create acts on — with one
+/// constant deny body (see <c>AuthorizeAssigneeAsync</c>). The reference ids (matter type, practice area, project type)
+/// are NOT gated: they are organization-owned reference rows the pane loads from the app-only
+/// <c>GET /api/office/search/{list}</c>, so they carry no per-record access, and the creation service verifies each
+/// one exists (an unknown id is dropped with a warning).</para>
 ///
 /// <para><b>Residual</b> (notes/030 §9): Read is a RECORD-level check. An app-only read does not apply column-level
 /// (field-level security) masking, so a secured column named in an admin-authored profile would still be copied.</para>
@@ -107,6 +115,20 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
     /// <summary>The Office error-code taxonomy's "access denied" code — the same one <see cref="EntityAccessFilter"/> emits.</summary>
     private const string AccessDeniedErrorCode = "OFFICE_009";
 
+    /// <summary>The Assigned To contact's logical name (task 100) — resolved to its entity set through the shared table.</summary>
+    private const string AssigneeLogicalName = "contact";
+
+    /// <summary>The ONE reason code the assignee gate emits (task 100), for every refusal.</summary>
+    internal const string AssigneeDeniedReasonCode = "assignee_inaccessible";
+
+    /// <summary>
+    /// The ONE detail the assignee gate emits. Names no contact and no id, and reads the same whether the contact is
+    /// absent, invisible to the caller, or the check could not run.
+    /// </summary>
+    internal const string AssigneeDeniedDetail =
+        "The person chosen in Assigned To is not available to you, so the record was not created. Choose someone "
+        + "else, or clear Assigned To.";
+
     private readonly CallerRecordAccessProbe _probe;
     private readonly ILogger<QuickCreateSourceAccessFilter>? _logger;
 
@@ -134,6 +156,13 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
         if (privilegeDenied is not null)
         {
             return privilegeDenied;
+        }
+
+        // Half 3 — Read on the Assigned To contact the create writes (master task 100). No body names none.
+        var request = context.Arguments.OfType<QuickCreateRequest>().FirstOrDefault();
+        if (request is not null && await AuthorizeAssigneeAsync(httpContext, request) is { } assigneeDenied)
+        {
+            return assigneeDenied;
         }
 
         return await next(context);
@@ -267,6 +296,73 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
 
         return null;
     }
+
+    /// <summary>
+    /// Task 100: Read on the Assigned To contact (<see cref="QuickCreateRequest.AssignedToContactId"/>), which the
+    /// create writes onto a record the caller's team owns. Returns the deny result, or <see langword="null"/> to
+    /// continue (also when none is named — the server's default is then the maker's OWN linked contact, or none).
+    /// </summary>
+    /// <remarks>
+    /// Unlike the source gate, every refusal here is ONE constant body (<see cref="AssigneeDeniedReasonCode"/>,
+    /// <see cref="AssigneeDeniedDetail"/>) — the <c>TodoSourceAccessFilter</c> posture for its own assignee. A probe
+    /// that throws, a contact that does not exist and one the caller may not read are indistinguishable, so the route
+    /// is not a contact-existence oracle. Without this gate the create, which writes app-only, would attach any
+    /// contact GUID — and Dataverse's fault on a missing one (500) against the 201 for an existing one would have been
+    /// that oracle.
+    /// </remarks>
+    private async Task<IResult?> AuthorizeAssigneeAsync(HttpContext httpContext, QuickCreateRequest request)
+    {
+        if (request.AssignedToContactId is not { } contactId || contactId == Guid.Empty)
+        {
+            return null;
+        }
+
+        // The shared logical-name → entity-set table (the same one /office/todo resolves its contact through).
+        if (!EntityAccessFilter.TryResolveEntitySet(AssigneeLogicalName, out var entitySet))
+        {
+            _logger?.LogError(
+                "[QUICKCREATE-ASSIGNEE-AUTH] Denying: '{EntityType}' has no entity-set mapping. CorrelationId: {CorrelationId}",
+                AssigneeLogicalName, httpContext.TraceIdentifier);
+            return DenyAssignee(httpContext);
+        }
+
+        AccessRights rights;
+        try
+        {
+            rights = await _probe.GetCallerRightsAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                entitySet,
+                contactId,
+                httpContext.RequestAborted);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex,
+                "[QUICKCREATE-ASSIGNEE-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}). Denying. "
+                + "CorrelationId: {CorrelationId}",
+                entitySet, contactId, httpContext.TraceIdentifier);
+            return DenyAssignee(httpContext);
+        }
+
+        if (!OperationAccessPolicy.HasRequiredRights(rights, ReadOperation))
+        {
+            _logger?.LogWarning(
+                "[QUICKCREATE-ASSIGNEE-AUTH] Denied: caller cannot read {EntitySet}({RecordId}). Holds {Rights}. "
+                + "CorrelationId: {CorrelationId}",
+                entitySet, contactId, rights, httpContext.TraceIdentifier);
+            return DenyAssignee(httpContext);
+        }
+
+        return null;
+    }
+
+    /// <summary>The ONE refusal for the assignee gate — no reason varies with the contact (see <see cref="AuthorizeAssigneeAsync"/>).</summary>
+    private static IResult DenyAssignee(HttpContext httpContext)
+        => Deny(httpContext, AssigneeDeniedReasonCode, AssigneeDeniedDetail);
 
     /// <summary>A 403 in the Office ProblemDetails shape (<see cref="EntityAccessFilter"/>'s: errorCode + reasonCode + correlationId).</summary>
     private static IResult Deny(HttpContext httpContext, string reasonCode, string detail)

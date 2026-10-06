@@ -1,4 +1,4 @@
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { buildOpenRecordUrl, configuredSpaarkeAppName } from './openRecordLauncher';
 
 /**

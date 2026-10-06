@@ -1,16 +1,20 @@
 // -----------------------------------------------------------------------------
 // H14aExchangePolicySubHandler.cs
 //
-// L2 CONTROL-PLANE H14a Exchange ApplicationAccessPolicy sub-handler (task
-// 073, wave C4 Batch 3F). T4 silent-fail trap owner.
+// L2 CONTROL-PLANE H14a Exchange mailbox-access sub-handler (task 073; RBAC for
+// Applications since task 251, owner D26). T4 silent-fail trap owner.
 //
 // PURPOSE:
-//   One of H14's 3 DAG-parallel sub-steps (spec.md FR-19). Applies +
-//   verifies the 2 Exchange Online ApplicationAccessPolicy entries (BFF
-//   app-reg + UAMI) via IExchangePolicyApplier's action-and-verify semantics
-//   (T4): 0/1 present -> create missing; 2+ present -> verify AppIds match
-//   the expected set exactly, else fail with a drift diagnostic (NO silent
-//   overwrite).
+//   One of H14's 3 DAG-parallel sub-steps (spec.md FR-19). Grants the customer
+//   stamp's managed identity the Exchange "Application Mail.*" roles, scoped to
+//   the customer's mail-enabled security group, so the stamp's Graph mail calls
+//   reach that group's mailboxes and no others (H10 no longer grants the Entra
+//   mailbox roles, which would reach every mailbox in the tenant). Action-and-
+//   verify via IExchangePolicyApplier (T4): any existing assignment that differs
+//   from the expected set is Drift -- nothing is created or changed (NO silent
+//   overwrite). Only the managed identity is granted: the BFF app registration
+//   does no app-only mail (its Mail.Send is delegated), and Exchange RBAC for
+//   Applications GRANTS access, so adding it would widen what it can reach.
 //
 // PARENT-OWNS-COSMOS DESIGN (Path C — pivot to comply with ADR-004's "one
 // message one handler one outcome" in spirit, documented per CLAUDE.md §6.5):
@@ -53,6 +57,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.DataverseAppUserGraphParity;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
@@ -65,7 +70,10 @@ public sealed class H14aExchangePolicySubHandler : IProvisioningHandler
     /// <summary>Sub-step token used in the idempotency key format h14-{customerId}-{subStep}-{hash}.</summary>
     public const string SubStep = "exchange";
 
+    private const int MaxAssignmentNameLength = 64;
+
     private readonly IExchangePolicyApplier _applier;
+    private readonly IGraphAppRolesRegistry _roles;
     private readonly ILogger<H14aExchangePolicySubHandler> _logger;
 
     /// <inheritdoc/>
@@ -73,11 +81,14 @@ public sealed class H14aExchangePolicySubHandler : IProvisioningHandler
 
     public H14aExchangePolicySubHandler(
         IExchangePolicyApplier applier,
+        IGraphAppRolesRegistry roles,
         ILogger<H14aExchangePolicySubHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(applier);
+        ArgumentNullException.ThrowIfNull(roles);
         ArgumentNullException.ThrowIfNull(logger);
         _applier = applier;
+        _roles = roles;
         _logger = logger;
     }
 
@@ -109,32 +120,34 @@ public sealed class H14aExchangePolicySubHandler : IProvisioningHandler
         }
 
         if (string.IsNullOrWhiteSpace(parameters.TenantId)
-            || string.IsNullOrWhiteSpace(parameters.BffAppRegId)
-            || string.IsNullOrWhiteSpace(parameters.UamiClientId))
+            || string.IsNullOrWhiteSpace(parameters.UamiClientId)
+            || string.IsNullOrWhiteSpace(parameters.UamiObjectId))
         {
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H14aRejections.ApplyFailed,
-                "H14a ParametersJson missing one of tenantId/bffAppRegId/uamiClientId.");
+                "H14a ParametersJson missing one of tenantId/uamiClientId/uamiObjectId.");
         }
 
-        if (string.IsNullOrWhiteSpace(parameters.PolicyScopeGroupId))
+        if (string.IsNullOrWhiteSpace(parameters.ScopeGroupId))
         {
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H14aRejections.MissingPolicyScopeGroupId,
-                "Run parameter 'exchangePolicyScopeGroupId' is required by H14a (New-ApplicationAccessPolicy " +
-                "-PolicyScopeGroupId) — operator must supply the mail-enabled security group id for this tenant.");
+                "Run parameter 'exchangePolicyScopeGroupId' is required by H14a — the operator must supply the Entra object id " +
+                "of the customer's mail-enabled security group (the mailboxes the stamp may reach).");
         }
 
-        var expectedAppIds = new[] { parameters.BffAppRegId, parameters.UamiClientId };
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, expectedAppIds);
+        var assignments = BuildAssignments(parameters.NamePrefix, envelope.CustomerId, _roles.GetExchangeScoped());
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, parameters.UamiClientId, parameters.ScopeGroupId, assignments);
 
-        // Task 161 (Wave G-6): CorrelationId = envelope.RunId — placed on the
-        // sidecar's `correlationId` wire field so its stdout log lines
-        // interleave with this Worker's own correlationId=RunId logs in the
-        // shared Log Analytics workspace (Listener.ps1 .OBSERVABILITY note).
         var outcome = await _applier.ApplyAsync(
             new ExchangePolicyApplyRequest(
-                parameters.TenantId, expectedAppIds, parameters.PolicyScopeGroupId, parameters.DescriptionPrefix,
+                parameters.TenantId,
+                AppId: parameters.UamiClientId,
+                ServicePrincipalObjectId: parameters.UamiObjectId,
+                DisplayName: $"{parameters.NamePrefix}-{envelope.CustomerId}-stamp-identity",
+                ScopeGroupId: parameters.ScopeGroupId,
+                Assignments: assignments,
+                // CorrelationId = RunId so the sidecar's log lines interleave with the Worker's.
                 CorrelationId: envelope.RunId),
             cancellationToken).ConfigureAwait(false);
 
@@ -142,22 +155,20 @@ public sealed class H14aExchangePolicySubHandler : IProvisioningHandler
         {
             case ExchangePolicyApplyOutcome.Applied applied:
                 _logger.LogInformation(
-                    "H14a Exchange policy applied: customerId={CustomerId} createdCount={CreatedCount}",
-                    envelope.CustomerId, applied.CreatedCount);
+                    "H14a Exchange mailbox access applied: customerId={CustomerId} createdCount={CreatedCount} assignments={Assignments}",
+                    envelope.CustomerId, applied.CreatedCount, string.Join(",", applied.AssignmentNames));
                 return new HandlerResult.Success(idempotencyKey);
 
             case ExchangePolicyApplyOutcome.Drift drift:
-                var diagnostic =
-                    $"T4 drift detected (spec.md FR-33): Get-ApplicationAccessPolicy returned entries for the " +
-                    $"expected AppId set but observed AppIds do not match. Expected: [{string.Join(", ", drift.ExpectedAppIds)}]. " +
-                    $"Observed: [{string.Join(", ", drift.ObservedAppIds)}]. No policy was created or modified — " +
-                    "operator must inspect the target Exchange Online tenant directly.";
-                return new HandlerResult.Failure(FailureClass.QuarantineRequired, H14aRejections.TrapT4Drift, diagnostic);
+                return new HandlerResult.Failure(FailureClass.QuarantineRequired, H14aRejections.TrapT4Drift,
+                    "T4 drift detected (spec.md FR-33): the stamp identity's Exchange role assignments differ from the expected " +
+                    $"group-scoped set. {string.Join(" ", drift.Conflicts)} Nothing was created or changed — the operator must " +
+                    "inspect the tenant's Exchange role assignments (Get-ManagementRoleAssignment) directly.");
 
             case ExchangePolicyApplyOutcome.Failure failure:
                 return new HandlerResult.Failure(
                     FailureClass.Resumable, H14aRejections.ApplyFailed,
-                    $"Exchange policy apply failed: {failure.Diagnostic}");
+                    $"Exchange mailbox access apply failed: {failure.Diagnostic}");
 
             default:
                 throw new InvalidOperationException($"Unhandled {nameof(ExchangePolicyApplyOutcome)} type '{outcome.GetType().Name}'.");
@@ -165,40 +176,68 @@ public sealed class H14aExchangePolicySubHandler : IProvisioningHandler
     }
 
     /// <summary>
-    /// Computes the deterministic H14a idempotency key:
-    /// <c>h14-{customerId}-exchange-{hash}</c> where hash is SHA-256 over the
-    /// sorted expected AppId set. Exposed internal so the parent handler +
-    /// unit tests can construct the expected key without duplicating the
-    /// format.
+    /// One assignment per Exchange-scoped Graph role, named <c>{prefix}-{customerId}-{role}</c>
+    /// (e.g. <c>Spaarke-acme-MailSend</c>). The names are H14a's idempotency key in Exchange.
     /// </summary>
-    internal static string BuildIdempotencyKey(string customerId, IReadOnlyList<string> expectedAppIds)
+    internal static IReadOnlyList<ExchangeRoleAssignmentSpec> BuildAssignments(
+        string namePrefix, string customerId, IReadOnlyList<GraphAppRoleEntry> exchangeScopedRoles)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(namePrefix);
+        ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
+        return exchangeScopedRoles
+            .Select(r => new ExchangeRoleAssignmentSpec(
+                BuildAssignmentName(namePrefix, customerId, r.Value),
+                IGraphAppRolesRegistry.ToExchangeApplicationRole(r.Value)))
+            .ToArray();
+    }
+
+    private static string BuildAssignmentName(string namePrefix, string customerId, string graphValue)
+    {
+        var name = $"{namePrefix}-{customerId}-{graphValue.Replace(".", string.Empty, StringComparison.Ordinal)}";
+        if (name.Length <= MaxAssignmentNameLength)
+        {
+            return name;
+        }
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(name)))[..8].ToLowerInvariant();
+        return $"{name[..(MaxAssignmentNameLength - 9)]}-{hash}";
+    }
+
+    /// <summary>
+    /// The key a run of this sub-handler records on success — H14 (parent) checks CompletedPhases for it
+    /// before dispatching. Uses this handler's role catalog, so parent and sub-handler cannot disagree.
+    /// </summary>
+    internal string ExpectedIdempotencyKey(string customerId, string uamiClientId, string scopeGroupId, string namePrefix)
+        => BuildIdempotencyKey(customerId, uamiClientId, scopeGroupId, BuildAssignments(namePrefix, customerId, _roles.GetExchangeScoped()));
+
+    /// <summary>
+    /// <c>h14-{customerId}-exchange-{hash}</c>; hash = SHA-256 over the app, the scope group and the
+    /// sorted assignment set — a different group or role set is different work.
+    /// </summary>
+    internal static string BuildIdempotencyKey(
+        string customerId, string appId, string scopeGroupId, IReadOnlyList<ExchangeRoleAssignmentSpec> assignments)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
-        ArgumentNullException.ThrowIfNull(expectedAppIds);
-        var payload = string.Join("|", expectedAppIds.OrderBy(a => a, StringComparer.Ordinal));
+        ArgumentNullException.ThrowIfNull(assignments);
+        var payload = string.Join("|",
+            new[] { appId.Trim().ToLowerInvariant(), scopeGroupId.Trim().ToLowerInvariant() }
+                .Concat(assignments.Select(a => $"{a.Name}:{a.Role}").OrderBy(x => x, StringComparer.Ordinal)));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))).ToLowerInvariant();
         return $"h14-{customerId}-{SubStep}-{hash}";
     }
 
     /// <summary>
-    /// Builds the opaque ParametersJson payload H14 (parent) embeds in the
-    /// sub-envelope it hands to this sub-handler. Exposed internal so the
-    /// parent + tests share one serialization contract.
+    /// Builds the opaque ParametersJson payload H14 (parent) embeds in the sub-envelope. Shared by the
+    /// parent and the tests so there is one serialization contract.
     /// </summary>
     internal static string BuildParametersJson(
-        string tenantId, string bffAppRegId, string uamiClientId, string policyScopeGroupId, string descriptionPrefix)
-        => JsonSerializer.Serialize(new Parameters(tenantId, bffAppRegId, uamiClientId, policyScopeGroupId, descriptionPrefix));
+        string tenantId, string uamiClientId, string uamiObjectId, string scopeGroupId, string namePrefix)
+        => JsonSerializer.Serialize(new Parameters(tenantId, uamiClientId, uamiObjectId, scopeGroupId, namePrefix));
 
-    /// <summary>
-    /// H14a's typed ParametersJson shape. Public (not private) so
-    /// <see cref="System.Text.Json.JsonSerializer"/>'s reflection-based
-    /// converter resolves the primary constructor without relying on
-    /// non-public-type reflection support.
-    /// </summary>
+    /// <summary>H14a's typed ParametersJson shape (public so System.Text.Json binds the primary constructor).</summary>
     public sealed record Parameters(
         [property: JsonPropertyName("tenantId")] string TenantId,
-        [property: JsonPropertyName("bffAppRegId")] string BffAppRegId,
         [property: JsonPropertyName("uamiClientId")] string UamiClientId,
-        [property: JsonPropertyName("policyScopeGroupId")] string PolicyScopeGroupId,
-        [property: JsonPropertyName("descriptionPrefix")] string DescriptionPrefix);
+        [property: JsonPropertyName("uamiObjectId")] string UamiObjectId,
+        [property: JsonPropertyName("scopeGroupId")] string ScopeGroupId,
+        [property: JsonPropertyName("namePrefix")] string NamePrefix);
 }

@@ -14,8 +14,8 @@
 //
 // SPEC / DESIGN references:
 //   - spec.md FR-18 (H13 acceptance criteria) + SC #5 (extended validate
-//     script) + SC #6 (all 6 traps re-verified) + SC #14 (cost envelope) +
-//     SC #17 (naming exit 0) + §4B (T1–T6 trap catalog) + §4C (Quarantined
+//     script) + SC #6 (all 7 traps re-verified) + SC #14 (cost envelope) +
+//     SC #17 (naming exit 0) + §4B (T1–T7 trap catalog; T7 added by task 238) + §4C (Quarantined
 //     rollback) + §4D (I1–I5 invariants) + §15 #14 (cost).
 //   - design.md §4.1 H13 row (final gate, downstream of H14) + §4B (trap
 //     catalog + owning-handler post-condition table) + §4D (5 invariants).
@@ -45,6 +45,8 @@
 //   ├───────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId/subscriptionId/buildId/      │ Resumable                 │
 //   │ dataverseUrl/bffApiUrl (§4D I1 / idempotency) │ (external precondition)   │
+//   │ Missing InterStepState resourceGroupName/     │ Resumable                 │
+//   │ appServiceName/keyVaultName (H2a outputs)     │ (upstream H2a not done)   │
 //   │ Run not found in Cosmos partition             │ Resumable                 │
 //   │ Extended validate script domain failure       │ QuarantineRequired        │
 //   │ (SC #5 sample-check failed — silent-fail      │ (a post-swap sample check │
@@ -52,7 +54,7 @@
 //   │                                               │ blocks handoff)          │
 //   │ Extended validate script infra fault          │ Resumable                 │
 //   │ (pwsh / script missing / timeout)             │                           │
-//   │ ANY T1–T6 trap FAILED                         │ QuarantineRequired        │
+//   │ ANY T1–T7 trap FAILED                         │ QuarantineRequired        │
 //   │ (silent-fail actually manifested — SC #6)     │                           │
 //   │ Trap verifier InfraFault                      │ Resumable                 │
 //   │ (probe could not run — no verdict)            │                           │
@@ -111,6 +113,7 @@
 using System.Diagnostics;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -129,26 +132,13 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the customer subscription id (ADR-027 D4) — required for cost query + ARM trap probes.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the BFF CI build number — feeds the idempotency key <c>validate-{customerId}-{buildId}</c>.</summary>
-    public const string BuildIdParameterKey = "buildId";
-
-    /// <summary>Non-secret parameter key carrying the target BFF API URL (production slot post-H9 swap).</summary>
-    public const string BffApiUrlParameterKey = "bffApiUrl";
-
-    /// <summary>Non-secret parameter key carrying the customer resource group name — cost + ARM query scoping.</summary>
-    public const string ResourceGroupNameParameterKey = "resourceGroupName";
-
-    /// <summary>Non-secret parameter key carrying the BFF App Service name — T1/T5 ARM trap scoping.</summary>
-    public const string AppServiceNameParameterKey = "appServiceName";
-
-    /// <summary>Non-secret parameter key carrying the customer KV name — T1 trap scoping.</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Non-secret parameter key carrying the Spaarke-internal registry Dataverse env URL (target of the SetupStatus PATCH — NOT the customer's own Dataverse env URL).</summary>
-    public const string RegistryDataverseUrlParameterKey = "registryDataverseUrl";
-
-    /// <summary>Non-secret parameter key carrying the absolute path to scripts/ on disk for I1 grep probe. Optional — defaults to the App Service publish scripts directory.</summary>
-    public const string ProvisioningScriptsDirectoryParameterKey = "provisioningScriptsDirectory";
+    // Not run parameters (tasks 245a / 245b, G25):
+    //   - the customer resource group, BFF App Service and customer Key Vault → H2a outputs
+    //     (InterStepState.ResourceGroupName / .AppServiceName / .KeyVaultName);
+    //   - the deployed BFF URL and build → H9 outputs (InterStepState.BffApiUrl / .BffBuildId);
+    //   - the SPE owner credential for T6 → SpeContainerOptions.ContainerTypeOwners, by the intake
+    //     containerTypeId;
+    //   - the I1 scripts directory → H13AcceptanceOptions.ProvisioningScriptsDirectory.
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IE2EValidationRunner _validationRunner;
@@ -252,16 +242,21 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H13 (ADR-027 D4 — cost query + ARM trap probes).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, BuildIdParameterKey, out var buildId))
+        // Task 245b: the deployed build and URL are H9's outputs (H13 ← H14 ← H9 in the DAG).
+        var buildId = run.InterStepState.BffBuildId;
+        if (string.IsNullOrWhiteSpace(buildId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBuildId,
-                "Run parameter 'buildId' is required by H13 (idempotency key: validate-{customerId}-{buildId}).",
+                "InterStepState.bffBuildId is not populated — H9 (BFF deploy) writes the build it deployed and must " +
+                "complete before H13 (idempotency key: validate-{customerId}-{buildId}; registry sprk_bffversion).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, BffApiUrlParameterKey, out var bffApiUrl))
+        var bffApiUrl = run.InterStepState.BffApiUrl;
+        if (string.IsNullOrWhiteSpace(bffApiUrl))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingBffApiUrl,
-                "Run parameter 'bffApiUrl' is required by H13 (BFF sample /healthz + E2E round-trip target).",
+                "InterStepState.bffApiUrl is not populated — H9 (BFF deploy) writes the production URL it health-probed " +
+                "and must complete before H13 (BFF sample /healthz + E2E round-trip target).",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -274,14 +269,36 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        TryGetNonEmpty(parameters, ResourceGroupNameParameterKey, out var resourceGroupName);
-        TryGetNonEmpty(parameters, AppServiceNameParameterKey, out var appServiceName);
-        TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName);
-        TryGetNonEmpty(parameters, RegistryDataverseUrlParameterKey, out var registryDataverseUrl);
-        TryGetNonEmpty(parameters, ProvisioningScriptsDirectoryParameterKey, out var scriptsDirParam);
-        var scriptsDirectory = string.IsNullOrWhiteSpace(scriptsDirParam)
-            ? Path.Combine(AppContext.BaseDirectory, "scripts")
-            : scriptsDirParam;
+        // Customer stamp names — H2a outputs, read from InterStepState (task 245a,
+        // G25), never from run parameters. REQUIRED: a blank value used to reach
+        // the T1/T5/T7 ARM trap probes and the cost query as "" and surface as an
+        // InfraFault that did not say H2a's output was missing.
+        var resourceGroupName = run.InterStepState.ResourceGroupName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(resourceGroupName))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingResourceGroupName,
+                "InterStepState.resourceGroupName is not populated — H2a (Bicep infra deploy) produces it and must " +
+                "complete before H13. The cost-envelope query and the T1/T5/T7 ARM trap probes are scoped to it.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        var appServiceName = run.InterStepState.AppServiceName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(appServiceName))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingAppServiceName,
+                "InterStepState.appServiceName is not populated — H2a (Bicep infra deploy) produces it and must " +
+                "complete before H13. The T1/T5/T7 ARM trap probes inspect this App Service.",
+                cancellationToken).ConfigureAwait(false);
+        }
+        var keyVaultName = run.InterStepState.KeyVaultName ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
+        {
+            return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingKeyVaultName,
+                "InterStepState.keyVaultName (the CUSTOMER Key Vault) is not populated — H2a (Bicep infra deploy) " +
+                "produces it and must complete before H13. The T5 trap probe checks slot-MI RBAC on this vault.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        var scriptsDirectory = _options.ProvisioningScriptsDirectory;
 
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, buildId);
 
@@ -318,6 +335,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         var bffAppRegId = run.InterStepState.BffAppRegId ?? string.Empty;
         var uamiClientId = run.InterStepState.MiClientId ?? string.Empty;
+        // auth-v4 §10.4 (task 205d / punch row A41) — the UAMI principalId,
+        // threaded through so the T2 probe can byte-compare it against the
+        // observed azureactivedirectoryobjectid rather than trusting a
+        // count=1 row alone.
+        var uamiObjectId = run.InterStepState.MiObjectId ?? string.Empty;
         var aiSearchEndpoint = run.InterStepState.AiSearchEndpoint ?? string.Empty;
         var cosmosEndpoint = run.InterStepState.CosmosEndpoint ?? string.Empty;
 
@@ -346,7 +368,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (5) Trap verifier (SC #6 — all 6 traps).
+        // (5) Trap verifier (SC #6 — all 7 traps).
         TrapCatalogVerificationResult trapResult;
         try
         {
@@ -361,7 +383,18 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     UamiClientId: uamiClientId,
                     KeyVaultName: keyVaultName,
                     AppServiceName: appServiceName,
-                    ResourceGroupName: resourceGroupName),
+                    ResourceGroupName: resourceGroupName,
+                    UamiObjectId: uamiObjectId,
+                    // T6 selects the SPE owning-app credential by the run's container type (task 245b).
+                    ContainerTypeId: parameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var containerTypeId)
+                        ? containerTypeId?.Trim() ?? string.Empty
+                        : string.Empty,
+                    // T6 looks for H8's container in the owning app's app-only listing (task 248).
+                    SpeContainerId: run.InterStepState.SpeContainerId?.Trim() ?? string.Empty,
+                    // T4 checks the stamp identity's Exchange roles are limited to this group (task 251).
+                    ExchangeScopeGroupId: parameters.TryGetValue(IntakeParameterCatalog.ExchangePolicyScopeGroupId, out var scopeGroupId)
+                        ? scopeGroupId?.Trim() ?? string.Empty
+                        : string.Empty),
                 cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -426,28 +459,51 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         }
 
         // (8) Cost envelope (SC #14 + §15 #14).
+        // Task 223 (D-12): parse tenancyModel at the handler edge (matches H1's pattern) —
+        // pre-D-12 the ArmCostEnvelopeChecker had an `_`-arm fallback that silently used
+        // Model1SharedFloorEnvelopeUsd for any unrecognized string. That option + fallback are
+        // deleted; the checker's SelectExpectedEnvelope is now exhaustive over the enum.
+        // Two distinct diagnostic channels below: costInfraDiag → CostQueryInfraFault (infra
+        // fault from ARM); costTenancyDiag → InvalidTenancyModel (unparseable tenancyModel
+        // at the H13 edge). Split rejection codes so operators pattern-matching on
+        // `h13-invalid-tenancy-model` can find it in `run.ErrorDetail` directly.
         CostEnvelopeReport? costReport = null;
         string? costInfraDiag = null;
-        try
+        string? costTenancyDiag = null;
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var parsedTenancyModel))
         {
-            costReport = await _costChecker.CheckAsync(
-                new CostEnvelopeRequest(
-                    CustomerId: envelope.CustomerId,
-                    RunId: envelope.RunId,
-                    SubscriptionId: subscriptionId,
-                    TenancyModel: run.TenancyModel,
-                    ResourceGroupName: resourceGroupName,
-                    DriftAdvisoryThreshold: _options.CostDriftAdvisoryThreshold),
-                cancellationToken).ConfigureAwait(false);
-            _logger.LogInformation("H13 cost-envelope: runId={RunId} summary={Summary}",
-                envelope.RunId, costReport.Summary);
+            costTenancyDiag =
+                $"ProvisioningRun.tenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel. " +
+                $"Expected: {Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()}. " +
+                "Cost-envelope check could not run without a typed tenancy value (upstream RunsEndpoints " +
+                "ValidateTenancyProfilePair normally 400s this at intake; H13 is the belt-and-braces defense).";
+            _logger.LogWarning(
+                "H13 cost-envelope: tenancyModel unparseable — cost check skipped: runId={RunId} tenancyModel={TenancyModel}",
+                envelope.RunId, run.TenancyModel);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        else
         {
-            _logger.LogError(ex,
-                "H13 cost-query infra fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            costInfraDiag = $"Cost query infra fault: {ex.GetType().Name}: {ex.Message}";
+            try
+            {
+                costReport = await _costChecker.CheckAsync(
+                    new CostEnvelopeRequest(
+                        CustomerId: envelope.CustomerId,
+                        RunId: envelope.RunId,
+                        SubscriptionId: subscriptionId,
+                        TenancyModel: parsedTenancyModel,
+                        ResourceGroupName: resourceGroupName,
+                        DriftAdvisoryThreshold: _options.CostDriftAdvisoryThreshold),
+                    cancellationToken).ConfigureAwait(false);
+                _logger.LogInformation("H13 cost-envelope: runId={RunId} summary={Summary}",
+                    envelope.RunId, costReport.Summary);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H13 cost-query infra fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                costInfraDiag = $"Cost query infra fault: {ex.GetType().Name}: {ex.Message}";
+            }
         }
 
         // (9) DECISION: aggregate every collaborator's outcome + pick failure
@@ -518,6 +574,15 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 $"Full invariant catalog: {invariantResult.ToLogSummary()}",
                 cancellationToken).ConfigureAwait(false);
         }
+        if (costTenancyDiag is not null)
+        {
+            // Task 223 (D-12) W1 fix: emit InvalidTenancyModel (not CostQueryInfraFault) so
+            // operators pattern-matching on `h13-invalid-tenancy-model` see it in
+            // `run.ErrorDetail` directly, not buried inside a CostQueryInfraFault diagnostic.
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                H13Rejections.InvalidTenancyModel, costTenancyDiag,
+                cancellationToken).ConfigureAwait(false);
+        }
         if (costInfraDiag is not null)
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
@@ -525,13 +590,94 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (10) All gates green. Transition registry Setup Status → Ready.
+        // (9.5) MED#10 SESSION-19 COSMOS-FIRST ORDERING (customer-provisioning-
+        //       orchestration-r1 adversarial e2e verify workflow wepdcb8we).
+        //
+        //       PRINCIPLE: write your OWN state (Cosmos, ETag-protected, your
+        //       partition) BEFORE mutating someone else's (the Dataverse registry).
+        //       If your OWN write fails, no external state was touched — safe to
+        //       resume without cleanup.
+        //
+        //       This eliminates the SESSION 18 documented split-brain window
+        //       where MarkCompleteAsync's ReplaceRunAsync Conflict would leave
+        //       the registry PATCHed to Ready but Cosmos still at Running.
+        //
+        //       NEW SEQUENCE:
+        //         (a) Prepare run state in-memory (mutations, gate stamps).
+        //         (b) Cosmos ReplaceRunAsync (SINGLE authoritative write).
+        //             → Conflict/NotFound → return Failure — NO registry mutation.
+        //         (c) Registry PATCHes (promoted columns → setupstatus=Ready) are
+        //             BEST-EFFORT. On failure, return HandlerResult.Success and
+        //             log a REGISTRY-STALE warning; the run IS complete (Cosmos
+        //             is authoritative) but the operator SKILL Step 6a
+        //             (.claude/skills/provision-environment/SKILL.md) picks up
+        //             the residual PATCH via re-verify + apply-drift-fix.
+        //
+        //       Trade-off: promoted-columns / setupstatus values may briefly lag
+        //       Cosmos-Completed. Downstream registry readers (H0 upgrade-mode
+        //       via sprk_provisionedon, operator dashboards) see the lag; the
+        //       operator SKILL Step 6a closes it. Cosmos-Completed with brief
+        //       registry lag is strictly better than the SESSION 18 alternative
+        //       of registry-Ready + Cosmos-Running for the same window.
+        PrepareRunStateForCompletion(
+            run, idempotencyKey, envelope, trapResult, invariantResult, costReport,
+            validationOutcome, namingOutcome);
+
+        var cosmosResult = await WriteCompletionToCosmosAsync(
+            run, etag, idempotencyKey, cancellationToken).ConfigureAwait(false);
+        if (cosmosResult is HandlerResult.Failure)
+        {
+            // Cosmos write lost race (Conflict) or row deleted (NotFound).
+            // NO registry PATCH attempted — safe to resume.
+            return cosmosResult;
+        }
+
+        // (10) Cosmos-Completed landed. Registry PATCHes are BEST-EFFORT.
+        //      A failure here leaves the registry stale (log-warn); the operator
+        //      SKILL Step 6a picks up the residual. Do NOT re-flip Cosmos back
+        //      to Failed — that would churn state and violate Cosmos-first.
+        var promotedColumns = BuildPromotedColumnsForReady(run, DateTimeOffset.UtcNow);
+        if (promotedColumns.Count > 0)
+        {
+            RegistryUpdateOutcome columnsOutcome;
+            try
+            {
+                columnsOutcome = await _registryClient.UpdateColumnsAsync(
+                    run.EnvironmentId, promotedColumns,
+                    envelope.CustomerId, envelope.RunId,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                LogRegistryStaleWarning(
+                    "promoted-columns PATCH threw", run, envelope,
+                    $"{ex.GetType().Name}: {ex.Message}", promotedColumns.Keys, ex);
+                return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
+            }
+
+            if (columnsOutcome is RegistryUpdateOutcome.Failure colFail)
+            {
+                LogRegistryStaleWarning(
+                    "promoted-columns PATCH rejected", run, envelope,
+                    colFail.Diagnostic, promotedColumns.Keys, exception: null);
+                return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
+            }
+            if (columnsOutcome is RegistryUpdateOutcome.NotFound colMissing)
+            {
+                LogRegistryStaleWarning(
+                    "promoted-columns PATCH target row not found", run, envelope,
+                    $"{colMissing.Diagnostic}. environmentId={run.EnvironmentId}",
+                    promotedColumns.Keys, exception: null);
+                return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
+            }
+        }
+
+        // (11) sprk_setupstatus → Ready. Best-effort — operator SKILL Step 6a picks up on failure.
         var envUpdate = new RegistrySetupStatusUpdateRequest(
             CustomerId: envelope.CustomerId,
             RunId: envelope.RunId,
             TenantId: tenantId,
-            EnvironmentId: run.EnvironmentId,
-            RegistryDataverseUrl: registryDataverseUrl);
+            EnvironmentId: run.EnvironmentId);
         RegistrySetupStatusUpdateOutcome updateOutcome;
         try
         {
@@ -540,38 +686,95 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex,
-                "H13 registry-update infra fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                H13Rejections.RegistryUpdateFailed,
-                $"Registry Setup Status → Ready PATCH infra fault: {ex.GetType().Name}: {ex.Message}.",
-                cancellationToken).ConfigureAwait(false);
+            LogRegistryStaleWarning(
+                "setupstatus=Ready PATCH threw", run, envelope,
+                $"{ex.GetType().Name}: {ex.Message}", columnKeys: null, ex);
+            return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
         }
 
         if (updateOutcome is RegistrySetupStatusUpdateOutcome.Failure updateFail)
         {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                H13Rejections.RegistryUpdateFailed,
-                $"Registry Setup Status → Ready PATCH rejected: {updateFail.Diagnostic}.",
-                cancellationToken).ConfigureAwait(false);
+            LogRegistryStaleWarning(
+                "setupstatus=Ready PATCH rejected", run, envelope,
+                updateFail.Diagnostic, columnKeys: null, exception: null);
+            return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
         }
 
-        // (11) Advance Cosmos state.
-        stopwatch.Stop();
+        // (12) Full success — Cosmos-Completed AND registry-Ready both landed.
+        return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: false);
+    }
+
+    /// <summary>
+    /// MED#10 SESSION-19 helper — emits the H13 success-summary log and returns
+    /// <see cref="HandlerResult.Success"/>. Centralized so the (12) full-success
+    /// path AND every (10)/(11) registry-stale fallback path produce a consistent
+    /// operator-visible summary. Stopwatch is stopped here (no double-stop).
+    /// </summary>
+    private HandlerResult SuccessSummaryLog(
+        string idempotencyKey,
+        ProvisioningRun run,
+        HandlerEnvelope envelope,
+        TrapCatalogVerificationResult trapResult,
+        InvariantCatalogVerificationResult invariantResult,
+        CostEnvelopeReport? costReport,
+        Stopwatch stopwatch,
+        bool registryStale)
+    {
+        if (stopwatch.IsRunning)
+        {
+            stopwatch.Stop();
+        }
         _logger.LogInformation(
             "H13 E2E acceptance succeeded: runId={RunId} customerId={CustomerId} durationMs={DurationMs} " +
-            "traps={TrapSummary} invariants={InvariantSummary} costSummary={CostSummary} costAdvisory={CostAdvisory}",
+            "traps={TrapSummary} invariants={InvariantSummary} costSummary={CostSummary} costAdvisory={CostAdvisory} " +
+            "registryStale={RegistryStale}",
             envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds,
             trapResult.ToLogSummary(), invariantResult.ToLogSummary(),
             costReport?.Summary ?? "(none)",
-            costReport?.ExceedsAdvisoryThreshold ?? false);
+            costReport?.ExceedsAdvisoryThreshold ?? false,
+            registryStale);
+        return new HandlerResult.Success(idempotencyKey);
+    }
 
-        return await MarkCompleteAsync(
-            run, etag, idempotencyKey, envelope,
-            trapResult, invariantResult, costReport,
-            validationOutcome, namingOutcome,
-            cancellationToken).ConfigureAwait(false);
+    /// <summary>
+    /// MED#10 SESSION-19 helper — emits the structured REGISTRY-STALE warning
+    /// consumed by the operator SKILL Step 6a runbook
+    /// (<c>.claude/skills/provision-environment/SKILL.md</c>). Structured
+    /// properties: <c>runId</c>, <c>customerId</c>, <c>environmentId</c>,
+    /// <c>failedPatch</c> (one of "promoted-columns" / "setupstatus=Ready"),
+    /// <c>columnNames</c> (optional, promoted-columns only), <c>diagnostic</c>.
+    /// The operator's Kusto alert on this shape can route to on-call without
+    /// re-parsing the message text.
+    /// </summary>
+    private void LogRegistryStaleWarning(
+        string failedPatch,
+        ProvisioningRun run,
+        HandlerEnvelope envelope,
+        string diagnostic,
+        IEnumerable<string>? columnKeys,
+        Exception? exception)
+    {
+        var columnNames = columnKeys is null ? "(none)" : string.Join(",", columnKeys);
+        if (exception is null)
+        {
+            _logger.LogWarning(
+                "H13 REGISTRY-STALE (MED#10 SESSION-19): {FailedPatch} — Cosmos is Completed but registry PATCH did not land. " +
+                "runId={RunId} customerId={CustomerId} environmentId={EnvironmentId} " +
+                "columnNames={ColumnNames} diagnostic={Diagnostic}. " +
+                "Operator SKILL Step 6a (.claude/skills/provision-environment/SKILL.md) picks up the residual PATCH.",
+                failedPatch, envelope.RunId, envelope.CustomerId, run.EnvironmentId,
+                columnNames, diagnostic);
+        }
+        else
+        {
+            _logger.LogWarning(exception,
+                "H13 REGISTRY-STALE (MED#10 SESSION-19): {FailedPatch} — Cosmos is Completed but registry PATCH did not land. " +
+                "runId={RunId} customerId={CustomerId} environmentId={EnvironmentId} " +
+                "columnNames={ColumnNames} diagnostic={Diagnostic}. " +
+                "Operator SKILL Step 6a (.claude/skills/provision-environment/SKILL.md) picks up the residual PATCH.",
+                failedPatch, envelope.RunId, envelope.CustomerId, run.EnvironmentId,
+                columnNames, diagnostic);
+        }
     }
 
     /// <summary>
@@ -599,6 +802,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         TrapKind.T4ExchangePolicyCount => H13Rejections.TrapT4Failed,
         TrapKind.T5SlotMiKvRbac => H13Rejections.TrapT5Failed,
         TrapKind.T6SpeConfidentialClient => H13Rejections.TrapT6Failed,
+        TrapKind.T7CustomerIdentityExplicit => H13Rejections.TrapT7Failed,
         _ => throw new InvalidOperationException($"Unmapped trap kind '{kind}'."),
     };
 
@@ -615,6 +819,91 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         InvariantKind.I5GraphTokenTenant => H13Rejections.InvariantI5Failed,
         _ => throw new InvalidOperationException($"Unmapped invariant kind '{kind}'."),
     };
+
+    /// <summary>
+    /// REG-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    /// 2026-08-27) — assembles the promoted-columns dictionary for the pre-
+    /// Ready PATCH. Best-effort — only writes what we actually have; unknown
+    /// values are OMITTED (never overwrite with null). sprk_provisionedon is
+    /// ALWAYS set (H13's write moment) because it is the load-bearing column
+    /// for H0 upgrade-mode detection on the next run (§14A).
+    ///
+    /// Column-to-source mapping (source keys shown in comments):
+    ///   sprk_provisionedon       ← <paramref name="readyStamp"/> (always)
+    ///   sprk_bffversion          ← run.InterStepState.BffBuildId (H9 output — the deployed build)
+    ///   sprk_solutionversion     ← ImportedSolutionSet.ComputeVersion(run.InterStepState.ImportedSolutions)
+    ///                              (H6 output — fingerprint of the imported solution set)
+    ///   sprk_azuresubscriptionid ← run.Parameters.NonSecret["subscriptionId"] (intake — the run's subscription)
+    ///   sprk_resourcegroupname   ← run.InterStepState.ResourceGroupName (H2a output)
+    ///   sprk_appservicename      ← run.InterStepState.AppServiceName (H2a output)
+    ///   sprk_keyvaultname        ← run.InterStepState.KeyVaultName (H2a output — the CUSTOMER vault)
+    ///   sprk_containertypeid     ← run.Parameters.NonSecret["containerTypeId"] (intake — the
+    ///                              container type pre-exists per environment; no handler
+    ///                              produces it, so InterStepState.ContainerTypeId is NOT read)
+    ///   sprk_clientcachebusttoken ← run.RunId (task 245b: every run is a deploy or an upgrade, so the run
+    ///                              id is new for each one — clients holding an older token refresh — and
+    ///                              stable across H13 retries of the same run)
+    ///
+    /// Column NAMES are lowercase Dataverse logical names (REG-06 rule).
+    /// Internal for pure-function test coverage.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> BuildPromotedColumnsForReady(
+        ProvisioningRun run, DateTimeOffset readyStamp)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var columns = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            // Always — H0 upgrade-mode detection depends on it.
+            ["sprk_provisionedon"] = readyStamp,
+        };
+
+        // Omit-when-absent throughout, so a partial-fill H13 does NOT clobber an
+        // existing registry value with null.
+        //
+        // Intake values (run.Parameters.NonSecret — written only at POST /api/runs).
+        var nonSecret = run.Parameters?.NonSecret ?? new Dictionary<string, string>();
+        // The stamp's subscription is the run's subscriptionId; there is no separate intake value for it.
+        AddParameterIfPresent(columns, nonSecret, SubscriptionIdParameterKey, "sprk_azuresubscriptionid");
+        // The SPE container type pre-exists per environment and is supplied at
+        // intake; InterStepState.ContainerTypeId has no producer (task 245a, G25).
+        AddParameterIfPresent(columns, nonSecret, IntakeParameterCatalog.ContainerTypeId, "sprk_containertypeid");
+
+        // H2a outputs (run.InterStepState). HandleAsync guards all three before
+        // reaching here; omit-when-absent keeps this pure helper total.
+        var interStep = run.InterStepState;
+        // Task 245b: handler outputs, not intake.
+        AddValueIfPresent(columns, interStep?.BffBuildId, "sprk_bffversion");
+        AddValueIfPresent(columns, ImportedSolutionSet.ComputeVersion(interStep?.ImportedSolutions), "sprk_solutionversion");
+        AddValueIfPresent(columns, run.RunId, "sprk_clientcachebusttoken");
+        AddValueIfPresent(columns, interStep?.ResourceGroupName, "sprk_resourcegroupname");
+        AddValueIfPresent(columns, interStep?.AppServiceName, "sprk_appservicename");
+        AddValueIfPresent(columns, interStep?.KeyVaultName, "sprk_keyvaultname");
+
+        return columns;
+
+        static void AddParameterIfPresent(
+            IDictionary<string, object?> columns,
+            IDictionary<string, string> nonSecret,
+            string paramKey,
+            string columnName)
+        {
+            if (nonSecret.TryGetValue(paramKey, out var raw))
+            {
+                AddValueIfPresent(columns, raw, columnName);
+            }
+        }
+
+        static void AddValueIfPresent(
+            IDictionary<string, object?> columns,
+            string? value,
+            string columnName)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                columns[columnName] = value;
+            }
+        }
+    }
 
     private static bool TryGetNonEmpty(
         IDictionary<string, string> parameters, string key, out string value)
@@ -672,15 +961,30 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         return new HandlerResult.Failure(failureClass, rejectionCode, diagnostic);
     }
 
-    private async Task<HandlerResult> MarkCompleteAsync(
-        ProvisioningRun run, string etag, string idempotencyKey, HandlerEnvelope envelope,
+    /// <summary>
+    /// MED#10 SESSION-19 helper (extracted from prior <c>MarkCompleteAsync</c>) —
+    /// mutates the in-memory <see cref="ProvisioningRun"/> to reflect terminal
+    /// H13 acceptance success. Sets <see cref="ProvisioningRun.Status"/> to
+    /// <see cref="RunStatus.Completed"/>, stamps <see cref="ProvisioningRun.CompletedOn"/>,
+    /// appends the H13 <see cref="CompletedPhase"/> row, stamps every H13 gate
+    /// as <see cref="GateState.Verified"/>, and attaches the advisory-drift
+    /// <c>ErrorDetail</c> when cost drift exceeded the advisory threshold.
+    ///
+    /// PURE (in-memory only). No I/O. Feeds <see cref="WriteCompletionToCosmosAsync"/>
+    /// which is the SINGLE Cosmos write in the Cosmos-first sequence.
+    /// </summary>
+    private void PrepareRunStateForCompletion(
+        ProvisioningRun run,
+        string idempotencyKey,
+        HandlerEnvelope envelope,
         TrapCatalogVerificationResult trapResult,
         InvariantCatalogVerificationResult invariantResult,
         CostEnvelopeReport? costReport,
         E2EValidationOutcome validationOutcome,
-        NamingConformanceOutcome namingOutcome,
-        CancellationToken cancellationToken)
+        NamingConformanceOutcome namingOutcome)
     {
+        _ = trapResult; _ = invariantResult; _ = validationOutcome; _ = namingOutcome;
+
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
@@ -699,6 +1003,13 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         // Record every H13 gate as Verified — operators can grep the run for
         // each of the 6 gates independently without opening the full doc.
+        // NOTE (MED#10 SESSION-19): RegistryReadyTransitioned is stamped Verified
+        // OPTIMISTICALLY here — the registry PATCH runs AFTER this method returns
+        // AND after WriteCompletionToCosmosAsync. If the registry PATCH fails,
+        // the H13 REGISTRY-STALE warning fires and the operator SKILL Step 6a
+        // picks up the residual PATCH. The gate name reflects H13's action
+        // ("I attempted the transition per contract"), not Dataverse's observed
+        // state which the operator SKILL reconciles.
         var verified = new GateEntry
         {
             Status = GateState.Verified,
@@ -711,9 +1022,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         run.GateStates[H13Gates.NamingConformanceVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry
         {
-            Status = costReport is not null && costReport.ExceedsAdvisoryThreshold
-                ? GateState.Verified   // Advisory-warn is Verified (Ready still transitions) — the warning is captured in the ErrorDetail advisory suffix + summary.
-                : GateState.Verified,
+            Status = GateState.Verified,   // Advisory-warn is Verified (Ready still transitions) — the warning is captured in the ErrorDetail advisory suffix + summary.
             VerifiedAt = completedAt,
             VerifierHandler = HandlerIdentifier,
         };
@@ -727,29 +1036,53 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                               $"(drift {costReport.DriftFraction:P1} > threshold {_options.CostDriftAdvisoryThreshold:P0}). " +
                               "Advisory-only per project deviation note; Ready transitioned despite drift.";
         }
+    }
+
+    /// <summary>
+    /// MED#10 SESSION-19 helper (extracted from prior <c>MarkCompleteAsync</c>) —
+    /// the SINGLE Cosmos write in the Cosmos-first sequence. Called AFTER
+    /// <see cref="PrepareRunStateForCompletion"/> has mutated the run in-memory
+    /// and BEFORE any registry PATCH. Returns:
+    /// <list type="bullet">
+    ///   <item><description><see langword="null"/> on Success — caller proceeds to registry PATCHes.</description></item>
+    ///   <item><description><see cref="HandlerResult.Failure"/> Resumable on Conflict / NotFound — caller returns it verbatim; NO registry mutation is attempted (this is the whole point of Cosmos-first).</description></item>
+    /// </list>
+    /// </summary>
+    private async Task<HandlerResult?> WriteCompletionToCosmosAsync(
+        ProvisioningRun run, string etag, string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        _ = idempotencyKey;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
         {
+            // MED#10 SESSION-19 Cosmos-first ordering: Conflict here means the
+            // concurrent winner already advanced the run. Because Cosmos is
+            // FIRST in this sequence, NO registry PATCH has been attempted by
+            // THIS caller — the registry is untouched. The concurrent winner
+            // owns the eventual registry PATCH.
             _logger.LogWarning(
-                "H13 success state write LOST optimistic-concurrency race: " +
+                "H13 Cosmos-first Completed write lost optimistic-concurrency race — NO registry PATCH attempted (MED#10 SESSION-19 eliminated the split-brain window): " +
                 "runId={RunId} customerId={CustomerId} winningStatus={WinningStatus}",
                 run.RunId, run.CustomerId, conflict.Current.Run.Status);
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H13Rejections.ConcurrentWriteConflict,
                 $"Concurrent write advanced run '{run.RunId}' between H13 read + write. " +
-                $"Winning status: {conflict.Current.Run.Status}. Resume will re-run H13.");
+                $"Winning status: {conflict.Current.Run.Status}. Resume will re-run H13. " +
+                "MED#10 SESSION-19 Cosmos-first ordering guarantees NO registry mutation " +
+                "was attempted — the registry is untouched by this attempt.");
         }
         if (replace is ReplaceRunResult.NotFound)
         {
             _logger.LogWarning(
-                "H13 success state write raced with row delete: runId={RunId} customerId={CustomerId}",
+                "H13 Cosmos-first Completed write raced with row delete: runId={RunId} customerId={CustomerId}",
                 run.RunId, run.CustomerId);
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H13Rejections.RunDeletedDuringAcceptance,
                 $"ProvisioningRun '{run.RunId}' was deleted while H13 was in flight.");
         }
 
-        return new HandlerResult.Success(idempotencyKey);
+        return null;
     }
 }

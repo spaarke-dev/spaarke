@@ -4,7 +4,7 @@
     <title>Publish initial docs/deployment/version-compatibility-matrix.md (BFF × Solution version cells per §14A.3)</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation-only publication. Creates one new markdown file; no code changes; no tests. Per root CLAUDE.md §8 rigor table, docs-only = MINIMAL.</rigor-reason>
     <model-tier>sonnet</model-tier>

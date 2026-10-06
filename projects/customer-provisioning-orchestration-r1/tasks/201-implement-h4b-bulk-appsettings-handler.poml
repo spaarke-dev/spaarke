@@ -4,7 +4,7 @@
     <title>Implement H4bBulkAppSettingsHandler (Option A thin wrapper): extend canonical manifest with per_env_settings; H4b invokes generated Configure script + polls /healthz (F20/F20a automation)</title>
     <phase>H-Prime — Absorb F19/F20 first-live findings into handler catalog</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','azure-deployment','config'; extends task 084's shipped canonical manifest schema + generator (delicate — must preserve determinism); introduces thin C# handler that shells to generated PS script; .cs implementation across 4 L2 projects; any bug produces silent BFF fail-fast at boot (F20 pattern observed live SESSION 2 with SIGABRT exit code 134 on `SpeAdmin:KeyVaultUri` missing). Blast radius = every BFF customer stamp.</rigor-reason>
     <model-tier>opus</model-tier>

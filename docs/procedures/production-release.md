@@ -528,7 +528,6 @@ During development, individual web resources can be updated without re-exporting
 | `Deploy-WizardCodePages.ps1` | Upload 12 wizard/code page web resources |
 | `Deploy-EventsPage.ps1` | Upload sprk_eventspage HTML |
 | `Deploy-SpeAdminApp.ps1` | Upload sprk_speadmin HTML |
-| `Deploy-PCFWebResources.ps1` | Upload PCF bundle.js + CSS |
 | `Deploy-RibbonIcons.ps1` | Upload SVG ribbon icons |
 
 These are **development iteration tools**, not part of the production release flow. For production releases, all web resources are included in the SpaarkeMaster solution import.

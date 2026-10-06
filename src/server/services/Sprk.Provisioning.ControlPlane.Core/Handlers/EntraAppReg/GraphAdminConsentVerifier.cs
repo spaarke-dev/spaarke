@@ -13,12 +13,15 @@
 // EntraAppRegPermissionCatalog.ScopeValues (5 as of task 130 — see that
 // file's header for why this is NOT the 14-role app-only catalog H10 owns).
 //
-// SP-NOT-FOUND SEMANTICS: for a MULTI-TENANT app (Model 1's shared app-reg,
-// signInAudience=AzureADMultipleOrgs), the service principal object is only
-// materialized in a given tenant once someone there interacts with the app
-// (typically the admin-consent flow itself). A 0-result SP lookup in the
-// customer tenant is therefore Pending (consent not yet granted), NOT an
-// error — the exact "gate can no longer advance on fiction" fix.
+// SP-NOT-FOUND SEMANTICS: for a MULTI-TENANT app (a Model 2 customer-tenant
+// app-reg with signInAudience=AzureADMultipleOrgs — see
+// EntraAppRegOptions.RequiredSignInAudience default post-D-13; the pre-D-13
+// example "Model 1's shared app-reg" is retired by task 222), the service
+// principal object is only materialized in a given tenant once someone there
+// interacts with the app (typically the admin-consent flow itself). A
+// 0-result SP lookup in the customer tenant is therefore Pending (consent
+// not yet granted), NOT an error — the exact "gate can no longer advance on
+// fiction" fix.
 //
 // NOT UNIT-TESTED IN THE CI SUITE (real Microsoft.Graph HTTP calls) — parity
 // with GraphAppRegistrationProvisioner.cs's file-header precedent list.

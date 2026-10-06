@@ -58,5 +58,5 @@ resource uamiCognitiveServicesUser 'Microsoft.Authorization/roleAssignments@2022
 output docIntelligenceId string = docIntelligence.id
 output docIntelligenceName string = docIntelligence.name
 output docIntelligenceEndpoint string = docIntelligence.properties.endpoint
-#disable-next-line outputs-should-not-contain-secrets
-output docIntelligenceKey string = docIntelligence.listKeys().key1
+// T243 (owner D13): no key output — the stamp BFF reaches this account with its UAMI (custom subdomain +
+// Cognitive Services User above), and no customer vault stores a Document Intelligence key.

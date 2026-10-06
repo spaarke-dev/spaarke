@@ -117,12 +117,27 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
     }
 
     [Fact]
-    public async Task TransitionToReadyAsync_Sets_ClearCurrentRunId_True()
+    public async Task TransitionToReadyAsync_Sets_ClearCurrentRunId_False_SingleWriterInvariant()
     {
-        // Companion update (spec.md FR-23): sprk_currentrunid MUST be cleared
-        // in the same transaction as the Ready write, or the I5 guard's
-        // Dataverse read would still see a stale runId and block the customer's
-        // next run.
+        // Bucket B HIGH#7 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the Ready PATCH MUST NOT
+        // clear sprk_currentrunid. Two writers on the same column with different
+        // safety models (unconditional PATCH here vs ETag-safe
+        // CustomerRunGuard.ReleaseAsync elsewhere) is a concurrency skew that
+        // produces silent-fail bugs.
+        //
+        // The release now fires from ONE authoritative path — Bucket B HIGH#6's
+        // explicit ICustomerRunGuard.ReleaseAsync call in HandlerOutcomeApplier's
+        // Success-with-RunStatus.Completed branch. That call is ETag-safe and
+        // stale-value-safe (Mismatched = no-op). This test locks the single-
+        // writer invariant so a future edit that re-flips ClearCurrentRunId=true
+        // fails here rather than silently re-opening the two-writer race.
+        //
+        // Historical note: spec.md FR-23 originally read "companion clear of
+        // sprk_currentrunid in the SAME transaction as Ready" — the SESSION 18
+        // adversarial audit re-classified that as a fragile-coupling anti-pattern
+        // now that ICustomerRunGuard.ReleaseAsync (task 059) is the canonical
+        // ETag-safe release primitive.
         var fake = new CapturingFakeClient(new RegistryUpdateOutcome.Success());
         var updater = NewUpdater(fake);
         var request = NewRequest();
@@ -130,8 +145,10 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         await updater.TransitionToReadyAsync(request, CancellationToken.None);
 
         fake.LastUpdate.Should().NotBeNull();
-        fake.LastUpdate!.ClearCurrentRunId.Should().BeTrue(
-            "spec.md FR-23 requires companion clear of sprk_currentrunid in the SAME transaction as Ready");
+        fake.LastUpdate!.ClearCurrentRunId.Should().BeFalse(
+            "single-writer invariant: sprk_currentrunid MUST be released via ICustomerRunGuard.ReleaseAsync " +
+            "(from HandlerOutcomeApplier's terminal-Completed branch per Bucket B HIGH#6), NOT piggy-backed " +
+            "on the Ready PATCH. Two writers with different safety models = concurrency race.");
     }
 
     [Fact]
@@ -140,13 +157,13 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         var fake = new CapturingFakeClient(new RegistryUpdateOutcome.Success());
         var updater = NewUpdater(fake);
         var request = NewRequest(
-            customerId: "trial-2026-08-20",
+            customerId: "trial20",
             runId: "65109e91-5968-4300-933e-9e79dea4109c",
             environmentId: "87d7b4a7-399b-f111-b8de-7ced8ddc4a05");
 
         await updater.TransitionToReadyAsync(request, CancellationToken.None);
 
-        fake.LastUpdate!.CustomerIdForLog.Should().Be("trial-2026-08-20");
+        fake.LastUpdate!.CustomerIdForLog.Should().Be("trial20");
         fake.LastUpdate.RunIdForLog.Should().Be("65109e91-5968-4300-933e-9e79dea4109c");
         fake.LastUpdate.EnvironmentId.Should().Be("87d7b4a7-399b-f111-b8de-7ced8ddc4a05");
     }
@@ -213,12 +230,11 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         => new(client, NullLogger<DataverseRegistrySetupStatusUpdater>.Instance);
 
     private static RegistrySetupStatusUpdateRequest NewRequest(
-        string customerId = "trial-2026-08-20",
+        string customerId = "trial20",
         string runId = "run-abc-def",
         string tenantId = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-        string environmentId = "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-        string registryDataverseUrl = "https://spaarkedev1.crm.dynamics.com")
-        => new(customerId, runId, tenantId, environmentId, registryDataverseUrl);
+        string environmentId = "87d7b4a7-399b-f111-b8de-7ced8ddc4a05")
+        => new(customerId, runId, tenantId, environmentId);
 
     // Capturing fake — records the last update passed to UpdateSetupStatusAsync
     // so unit tests can assert on the exact shape H13 sees on the wire.

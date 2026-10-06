@@ -112,7 +112,10 @@ using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Provisioning.ControlPlane.Concurrency;
+using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
+using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -129,6 +132,70 @@ public static class RunsEndpoints
 {
     /// <summary>Stable log-event prefix for the FR-24 clear-quarantine audit record.</summary>
     public const string QuarantineClearedEventName = "QuarantineCleared";
+
+    /// <summary>
+    /// COMP-03 (customer-provisioning-orchestration-r1 SESSION 17 pre-dispatch
+    /// remediation, 2026-08-27): centralised profile-enum constants + design
+    /// call = REJECT unknown profile (mirrors intake.schema.json profile enum
+    /// exactly). Rationale for the reject design (vs warn+accept):
+    ///   1. intake.schema.json declares profile as a strict enum
+    ///      — batch mode already fails schema validation on any drift.
+    ///   2. Interactive mode passes the operator-typed value straight through;
+    ///      accepting an unknown profile silently produces cryptic downstream
+    ///      failures (H5 tier derivation, H11 user provisioning gate).
+    ///   3. The 4th "unknown" branch never has a defensible behavior — every
+    ///      handler hard-casts. Rejecting at intake with a clear diagnostic
+    ///      is strictly better than any warn+accept behavior.
+    ///
+    /// Enforced by <see cref="TryValidateTenancyProfilePair"/> at the endpoint
+    /// layer and mirror-checked by a contract-parity test in the sibling
+    /// <c>Sprk.Provisioning.ControlPlane.Tests</c> project that reads
+    /// <c>scripts/provisioning-prereqs/intake.schema.json</c> at test time and
+    /// asserts the enum values match this class's constants exactly (fails the
+    /// build the moment either surface drifts).
+    ///
+    /// Task 225b (D-12, G6): <c>spaarke-hosted-model1-trial</c> (the retired shared
+    /// trial/SMB tier) is no longer a known profile — a request carrying it is
+    /// refused as an unknown profile. The profile names predate the D-12
+    /// renumbering: <c>spaarke-hosted-model2</c> is the Model 1 profile.
+    /// </summary>
+    public static class KnownProfiles
+    {
+        /// <summary>Model 1 (D-12): dedicated stamp hosted in Spaarke's tenant and Azure subscription. Pairs only with tenancyModel <c>Model1</c>.</summary>
+        public const string SpaarkeHostedModel2 = "spaarke-hosted-model2";
+
+        /// <summary>Model 2 (D-12): dedicated stamp in the customer's own tenant and Azure subscription. Pairs only with tenancyModel <c>Model2</c>.</summary>
+        public const string CustomerOwnedModel2 = "customer-owned-model2";
+
+        /// <summary>All legal profile values — the authoritative L2-side enum.</summary>
+        public static readonly IReadOnlyList<string> All = new[]
+        {
+            SpaarkeHostedModel2,
+            CustomerOwnedModel2,
+        };
+    }
+
+    /// <summary>
+    /// COMP-03 (customer-provisioning-orchestration-r1 SESSION 17): centralised
+    /// tenancy-model enum constants — same reject-unknown design as
+    /// <see cref="KnownProfiles"/>. Mirrors intake.schema.json tenancyModel enum.
+    /// Task 223 (D-12, 2026-09-29): const strings + <c>All</c> now derive from the
+    /// shared <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/>
+    /// enum via <c>nameof</c> / <c>Enum.GetNames</c>. The runtime string values are
+    /// unchanged (BINDING: H12c idempotency-key format preservation) — this class
+    /// is now the enum's string view for the HTTP surface.
+    /// </summary>
+    public static class KnownTenancyModels
+    {
+        /// <summary>Model 1 — Spaarke-hosted dedicated stamp per D-12 (post-T224 rename; pre-T224 was <c>Model1Shared</c>).</summary>
+        public const string Model1 = nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1);
+
+        /// <summary>Model 2 — customer-hosted dedicated stamp per D-12 (post-T224 rename; pre-T224 was <c>Model2Dedicated</c>).</summary>
+        public const string Model2 = nameof(Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2);
+
+        /// <summary>All legal tenancyModel string values, derived from the enum.</summary>
+        public static readonly IReadOnlyList<string> All = Enum.GetNames<Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel>();
+    }
 
     /// <summary>
     /// Downstream handler dispatched by <c>POST /api/runs</c> on run creation
@@ -302,6 +369,7 @@ public static class RunsEndpoints
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         ICustomerRunGuard runGuard,
+        Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient registryClient,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
@@ -309,26 +377,162 @@ public static class RunsEndpoints
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(runGuard);
+        ArgumentNullException.ThrowIfNull(registryClient);
 
         if (request is null)
         {
-            return BadRequest(httpContext, "Request body is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.RequestBodyRequired, "Request body is required.");
         }
         if (string.IsNullOrWhiteSpace(request.CustomerId))
         {
-            return BadRequest(httpContext, "customerId is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdRequired, "customerId is required.");
+        }
+        // T237 (owner D10 / INCOMING-CUSTOMERID-STANDARD §3.1): the customerId standard is enforced
+        // HERE — ARM has no @pattern and the Dataverse column has no regex, so nothing later can catch
+        // a hyphenated id (silent storage-account collision) or an over-long one (customer.bicep's Key
+        // Vault name ends in a hyphen → H2a fails). Reject, never repair; checked before the registry
+        // lookup, the run guard, any Cosmos write and any enqueue.
+        if (!CustomerIdStandard.IsValid(request.CustomerId))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdNonStandard,
+                $"customerId '{request.CustomerId}' does not match the customerId standard {CustomerIdStandard.Pattern}: " +
+                $"{CustomerIdStandard.Description}. Abbreviate longer customer names at intake (northwind -> nwind) " +
+                "and record the full name as the registry row's display name.");
+        }
+        if (CustomerIdStandard.IsReserved(request.CustomerId))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdReserved,
+                $"customerId '{request.CustomerId}' is reserved: it names a non-customer resource group " +
+                $"(rg-spaarke-{request.CustomerId}-{{env}}). Reserved ids: {string.Join(", ", CustomerIdStandard.ReservedIds)}.");
         }
         if (string.IsNullOrWhiteSpace(request.EnvironmentId))
         {
-            return BadRequest(httpContext, "environmentId is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.EnvironmentIdRequired, "environmentId is required.");
         }
         if (string.IsNullOrWhiteSpace(request.TenancyModel))
         {
-            return BadRequest(httpContext, "tenancyModel is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.TenancyModelRequired, "tenancyModel is required.");
         }
         if (string.IsNullOrWhiteSpace(request.Profile))
         {
-            return BadRequest(httpContext, "profile is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.ProfileRequired, "profile is required.");
+        }
+
+        // ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+        // 2026-08-27): enforce tenancyModel × profile cross-field invariant,
+        // mirroring intake.schema.json's allOf logic. Without this check, a
+        // direct-API caller (test harness, retry script) supplying an invalid
+        // pair (e.g., Model1 + customer-owned-model2) succeeds at
+        // CreateRun; handlers that read tenancyModel then misbehave (H5 tier
+        // derivation, H11 user provisioning gate). Downstream failures are
+        // cryptic — surfacing "invalid tenancy/profile pair" at intake is
+        // the only place the operator gets a clear signal.
+        //
+        // Rules (mirrors intake.schema.json allOf; task 225b / D-12 pairing):
+        //   Model1 → profile MUST be 'spaarke-hosted-model2' (Spaarke-hosted dedicated stamp)
+        //   Model2 → profile MUST be 'customer-owned-model2' (customer-hosted dedicated stamp)
+        //   Any other profile value (incl. the retired 'spaarke-hosted-model1-trial')
+        //   or tenancyModel value → 400 (enum check).
+        if (!TryValidateTenancyProfilePair(request.TenancyModel, request.Profile, out var pairError))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.TenancyProfileInvalid, pairError);
+        }
+
+        // Task 245a (G25 — run-context contract): nonSecretParameters is the ONLY writer of
+        // run.Parameters.NonSecret, so it may carry intake values only — the closed set in
+        // IntakeParameterCatalog. An unknown key is a typo (`tenant_id`) or a value some handler
+        // produces (which belongs in InterStepState); either way no handler would ever read it as
+        // intended, so refuse it here instead of letting the run fail deep in the DAG.
+        if (request.NonSecretParameters is not null)
+        {
+            var unknownKeys = IntakeParameterCatalog.UnknownKeys(request.NonSecretParameters.Keys);
+            if (unknownKeys.Count > 0)
+            {
+                // Echo at most a few rejected keys (the body is attacker-controlled); the full accepted set
+                // goes back in `acceptedKeys` so the caller can correct the payload without reading code.
+                const int maxEchoed = 5;
+                var echoed = string.Join(", ", unknownKeys.Take(maxEchoed).Select(k => $"'{k}'"))
+                    + (unknownKeys.Count > maxEchoed ? $" (+{unknownKeys.Count - maxEchoed} more)" : string.Empty);
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status400BadRequest,
+                    ControlPlaneErrorCodes.IntakeUnknownKey,
+                    $"nonSecretParameters contains keys that are not accepted intake values: {echoed}. Keys are " +
+                    "case-sensitive; the accepted set is listed in `acceptedKeys`. A value one handler produces for " +
+                    "another is never a run parameter.",
+                    new Dictionary<string, object?>
+                    {
+                        ["acceptedKeys"] = IntakeParameterCatalog.All.Keys.Order(StringComparer.Ordinal).ToArray(),
+                    });
+            }
+
+            if (request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.EnvironmentName, out var environmentNameValue)
+                && !IntakeParameterCatalog.AllowedEnvironmentNames.Contains(environmentNameValue ?? string.Empty))
+            {
+                return BadRequest(httpContext, ControlPlaneErrorCodes.IntakeInvalidEnvironmentName,
+                    $"nonSecretParameters['{IntakeParameterCatalog.EnvironmentName}'] is '{environmentNameValue}'; " +
+                    $"allowed values are {string.Join(" | ", IntakeParameterCatalog.AllowedEnvironmentNames.Order(StringComparer.Ordinal))} " +
+                    $"(customer.bicep environmentName). Omit it for '{IntakeParameterCatalog.DefaultEnvironmentName}'.");
+            }
+        }
+
+        // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27, Wave 0 Decision 1): validate that tenantId is present in
+        // nonSecretParameters. tenantId is the CANONICAL propagation path per
+        // Wave 0 Decision 1 — every downstream handler reads
+        // run.Parameters.NonSecret["tenantId"] to satisfy §4D I1 (no
+        // hardcoded-tenant); a missing value causes the very first handler to
+        // fail Resumable with missing-tenant-id, wasting the whole H0 dispatch.
+        // Fail-fast at intake with a clear 400 instead of surfacing the same
+        // error deep inside the DAG.
+        if (request.NonSecretParameters is null
+            || !request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.TenantId, out var tenantIdValue)
+            || string.IsNullOrWhiteSpace(tenantIdValue))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.TenantIdRequired,
+                "nonSecretParameters['tenantId'] is required (§4D I1 tenant-isolation invariant). " +
+                "Every downstream handler reads run.Parameters.NonSecret['tenantId']; a missing value " +
+                "would fail the H0 preflight envelope with missing-tenant-id — surface at intake instead.");
+        }
+
+        // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+        // 2026-08-27): for Model2 runs, subscriptionId MUST be present
+        // in nonSecretParameters (per ADR-027 D4 subscription-per-customer +
+        // intake.schema.json Model2 allOf). The handlers that read it are
+        // declared in Reconciler/HandlerRunInputs.cs; they hard-stop on absence —
+        // H1 typically fails within ~20s with MissingSubscriptionId, and the
+        // operator has no post-CreateRun add-nonSecret endpoint to recover.
+        //
+        // Model1 is EXEMPT — the skill's Step 4.0 auto-injects the Spaarke
+        // shared subscription id for Model 1 flows (documented in
+        // intake.schema.json subscriptionId description) so intake need not
+        // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
+        // in RunsEndpointsTests.
+        // Task 223 (D-12): the parse succeeds by construction — ValidateTenancyProfilePair above
+        // already TryParsed request.TenancyModel. Comparing against KnownTenancyModels.Model2
+        // via case-INsensitive string.Equals used to permit "model2dedicated" past this guard while
+        // downstream handlers require exact case; the enum comparison keeps H1's / H12c's strict
+        // literal contract in force at the HTTP edge.
+        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var m2Check)
+            && m2Check == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2
+            && (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SubscriptionId, out var subscriptionIdValue)
+                || string.IsNullOrWhiteSpace(subscriptionIdValue)))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.SubscriptionIdRequired,
+                "nonSecretParameters['subscriptionId'] is required for tenancyModel='Model2' " +
+                "(ADR-027 D4 subscription-per-customer). H1 onward target the customer's own subscription; " +
+                "a missing value would fail H1 subscription-readiness with MissingSubscriptionId within ~20s " +
+                "and leave the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
+                "Model1 runs are exempt — the skill auto-injects the Spaarke shared sub-id.");
+        }
+
+        // Task 245c (G25): the operator-owned values H11, H14 and H4 need, checked with the handlers' own rules.
+        // Intake is fixed here (there is no add-parameter endpoint), so a value a handler would refuse must be
+        // refused now — before the run guard, the registry lookup, any Cosmos write or enqueue — not after
+        // H0–H10 have built the stamp.
+        if (ValidateOperatorIntake(request.NonSecretParameters) is { } intakeViolation)
+        {
+            return BadRequest(httpContext, intakeViolation.ErrorCode, intakeViolation.Detail);
         }
 
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
@@ -348,18 +552,17 @@ public static class RunsEndpoints
                     "CustomerId={CustomerId} AttemptedRunId={RunId} " +
                     "WinningRunId={WinningRunId} ReasonCode={ReasonCode}",
                     request.CustomerId, runId, conflict.WinningRunId, conflict.ReasonCode);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status409Conflict,
-                    title: "Conflict",
-                    detail:
-                        $"A provisioning run for customer '{request.CustomerId}' is already " +
-                        $"in flight (winning runId '{conflict.WinningRunId}', reason '{conflict.ReasonCode}'). " +
-                        "Cross-customer runs are unaffected — this is per-customer serialization only (spec.md §4D I5 / FR-23).",
-                    extensions: new Dictionary<string, object?>
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status409Conflict,
+                    ControlPlaneErrorCodes.CustomerRunInFlight,
+                    $"A provisioning run for customer '{request.CustomerId}' is already " +
+                    $"in flight (winning runId '{conflict.WinningRunId}', reason '{conflict.ReasonCode}'). " +
+                    "Cross-customer runs are unaffected — this is per-customer serialization only (spec.md §4D I5 / FR-23).",
+                    new Dictionary<string, object?>
                     {
                         ["winningRunId"] = conflict.WinningRunId,
                         ["reasonCode"] = conflict.ReasonCode,
-                        ["correlationId"] = httpContext.TraceIdentifier,
                     });
 
             case AcquireResult.TransientFailure txf:
@@ -367,16 +570,98 @@ public static class RunsEndpoints
                     "CreateRun: 502 — CustomerRunGuard transient failure. " +
                     "CustomerId={CustomerId} AttemptedRunId={RunId} Diagnostic={Diagnostic}",
                     request.CustomerId, runId, txf.Diagnostic);
-                return Results.Problem(
-                    statusCode: StatusCodes.Status502BadGateway,
-                    title: "Bad Gateway",
-                    detail:
-                        $"Concurrency guard could not be evaluated for customer '{request.CustomerId}': " +
-                        $"{txf.Diagnostic}",
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["correlationId"] = httpContext.TraceIdentifier,
-                    });
+                return ControlPlaneProblems.Create(
+                    httpContext,
+                    StatusCodes.Status502BadGateway,
+                    ControlPlaneErrorCodes.RunGuardUnavailable,
+                    $"Concurrency guard could not be evaluated for customer '{request.CustomerId}': " +
+                    $"{txf.Diagnostic}");
+        }
+
+        // REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27): validate the operator-supplied environmentId against the
+        // registry BEFORE writing to Cosmos. Prevents:
+        //   - Unknown environmentId (typo, or Step-1f partially failed and
+        //     returned a stale GUID) → H1–H12 run to completion, H13 PATCHes
+        //     the wrong row (§4D I1 cross-customer bleed) or 404s with no
+        //     recovery path (H13 marks Resumable but Cosmos still carries the
+        //     wrong environmentId).
+        //   - CustomerId mismatch → same cross-customer bleed risk.
+        //   - SetupStatus != InProgress → row is already finalized (Ready)
+        //     or in a rollback state; a second run should never overwrite it.
+        //
+        // Best-effort: a registry lookup infra fault (client throws) is treated
+        // as inconclusive — CreateRun proceeds so the operator isn't blocked
+        // by a transient registry outage. The concurrency guard already gates
+        // dual-dispatch; H13's own row-id write will catch a wrong-row PATCH
+        // as NotFound. Silent fallback lets operators complete provisioning
+        // when the registry is degraded — Cosmos write + audit trail are the
+        // fallback source of truth. Null-Object registry (P2 fallback per
+        // ADR-032) returns null → the strict check is skipped (WARN in logs).
+        try
+        {
+            var snapshot = await registryClient
+                .LookupByEnvironmentIdAsync(request.EnvironmentId, cancellationToken)
+                .ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                if (!string.Equals(snapshot.CustomerId, request.CustomerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Best-effort release the guard we just acquired so the operator
+                    // can retry with the correct customerId without waiting for
+                    // an idle-timeout / reconciler pass.
+                    _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                    logger.LogWarning(
+                        "CreateRun: 400 — REG-07 customerId mismatch. RequestedCustomerId={RequestedCustomerId} " +
+                        "RegistryCustomerId={RegistryCustomerId} EnvironmentId={EnvironmentId}",
+                        request.CustomerId, snapshot.CustomerId, request.EnvironmentId);
+                    return BadRequest(httpContext, ControlPlaneErrorCodes.RegistryCustomerMismatch,
+                        $"REG-07: environmentId '{request.EnvironmentId}' belongs to customer " +
+                        $"'{snapshot.CustomerId}', not requested customer '{request.CustomerId}' " +
+                        "(§4D I1 cross-customer bleed guard).");
+                }
+                if (!string.Equals(snapshot.SetupStatus, "InProgress", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                    logger.LogWarning(
+                        "CreateRun: 400 — REG-07 setupStatus mismatch. RequestedCustomerId={CustomerId} " +
+                        "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus}",
+                        request.CustomerId, request.EnvironmentId, snapshot.SetupStatus);
+                    return BadRequest(httpContext, ControlPlaneErrorCodes.RegistrySetupStatusNotInProgress,
+                        $"REG-07: environmentId '{request.EnvironmentId}' has setupStatus='{snapshot.SetupStatus}' " +
+                        "(expected 'InProgress'). Row is already finalized or in a rollback state; " +
+                        "a new run cannot overwrite it. Use clear-quarantine or an operator-side " +
+                        "registry reset before retrying.");
+                }
+            }
+            else
+            {
+                // Null snapshot from the real client means the row does not
+                // exist (or the client is the Null-Object fallback). We only
+                // hard-fail on absence when the registry lookup returned a
+                // definitive 'row not found' — since LookupByEnvironmentIdAsync
+                // and NullDataverseEnvironmentRegistryClient both return null,
+                // we cannot distinguish here without extra flavor on the
+                // outcome type. Rather than block CreateRun on the ambiguity,
+                // log at Warning and let H13's own row-id PATCH catch the
+                // truly-missing row (NotFound → Resumable, operator can retry
+                // after Step-1f re-runs).
+                logger.LogWarning(
+                    "CreateRun: REG-07 registry lookup returned null for environmentId={EnvironmentId} " +
+                    "(row missing OR Null-Object registry). Proceeding — H13 will fail Resumable if the row " +
+                    "is truly missing.",
+                    request.EnvironmentId);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Registry-lookup infra fault — do NOT block CreateRun. Cosmos +
+            // audit trail are the fallback source of truth; the concurrency
+            // guard prevents dual-dispatch even if the strict check was
+            // skipped.
+            logger.LogWarning(ex,
+                "CreateRun: REG-07 registry lookup infra fault for environmentId={EnvironmentId} — proceeding without strict check.",
+                request.EnvironmentId);
         }
 
         var run = new ProvisioningRun
@@ -393,15 +678,23 @@ public static class RunsEndpoints
 
         // Copy non-secret parameters into the run. Cleartext secrets are
         // structurally impossible on this endpoint — CreateRunRequest exposes
-        // NonSecret (Dictionary<string,string>) only; the KeyVaultSecretRef
-        // channel is populated by handlers (H3/H4) later in the DAG, never
-        // by the intake body.
+        // NonSecret (Dictionary<string,string>) only. The KeyVaultSecretRef
+        // channel (run.Parameters.Secrets) has NO writer since task 245a: the
+        // manifest entries that still expect one are pinned gaps in
+        // RunContextContractTests, each owned by a follow-up task.
         if (request.NonSecretParameters is not null)
         {
             foreach (var kvp in request.NonSecretParameters)
             {
                 run.Parameters.NonSecret[kvp.Key] = kvp.Value;
             }
+        }
+
+        // Task 245a: one stamp environment for every handler. Before, H2a/H2b defaulted a missing
+        // value to "prod" on their own while H4b required it — the same run could see two answers.
+        if (!run.Parameters.NonSecret.ContainsKey(IntakeParameterCatalog.EnvironmentName))
+        {
+            run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = IntakeParameterCatalog.DefaultEnvironmentName;
         }
 
         try
@@ -421,11 +714,18 @@ public static class RunsEndpoints
                 "CreateRun: id collision (customerId={CustomerId}, runId={RunId})",
                 run.CustomerId, run.RunId);
             _ = await runGuard.ReleaseAsync(run.CustomerId, run.RunId, cancellationToken).ConfigureAwait(false);
-            return Results.Problem(
-                statusCode: StatusCodes.Status409Conflict,
-                title: "Conflict",
-                detail: $"A run with id '{runId}' already exists.",
-                extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+            return Conflict(httpContext, ControlPlaneErrorCodes.RunIdCollision, $"A run with id '{runId}' already exists.");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Any other run-store failure (throttling, an item over Cosmos's size limit, an outage) left the I5 guard
+            // held, blocking every new run for this customer until the guard went stale (found in the T245c review).
+            // Release it, then let the failure surface as before.
+            logger.LogError(ex,
+                "CreateRun: run-store write failed — releasing the run guard (customerId={CustomerId}, runId={RunId})",
+                run.CustomerId, run.RunId);
+            _ = await runGuard.ReleaseAsync(run.CustomerId, run.RunId, CancellationToken.None).ConfigureAwait(false);
+            throw;
         }
 
         // Enqueue H0 preflight. Deterministic MessageId (FR-22 level-1) dedup's
@@ -539,7 +839,7 @@ public static class RunsEndpoints
         }
         if (string.IsNullOrWhiteSpace(gateId))
         {
-            return BadRequest(httpContext, "gateId is required.");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.GateIdRequired, "gateId is required.");
         }
 
         var read = await repository.ReadRunAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
@@ -693,10 +993,12 @@ public static class RunsEndpoints
         string? reason,
         IQuarantineClearService clearService,
         IHandlerEnqueuer enqueuer,
+        ICustomerRunGuard runGuard,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(runGuard);
         if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
         {
             return validationResult;
@@ -705,7 +1007,7 @@ public static class RunsEndpoints
         // NOT emit on the 400 path (only on the enqueue-successful path).
         if (string.IsNullOrWhiteSpace(reason))
         {
-            return BadRequest(httpContext, "reason is required (spec FR-24).");
+            return BadRequest(httpContext, ControlPlaneErrorCodes.ReasonRequired, "reason is required (spec FR-24).");
         }
 
         // Task 061: single source of truth for the Quarantined -> Failed
@@ -729,12 +1031,14 @@ public static class RunsEndpoints
             case QuarantineClearResult.Conflict wrongState:
                 return Conflict(
                     httpContext,
+                    ControlPlaneErrorCodes.RunNotQuarantined,
                     $"Run '{id}' is not in Quarantined state (current status: {wrongState.CurrentStatus}). " +
                     "clear-quarantine requires the run to be in Quarantined state (spec FR-24).");
 
             case QuarantineClearResult.ConcurrencyConflict concurrent:
                 return Conflict(
                     httpContext,
+                    ControlPlaneErrorCodes.RunConcurrentlyModified,
                     $"Run '{id}' was modified by a concurrent writer (current status: {concurrent.Current.Status}). " +
                     "Retry the clear-quarantine after re-reading the run state.");
 
@@ -744,6 +1048,31 @@ public static class RunsEndpoints
             default:
                 throw new UnreachableException(
                     $"QuarantineClearResult exhaustive union changed: {result.GetType().FullName}");
+        }
+
+        // REG-03 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27): mirror the CancelRun ReleaseAsync semantics so a fresh
+        // POST /api/runs can start immediately after a clear-quarantine.
+        // Without this call, sprk_currentrunid on the registry row stays
+        // pointing at the (now-cleared) runId; the next POST /api/runs for
+        // this customer reads the stale value, DetermineConflictReasonAsync
+        // sees Failed status (not Quarantined), returns AlreadyInFlight
+        // fallback, and the operator hits 409 indefinitely — with no
+        // documented operator-side recovery. ReleaseAsync's stale-value guard
+        // (only clears when current value matches this runId) keeps the
+        // operation safe against concurrent races (parity with CancelRun).
+        var release = await runGuard.ReleaseAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (release is ReleaseResult.TransientFailure txf)
+        {
+            // Not fatal to the request — the Quarantined→Failed transition
+            // has already landed via clearService above; the FR-24 audit-log
+            // + envelope enqueue must still fire so operators see the
+            // clear-quarantine action. Log for observability so a repeated
+            // failure to release surfaces before the next-run 409 loop.
+            logger.LogWarning(
+                "ClearQuarantine: CustomerRunGuard release transient failure (REG-03) — " +
+                "CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
+                customerId, id, txf.Diagnostic);
         }
 
         // Fire-and-forget dispatch envelope so downstream consumers (log
@@ -790,6 +1119,74 @@ public static class RunsEndpoints
     // -------------------------------------------------------------------------
 
     /// <summary>
+    /// ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+    /// 2026-08-27): mirrors the intake.schema.json allOf logic — validates
+    /// the tenancyModel × profile pair. Exposed <c>internal</c> so unit tests
+    /// can cover the matrix directly without going through the HTTP surface.
+    /// Returns true on a valid pair; returns false with a filled diagnostic
+    /// string on an unknown profile, an unknown tenancyModel or a mis-paired
+    /// combination (all surfaced as <c>tenancy-profile-invalid</c>).
+    /// </summary>
+    internal static bool TryValidateTenancyProfilePair(
+        string tenancyModel,
+        string profile,
+        out string error)
+    {
+        // COMP-03: unknown-profile reject-first — before tenancy-model
+        // matching so a garbage profile string surfaces its own diagnostic
+        // instead of falling through to the pair-mismatch branch and blaming
+        // the tenancy-model. Mirrors intake.schema.json profile enum exactly.
+        if (!KnownProfiles.All.Any(p => string.Equals(p, profile, StringComparison.OrdinalIgnoreCase)))
+        {
+            error =
+                $"Invalid profile '{profile}': must be one of [{string.Join(", ", KnownProfiles.All)}] " +
+                "(intake.schema.json profile enum). Handlers hard-cast on this value; unknown profiles " +
+                "are silent no-ops that surface deep in the DAG as cryptic H5/H11 failures.";
+            return false;
+        }
+
+        // Task 223 (D-12, 2026-09-29): parse tenancyModel via the shared parser rather than
+        // ad-hoc case-insensitive string.Equals. TryParse is CASE-SENSITIVE (H12c
+        // idempotency-key format preservation constraint); pre-D-12 the API accepted
+        // "model1shared" and coerced downstream, whereas H3/H1 rejected the same string.
+        // Tightening at the HTTP edge closes that asymmetry — a caller sending wrong-case
+        // now gets a specific 400 rather than a cryptic downstream handler failure.
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(tenancyModel, out var parsedTenancyModel))
+        {
+            error =
+                $"Invalid tenancyModel '{tenancyModel}': must be one of [{string.Join(", ", KnownTenancyModels.All)}] " +
+                "(intake.schema.json enum, case-sensitive). Handlers hard-cast on this value; unknown values " +
+                "are silent no-ops with cost blow-up potential.";
+            return false;
+        }
+
+        // Task 225b (D-12, G6): each tenancy model has exactly one legal profile —
+        // Model1 (Spaarke-hosted dedicated stamp) ↔ spaarke-hosted-model2,
+        // Model2 (customer-hosted dedicated stamp) ↔ customer-owned-model2.
+        var requiredProfile = parsedTenancyModel switch
+        {
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model1 => KnownProfiles.SpaarkeHostedModel2,
+            Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2 => KnownProfiles.CustomerOwnedModel2,
+            _ => throw new InvalidOperationException(
+                $"Unhandled TenancyModel '{parsedTenancyModel}' in RunsEndpoints.ValidateTenancyProfilePair. " +
+                "Add a switch arm here when the enum grows (Task 224 / Item 3 territory)."),
+        };
+
+        if (!string.Equals(profile, requiredProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            error =
+                $"Invalid tenancyModel × profile pair: '{parsedTenancyModel}' MUST pair with " +
+                $"'{requiredProfile}' (received profile='{profile}'). Mirrors the intake.schema.json " +
+                "tenancyModel × profile allOf invariant. Downstream handlers (H5 tier derivation, H11 user " +
+                "provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
+            return false;
+        }
+
+        error = string.Empty;
+        return true;
+    }
+
+    /// <summary>
     /// Validates the route id + customerId query parameter. Returns true when
     /// both are non-empty; otherwise sets <paramref name="failure"/> to a 400
     /// ProblemDetails result and returns false.
@@ -802,12 +1199,12 @@ public static class RunsEndpoints
     {
         if (string.IsNullOrWhiteSpace(id))
         {
-            failure = BadRequest(httpContext, "runId is required.");
+            failure = BadRequest(httpContext, ControlPlaneErrorCodes.RunIdRequired, "runId is required.");
             return false;
         }
         if (string.IsNullOrWhiteSpace(customerId))
         {
-            failure = BadRequest(httpContext,
+            failure = BadRequest(httpContext, ControlPlaneErrorCodes.CustomerIdQueryRequired,
                 "customerId query parameter is required (§4D I3 forbids cross-partition reads).");
             return false;
         }
@@ -815,29 +1212,61 @@ public static class RunsEndpoints
         return true;
     }
 
-    private static IResult BadRequest(HttpContext httpContext, string detail) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status400BadRequest,
-            title: "Bad Request",
-            detail: detail,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.1",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+    /// <summary>
+    /// Task 245c: H11's identity preset + user list (<see cref="UserProvisioningIntake"/> — the code H11 itself
+    /// runs), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
+    /// H4's Communication default mailbox. <c>null</c> when the values are usable.
+    /// </summary>
+    internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(IDictionary<string, string> parameters)
+    {
+        parameters.TryGetValue(IntakeParameterCatalog.IdentityPreset, out var identityPreset);
+        parameters.TryGetValue(IntakeParameterCatalog.UsersJson, out var usersJson);
+        if (UserProvisioningIntake.Validate(identityPreset, usersJson) is UserProvisioningIntakeOutcome.Invalid users)
+        {
+            return (users.RejectionCode, $"nonSecretParameters: {users.Diagnostic}");
+        }
+
+        if (IsBlank(parameters, IntakeParameterCatalog.ExchangePolicyScopeGroupId))
+        {
+            return (H14aRejections.MissingPolicyScopeGroupId,
+                $"nonSecretParameters['{IntakeParameterCatalog.ExchangePolicyScopeGroupId}'] is required — the " +
+                "mail-enabled security group that scopes the Exchange ApplicationAccessPolicy H14a creates. The " +
+                "Exchange admin of the stamp's tenant (the customer's for Model 2, Spaarke's for Model 1) creates it " +
+                "before the run (prerequisite PRQ-C-08).");
+        }
+
+        if (IsBlank(parameters, IntakeParameterCatalog.CommunicationGraphResource)
+            && IsBlank(parameters, IntakeParameterCatalog.EmailGraphResource))
+        {
+            return (H14bRejections.NoWebhookTargetsConfigured,
+                $"nonSecretParameters needs at least one of '{IntakeParameterCatalog.CommunicationGraphResource}' " +
+                $"and '{IntakeParameterCatalog.EmailGraphResource}' — the Graph subscription resources H14b subscribes to.");
+        }
+
+        parameters.TryGetValue(IntakeParameterCatalog.CommunicationDefaultMailbox, out var mailbox);
+        if (!IntakeParameterCatalog.IsMailboxAddress(mailbox))
+        {
+            return (ControlPlaneErrorCodes.CommunicationDefaultMailboxInvalid,
+                $"nonSecretParameters['{IntakeParameterCatalog.CommunicationDefaultMailbox}'] is required and must be " +
+                $"a mailbox address (local@domain.tld, at most {IntakeParameterCatalog.MaxMailboxAddressLength} characters) — " +
+                "H4 writes it to the customer vault as Communication-DefaultMailbox.");
+        }
+
+        return null;
+
+        static bool IsBlank(IDictionary<string, string> values, string key)
+            => !values.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value);
+    }
+
+    private static IResult BadRequest(HttpContext httpContext, string errorCode, string detail) =>
+        ControlPlaneProblems.BadRequest(httpContext, errorCode, detail);
 
     private static IResult NotFound(HttpContext httpContext, string runId, string customerId) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status404NotFound,
-            title: "Not Found",
-            detail: $"ProvisioningRun '{runId}' not found in customer partition '{customerId}'.",
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+        ControlPlaneProblems.NotFound(httpContext, ControlPlaneErrorCodes.RunNotFound,
+            $"ProvisioningRun '{runId}' not found in customer partition '{customerId}'.");
 
-    private static IResult Conflict(HttpContext httpContext, string detail) =>
-        Results.Problem(
-            statusCode: StatusCodes.Status409Conflict,
-            title: "Conflict",
-            detail: detail,
-            type: "https://tools.ietf.org/html/rfc7231#section-6.5.8",
-            extensions: new Dictionary<string, object?> { ["correlationId"] = httpContext.TraceIdentifier });
+    private static IResult Conflict(HttpContext httpContext, string errorCode, string detail) =>
+        ControlPlaneProblems.Conflict(httpContext, errorCode, detail);
 
     private static string SerializeEnqueueParameters(EnqueuePayload payload) =>
         JsonSerializer.Serialize(payload, ParametersJsonOptions);
@@ -855,8 +1284,8 @@ public static class RunsEndpoints
 
     /// <summary>
     /// DTO for the POST /api/runs request body. Non-secret parameters only —
-    /// the KeyVaultSecretRef channel is populated by handlers (H3/H4) later
-    /// in the DAG, never by intake body.
+    /// cleartext secrets have no field here, and the run's KeyVaultSecretRef
+    /// channel (run.Parameters.Secrets) is never written from the intake body.
     /// </summary>
     public sealed record CreateRunRequest
     {
@@ -866,15 +1295,19 @@ public static class RunsEndpoints
         [JsonPropertyName("environmentId")]
         public string EnvironmentId { get; init; } = string.Empty;
 
-        /// <summary>Values: <c>Model1Shared</c> | <c>Model2Dedicated</c> (per <see cref="ProvisioningRun.TenancyModel"/>).</summary>
+        /// <summary>Values: the string members of <see cref="Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel"/> (case-sensitive per Task 223 D-12) — post-T224 rename: <c>Model1</c> | <c>Model2</c>. Serialized string on <see cref="ProvisioningRun.TenancyModel"/>.</summary>
         [JsonPropertyName("tenancyModel")]
         public string TenancyModel { get; init; } = string.Empty;
 
-        /// <summary>Values: <c>spaarke-hosted-model2</c> | <c>customer-owned-model2</c> | <c>spaarke-hosted-model1-trial</c>.</summary>
+        /// <summary>Values: <c>spaarke-hosted-model2</c> (pairs with <c>Model1</c>) | <c>customer-owned-model2</c> (pairs with <c>Model2</c>).</summary>
         [JsonPropertyName("profile")]
         public string Profile { get; init; } = string.Empty;
 
-        /// <summary>Optional non-secret parameter map (target-env, feature flags, etc.).</summary>
+        /// <summary>
+        /// Intake values for the run — keys must be in <see cref="IntakeParameterCatalog"/> (closed set,
+        /// case-sensitive; anything else is a 400 <c>intake-unknown-key</c>). <c>tenantId</c> is required;
+        /// <c>subscriptionId</c> is required for Model 2.
+        /// </summary>
         [JsonPropertyName("nonSecretParameters")]
         public IDictionary<string, string>? NonSecretParameters { get; init; }
     }

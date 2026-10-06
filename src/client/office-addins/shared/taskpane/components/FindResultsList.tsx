@@ -14,7 +14,7 @@ import {
 import { useLazyResults } from '../hooks/useLazyResults';
 import type { AnnounceMode } from '../hooks/useAnnounce';
 import type { RecordSeedSource, RecordMatch, UseFindRecordMatchesResult } from '../hooks/useFindRecordMatches';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 
 /**
  * FindResultsList — renders the Find tab's results (spaarkeai-word-add-in-r1 task 034, extended task 077,

@@ -320,6 +320,33 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
 - Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
 
+**SPE topology mode** (added 2026-08-30, task 213.4 — creates the container-type OWNING and BFF app-regs per [SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A](../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md#3A)):
+
+```powershell
+# ONE-TIME operator setup (NOT per-customer). Follow the 8-step runbook:
+#   docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
+
+# Owning app-reg (permanent 1:1 with a container-type; SS3A rows 1-3)
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model1
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Model2
+
+# BFF app-reg — shared per tier (Trial 1 + Model 1); per-customer for Model 2 (SS3A rows 4-6)
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Trial1
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model1
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateBffApp Model2 -CustomerName Acme
+
+# Both in one invocation:
+.\Register-EntraAppRegistrations.ps1 -TenantId $env:AZURE_TENANT_ID -CreateOwningApp Trial1 -CreateBffApp Trial1
+```
+
+Topology-mode behavior (idempotent; safe to re-run):
+- Model 2 owning app is the ONLY multi-tenant app-reg (`AzureADMultipleOrgs`); all others single-tenant (`AzureADMyOrg`).
+- **NO client secret minted** on any topology app-reg (ADR-028 A4 + KV credential-lifecycle rule 1).
+- **NO Key Vault writes** (H4 handler owns per-customer KV wiring at provisioning time).
+- Not combinable with `-CreateFederatedCredential` / `-FicOnly` / `-AllowClientSecretMint` (throws with actionable message).
+- Bypasses the default `spaarke-bff-api-prod` flow (implicit `-SkipBffApi`) + Key Vault pre-flight.
+
 > 🔴 **Pass `-SkipClientSecret` for any new registration (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033).**
 > The BFF identity is **secret-free** per ADR-028 **A4**: it authenticates as a confidential client using a
 > federated credential issued to its user-assigned managed identity. `BFF-API-ClientSecret` and its lowercase
@@ -706,20 +733,25 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 # Build only the LegalWorkspace and SmartTodo solutions
 .\scripts\Build-AllClientComponents.ps1 -Component LegalWorkspace, SmartTodo
 
-# Preview what would happen when building PCF controls
+# Preview what would happen when building PCF controls (lists every discovered PCF)
 .\scripts\Build-AllClientComponents.ps1 -Component PCF -WhatIf
+
+# Shared libraries, then one PCF (production mode)
+.\scripts\Build-AllClientComponents.ps1 -Component SharedLibs, PCF/VisualHost
 ```
 
 **Parameters:**
 - `-SkipSharedLibs` — Skip shared library builds (step 1). Use when shared libs are already built.
-- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `SemanticSearch`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`.
+- `-Component` — Build only specific components by name. Accepts an array of component names matching directory names (e.g., `LegalWorkspace`, `SemanticSearch`, `PCF`). Special names: `SharedLibs`, `PCF`, `ExternalSPA`. `PCF` selects every PCF; `PCF/<folder>` selects one (bare PCF folder names are not accepted — `DocumentRelationshipViewer` is both a PCF and a code page). `PCF` alone does not build the shared libraries the PCFs import; on a clean checkout use `-Component SharedLibs, PCF`.
 
 **Build Order:**
-1. Shared libraries (`Spaarke.Auth`, `Spaarke.SdapClient`, `Spaarke.UI.Components`)
-2. Vite solutions (20 projects in `src/solutions/`)
-3. Webpack code pages (4 projects in `src/client/code-pages/`)
-4. PCF controls (`src/client/pcf/`)
+1. Shared libraries (14 packages in `src/client/shared/`, in dependency order; the `$SharedLibs` list in the script is authoritative)
+2. Vite solutions (19 projects in `src/solutions/`)
+3. Webpack code pages (3 projects in `src/client/code-pages/`)
+4. PCF controls — **one at a time, production mode**. Every git-tracked `src/client/pcf/<name>/package.json` with a `build:prod` script is a PCF (the same discovery rules as `.github/workflows/pcf-build-prod-nightly.yml`: git-tracked, exactly one folder level deep, and an unparseable `package.json` is a reported error in both, never a silent drop); each gets `npm install --legacy-peer-deps --no-audit --no-fund` then `npm run build:prod`, and is judged from its output by `PcfBuildResult.psm1` (`pcf-scripts` exits 0 when webpack fails). Each PCF is its own summary row (`PCF/<name>`), so a failure names the control; discovering zero PCFs is a `FAILED` row, and so is a `-Component` name that matches nothing (e.g. `PCF/Nope`), so the script exits non-zero. *(Until 2026-10 this step ran one aggregate dev-mode `npm run build` at `src/client/pcf`; it never worked from a clean checkout — TS5083 on the controls' relative tsconfig `extends`, then out-of-memory building every control in one process — and nothing consumed its `src/client/pcf/out` output.)*
 5. External SPA (`src/client/external-spa/`)
+
+**PowerShell 7 (`pwsh`) is recommended** (`Deploy-Release.ps1` runs it under `pwsh`). The file is ASCII-only, so Windows PowerShell 5.1 parses it too; keep it ASCII-only (no BOM needed).
 
 ---
 
@@ -742,7 +774,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 .\scripts\Deploy-AllWebResources.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com
 
 # Skip specific components
-.\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons, PCFWebResources
+.\scripts\Deploy-AllWebResources.ps1 -SkipComponent RibbonIcons
 
 # Preview which components would be deployed
 .\scripts\Deploy-AllWebResources.ps1 -WhatIf
@@ -750,7 +782,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 **Parameters:**
 - `-DataverseUrl` — Target Dataverse environment URL (falls back to `DATAVERSE_URL` env var)
-- `-SkipComponent` — Array of component names to skip: `CorporateWorkspace`, `ExternalWorkspaceSpa`, `SpeAdminApp`, `WizardCodePages`, `EventsPage`, `PCFWebResources`, `RibbonIcons`
+- `-SkipComponent` — Array of component names to skip: `CorporateWorkspace`, `ExternalWorkspaceSpa`, `SpeAdminApp`, `WizardCodePages`, `EventsPage`, `RibbonIcons`
 
 **Deployment Sequence:**
 | # | Script Called | Web Resource |
@@ -760,7 +792,7 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 | 3 | `Deploy-SpeAdminApp.ps1` | `sprk_speadmin` (HTML) |
 | 4 | `Deploy-WizardCodePages.ps1` | 12 wizard/code page web resources (note: `sprk_corporateworkspace` entry retired — see above) |
 | 5 | `Deploy-EventsPage.ps1` | `sprk_eventspage.html` |
-| 6 | `Deploy-PCFWebResources.ps1` | PCF bundle.js + CSS |
+| 6 | ~~`Deploy-PCFWebResources.ps1`~~ | ~~PCF bundle.js + CSS~~ — **RETIRED 2026-10-04** (spaarke-ontology-platform-r1 task 094): it only ever pushed the `UniversalQuickCreate` bundle, from a hard-coded `C:\code_files\spaarke\src\controls\...` path that no longer exists; the control was deleted 2026-06-22 (`pcf-orphan-cleanup-r1`). Deploy PCFs via the `pcf-deploy` skill. |
 | 7 | `Deploy-RibbonIcons.ps1` | 3 SVG ribbon icons |
 
 ---
@@ -965,27 +997,32 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 ---
 
-#### `Deploy-PCFWebResources.ps1`
-**Purpose:** Deploy PCF control web resources to Dataverse
-**Usage:** 🟢 Active - Deploy after PCF build
+#### `Invoke-PcfBuildProd.ps1`
+**Purpose:** Production build of ONE PCF control (`npm run build:prod`) that **fails when the build failed**
+**Usage:** 🟢 Active - before packing or importing any PCF
 **Lifecycle:** ✅ Maintained
-**Dependencies:** PAC CLI, Dataverse connection
+**Dependencies:** Node/npm; the PCF's own `build:prod` script; `PcfBuildResult.psm1`
 **Owner:** Development Team
-**Last Used:** Phase 8 (File Viewer deployment)
+**Added:** 2026-10-04 (spaarke-ontology-platform-r1 task 094)
 
-**When to Use:**
-- After building PCF control (`npm run build`)
-- Deploying updates to existing controls
-- Testing PCF changes in Dataverse environment
+**Why it exists:** `pcf-scripts build` **exits 0 when webpack fails**. It logs `[build] Failed:` and
+`[pcf-1033] [Error] An error occurred compiling or bundling the control.` and returns without rethrowing, so a bare
+`npm run build:prod` followed by "copy `bundle.js` and pack" ships the PREVIOUS bundle still sitting in `out/`.
+This script judges the result from the output: FAIL on a non-zero exit, `[build] Failed`, a `compiled with N error(s)`
+line or `[pcf-1033]`; PASS only on `[build] Succeeded`. The same rule is used by `Build-AllClientComponents.ps1`
+(PCF step, which builds every PCF this way, one per summary row) and the nightly CI workflow
+`.github/workflows/pcf-build-prod-nightly.yml`.
 
 **Command:**
 ```powershell
-.\Deploy-PCFWebResources.ps1 -ControlName "UniversalQuickCreate" -Environment "dev"
+.\scripts\Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/SemanticSearchControl          # exits 1 on a failed build
+.\scripts\Invoke-PcfBuildProd.ps1 -PcfPath src/client/pcf/SemanticSearchControl -Install # npm install first
 ```
 
-**Alternatives:**
-- PAC CLI: `pac pcf push`
-- Power Platform Build Tools (CI/CD)
+**Related:** `PcfBuildResult.psm1` (`Get-PcfBuildResult -Output <lines> -ExitCode <n>`) holds the rule for any other script.
+
+#### ~~`Deploy-PCFWebResources.ps1`~~
+**RETIRED 2026-10-04** (spaarke-ontology-platform-r1 task 094): it only ever pushed the `UniversalQuickCreate` bundle, from a hard-coded `C:\code_files\spaarke\src\controls\...` path that no longer exists; the control was deleted 2026-06-22 (`pcf-orphan-cleanup-r1`). Deploy PCFs via the `pcf-deploy` skill.
 
 ---
 
@@ -1341,7 +1378,7 @@ every vault holds the same value, and that value authenticates as the owning app
 ```
 
 ### `tests/bicep-e2e-dry-run.ps1`
-**Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 4 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep, stacks/model1-shared.bicep) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.
+**Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 3 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep — stacks/model1-shared.bicep was retired by task 225a) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.
 **Usage:** 🟡 Occasional - Before any PR that modifies infrastructure/bicep/** or after Wave C2 changes land; recurring pre-Phase F gate per customer-provisioning-orchestration-r1 spec FR-04.
 **Lifecycle:** ✅ Maintained (added 2026-08-17 by customer-provisioning-orchestration-r1 task 034)
 **Dependencies:** Azure CLI (`az login`), Bicep CLI (`az bicep install`), dev subscription context (for `-Mode DryRun/Full`)
@@ -1350,12 +1387,12 @@ every vault holds the same value, and that value authenticates as the owning app
 **When to Use:**
 - Before merging any PR that touches `infrastructure/bicep/**`
 - After any Wave C2 task lands (027-033), to verify composition coherence
-- As Phase F gate to confirm the 4-stack composition still dry-runs cleanly
+- As Phase F gate to confirm the 3-stack composition still dry-runs cleanly
 - Nightly / scheduled runs (Phase H CI-wiring coordinated PR)
 
 **Command:**
 ```powershell
-# Tier 1 only: fast build check on all 4 stacks (no dev sub needed)
+# Tier 1 only: fast build check on all 3 stacks (no dev sub needed)
 pwsh scripts/tests/bicep-e2e-dry-run.ps1
 
 # Tier 1 + Tier 2: adds live what-if against dev subscription
@@ -1367,7 +1404,7 @@ pwsh scripts/tests/bicep-e2e-dry-run.ps1 -Mode Full
 
 **Related**: `projects/customer-provisioning-orchestration-r1/tasks/034-integration-test-bicep-dry-run.poml` (task POML); `projects/customer-provisioning-orchestration-r1/spec.md` FR-04; `projects/customer-provisioning-orchestration-r1/notes/bicep-e2e-dry-run-*.md` (per-run notes artifacts).
 
-**Known deferred failure**: `stacks/model1-shared.bicep` build fails as of 2026-08-17 (unmigrated caller of task-029 UAMI-only app-service.bicep). Marked `ExpectedBuild: EXPECTED_FAILURE` in the script — test still PASSES overall. Follow-on task recommended: migrate the `sharedBffApi` module invocation to the new UAMI-only param signature.
+**Retired stack**: `stacks/model1-shared.bicep` was retired by customer-provisioning-orchestration-r1 task 225a (2026-10-01, D-12); the script now builds 3 stacks and must be green (no `EXPECTED_FAILURE` mechanism any more). The old "build fails since 2026-08-17" deferral was a Windows artifact — `az bicep build --stdout` crashing on non-ASCII output — not a broken stack (the script now builds to a temp file).
 
 ---
 
@@ -1611,7 +1648,7 @@ These scripts were used during initial SPE Container Type registration and are k
 5. Update when usage patterns change
 
 **Naming Convention:**
-- **Action-Target-Method.ps1** (e.g., `Deploy-PCFWebResources.ps1`)
+- **Action-Target-Method.ps1** (e.g., `Deploy-SpeAdminApp.ps1`)
 - Use PascalCase for PowerShell scripts
 - Use kebab-case for JavaScript/Node scripts
 
@@ -1660,7 +1697,7 @@ These scripts were used during initial SPE Container Type registration and are k
 ### By Development Phase
 
 **Development:**
-- `Deploy-PCFWebResources.ps1` - After PCF changes
+- `Invoke-PcfBuildProd.ps1` - Production PCF build that fails on a failed build (then the `pcf-deploy` skill)
 - `Test-SdapBffApi.ps1` - Validate API changes
 
 **Deployment:**

@@ -12,7 +12,7 @@
 //     acceptance) + SC #5 (extended validate script) + SC #6 (traps re-verified)
 //     + SC #17 (naming-conformance exit 0) + §15 #14 (cost envelope).
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H13 row +
-//     §4B (T1–T6 trap catalog) + §4C (Quarantined semantics) + §4D (I1–I5
+//     §4B (T1–T7 trap catalog) + §4C (Quarantined semantics) + §4D (I1–I5
 //     tenant-isolation invariants).
 //
 // PATTERN PARITY:
@@ -71,7 +71,7 @@ public sealed class H13AcceptanceOptions
     public TimeSpan NamingConformanceTimeout { get; set; } = TimeSpan.FromMinutes(2);
 
     /// <summary>
-    /// Maximum time to wait for a single trap verifier probe (T1–T6). Defaults
+    /// Maximum time to wait for a single trap verifier probe (T1–T7). Defaults
     /// to 3 minutes — each verifier is a bounded Graph/ARM/Dataverse REST or
     /// az CLI call.
     /// </summary>
@@ -109,11 +109,11 @@ public sealed class H13AcceptanceOptions
     /// </summary>
     public decimal Model1MarginalEnvelopeUsd { get; set; } = 430m;
 
-    /// <summary>
-    /// Expected monthly cost envelope for the Model 1 SHARED baseline floor in
-    /// whole USD. Per spec.md §15 #14 target: ≤ $400/mo.
-    /// </summary>
-    public decimal Model1SharedFloorEnvelopeUsd { get; set; } = 400m;
+    // Task 223 (D-12): Model1SharedFloorEnvelopeUsd DELETED. The "shared floor"
+    // concept was the pre-D-12 baseline for the shared platform tier; D-12 retires
+    // the shared tier entirely, so the option has no runtime meaning. The
+    // ArmCostEnvelopeChecker's `_`-arm fallback that consumed this option is also
+    // deleted — the switch is now exhaustive over the enum. Do NOT reintroduce.
 
     /// <summary>
     /// Cost drift fraction above which H13 emits an advisory warning per
@@ -137,6 +137,31 @@ public sealed class H13AcceptanceOptions
     /// targets the live post-H9-swap slot.
     /// </summary>
     public string TargetSlotName { get; set; } = "production";
+
+    /// <summary>
+    /// Task 245b: directory holding the packaged <c>scripts/</c> the I1 invariant probe scans for
+    /// hard-coded tenant literals. L2 configuration (formerly the run parameter
+    /// <c>provisioningScriptsDirectory</c>, which nothing wrote); defaults to the publish layout.
+    /// </summary>
+    public string ProvisioningScriptsDirectory { get; set; } = Path.Combine(AppContext.BaseDirectory, "scripts");
+
+    /// <summary>
+    /// Startup validation (E2EAcceptanceModule — ValidateOnStart). Throws
+    /// <see cref="InvalidOperationException"/> naming the invalid setting.
+    /// </summary>
+    public void Validate()
+    {
+        if (string.IsNullOrWhiteSpace(ProvisioningScriptsDirectory))
+        {
+            throw new InvalidOperationException(
+                "E2EAcceptance:ProvisioningScriptsDirectory must not be blank — the I1 invariant probe scans it " +
+                "(default: <app>/scripts).");
+        }
+        if (string.IsNullOrWhiteSpace(TargetSlotName))
+        {
+            throw new InvalidOperationException("E2EAcceptance:TargetSlotName must not be blank (default: production).");
+        }
+    }
 
     /// <summary>
     /// When true, H13 short-circuits + returns Success WITHOUT invoking any

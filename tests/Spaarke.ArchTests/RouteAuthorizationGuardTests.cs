@@ -6804,7 +6804,10 @@ public partial class RouteAuthorizationGuardTests
 
         // Existing waivers, re-verified.
         Assert.Equal(PermanentBasis.CreateWithNoPriorResource, WaiverOf("PUT /api/obo/me/files/{*path}")!.Basis);
-        Assert.Equal(PermanentBasis.ReferenceData, WaiverOf("GET /api/office/search/matter-types")!.Basis);
+        // Master task 100 (2026-10-05 merge): /search/matter-types became the ONE parameterized /search/{list} (same URL).
+        Assert.Equal(PermanentBasis.ReferenceData, WaiverOf("GET /api/office/search/{list}")!.Basis);
+        Assert.Null(WaiverOf("GET /api/office/search/matter-types"));
+        Assert.Equal(PermanentBasis.CallerScopedOnly, WaiverOf("GET /api/office/quickcreate/defaults")!.Basis);
         Assert.Equal("166", WaiverOf("POST /api/v1/documents")!.OwningTask);
         foreach (var key in new[]
                  {

@@ -47,13 +47,19 @@ public static class EnvVarValuesRejectionCodes
     public const string MissingUpstreamState = "missing-upstream-state";
 
     /// <summary>
-    /// <see cref="EnvVarValuesOptions.ClientSecret"/> is not populated. H7
-    /// authenticates to the target Dataverse env using the same confidential-
-    /// client (BFF app-reg) credential pattern H6 uses for solution import —
-    /// the MI-Dataverse App User (H10) has not yet been created at H7's point
-    /// in the DAG (H10 runs AFTER H7 per design.md §4.1), so MI-based auth is
-    /// not viable here. Wave C5 wires this to a Key Vault reference; wave C4
-    /// requires operator to set the app-setting explicitly.
+    /// <see cref="EnvVarValuesOptions.ClientSecret"/> is not populated AND the
+    /// FR-39 ordered credential chain REQUIRES it (primary =
+    /// <c>ClientSecret</c> — the legacy/unconfigured default; A44.5, task
+    /// 205i). H7 authenticates to the target Dataverse env using the same
+    /// confidential-client (BFF app-reg) credential pattern H6 uses for
+    /// solution import — the MI-Dataverse App User (H10) has not yet been
+    /// created at H7's point in the DAG (H10 runs AFTER H7 per design.md
+    /// §4.1); under the secret-free chain the Worker UAMI's federated
+    /// assertion proves the SAME app-reg identity (H3-created FIC), so this
+    /// rejection cannot fire there — an empty slot is the signal (auth-v4
+    /// §9.1), never an error. Wave C5 wires the legacy path to a Key Vault
+    /// reference (conditionally emitted per A44.5); wave C4 required the
+    /// operator to set the app-setting explicitly.
     /// </summary>
     public const string MissingClientSecret = "missing-client-secret";
 

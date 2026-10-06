@@ -33,8 +33,14 @@
 //          NFR-01 gate Verified.
 //   AC-2a  Missing tenantId (§4D I1) → Resumable + MissingTenantId.
 //   AC-2b  Missing subscriptionId → Resumable + MissingSubscriptionId.
-//   AC-2c  Missing resourceGroupName → Resumable + MissingResourceGroupName.
-//   AC-2d  Missing appServiceName → Resumable + MissingAppServiceName.
+//   AC-2c  Missing InterStepState.ResourceGroupName (H2a output, task 245a)
+//          → Resumable + MissingResourceGroupName.
+//   AC-2c2 H2a outputs present only in NonSecret (not InterStepState) are
+//          NOT read → Resumable + MissingResourceGroupName (G25 guard).
+//   AC-2d  Missing InterStepState.AppServiceName (H2a output) → Resumable +
+//          MissingAppServiceName.
+//   AC-2f  Blank InterStepState.AppServiceStagingSlotName → falls back to
+//          BffDeployOptions.DefaultStagingSlotName.
 //   AC-2e  buildId ABSENT (now optional, task 132 DS-4 §5 item 1) → resolves
 //          from manifest.BuildId; deploy proceeds + idempotency key uses the
 //          RESOLVED buildId, not a run parameter.
@@ -161,6 +167,10 @@ public sealed class H9BffDeployHandlerTests : IDisposable
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H9");
         repo.LastWrittenRun.GateStates.Should().ContainKey("h9-nfr01-publish-size");
         repo.LastWrittenRun.GateStates["h9-nfr01-publish-size"].Status.Should().Be(GateState.Verified);
+        // Task 245b: H9 publishes what H7 / H13 / H14 read — the production URL it probed, the build it deployed —
+        // in the same write as its completion.
+        repo.LastWrittenRun.InterStepState.BffApiUrl.Should().Be($"https://{AppServiceName}.azurewebsites.net");
+        repo.LastWrittenRun.InterStepState.BffBuildId.Should().Be(BuildId);
 
         verifier.CallCount.Should().Be(1);
         downloader.CallCount.Should().Be(1);
@@ -217,7 +227,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     public async Task AC2c_MissingResourceGroupName_FailsResumable()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H9BffDeployHandler.ResourceGroupNameParameterKey);
+        run.InterStepState.ResourceGroupName = null; // H2a's output not recorded on this run.
         var seams = FreshGreenSeams();
         var handler = BuildHandler(new FakeRepository(run, etag: "etag-2c"), seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
@@ -231,7 +241,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     public async Task AC2d_MissingAppServiceName_FailsResumable()
     {
         var run = BuildRun();
-        run.Parameters.NonSecret.Remove(H9BffDeployHandler.AppServiceNameParameterKey);
+        run.InterStepState.AppServiceName = null; // H2a's output not recorded on this run.
         var seams = FreshGreenSeams();
         var handler = BuildHandler(new FakeRepository(run, etag: "etag-2d"), seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer);
 
@@ -239,6 +249,24 @@ public sealed class H9BffDeployHandlerTests : IDisposable
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.RejectionCode.Should().Be(BffDeployRejectionCodes.MissingAppServiceName);
+    }
+
+    [Fact]
+    public async Task AC2f_StagingSlotBlankInInterStepState_FallsBackToConfiguredDefault()
+    {
+        const string defaultSlot = "fallback-slot";
+        var run = BuildRun();
+        run.InterStepState.AppServiceStagingSlotName = null;
+        var kudu = FakeKuduDeployer.Success();
+        var seams = FreshGreenSeams(overrideKudu: kudu);
+        var handler = BuildHandler(new FakeRepository(run, etag: "etag-2f"), seams.Verifier, seams.Downloader, seams.Kudu, seams.Swapper, seams.Probe, seams.Sizer,
+            configureOptions: o => o.DefaultStagingSlotName = defaultSlot);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        kudu.LastRequest!.SlotName.Should().Be(defaultSlot);
+        seams.Swapper.LastRequests[0].SourceSlotName.Should().Be(defaultSlot);
     }
 
     [Fact]
@@ -746,7 +774,7 @@ public sealed class H9BffDeployHandlerTests : IDisposable
     {
         const string customSlot = "blue";
         var run = BuildRun();
-        run.Parameters.NonSecret[H9BffDeployHandler.StagingSlotNameParameterKey] = customSlot;
+        run.InterStepState.AppServiceStagingSlotName = customSlot;
         var repo = new FakeRepository(run, etag: "etag-20a");
         var callLog = new List<string>();
         var guard = FakeSlotGuard.Success();
@@ -913,17 +941,19 @@ public sealed class H9BffDeployHandlerTests : IDisposable
             RunId = RunId,
             CustomerId = CustomerId,
             EnvironmentId = "env-guid",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Status = RunStatus.Running,
             Profile = "spaarke-hosted-model2",
         };
+        // Intake values — run.Parameters.NonSecret.
         run.Parameters.NonSecret[H9BffDeployHandler.TenantIdParameterKey] = TenantId;
         run.Parameters.NonSecret[H9BffDeployHandler.SubscriptionIdParameterKey] = SubscriptionId;
-        run.Parameters.NonSecret[H9BffDeployHandler.ResourceGroupNameParameterKey] = ResourceGroupName;
-        run.Parameters.NonSecret[H9BffDeployHandler.AppServiceNameParameterKey] = AppServiceName;
         run.Parameters.NonSecret[H9BffDeployHandler.BuildIdParameterKey] = BuildId;
-        run.Parameters.NonSecret[H9BffDeployHandler.StagingSlotNameParameterKey] = StagingSlotName;
         run.Parameters.NonSecret[H9BffDeployHandler.HealthCheckPathParameterKey] = HealthCheckPath;
+        // H2a's outputs — run.InterStepState (task 245a, G25).
+        run.InterStepState.ResourceGroupName = ResourceGroupName;
+        run.InterStepState.AppServiceName = AppServiceName;
+        run.InterStepState.AppServiceStagingSlotName = StagingSlotName;
         return run;
     }
 

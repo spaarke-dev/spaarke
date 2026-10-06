@@ -4,7 +4,7 @@
     <title>Coordinate .github/workflows/** gate wiring for naming-conformance + tenant-isolation ArchTests via PR to ci-cd-unit-test-remediation-r1</title>
     <phase>H KV Federation Full Remediation</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Coord-PR spec authoring only; no code changes in this task; ci-cd-r1 worktree applies the actual workflow edits. NFR-08 acceptance scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

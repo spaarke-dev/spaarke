@@ -1,6 +1,6 @@
 # Secret Rotation Procedures
 
-> **Last Updated**: 2026-04-05
+> **Last Updated**: 2026-10-05 (Redis: no key to rotate — task 242/242b)
 >
 > **Applies To**: Spaarke Production Environment
 >
@@ -29,7 +29,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 | `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Dataverse Service Endpoint must be re-registered with the new key. |
 | `Communication-WebhookClientState` | Graph subscription validation secret | Generated random string | Manual (every 90 days or on Graph subscription renewal) |
 | `ServiceBus-ConnectionString` | Service Bus access key | sprk-platform-{env}-sb | Automated (`Rotate-Secrets.ps1 -SecretType ServiceBus`) |
-| `Redis-ConnectionString` | Redis access key | sprk-platform-{env}-redis | Automated (`Rotate-Secrets.ps1 -SecretType Redis`) |
+| ~~`Redis-ConnectionString`~~ | ~~Redis access key~~ | — | 🔴 **NOTHING TO ROTATE.** Every Spaarke Redis is Azure Managed Redis with access keys disabled; the BFF and L2 Worker reach it through `Redis__Endpoint` with their managed identities (task 242, owner D12/D13; dev cut over 2026-10-05 by task 242b). `Rotate-Secrets.ps1` has no Redis branch. An existing `Redis-ConnectionString` secret is left in place, unreferenced — never deleted. |
 | `BFF-API-ClientId` | Entra ID application ID | Entra ID app registration | Not rotated (immutable identifier) |
 
 ### Deprecated / To-Be-Removed (Auth v2)
@@ -46,7 +46,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 |-------------|------|-----------------|-----------------|
 | `Storage-ConnectionString` | Storage account key | sprk{customerId}{env}sa | Automated (`Rotate-Secrets.ps1 -SecretType StorageKey`) |
 | `ServiceBus-ConnectionString` | Service Bus access key | sprk-{customerId}-{env}-sb | Automated (`Rotate-Secrets.ps1 -SecretType ServiceBus`) |
-| `Redis-ConnectionString` | Redis access key | sprk-{customerId}-{env}-redis | Automated (`Rotate-Secrets.ps1 -SecretType Redis`) |
+| ~~`Redis-ConnectionString`~~ | ~~Redis access key~~ | — | Not created for customer stamps — the stamp cache is Azure Managed Redis, Entra only (task 242). Nothing to rotate. |
 
 ### Secrets Not Managed by Rotate-Secrets.ps1
 
@@ -65,7 +65,6 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 | Entra ID client secrets | Every 90 days | Yes | Created with 12-month expiry; rotate well before expiry |
 | Storage account keys | Every 90 days | Yes | Zero-downtime via secondary/primary key swap |
 | Service Bus access keys | Every 90 days | Yes | Zero-downtime via secondary/primary key swap |
-| Redis access keys | Every 90 days | Yes | Zero-downtime via secondary/primary key swap |
 | GitHub Actions secrets | Every 180 days | No | Manual update in GitHub repository settings |
 
 **Recommended calendar**:
@@ -92,7 +91,7 @@ Before running any rotation procedure:
 
 2. **Required RBAC roles**:
    - **Key Vault Secrets Officer** on all target Key Vaults
-   - **Contributor** on target resources (storage accounts, Service Bus, Redis)
+   - **Contributor** on target resources (storage accounts, Service Bus)
    - **Application Administrator** (Entra ID) for client secret rotation
 
 3. **Script location**: `scripts/Rotate-Secrets.ps1` in the repository root
@@ -106,7 +105,7 @@ Before running any rotation procedure:
 | Parameter | Required | Values | Default | Description |
 |-----------|----------|--------|---------|-------------|
 | `-Scope` | Yes | `Platform`, `Customer`, `All` | — | Which vaults to rotate |
-| `-SecretType` | Yes | `StorageKey`, `ServiceBus`, `Redis`, `EntraId`, `All` | — | Which secret type to rotate |
+| `-SecretType` | Yes | `StorageKey`, `ServiceBus`, `EntraId`, `All` | — | Which secret type to rotate (no `Redis` — task 242) |
 | `-CustomerId` | Conditional | String (e.g., `demo`) | — | Required when Scope is `Customer` |
 | `-Environment` | No | `dev`, `staging`, `prod` | `prod` | Target environment |
 | `-DryRun` | No | Switch | Off | Preview changes without executing |
@@ -169,8 +168,8 @@ Post in the operations channel confirming rotation completed with date and audit
 ### Procedure: Rotate a Single Secret Type
 
 ```powershell
-# Rotate only Redis keys for platform
-.\scripts\Rotate-Secrets.ps1 -Scope Platform -SecretType Redis
+# Rotate only Service Bus keys for platform
+.\scripts\Rotate-Secrets.ps1 -Scope Platform -SecretType ServiceBus
 
 # Rotate only storage keys for a customer
 .\scripts\Rotate-Secrets.ps1 -Scope Customer -CustomerId demo -SecretType StorageKey
@@ -180,7 +179,7 @@ Post in the operations channel confirming rotation completed with date and audit
 
 ## How the Automated Rotation Works
 
-The script follows a zero-downtime rotation pattern for key-based secrets (Storage, Service Bus, Redis):
+The script follows a zero-downtime rotation pattern for key-based secrets (Storage, Service Bus):
 
 ```
 1. Regenerate SECONDARY key at the Azure resource
@@ -341,7 +340,6 @@ The log contains a JSON summary at the end with counts of succeeded, failed, and
 |-------------|---------------------|
 | Storage | `az storage container list --account-name sprk{cid}{env}sa --auth-mode login` |
 | Service Bus | `az servicebus namespace show --name sprk-{cid}-{env}-sb --resource-group rg-spaarke-{cid}-{env} --query status` |
-| Redis | `az redis show --name sprk-{cid}-{env}-redis --resource-group rg-spaarke-{cid}-{env} --query provisioningState` |
 | Entra ID | `az ad app credential list --id <app-id> --query "[].{name:displayName, expiry:endDateTime}"` |
 
 ---

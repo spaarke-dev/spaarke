@@ -46,14 +46,33 @@
 //   - .claude/adr/ADR-044: interStepState.MiObjectId + MiClientId are UAMI-
 //       scoped IDs (H2a wrote them at task 044).
 //
+// RUN CONTEXT (task 245a, G25 run-context contract — see Models/InterStepState.cs):
+//   - Intake values, read from run.Parameters.NonSecret: tenantId, subscriptionId,
+//     provisionedOn, rotate, ficOmitSecretNames, containerTypeId.
+//   - secretsVer (idempotency version) is the content version of the embedded manifest
+//     (task 245b — KvSecretManifestReadResult.Success.ContentVersion), not a run parameter.
+//   - H2a outputs, read from run.InterStepState: KeyVaultName (customer vault),
+//     ResourceGroupName, AppServiceName, AppServiceStagingSlotName (blank ⇒
+//     "staging"), MiResourceId (UAMI resource id — T1 PATCH target).
+//   - L2 configuration, validated at Worker startup: ControlPlaneIdentityOptions.PrincipalObjectId
+//     (the principal the KV RBAC bootstrap grants Secrets Officer — L2's own identity, never the
+//     stamp UAMI; task 245b, moved to the option shared with H2a by task 249). The platform-vault
+//     vendor-key source option was removed by task 225b (owner D18, 2026-10-02).
+//   - The vault resource id is always derived (BuildKvResourceId) from
+//     subscriptionId + ResourceGroupName + KeyVaultName.
+//
 // ROLLBACK CLASSIFICATION (§4C mapping — declared at code level):
 //   ┌───────────────────────────────────────────┬──────────────────────────┐
 //   │ Failure mode                              │ §4C class                │
 //   ├───────────────────────────────────────────┼──────────────────────────┤
-//   │ Missing tenantId / subscriptionId /       │ Resumable                │
-//   │ keyVaultName / secretsVer /               │ (external precondition — │
-//   │ resourceGroupName / appServiceName /      │ operator fixes params +  │
-//   │ uamiResourceId (§4D I1 + structural)      │ resumes)                 │
+//   │ Missing run parameter tenantId /          │ Resumable                │
+//   │ subscriptionId                            │ (external precondition — │
+//   │ (§4D I1 + structural)                     │ operator fixes params +  │
+//   │                                           │ resumes)                 │
+//   │ Missing InterStepState keyVaultName /     │ Resumable                │
+//   │ resourceGroupName / appServiceName /      │ (H2a output absent —     │
+//   │ miResourceId (H2a outputs, task 245a)     │ H2a completes, then      │
+//   │                                           │ resume)                  │
 //   │ Run not found in Cosmos partition         │ Resumable                │
 //   │ Manifest reader failure                   │ Resumable                │
 //   │ BINDING pre-check violation (manifest     │ QuarantineRequired       │
@@ -82,9 +101,9 @@
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H4",
 //           IdempotencyKey==kv-{customerId}-{secretsVer}). Match ⇒ Success
-//           no-op. secretsVer is the manifest hash from Phase H (a content
-//           hash — a content change to the manifest yields a new key + a
-//           new invocation).
+//           no-op. secretsVer is the embedded manifest's content version
+//           (task 245b, ArtifactVersion — a content change to the manifest
+//           yields a new key + a new invocation).
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H4 does NOT enqueue a specific successor. Parity with H2a/H2b/H3: the
@@ -142,26 +161,14 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (canonical §7.9 R3 sprk-{env}-kv).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Non-secret parameter key carrying the resource group name (T1 PATCH + T5 slot MI reads).</summary>
-    public const string ResourceGroupNameParameterKey = "resourceGroupName";
-
-    /// <summary>Non-secret parameter key carrying the App Service name (T1 PATCH + T5 slot MI reads).</summary>
-    public const string AppServiceNameParameterKey = "appServiceName";
-
-    /// <summary>Non-secret parameter key carrying the App Service staging slot name (defaults to <c>staging</c>).</summary>
-    public const string StagingSlotNameParameterKey = "stagingSlotName";
-
-    /// <summary>Non-secret parameter key carrying the UAMI resource id H4 patches into keyVaultReferenceIdentity (T1). Written by H2a to interStepState.MiObjectId is the OBJECT id; H4 needs the full RID which is passed as a param.</summary>
-    public const string UamiResourceIdParameterKey = "userAssignedIdentityResourceId";
-
-    /// <summary>Non-secret parameter key carrying the full KV resource id (T5 grant scope). May be derived from keyVaultName + subscription + rg when absent.</summary>
-    public const string KeyVaultResourceIdParameterKey = "keyVaultResourceId";
-
-    /// <summary>Non-secret parameter key carrying the manifest content hash / semantic version — feeds idempotency key kv-{customerId}-{secretsVer}.</summary>
-    public const string SecretsVersionParameterKey = "secretsVer";
+    // Task 245a (G25, run-context contract): the customer Key Vault name, resource group,
+    // App Service name, App Service staging slot and UAMI resource id are H2a's outputs —
+    // read from run.InterStepState (KeyVaultName / ResourceGroupName / AppServiceName /
+    // AppServiceStagingSlotName / MiResourceId), never from run.Parameters.NonSecret, which
+    // only intake writes. The former keyVaultName / resourceGroupName / appServiceName /
+    // stagingSlotName / userAssignedIdentityResourceId parameter-key constants were removed
+    // with that move, as was the keyVaultResourceId override (not an accepted intake key —
+    // the vault resource id is always derived via BuildKvResourceId).
 
     /// <summary>Non-secret parameter key toggling rotation mode (H4-rotate variant per spec.md FR-34). Absent OR "false" = rotation-safe (default).</summary>
     public const string RotateExistingParameterKey = "rotate";
@@ -186,7 +193,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     /// </summary>
     public const string ProvisionedOnParameterKey = "provisionedOn";
 
-    /// <summary>Default staging slot name when the parameter is absent (parity with app-service.bicep task 029).</summary>
+    /// <summary>Default staging slot name when InterStepState.AppServiceStagingSlotName is blank (parity with app-service.bicep task 029).</summary>
     private const string DefaultStagingSlotName = "staging";
 
     /// <summary>
@@ -195,10 +202,21 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     /// someone accidentally writes a raw client-secret literal). Values
     /// starting with <c>@Microsoft.KeyVault(</c> are safe KV URI references
     /// and short-circuit to false. Any value with 40+ alphanumeric + secret-
-    /// separator chars trips the guard.
+    /// separator chars trips the guard — except a DNS host name, see
+    /// <see cref="IsCleartextSecretPattern"/>.
     /// </summary>
     private static readonly Regex CleartextSecretPattern = new(
         @"[A-Za-z0-9~._\-]{40,}",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled,
+        matchTimeout: TimeSpan.FromSeconds(1));
+
+    /// <summary>
+    /// A lowercase multi-label DNS host name (<c>spaarke-acme-prod-cosmos.documents.azure.com</c>). Azure
+    /// endpoint hosts are lowercase; secrets are not shaped like this (Entra client secrets carry <c>~</c>
+    /// and upper case, base64 carries upper case / <c>+/=</c>, JWT segments carry upper case).
+    /// </summary>
+    private static readonly Regex DnsHostName = new(
+        @"^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$",
         RegexOptions.CultureInvariant | RegexOptions.Compiled,
         matchTimeout: TimeSpan.FromSeconds(1));
 
@@ -208,7 +226,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     private readonly IAppServiceIdentityPatcher _identityPatcher;
     private readonly IArmKeyVaultRefProbe _t1Probe;
     private readonly ISlotIdentityRoleGranter _t5Granter;
+    private readonly ISecretFreeMarkerApplier _markerApplier;
+    private readonly IOperatorKvRbacBootstrapper _operatorKvRbacBootstrapper;
     private readonly KvSecretsPopulationOptions _options;
+    private readonly ControlPlaneIdentityOptions _identity;
     private readonly ILogger<H4KvSecretsPopulationHandler> _logger;
 
     /// <inheritdoc/>
@@ -232,7 +253,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         IAppServiceIdentityPatcher identityPatcher,
         IArmKeyVaultRefProbe t1Probe,
         ISlotIdentityRoleGranter t5Granter,
+        ISecretFreeMarkerApplier markerApplier,
+        IOperatorKvRbacBootstrapper operatorKvRbacBootstrapper,
         IOptions<KvSecretsPopulationOptions> options,
+        IOptions<ControlPlaneIdentityOptions> identity,
         ILogger<H4KvSecretsPopulationHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
@@ -241,7 +265,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(identityPatcher);
         ArgumentNullException.ThrowIfNull(t1Probe);
         ArgumentNullException.ThrowIfNull(t5Granter);
+        ArgumentNullException.ThrowIfNull(markerApplier);
+        ArgumentNullException.ThrowIfNull(operatorKvRbacBootstrapper);
         ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(identity);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
@@ -250,7 +277,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         _identityPatcher = identityPatcher;
         _t1Probe = t1Probe;
         _t5Granter = t5Granter;
+        _markerApplier = markerApplier;
+        _operatorKvRbacBootstrapper = operatorKvRbacBootstrapper;
         _options = options.Value;
+        _identity = identity.Value;
         _logger = logger;
     }
 
@@ -297,7 +327,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         var etag = read.ETag;
         var parameters = run.Parameters.NonSecret;
 
-        // (2) Parameter guards — every field H4 needs must be non-empty
+        // (2) Run-parameter + InterStepState guards — every field H4 needs must be non-empty
         //     BEFORE any external side effect (§4C Resumable classification
         //     for external preconditions).
         if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var tenantId))
@@ -315,52 +345,59 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H4 (ADR-027 D4). H1 subscription-readiness MUST populate this.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // Task 245a (G25): the next four values are H2a's outputs (Bicep ARM outputs persisted
+        // to InterStepState) — never run parameters. A blank value means H2a has not completed.
+        var interStepState = run.InterStepState;
+        var keyVaultName = interStepState.KeyVaultName;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 KvSecretsPopulationRejectionCodes.MissingKeyVaultName,
-                "Run parameter 'keyVaultName' is required by H4 (target vault for all writes; §7.9 canonical sprk-{env}-kv).",
+                "InterStepState.keyVaultName (the customer Key Vault — target vault for all writes; §7.9 canonical " +
+                "sprk-{env}-kv) is not populated. It is H2a's output (Bicep ARM output keyVaultName); H2a MUST " +
+                "complete before H4 dispatches.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, ResourceGroupNameParameterKey, out var resourceGroupName))
+        var resourceGroupName = interStepState.ResourceGroupName;
+        if (string.IsNullOrWhiteSpace(resourceGroupName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 KvSecretsPopulationRejectionCodes.MissingResourceGroupName,
-                "Run parameter 'resourceGroupName' is required by H4 (T1 App Service PATCH + T5 slot MI reads).",
+                "InterStepState.resourceGroupName (T1 App Service PATCH + T5 slot MI reads) is not populated. " +
+                "It is H2a's output (Bicep ARM output resourceGroupName); H2a MUST complete before H4 dispatches.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, AppServiceNameParameterKey, out var appServiceName))
+        var appServiceName = interStepState.AppServiceName;
+        if (string.IsNullOrWhiteSpace(appServiceName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 KvSecretsPopulationRejectionCodes.MissingAppServiceName,
-                "Run parameter 'appServiceName' is required by H4 (T1 App Service PATCH).",
+                "InterStepState.appServiceName (T1 App Service PATCH) is not populated. It is H2a's output " +
+                "(Bicep ARM output appServiceName); H2a MUST complete before H4 dispatches.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, UamiResourceIdParameterKey, out var uamiResourceId))
+        var uamiResourceId = interStepState.MiResourceId;
+        if (string.IsNullOrWhiteSpace(uamiResourceId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 KvSecretsPopulationRejectionCodes.MissingUamiResourceId,
-                "Run parameter 'userAssignedIdentityResourceId' is required by H4 (T1 PATCH target). H2a Bicep MUST populate this.",
-                cancellationToken).ConfigureAwait(false);
-        }
-        if (!TryGetNonEmpty(parameters, SecretsVersionParameterKey, out var secretsVer))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                KvSecretsPopulationRejectionCodes.MissingSecretsVersion,
-                "Run parameter 'secretsVer' is required by H4 (idempotency key kv-{customerId}-{secretsVer}). " +
-                "MUST be the manifest content hash / semantic version per Phase H canonical secret-catalog manifest.",
+                "InterStepState.miResourceId (the UAMI resource id — T1 keyVaultReferenceIdentity PATCH target) is " +
+                "not populated. It is H2a's output (Bicep ARM output userAssignedIdentityResourceId); H2a MUST " +
+                "complete before H4 dispatches.",
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var stagingSlotName = TryGetNonEmpty(parameters, StagingSlotNameParameterKey, out var slot)
-            ? slot
-            : DefaultStagingSlotName;
+        // Staging slot: H2a's output (ARM output appServiceStagingSlotName); blank falls back to
+        // the app-service.bicep default.
+        var stagingSlotName = string.IsNullOrWhiteSpace(interStepState.AppServiceStagingSlotName)
+            ? DefaultStagingSlotName
+            : interStepState.AppServiceStagingSlotName;
         var rotateExisting = TryGetNonEmpty(parameters, RotateExistingParameterKey, out var rotateRaw)
             && bool.TryParse(rotateRaw, out var rotateParsed)
             && rotateParsed;
-        var kvResourceId = TryGetNonEmpty(parameters, KeyVaultResourceIdParameterKey, out var kvRid)
-            ? kvRid
-            : BuildKvResourceId(subscriptionId, resourceGroupName, keyVaultName);
+        // The vault resource id is always derived — there is no accepted intake key that
+        // could override it (task 245a removed the never-supplied keyVaultResourceId override).
+        var kvResourceId = BuildKvResourceId(subscriptionId, resourceGroupName, keyVaultName);
         var upgradeMode = TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out var provisionedOnRaw)
             && !string.IsNullOrWhiteSpace(provisionedOnRaw);
         var omitCanonicalNames = TryGetNonEmpty(parameters, FicOmitSecretNamesParameterKey, out var ficOmitRaw)
@@ -369,22 +406,32 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 StringComparer.Ordinal)
             : new HashSet<string>(StringComparer.Ordinal);
 
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, secretsVer);
-
-        // (3) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        // Row A38a (task 205a, 2026-08-25 — auth-v4 §9.1 OMIT-is-the-signal):
+        // on secret-free environments, union the A38a targets into the
+        // EXISTING task-126 FR-39 omit seam above (same
+        // KvSecretWriteRequest.OmitCanonicalNames -> KvSecretWriteAction.Omitted
+        // path the operator's ficOmitSecretNames parameter uses — no parallel
+        // seam, per task 125's "no special-casing" commitment). This is
+        // defense-in-depth BEHIND FileKvSecretManifest's served-entry filter:
+        // it also protects against any manifest implementation that serves the
+        // targets unfiltered. Q3 Path A rollback re-includes
+        // them. Task 225b (G21): the target set is BFF-API-ClientSecret +
+        // Dataverse-ClientSecret — neither is created in a secret-free environment.
+        var secretFreeOmitActive = _options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback;
+        if (secretFreeOmitActive)
         {
+            omitCanonicalNames.UnionWith(FileKvSecretManifest.SecretFreeIdentityOmitTargets);
             _logger.LogInformation(
-                "H4 idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
+                "H4 A38a secret-free omit active: runId={RunId} customerId={CustomerId} — unioned " +
+                "{Targets} into the FR-39 OmitCanonicalNames seam (omit-set size now {Size})",
+                envelope.RunId, envelope.CustomerId,
+                string.Join(", ", FileKvSecretManifest.SecretFreeIdentityOmitTargets), omitCanonicalNames.Count);
         }
 
-        // (4) Read the manifest. Failure here is Resumable (external precondition
-        //     — operator resolves manifest source + resumes; NO writes have
-        //     happened yet so partial-state guarantees hold).
+        // (3) Read the manifest. Failure here is Resumable (external precondition —
+        //     NO writes have happened yet so partial-state guarantees hold). Its content
+        //     version is this handler's secretsVer (task 245b — formerly a run parameter
+        //     nothing wrote, so every real run stopped here).
         KvSecretManifestReadResult manifestResult;
         try
         {
@@ -398,7 +445,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.Resumable,
                 KvSecretsPopulationRejectionCodes.ManifestReadFailed,
                 $"Canonical secret-catalog manifest read failed: {ex.GetType().Name}: {ex.Message}. " +
-                "Verify the Phase H manifest source is reachable + the L2 UAMI has read access.",
+                "Verify the embedded scripts/canonical-secret-catalog/manifest.yaml resource is intact.",
                 cancellationToken).ConfigureAwait(false);
         }
 
@@ -410,7 +457,34 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        var entries = ((KvSecretManifestReadResult.Success)manifestResult).Entries;
+        var manifest = (KvSecretManifestReadResult.Success)manifestResult;
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, manifest.ContentVersion);
+
+        // (4) Level-3 idempotency: durable no-op on duplicate.
+        if (run.CompletedPhases.Any(cp =>
+                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
+                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        {
+            _logger.LogInformation(
+                "H4 idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, idempotencyKey);
+            return new HandlerResult.Success(idempotencyKey);
+        }
+
+        var allEntries = manifest.Entries;
+
+        // Task 245a (G25): entries H3 writes itself (value_source: written-by-h3 — BFF-API-ClientId,
+        // BFF-API-Audience) are not H4's to write or resolve. H3 runs AFTER H4 (it needs this handler's
+        // vault RBAC bootstrap), so waiting for them here deadlocked every real run.
+        var entries = allEntries.Where(e => e.ValueSource != KvSecretValueSource.WrittenByEntraAppReg).ToList();
+        if (entries.Count != allEntries.Count)
+        {
+            _logger.LogInformation(
+                "H4 skipping {Count} manifest entries written by H3 (EntraAppReg): {Names}",
+                allEntries.Count - entries.Count,
+                string.Join(", ", allEntries.Where(e => e.ValueSource == KvSecretValueSource.WrittenByEntraAppReg)
+                    .Select(e => e.CanonicalName)));
+        }
 
         // (5) BINDING pre-check — refuse to proceed if any manifest entry has
         //     a Delete op targeting a never-delete canonical name. This MUST
@@ -431,21 +505,59 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
-        // Task 200: FromSharedService entries belong to
-        // H4SharedKvSecretsPopulationHandler (targets the SHARED KV, not the
-        // per-tenant KV). Filter them out here BEFORE the writer sees them so
-        // the KvSecretValueResolver never hits its FromSharedService branch
-        // during a per-tenant H4 run. The manifest is the single source of
-        // truth for both flows; the tier-split lives in the handler.
-        var perTenantEntries = entries
-            .Where(e => e.ValueSource != KvSecretValueSource.FromSharedService)
-            .ToList();
+        // T226 (2026-09-30): every manifest entry targets the customer's own vault —
+        // the former from-shared-service split (task 200 H4-shared) is retired.
 
         _logger.LogInformation(
             "H4 manifest loaded: runId={RunId} customerId={CustomerId} entryCount={EntryCount} " +
-            "perTenantCount={PerTenantCount} sharedSkipped={SharedSkipped} upgradeMode={UpgradeMode} rotate={Rotate}",
-            envelope.RunId, envelope.CustomerId, entries.Count, perTenantEntries.Count,
-            entries.Count - perTenantEntries.Count, upgradeMode, rotateExisting);
+            "upgradeMode={UpgradeMode} rotate={Rotate}",
+            envelope.RunId, envelope.CustomerId, entries.Count, upgradeMode, rotateExisting);
+
+        // (5.5) HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18:
+        //       bootstrap KV Secrets Officer role on the target vault for the
+        //       operator principal BEFORE the first SecretClient.SetSecretAsync
+        //       call. Fresh RBAC-enabled KVs deny data-plane access even to
+        //       subscription Owner; SESSION 2 hit this on BOTH per-tenant and
+        //       shared KVs and manually granted the role. Automating this here
+        //       eliminates the dead-loop halt.
+        //       Idempotent — no-op when the role assignment already exists.
+        //       Domain failure → Resumable + specific rejection code (operator
+        //       manually grants + resumes).
+        try
+        {
+            var bootstrapRequest = new OperatorKvRbacBootstrapRequest(
+                SubscriptionId: subscriptionId,
+                ResourceGroupName: resourceGroupName,
+                KeyVaultName: keyVaultName,
+                KeyVaultResourceId: kvResourceId,
+                // Task 245b (🔒 owner-approved 2026-10-01): the principal that WRITES the secrets — L2's
+                // own identity (validated configuration). Never the stamp's BFF UAMI
+                // (InterStepState.MiObjectId): it only reads its vault (Secrets User, customer.bicep),
+                // and granting it Secrets Officer gave the customer workload write access to its own
+                // secrets while leaving the real writer without any.
+                PrincipalObjectId: _identity.CanonicalPrincipalObjectId(),   // validated at startup (task 249: shared option)
+                RoleDefinitionId: KvBuiltInRoleIds.SecretsOfficer);
+            var bootstrapOutcome = await _operatorKvRbacBootstrapper
+                .EnsureGrantedAsync(bootstrapRequest, cancellationToken).ConfigureAwait(false);
+            if (bootstrapOutcome is OperatorKvRbacBootstrapOutcome.Failure bootstrapFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed,
+                    bootstrapFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "H4 operator-KV-RBAC bootstrap infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed,
+                $"Operator-KV-RBAC bootstrap infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                "Manual role grant (Key Vault Secrets Officer) required on the vault before resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
 
         // (6) Invoke the writer. Domain outcomes (per-entry Failed / whole-writer
         //     Failure) do NOT throw; only infra faults do. Classification:
@@ -460,11 +572,12 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 CustomerId: envelope.CustomerId,
                 TargetKeyVaultName: keyVaultName,
                 SubscriptionId: subscriptionId,
-                Entries: perTenantEntries,
+                Entries: entries,
                 UpgradeMode: upgradeMode,
                 RotateExisting: rotateExisting,
                 SecretParameters: new Dictionary<string, KeyVaultSecretRef>(run.Parameters.Secrets, StringComparer.Ordinal),
-                OmitCanonicalNames: omitCanonicalNames);
+                OmitCanonicalNames: omitCanonicalNames,
+                IntakeValues: BuildIntakeValues(run.Parameters.NonSecret));
             writeOutcome = await _writer.WriteAsync(writeRequest, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
@@ -630,12 +743,60 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
                 .ConfigureAwait(false);
         }
 
+        // (10.5) Row A38a positive migration marker (auth-v4 §9.1: the marker
+        //        lives OUTSIDE the credential slots — KV resource tag
+        //        spaarke-secret-free-identity=true + registry state field
+        //        sprk_credentialmode=secret-free). Applied once per vault:
+        //        under Model 2 the per-customer dispatch fan-out invokes H4
+        //        once per customer vault, so this single call IS the
+        //        once-per-vault application (no extra iteration pass).
+        //        Idempotent (tag: check-then-apply; registry: value-idempotent
+        //        PATCH; Level-3 idempotency above short-circuits re-runs
+        //        entirely). Failure is Resumable + FAIL-LOUD — an unmarked
+        //        secret-free vault is the §5.3 fleet-consistency gap. NOT
+        //        applied under Q3 Path A rollback (env is not secret-free).
+        if (secretFreeOmitActive)
+        {
+            SecretFreeMarkerApplyOutcome markerOutcome;
+            try
+            {
+                markerOutcome = await _markerApplier.ApplyAsync(
+                    new SecretFreeMarkerApplyRequest(
+                        SubscriptionId: subscriptionId,
+                        ResourceGroupName: resourceGroupName,
+                        KeyVaultName: keyVaultName,
+                        TenantId: tenantId,
+                        CustomerIdForLog: envelope.CustomerId,
+                        RunIdForLog: envelope.RunId),
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H4 A38a marker applier infrastructure fault: runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed,
+                    $"A38a marker applier infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                    "KV writes/omits succeeded; marker application is idempotent — fix cause + resume.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (markerOutcome is SecretFreeMarkerApplyOutcome.Failure markerFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed,
+                    markerFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
         // (11) All post-conditions cleared — advance Cosmos state. Downstream
         //      reconciler (wave C5) fans out to H7.
         stopwatch.Stop();
         var wroteCount = writeResults.Count(r => r.Action == KvSecretWriteAction.Wrote);
         var skippedCount = writeResults.Count(r => r.Action == KvSecretWriteAction.SkippedRotationSafe);
         var deletedCount = writeResults.Count(r => r.Action == KvSecretWriteAction.Deleted);
+        var omittedCount = writeResults.Count(r => r.Action == KvSecretWriteAction.Omitted);
         var t5Summary = t5Result switch
         {
             SlotIdentityRoleGrantResult.Granted => "granted-both-slots",
@@ -644,8 +805,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         };
         _logger.LogInformation(
             "H4 KV secrets population succeeded: runId={RunId} customerId={CustomerId} " +
-            "wrote={Wrote} skipped-rotation-safe={Skipped} deleted={Deleted} t1=cleared t5={T5} durationMs={DurationMs}",
-            envelope.RunId, envelope.CustomerId, wroteCount, skippedCount, deletedCount, t5Summary, stopwatch.ElapsedMilliseconds);
+            "wrote={Wrote} skipped-rotation-safe={Skipped} deleted={Deleted} omitted-fr39={Omitted} " +
+            "secretFree={SecretFree} t1=cleared t5={T5} durationMs={DurationMs}",
+            envelope.RunId, envelope.CustomerId, wroteCount, skippedCount, deletedCount, omittedCount,
+            secretFreeOmitActive, t5Summary, stopwatch.ElapsedMilliseconds);
 
         return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, cancellationToken)
             .ConfigureAwait(false);
@@ -664,10 +827,10 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     }
 
     /// <summary>
-    /// Builds the canonical KV resource id from subscription + rg + vault name.
-    /// Used when the operator does not pass an explicit
-    /// <see cref="KeyVaultResourceIdParameterKey"/> — the standard shape
-    /// suffices for the T5 role-assignment scope.
+    /// Builds the canonical KV resource id from subscription (run parameter) +
+    /// resource group + vault name (both H2a outputs on InterStepState). This is
+    /// the ONLY source of the vault resource id — the standard shape suffices for
+    /// the operator-RBAC bootstrap and T5 role-assignment scopes.
     /// </summary>
     internal static string BuildKvResourceId(string subscriptionId, string resourceGroupName, string keyVaultName)
     {
@@ -681,7 +844,11 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     /// Detects candidate cleartext-secret patterns in a value. Exposed
     /// internal so unit tests can validate the guard's coverage. Values
     /// starting with <c>@Microsoft.KeyVault(</c> are treated as safe KV URI
-    /// references. Parity with H3's IsCleartextSecretPattern.
+    /// references. A DNS host name — bare (<c>ServiceBusFullyQualifiedNamespace</c>) or as an
+    /// http(s) URI's host (the endpoint fields) — is not secret-shaped: real Azure host names run past
+    /// 40 characters (<c>spaarke-acme-prod-cosmos.documents.azure.com</c> is 44), and before task 245a
+    /// that tripped the guard on every real run. A URI's user-info, path, query and fragment are still
+    /// checked — a credential can ride there (a SAS <c>sig=</c>, a token in a webhook path).
     /// </summary>
     internal static bool IsCleartextSecretPattern(string? value)
     {
@@ -690,7 +857,16 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
 
         try
         {
-            return CleartextSecretPattern.IsMatch(value);
+            if (DnsHostName.IsMatch(value)) return false;
+
+            var checkedPart = value;
+            if (Uri.TryCreate(value, UriKind.Absolute, out var uri)
+                && (uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp)
+                && DnsHostName.IsMatch(uri.IdnHost))
+            {
+                checkedPart = $"{uri.UserInfo} {uri.PathAndQuery} {uri.Fragment}";
+            }
+            return CleartextSecretPattern.IsMatch(checkedPart);
         }
         catch (RegexMatchTimeoutException)
         {
@@ -698,30 +874,58 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         }
     }
 
+    /// <summary>
+    /// Every string property of <see cref="InterStepState"/>, by reflection — so a property added later
+    /// (task 245a added seven) is covered without anyone remembering to list it here.
+    /// </summary>
+    private static readonly System.Reflection.PropertyInfo[] InterStepStateStringProperties =
+        typeof(InterStepState).GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance)
+            .Where(p => p.PropertyType == typeof(string) && p.CanRead)
+            .ToArray();
+
     private static (string Field, string Value)? FindCleartextSecretLeak(InterStepState state)
     {
-        (string, string?)[] pairs =
+        foreach (var property in InterStepStateStringProperties)
         {
-            (nameof(state.BffAppRegId), state.BffAppRegId),
-            (nameof(state.S2SAppRegId), state.S2SAppRegId),
-            (nameof(state.MiObjectId), state.MiObjectId),
-            (nameof(state.MiClientId), state.MiClientId),
-            (nameof(state.ContainerTypeId), state.ContainerTypeId),
-            (nameof(state.DataverseEnvUrl), state.DataverseEnvUrl),
-            (nameof(state.OpenAiEndpoint), state.OpenAiEndpoint),
-            (nameof(state.AiSearchEndpoint), state.AiSearchEndpoint),
-            (nameof(state.CosmosEndpoint), state.CosmosEndpoint),
-            (nameof(state.SystemUserId), state.SystemUserId),
-            (nameof(state.SpeConsentCorrelationId), state.SpeConsentCorrelationId),
-        };
-        foreach (var (field, value) in pairs)
-        {
+            var value = (string?)property.GetValue(state);
             if (IsCleartextSecretPattern(value))
             {
-                return (field, value!);
+                return (property.Name, value!);
             }
         }
         return null;
+    }
+
+    /// <summary>
+    /// Manifest canonical name → the INTAKE parameter (IntakeParameterCatalog) that carries its value, for
+    /// manifest <c>value_source: from-topology-constants</c> (T226 — SPE-ContainerTypeId; H8 reads the same
+    /// key) and <c>value_source: from-intake-parameter</c> (task 245a — TenantId; task 245c — Communication-DefaultMailbox).
+    /// </summary>
+    internal static readonly IReadOnlyDictionary<string, string> IntakeValueParameterKeys =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["SPE-ContainerTypeId"] = IntakeParameterCatalog.ContainerTypeId,
+            ["TenantId"] = IntakeParameterCatalog.TenantId,
+            ["Communication-DefaultMailbox"] = IntakeParameterCatalog.CommunicationDefaultMailbox,   // task 245c
+        };
+
+    /// <summary>
+    /// Projects the run's non-secret parameters onto the canonical names in
+    /// <see cref="IntakeValueParameterKeys"/>. Absent / blank parameters are left out, so the
+    /// resolver reports the missing value against the canonical name.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BuildIntakeValues(
+        IDictionary<string, string> nonSecretParameters)
+    {
+        var values = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var (canonicalName, parameterKey) in IntakeValueParameterKeys)
+        {
+            if (TryGetNonEmpty(nonSecretParameters, parameterKey, out var value))
+            {
+                values[canonicalName] = value.Trim();
+            }
+        }
+        return values;
     }
 
     private static bool TryGetNonEmpty(

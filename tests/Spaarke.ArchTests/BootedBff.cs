@@ -29,9 +29,11 @@ namespace Spaarke.ArchTests;
 ///   <item>Hosted services are removed: they are background workers (Service Bus processors, schedulers) that would
 ///   connect to the fake endpoints in the configuration. They map no route and register no policy.</item>
 ///   <item>Production needs a reachable Redis (<c>CacheModule</c> connects at registration with
-///   <c>AbortOnConnectFail</c>), so the Production boot points <c>Redis:ConnectionString</c> at
+///   <c>AbortOnConnectFail</c>), so the Production boot points <c>Redis:Endpoint</c> at
 ///   <see cref="HandshakeOnlyRedis"/>, a loopback listener that answers StackExchange.Redis's connect handshake and
-///   nothing else. The cache is never used: no request is sent.</item>
+///   nothing else. Since master T242 a Production BFF connects only by its managed identity over TLS, so the boot swaps
+///   the two network steps (<c>CacheModule.NetworkStepsForBootedHostTests</c>) for a plain RESP2 connect; the mode
+///   selection itself runs unchanged. The cache is never used: no request is sent.</item>
 ///   <item>Configuration is the fake values every BFF test host uses, plus what Production's fail-fast validators
 ///   demand (an HTTPS CORS origin, a customer id, the public config, the onboarding HMAC key, an Application Insights
 ///   connection string pointed at a closed loopback port). Every feature gate that decides whether a route group is
@@ -77,7 +79,22 @@ public sealed class BootedApp : IDisposable
     {
         Environment = environment;
         _redis = environment == Environments.Development ? null : new HandshakeOnlyRedis();
-        _factory = new BffFactory(environment, _redis?.ConnectionString);
+        _factory = new BffFactory(environment, _redis?.Endpoint);
+        if (_redis is not null)
+        {
+            // Master T242: a Production BFF reaches Redis ONLY by its managed identity over TLS (no connection string outside
+            // Development/Testing). The mode selection runs unchanged (the endpoint is required and parsed); only the two
+            // network steps are swapped for the loopback listener, which speaks plain RESP2 and needs no Entra token.
+            Sprk.Bff.Api.Infrastructure.DI.CacheModule.NetworkStepsForBootedHostTests = (
+                (_, _) => Task.CompletedTask,
+                options =>
+                {
+                    options.Ssl = false;
+                    options.Protocol = StackExchange.Redis.RedisProtocol.Resp2;
+                    return StackExchange.Redis.ConnectionMultiplexer.Connect(options);
+                });
+        }
+
         try
         {
             Services = _factory.Services;
@@ -92,6 +109,11 @@ public sealed class BootedApp : IDisposable
             _factory.Dispose();
             _redis?.Dispose();
             throw;
+        }
+        finally
+        {
+            // Consulted only while Program registers its modules; never left set for anything else in the process.
+            Sprk.Bff.Api.Infrastructure.DI.CacheModule.NetworkStepsForBootedHostTests = null;
         }
     }
 
@@ -241,7 +263,7 @@ public sealed class BootedApp : IDisposable
             else
             {
                 settings["Redis:Enabled"] = "true";
-                settings["Redis:ConnectionString"] = redisConnectionString;
+                settings["Redis:Endpoint"] = redisConnectionString;   // host:port, as a Production App Service carries it
                 settings["Redis:InstanceName"] = "archtests:";
             }
 
@@ -271,7 +293,8 @@ internal sealed class HandshakeOnlyRedis : IDisposable
         _ = Task.Run(AcceptLoopAsync);
     }
 
-    public string ConnectionString => $"127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port},abortConnect=true";
+    /// <summary>host:port — the shape of <c>Redis__Endpoint</c> (master T242: no credential, no options).</summary>
+    public string Endpoint => $"127.0.0.1:{((IPEndPoint)_listener.LocalEndpoint).Port}";
 
     public void Dispose()
     {

@@ -4,7 +4,7 @@
     <title>Refactor SPE scripts (Create-NewContainerType, Register-*, New-BusinessUnitContainer) to confidential-client (app-only) token</title>
     <phase>B Gap Automation Script Hardening</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies existing PowerShell scripts; not BFF code; tags include auth (SPE token acquisition). Per root CLAUDE.md §8, non-BFF auth-adjacent script work = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

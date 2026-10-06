@@ -4,7 +4,7 @@
     <title>Refactor RegistrationDataverseService ctor off DemoProvisioningOptions fallback (unblocks task 082)</title>
     <phase>E DemoExpirationService Migration</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'bff-api' + 'deploy'; modifies frozen BFF file at DI-singleton ctor consumed by IHostedService (boot-path); requires pre-deploy Azure App Service config mutation with rollback plan. Fix-drift-at-discovery follow-up to task 082 POML escalation.</rigor-reason>
     <model-tier>sonnet</model-tier>

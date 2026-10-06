@@ -4,7 +4,7 @@
     <title>Add H0 preflight quota-check PowerShell prep (Azure OpenAI TPM, Dataverse env-creation rate, subscription vCPU, SPE cert-bootstrap)</title>
     <phase>B Gap Automation Script Hardening</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>New PowerShell prep modules for a downstream C4 handler; azure-deployment scope; not BFF code. Per root CLAUDE.md §8, script/prep work with explicit constraints = STANDARD.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -21,7 +21,7 @@
 //
 // ARTIFACT PACKAGING (DS-1b §1 H6 row — "solution ZIPs must become versioned
 // publish/content artifacts, not files assumed present on a local shell's
-// filesystem"): the 8 solution ZIPs are resolved from the SAME
+// filesystem"): the 9 solution ZIPs are resolved from the SAME
 // `provisioning-artifacts` blob container task 116 (BFF zip)/117 (ARM JSON)/
 // 132 (H9 artifact) already publish to, via a small solution-specific
 // manifest (`dataverse-solutions-latest.json` by default — see
@@ -95,7 +95,7 @@
 // pattern H7's DataverseWebApiEnvVarValuesWriter uses). Token audience is the
 // target Dataverse env's origin + `/.default` (Dataverse Web API convention,
 // parity with DataverseWebApiHealthProbe / DataverseWebApiEnvVarValuesWriter).
-// Blob-artifact resolution (fetching the 8 solution ZIPs from Spaarke's OWN
+// Blob-artifact resolution (fetching the 9 solution ZIPs from Spaarke's OWN
 // provisioning-artifacts storage account) uses a SEPARATE, unrelated
 // credential — the shared L2 UAMI TokenCredential singleton (ADR-028
 // MI-outbound), injected via the pre-constructed BlobContainerClient (parity
@@ -130,9 +130,9 @@ using System.Text.Json;
 using System.Xml.Linq;
 using Azure;
 using Azure.Core;
-using Azure.Identity;
 using Azure.Storage.Blobs;
 using Microsoft.Extensions.Options;
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
@@ -168,12 +168,23 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
     private readonly Func<string, string, string, TokenCredential> _credentialFactory;
     private readonly ILogger<DataverseWebApiSolutionImporter> _logger;
 
-    /// <summary>Constructs the importer bound to a typed <see cref="HttpClient"/> (production via <c>services.AddSingleton</c> factory in Worker/Program.cs).</summary>
+    /// <summary>
+    /// Constructs the importer bound to a typed <see cref="HttpClient"/>
+    /// (production via <c>services.AddSingleton</c> factory in
+    /// Worker/Program.cs). A44.5 (task 205i): the credential is selected by
+    /// the FR-39 ordered chain (<paramref name="credentialFactory"/> over
+    /// <c>SolutionImportOptions:Credentials:Order</c> — MI-FIC first on
+    /// secret-free envs; ClientSecret only for prong-3 unmigrated envs),
+    /// mirroring master's <c>DataverseServiceClientImpl</c> migration. Raw
+    /// <c>ClientSecretCredential</c> construction lives ONLY in the factory's
+    /// fallback branch — never on the secret-free branch.
+    /// </summary>
     public DataverseWebApiSolutionImporter(
         HttpClient httpClient,
         BlobContainerClient artifactsContainer,
         ISolutionCatalog catalog,
         IOptions<SolutionImportOptions> options,
+        WorkerDataverseCredentialFactory credentialFactory,
         ILogger<DataverseWebApiSolutionImporter> logger)
         : this(
             httpClient,
@@ -182,14 +193,24 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
             options,
             logger,
             TimeProvider.System,
-            (tenantId, clientId, clientSecret) => new ClientSecretCredential(tenantId, clientId, clientSecret))
+            (tenantId, clientId, clientSecret) => credentialFactory
+                .Create(
+                    options.Value.Credentials,
+                    SolutionImportOptions.SectionName,
+                    tenantId,
+                    clientId,
+                    string.IsNullOrWhiteSpace(clientSecret) ? null : clientSecret)
+                .Credential)
     {
+        ArgumentNullException.ThrowIfNull(credentialFactory);
     }
 
     /// <summary>
     /// Test seam constructor — injects a <paramref name="credentialFactory"/>
-    /// (so tests never invoke the real ClientSecretCredential network path)
+    /// (so tests never invoke a real credential network path)
     /// alongside a fake-transport <see cref="HttpClient"/> + <see cref="TimeProvider"/>.
+    /// The delegate's third parameter is the resolved secret slot value —
+    /// EMPTY STRING on secret-free environments (A44.5).
     /// </summary>
     internal DataverseWebApiSolutionImporter(
         HttpClient httpClient,
@@ -225,7 +246,8 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ClientSecret);
+        // A44.5: ClientSecret deliberately NOT required — empty on secret-free
+        // envs (the signal, §9.1); the FR-39 credential factory selects MI-FIC.
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TargetDataverseUrl);
 
         if (!Uri.TryCreate(request.TargetDataverseUrl, UriKind.Absolute, out var envUri))
@@ -249,7 +271,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                 SolutionImportFailureKind.MissingSolutionZips,
                 $"Solution artifact manifest '{_options.SolutionArtifactManifestBlobName}' not found in the " +
                 "'provisioning-artifacts' blob container. H6 refuses to fall back to a local filesystem path — " +
-                "the 8 solution ZIPs must be published as versioned blob artifacts (DS-1b §1 H6 invariant).");
+                "the 9 solution ZIPs must be published as versioned blob artifacts (DS-1b §1 H6 invariant).");
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
@@ -259,18 +281,26 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                 $"{ex.GetType().Name}: {ex.Message}.");
         }
 
-        var credential = _credentialFactory(request.TenantId, request.ClientId, request.ClientSecret);
         var scope = $"{new Uri(envUri, "/")}".TrimEnd('/') + "/.default";
 
         AccessToken token;
         try
         {
+            // A44.5: credential selection (FR-39 ordered chain in production;
+            // fake in tests) can itself throw on an exhausted chain — classify
+            // as AuthFailure (→ §4C Resumable at the handler), same boundary
+            // as a failed token acquisition.
+            var credential = _credentialFactory(
+                request.TenantId, request.ClientId, request.ClientSecret ?? string.Empty);
             token = await credential.GetTokenAsync(new TokenRequestContext(new[] { scope }), cancellationToken)
                 .ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogWarning(ex, "H6 importer token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
+            // Prefix convention preserved (parity with the verifier's task-141
+            // test contract); credential-SELECTION failures carry their own
+            // "No credential could be selected …" inner message.
+            _logger.LogWarning(ex, "H6 importer credential selection / token acquisition failed for env={EnvUrl}", request.TargetDataverseUrl);
             return new SolutionImportOutcome.Failure(
                 SolutionImportFailureKind.AuthFailure,
                 $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");

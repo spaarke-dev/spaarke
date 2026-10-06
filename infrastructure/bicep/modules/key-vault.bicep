@@ -62,7 +62,7 @@ param adminPrincipalIds array = []
 // DIAGNOSTIC SETTINGS PARAMETERS
 // ============================================================================
 
-@description('Log Analytics workspace ID for audit logs (empty to skip)')
+@description('ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip')
 param logAnalyticsWorkspaceId string = ''
 
 // ============================================================================
@@ -128,9 +128,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 //
 //   Secrets requiring rotation (canonical names per
 //   scripts/canonical-secret-catalog/manifest.yaml; task 086 alignment):
-//     Redis-ConnectionString, ServiceBus-ConnectionString,
+//     ServiceBus-ConnectionString,
 //     Storage-ConnectionString, AzureOpenAI-ApiKey, AiSearch--AdminKey,
-//     DocumentIntelligence-ApiKey, Communication-WebhookClientState
+//     Communication-WebhookClientState (DocumentIntelligence-ApiKey retired by T243;
+//     Redis-ConnectionString retired by T242 -- Azure Managed Redis has no access keys;
+//     T226 retired the ServiceBus / AzureOpenAI / AiSearch / Storage keys on customer stamps)
 //
 //   Expiry: 365 days | Notify: 30 days before expiry
 //

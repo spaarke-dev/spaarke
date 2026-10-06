@@ -9,6 +9,14 @@
 // PATTERN PARITY: mirrors Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs
 // and Handlers/DataverseAppUserGraphParity/H10Rejections.cs — one const per
 // failure branch + lowercase kebab-case for greppability.
+//
+// STABILITY: these codes are API contract. Since task 245c, POST /api/runs
+// returns the intake ones (identityPreset / usersJson) as its ProblemDetails
+// `errorCode` (ADR-019) — renaming one breaks callers that branch on it.
+//
+// PERSONAL DATA (owner decision D15, task 245c): diagnostics identify a user by
+// its 1-based position in usersJson or its Entra object id — never by name,
+// email or UPN (they flow to run.ErrorDetail and to logs).
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
@@ -38,20 +46,29 @@ public static class H11Rejections
     public const string MalformedUsersPayload = "userprov-malformed-users-payload";
 
     /// <summary>
+    /// A <c>usersJson</c> entry is null, lacks a first or last name (NativeAccount) or an email (B2BGuest) — task
+    /// 245c. Checked for the whole list before the first Graph call (<see cref="UserProvisioningIntake"/>).
+    /// </summary>
+    public const string InvalidUserEntry = "userprov-invalid-user-entry";
+
+    /// <summary>Run parameter <c>usersJson</c> has more than <see cref="UserProvisioningIntake.MaxUsers"/> entries — task 245c.</summary>
+    public const string TooManyUsers = "userprov-too-many-users";
+
+    /// <summary>
     /// NativeAccount branch: Graph user creation failed for a specific user
-    /// (diagnostic names the user).
+    /// (diagnostic gives the user's position in usersJson).
     /// </summary>
     public const string UserCreationFailed = "userprov-user-creation-failed";
 
     /// <summary>
     /// NativeAccount branch: license assignment failed for a specific user
-    /// (diagnostic names the user) — DISTINCT rejection code per acceptance
+    /// (diagnostic gives its position + Entra object id) — DISTINCT rejection code per acceptance
     /// criterion; classified RetryableWithCleanup (user account already
     /// exists; assignLicense is itself idempotent).
     /// </summary>
     public const string LicenseAssignmentFailed = "userprov-license-assignment-failed";
 
-    /// <summary>B2BGuest branch: Graph invitation failed for a specific user (diagnostic names the user).</summary>
+    /// <summary>B2BGuest branch: Graph invitation failed for a specific user (diagnostic gives its position in usersJson).</summary>
     public const string B2BInvitationFailed = "userprov-b2b-invitation-failed";
 
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>

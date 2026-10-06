@@ -4,7 +4,7 @@
     <title>Implement H13 E2E Acceptance-Gate Handler (verifies ALL 6 T1–T6 traps + ALL 5 I1–I5 invariants + naming + cost)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','deploy'; modifies .cs files; final acceptance gate — asserts EVERY trap + invariant + naming + cost; deployment-touching (gates registry Setup Status transition to Ready).</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -46,8 +46,15 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 /// requested capacity + region so the operator can file a quota-bump
 /// request or resolve the missing precondition without further probing.
 /// </param>
+/// <param name="RejectionCode">
+/// Optional: the machine-stable rejection code for THIS failure, when one
+/// check can fail for distinct operator-actionable reasons (task 248 —
+/// <see cref="SpeOwnerCredentialProbe"/>). <c>null</c> = H0 derives the code
+/// from <see cref="CheckName"/>. Ignored when <see cref="Passed"/> is true.
+/// </param>
 public sealed record PreflightCheckResult(
     string CheckName,
     bool Passed,
     JsonElement Headroom,
-    string Diagnostic);
+    string Diagnostic,
+    string? RejectionCode = null);

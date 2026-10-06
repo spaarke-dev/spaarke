@@ -8,7 +8,7 @@
 // Azure.Security.KeyVault.Secrets.SecretClient
 // (SetSecretAsync/GetSecretAsync/StartDeleteSecretAsync) under
 // DefaultAzureCredential pinned to the L2 UAMI — parity with
-// <see cref="Preflight.KeyVaultCertBootstrapProbe"/> (task 120), which
+// task 120's KeyVaultCertBootstrapProbe (retired by task 248), which
 // verified the installed 4.11.0 package's SecretClient shape via reflection
 // before writing that file; this port reuses the SAME ground-truthed shapes
 // (SetSecretAsync(name,value,ct), GetSecretAsync(name,version,ct) throwing
@@ -60,7 +60,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 /// <summary>
 /// Calls Azure.Security.KeyVault.Secrets.SecretClient for each manifest entry.
 /// Constructed with a <see cref="TokenCredential"/> (SecretClient is built
-/// per-vault-per-call, matching <see cref="Preflight.KeyVaultCertBootstrapProbe"/>'s
+/// per-vault-per-call, matching the retired KeyVaultCertBootstrapProbe's
 /// posture — the vault name is a per-run parameter) plus an <see cref="ArmClient"/>
 /// for the whole-writer prerequisite probe. Tests inject a
 /// <see cref="SecretClientOptions"/> built against a fake

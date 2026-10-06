@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "15734870157518315769"
+      "templateHash": "7859057405814127405"
     }
   },
   "parameters": {
@@ -75,13 +75,6 @@
         "description": "Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name \"BFF-API-ClientSecret\" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default)."
       }
     },
-    "azureOpenAiEndpointSecretName": {
-      "type": "string",
-      "defaultValue": "AzureOpenAI-Endpoint",
-      "metadata": {
-        "description": "Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name \"AzureOpenAI-Endpoint\" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c's Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs)."
-      }
-    },
     "githubActionsOidcPrincipalId": {
       "type": "string",
       "defaultValue": "",
@@ -101,6 +94,41 @@
       "defaultValue": "[if(startsWith(parameters('acrImageTag'), 'mcr.microsoft.com/'), 'Anonymous', 'UserAssigned')]",
       "metadata": {
         "description": "ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed."
+      }
+    },
+    "exchangeAdminAppId": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Client id of the 'Spaarke Exchange Admin' app registration the Worker signs in as for H14a (task 251, owner D24) -- through its federated identity credential that trusts the control-plane UAMI; no certificate, no secret. Threaded to modules/controlplane-worker-app-service.bicep (IntegrationWiring__ExchangeAdminAppId). Empty: the Worker and its sidecar start, and H14a reports \"not configured\" on first use -- never a placeholder value. Created by docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (Exchange admin app)."
+      }
+    },
+    "redisEndpoint": {
+      "type": "string",
+      "minLength": 1,
+      "metadata": {
+        "description": "Endpoint (host:port) of the per-environment Azure Managed Redis (spaarke-bff-redis-{env}; modules/redis.bicep output `redisEndpoint`, deployed with parameters/redis-{env}.bicepparam). Threaded to modules/controlplane-worker-app-service.bicep as Redis__Endpoint -- the Worker authenticates with the control-plane UAMI (access keys are disabled, task 242 / owner D12-D13), so that UAMI must be in the cache's access-policy list. Required: the Worker refuses to start without it outside Development/Testing."
+      }
+    },
+    "speContainerTypeOwners": {
+      "type": "array",
+      "defaultValue": [],
+      "metadata": {
+        "description": "SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app."
+      }
+    },
+    "customerRunGuardEnabled": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production."
+      }
+    },
+    "requireSecretFreeIdentity": {
+      "type": "bool",
+      "defaultValue": false,
+      "metadata": {
+        "description": "A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H7/H6 then authenticate via the Worker UAMI federated assertion. Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record)."
       }
     },
     "jwtTenantId": {
@@ -440,7 +468,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15519022507304554186"
+              "templateHash": "5920606518685923232"
             }
           },
           "parameters": {
@@ -549,7 +577,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+                "description": "ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip"
               }
             }
           },
@@ -1130,6 +1158,12 @@
           "serviceBusQueueName": {
             "value": "sprk-provisioning-jobs"
           },
+          "adminDataverseEnvironmentUrl": {
+            "value": "[parameters('adminDataverseEnvironmentUrl')]"
+          },
+          "customerRunGuardEnabled": {
+            "value": "[parameters('customerRunGuardEnabled')]"
+          },
           "appInsightsConnectionString": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-monitoring'), '2025-04-01').outputs.connectionString.value]"
           },
@@ -1144,7 +1178,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15868794668967312266"
+              "templateHash": "2515857833466178412"
             }
           },
           "parameters": {
@@ -1227,6 +1261,20 @@
               "defaultValue": "sprk-provisioning-jobs",
               "metadata": {
                 "description": "Name of the fleet-scoped Service Bus queue this App Service enqueues onto (DS-5 C5.1). Defaults to the canonical queue declared by task 108."
+              }
+            },
+            "adminDataverseEnvironmentUrl": {
+              "type": "string",
+              "minLength": 1,
+              "metadata": {
+                "description": "Admin Dataverse environment URL hosting the sprk_dataverseenvironment registry. Emitted as DataverseEnvironmentRegistry__AdminEnvironmentUrl: since REG-07 the Api host registers DataverseEnvironmentRegistryClient (CreateRun sanity-checks environmentId), whose options require it, and the CustomerRunGuard falls back to it as its TargetDataverseUrl (REG-05). Same value the Worker module receives. (Added task 242b, 2026-10-05: the Api module never emitted it.)"
+              }
+            },
+            "customerRunGuardEnabled": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "CustomerRunGuard kill-switch, emitted as CustomerRunGuard__Enabled. MUST equal the Worker module's value: the Api acquires the per-customer lock in POST /api/runs and the Worker releases it when a run ends, so a guard on in one host and off in the other leaves customers locked. The guard signs in as the UAMI (ManagedIdentity__ClientId) against adminDataverseEnvironmentUrl. (Added task 242b, 2026-10-05.)"
               }
             },
             "appInsightsConnectionString": {
@@ -1319,6 +1367,14 @@
                     {
                       "name": "ManagedIdentity__ClientId",
                       "value": "[parameters('uamiClientId')]"
+                    },
+                    {
+                      "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
+                      "value": "[parameters('adminDataverseEnvironmentUrl')]"
+                    },
+                    {
+                      "name": "CustomerRunGuard__Enabled",
+                      "value": "[string(parameters('customerRunGuardEnabled'))]"
                     },
                     {
                       "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
@@ -1440,9 +1496,6 @@
           "keyVaultName": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultName.value]"
           },
-          "keyVaultUri": {
-            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-keyvault'), '2025-04-01').outputs.keyVaultUri.value]"
-          },
           "serviceBusNamespaceName": {
             "value": "[variables('effectiveServiceBusNamespaceName')]"
           },
@@ -1455,14 +1508,32 @@
           "bffApiClientSecretName": {
             "value": "[parameters('bffApiClientSecretName')]"
           },
-          "azureOpenAiEndpointSecretName": {
-            "value": "[parameters('azureOpenAiEndpointSecretName')]"
-          },
           "acrImageTag": {
             "value": "[parameters('acrImageTag')]"
           },
           "sidecarAuthType": {
             "value": "[parameters('sidecarAuthType')]"
+          },
+          "exchangeAdminAppId": {
+            "value": "[parameters('exchangeAdminAppId')]"
+          },
+          "redisEndpoint": {
+            "value": "[parameters('redisEndpoint')]"
+          },
+          "controlPlanePrincipalId": {
+            "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-uami'), '2025-04-01').outputs.principalId.value]"
+          },
+          "speContainerTypeOwners": {
+            "value": "[parameters('speContainerTypeOwners')]"
+          },
+          "customerRunGuardTenantId": {
+            "value": "[variables('effectiveJwtTenantId')]"
+          },
+          "customerRunGuardEnabled": {
+            "value": "[parameters('customerRunGuardEnabled')]"
+          },
+          "requireSecretFreeIdentity": {
+            "value": "[parameters('requireSecretFreeIdentity')]"
           },
           "artifactsStorageContainerUri": {
             "value": "[reference(extensionResourceId(format('/subscriptions/{0}/resourceGroups/{1}', subscription().subscriptionId, variables('resourceGroupName')), 'Microsoft.Resources/deployments', 'controlplane-artifacts-storage'), '2025-04-01').outputs.blobUri.value]"
@@ -1481,7 +1552,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "15054058479504984665"
+              "templateHash": "13662544885713775605"
             }
           },
           "parameters": {
@@ -1540,12 +1611,6 @@
                 "description": "Key Vault name (for @Microsoft.KeyVault references in appSettings + sitecontainer environmentVariables)."
               }
             },
-            "keyVaultUri": {
-              "type": "string",
-              "metadata": {
-                "description": "Key Vault URI (https://{name}.vault.azure.net/) -- passed to the sitecontainer as PLATFORM_KV_URI so the sidecar can fetch the Exchange cert via App Service MSI at call time (DS-1b Section 3)."
-              }
-            },
             "serviceBusNamespaceName": {
               "type": "string",
               "metadata": {
@@ -1572,18 +1637,11 @@
                 "description": "Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name \"BFF-API-ClientSecret\" per scripts/canonical-secret-catalog/manifest.yaml -- BINDING never-delete). Consumed by EnvVarValuesOptions.ClientSecret (Sprk.Provisioning.ControlPlane.Core/Handlers/EnvVarValues/EnvVarValuesOptions.cs, task 142 -- H7 authenticates to each customer's target Dataverse environment via confidential-client credentials against this SAME shared multitenant BFF app-reg, the identity spec.md §9.1 v3 mandates for Model 1; H6 uses the identical pattern for solution import). REQUIRED as of task 142 (Wave G-4): EnvVarValuesOptions.Validate() fails fast at boot if the resolved value is unset (NFR-05) -- no kill-switch/Enabled flag exists for this seam by design (parity with adminDataverseEnvironmentUrl above)."
               }
             },
-            "azureOpenAiEndpointSecretName": {
+            "redisEndpoint": {
               "type": "string",
-              "defaultValue": "AzureOpenAI-Endpoint",
+              "minLength": 1,
               "metadata": {
-                "description": "Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name \"AzureOpenAI-Endpoint\" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint; single source of truth, not a second copy). Consumed by RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint (Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs, task 153 -- H12c writes this endpoint into every Model1Shared customer's sprk_aimodeldeployment rows; Model2Dedicated customers instead read InterStepState.OpenAiEndpoint from H2a's Bicep output and never consult this setting). Unlike adminDataverseEnvironmentUrl / bffApiClientSecretName, this field is CONDITIONALLY required (Model1Shared branch only) -- RuntimeReferencesOptions.Validate() deliberately does NOT fail-fast at boot on this being unset (task 153); the existing per-run runtime guard (H12cRuntimeReferencesHandler.cs) classifies a missing value as a Resumable failure on the affected run only, not a Worker-wide boot crash."
-              }
-            },
-            "redisConnectionStringSecretName": {
-              "type": "string",
-              "defaultValue": "Redis-ConnectionString",
-              "metadata": {
-                "description": "Name of the platform Key Vault secret holding the per-environment Redis connection string (canonical name \"Redis-ConnectionString\" per scripts/canonical-secret-catalog/manifest.yaml). Consumed by DispatchModule.cs:154-199 (Level-2 dispatch-idempotency IDistributedCache backing store, task 105 / DS-2 §4-L2): the code reads ConnectionStrings:Redis first, then Redis:ConnectionString, and THROWS at composition time (NFR-05 fail-fast) when neither is set and ASPNETCORE_ENVIRONMENT is not Development/Testing -- App Service defaults to Production, so omitting this app setting is a guaranteed Worker crash-loop (G-8 audit defect #6). The referenced Redis is the REAL per-environment instance (spaarke-bff-redis-{env}, provisioned by scripts/Deploy-RedisCache.ps1 via modules/redis.bicep -- platform-controlplane.bicep deliberately does not declare its own Redis); the secret must be seeded into THIS module's platform KV (sprk-controlplane-{env}-kv) by Seed-PlatformKeyVault.ps1 (G-8 Batch 4, defect #9) -- same seeding contract as bffApiClientSecretName / azureOpenAiEndpointSecretName above. We deliberately do NOT set ASPNETCORE_ENVIRONMENT=Development to bypass the gate: the fail-fast exists to prevent silent same-instance-only duplicate suppression in deployed multi-instance environments."
+                "description": "Endpoint (host:port) of the per-environment Azure Managed Redis (spaarke-bff-redis-{env}, modules/redis.bicep output `redisEndpoint`), emitted as Redis__Endpoint. Consumed by DispatchModule (Level-2 dispatch-idempotency IDistributedCache, task 105 / DS-2 §4-L2): with Redis__Endpoint set the Worker authenticates with its user-assigned identity (ManagedIdentity__ClientId) over RESP3 -- the cache has access keys disabled (task 242, owner D12/D13), so there is no connection string and no Key Vault secret. The Worker UAMI must hold an access-policy assignment on the cache (parameters/redis-{env}.bicepparam). Required: outside Development/Testing the Worker refuses to start without it (NFR-05 fail-fast; we do not set ASPNETCORE_ENVIRONMENT=Development to bypass it -- the gate prevents silent same-instance-only duplicate suppression in multi-instance environments). Not a secret."
               }
             },
             "artifactsStorageContainerUri": {
@@ -1602,7 +1660,7 @@
               "type": "string",
               "defaultValue": "mcr.microsoft.com/appsvc/staticsite:latest",
               "metadata": {
-                "description": "Container image reference for the DS-1b Exchange ApplicationAccessPolicy sidecar (task 114 built the Dockerfile; task 115 wires CI build+push to the platform ACR). Defaults to a public placeholder per this task POML escalation-trigger guidance -- REPLACE with the real ACR tag (e.g. {acrLoginServer}/sprk-provisioning-sidecar:{tag}) once task 115 lands; do not leave the placeholder in a live deploy."
+                "description": "Container image of the Exchange sidecar (H14a apply + H13 T4 read, RBAC for Applications -- task 251), e.g. {acrLoginServer}/provisioning-sidecar:{tag}, built by .github/workflows/build-provisioning-sidecar.yml or az acr build. The default is a public placeholder that serves none of the sidecar routes -- never deploy it."
               }
             },
             "sidecarAuthType": {
@@ -1616,21 +1674,48 @@
               "type": "string",
               "defaultValue": "Sidecar-Shared-Secret",
               "metadata": {
-                "description": "Name of the KV secret holding the per-boot shared secret the Worker site injects into the sidecar as SIDECAR_SHARED_SECRET (DS-1b Section 3 main-to-sidecar auth leg)."
+                "description": "Name of the platform KV secret holding the per-boot shared secret between the Worker and the Exchange sidecar (DS-1b Section 3). The Worker reads it from Key Vault (IntegrationWiring__SidecarSharedSecret*); the sidecar receives it through the ExchangeSidecar__SharedSecret Key Vault reference app setting."
               }
             },
-            "exchangeCertKvSecretName": {
-              "type": "string",
-              "defaultValue": "Exchange-Connect-Cert",
-              "metadata": {
-                "description": "Name of the KV secret holding the Exchange Online connect certificate (PFX) the sidecar fetches at call time via the App Service MSI endpoint. This is the SECRET NAME passed as EXCHANGE_CERT_SECRET_NAME -- not the certificate value itself (DS-1b Section 3 sidecar-to-Exchange auth leg)."
-              }
-            },
-            "exchangeConnectAppId": {
+            "exchangeAdminAppId": {
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding."
+                "description": "Client id of the 'Spaarke Exchange Admin' app registration (task 251, owner D24). The Worker signs in as it through the federated identity credential that trusts this module's UAMI and hands the Exchange Online token to the sidecar per request -- no certificate, no secret. Emitted as IntegrationWiring__ExchangeAdminAppId. Empty: the Worker and sidecar start, and H14a / H13 T4 report \"ExchangeAdminAppId is not configured\" on first use."
+              }
+            },
+            "customerRunGuardTenantId": {
+              "type": "string",
+              "defaultValue": "",
+              "metadata": {
+                "description": "Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Diagnostics only since the guard authenticates as the UAMI (not validated, not used for token issuance — CustomerRunGuardOptions; task 242b restored REG-02). Task 203b, punch list row A27 / r1-gap-analysis c5-6."
+              }
+            },
+            "customerRunGuardEnabled": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the bound UAMI is a Dataverse Application User on the admin env (customerRunGuardTenantId is diagnostics-only) (it authenticates as the UAMI since 2026-08-27; no client secret is involved). MUST equal the Api module's value (the Api acquires, the Worker releases). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27)."
+              }
+            },
+            "requireSecretFreeIdentity": {
+              "type": "bool",
+              "defaultValue": false,
+              "metadata": {
+                "description": "A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge 92b480500 had taken master's pre-A44.5 copy of this module). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): the BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions). A secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves the legacy shape byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. (The CustomerRunGuard authenticates as the bound UAMI and carries no secret in either mode.)"
+              }
+            },
+            "controlPlanePrincipalId": {
+              "type": "string",
+              "metadata": {
+                "description": "Object id of the L2 control plane's own identity (the Worker UAMI this module binds). Emitted as ControlPlaneIdentity__PrincipalObjectId (task 249 -- one setting for two handlers): the principal H4 grants Key Vault Secrets Officer on each customer vault before writing its secrets (customer-provisioning-orchestration-r1 task 245b, owner-approved 2026-10-01; it previously granted the customer stamp's BFF UAMI instead), and the principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId on Model 1 stamps (Website Contributor on the stamp BFF). REQUIRED: ControlPlaneIdentityOptions.Validate() fails Worker startup on a blank or non-GUID value. platform-controlplane.bicep passes uami.outputs.principalId -- the same value its Cosmos RBAC takes as controlPlanePrincipalId."
+              }
+            },
+            "speContainerTypeOwners": {
+              "type": "array",
+              "defaultValue": [],
+              "metadata": {
+                "description": "SPE container types this L2 deployment provisions into, each with its OWNING app: [{ containerTypeId, ownerAppId }]. containerTypeId = the SPE container type GUID, matched against the run's intake containerTypeId; ownerAppId = the owning app registration's client id -- never the customer BFF app (topology section 3A). L2 signs in as the owning app through the federated identity credential on it whose subject is this Worker's UAMI (task 248, ADR-028 A4) -- no certificate or secret is configured or stored. Emitted as SpeContainerOptions__ContainerTypeOwners__{i}__ContainerTypeId / __OwnerAppId -- read by H0's SpeOwnerCredential probe, H8 (container creation) and H13's T6 probe. Empty (default) boots the Worker; H0 then rejects every run (spe-owner-not-configured) until the topology runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md) has created a container type + owning app and its entry is added here. SpeContainerOptions.Validate() fails Worker startup on a non-GUID id, a duplicate container type or an owning app listed twice."
               }
             },
             "tags": {
@@ -1640,6 +1725,37 @@
                 "description": "Tags for the resource."
               }
             }
+          },
+          "variables": {
+            "legacyClientSecretAppSettings": [
+              {
+                "name": "EnvVarValues__ClientSecret",
+                "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('bffApiClientSecretName'))]"
+              },
+              {
+                "name": "SolutionImportOptions__ClientSecret",
+                "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('bffApiClientSecretName'))]"
+              }
+            ],
+            "secretFreeCredentialAppSettings": [
+              {
+                "name": "EnvVarValues__Credentials__Order__0",
+                "value": "ManagedIdentityFederated"
+              },
+              {
+                "name": "EnvVarValues__Credentials__RequireSecretFreeIdentity",
+                "value": "true"
+              },
+              {
+                "name": "SolutionImportOptions__Credentials__Order__0",
+                "value": "ManagedIdentityFederated"
+              },
+              {
+                "name": "SolutionImportOptions__Credentials__RequireSecretFreeIdentity",
+                "value": "true"
+              }
+            ],
+            "speContainerTypeOwnerSettings": "[flatten(map(range(0, length(parameters('speContainerTypeOwners'))), lambda('i', createArray(createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__ContainerTypeId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].containerTypeId), createObject('name', format('SpeContainerOptions__ContainerTypeOwners__{0}__OwnerAppId', lambdaVariables('i')), 'value', parameters('speContainerTypeOwners')[lambdaVariables('i')].ownerAppId)))))]"
           },
           "resources": [
             {
@@ -1666,72 +1782,7 @@
                   "minTlsVersion": "1.2",
                   "ftpsState": "Disabled",
                   "healthCheckPath": "/healthz",
-                  "appSettings": [
-                    {
-                      "name": "Cosmos__AccountEndpoint",
-                      "value": "[parameters('cosmosAccountEndpoint')]"
-                    },
-                    {
-                      "name": "Cosmos__DatabaseName",
-                      "value": "[parameters('cosmosDatabaseName')]"
-                    },
-                    {
-                      "name": "Cosmos__ContainerName",
-                      "value": "[parameters('cosmosRunsContainerName')]"
-                    },
-                    {
-                      "name": "ServiceBus__FullyQualifiedNamespace",
-                      "value": "[format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))]"
-                    },
-                    {
-                      "name": "ServiceBus__QueueName",
-                      "value": "[parameters('serviceBusQueueName')]"
-                    },
-                    {
-                      "name": "DataverseEnvironmentRegistry__AdminEnvironmentUrl",
-                      "value": "[parameters('adminDataverseEnvironmentUrl')]"
-                    },
-                    {
-                      "name": "EnvVarValues__ClientSecret",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('bffApiClientSecretName'))]"
-                    },
-                    {
-                      "name": "RuntimeReferences__SharedPlatformOpenAiEndpoint",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('azureOpenAiEndpointSecretName'))]"
-                    },
-                    {
-                      "name": "ConnectionStrings__Redis",
-                      "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('redisConnectionStringSecretName'))]"
-                    },
-                    {
-                      "name": "BicepInfraDeployOptions__ProvisioningArtifactsContainerUri",
-                      "value": "[parameters('artifactsStorageContainerUri')]"
-                    },
-                    {
-                      "name": "BffDeployOptions__ProvisioningArtifactsContainerUri",
-                      "value": "[parameters('artifactsStorageContainerUri')]"
-                    },
-                    {
-                      "name": "SolutionImportOptions__ProvisioningArtifactsContainerUri",
-                      "value": "[parameters('artifactsStorageContainerUri')]"
-                    },
-                    {
-                      "name": "AZURE_CLIENT_ID",
-                      "value": "[parameters('uamiClientId')]"
-                    },
-                    {
-                      "name": "ManagedIdentity__ClientId",
-                      "value": "[parameters('uamiClientId')]"
-                    },
-                    {
-                      "name": "APPLICATIONINSIGHTS_CONNECTION_STRING",
-                      "value": "[parameters('appInsightsConnectionString')]"
-                    },
-                    {
-                      "name": "ApplicationInsightsAgent_EXTENSION_VERSION",
-                      "value": "~3"
-                    }
-                  ]
+                  "appSettings": "[concat(createArray(createObject('name', 'Cosmos__AccountEndpoint', 'value', parameters('cosmosAccountEndpoint')), createObject('name', 'Cosmos__DatabaseName', 'value', parameters('cosmosDatabaseName')), createObject('name', 'Cosmos__ContainerName', 'value', parameters('cosmosRunsContainerName')), createObject('name', 'ServiceBus__FullyQualifiedNamespace', 'value', format('{0}.servicebus.windows.net', parameters('serviceBusNamespaceName'))), createObject('name', 'ServiceBus__QueueName', 'value', parameters('serviceBusQueueName')), createObject('name', 'DataverseEnvironmentRegistry__AdminEnvironmentUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'Redis__Endpoint', 'value', parameters('redisEndpoint')), createObject('name', 'BicepInfraDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'BffDeployOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'SolutionImportOptions__ProvisioningArtifactsContainerUri', 'value', parameters('artifactsStorageContainerUri')), createObject('name', 'CustomerRunGuard__TargetDataverseUrl', 'value', parameters('adminDataverseEnvironmentUrl')), createObject('name', 'CustomerRunGuard__TenantId', 'value', parameters('customerRunGuardTenantId')), createObject('name', 'CustomerRunGuard__ManagedIdentityClientId', 'value', parameters('uamiClientId')), createObject('name', 'CustomerRunGuard__Enabled', 'value', string(parameters('customerRunGuardEnabled'))), createObject('name', 'AZURE_CLIENT_ID', 'value', parameters('uamiClientId')), createObject('name', 'ManagedIdentity__ClientId', 'value', parameters('uamiClientId')), createObject('name', 'APPLICATIONINSIGHTS_CONNECTION_STRING', 'value', parameters('appInsightsConnectionString')), createObject('name', 'ApplicationInsightsAgent_EXTENSION_VERSION', 'value', '~3'), createObject('name', 'ControlPlaneIdentity__PrincipalObjectId', 'value', parameters('controlPlanePrincipalId')), createObject('name', 'KvSecretsPopulationOptions__RequireSecretFreeIdentity', 'value', 'true'), createObject('name', 'IntegrationWiring__SidecarSharedSecretVaultName', 'value', parameters('keyVaultName')), createObject('name', 'IntegrationWiring__SidecarSharedSecretSubscriptionId', 'value', subscription().subscriptionId), createObject('name', 'IntegrationWiring__SidecarSharedSecretName', 'value', parameters('sidecarSharedSecretKvSecretName')), createObject('name', 'IntegrationWiring__ExchangeAdminAppId', 'value', parameters('exchangeAdminAppId')), createObject('name', 'ExchangeSidecar__SharedSecret', 'value', format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName')))), if(parameters('requireSecretFreeIdentity'), variables('secretFreeCredentialAppSettings'), variables('legacyClientSecretAppSettings')), variables('speContainerTypeOwnerSettings'))]"
                 }
               }
             },
@@ -1744,22 +1795,11 @@
                 "targetPort": "8091",
                 "isMain": false,
                 "authType": "[parameters('sidecarAuthType')]",
+                "userManagedIdentityClientId": "[parameters('uamiClientId')]",
                 "environmentVariables": [
                   {
-                    "name": "PLATFORM_KV_URI",
-                    "value": "[parameters('keyVaultUri')]"
-                  },
-                  {
-                    "name": "EXCHANGE_CERT_SECRET_NAME",
-                    "value": "[parameters('exchangeCertKvSecretName')]"
-                  },
-                  {
-                    "name": "EXCHANGE_CONNECT_APP_ID",
-                    "value": "[parameters('exchangeConnectAppId')]"
-                  },
-                  {
                     "name": "SIDECAR_SHARED_SECRET",
-                    "value": "[format('@Microsoft.KeyVault(VaultName={0};SecretName={1})', parameters('keyVaultName'), parameters('sidecarSharedSecretKvSecretName'))]"
+                    "value": "ExchangeSidecar__SharedSecret"
                   }
                 ]
               },

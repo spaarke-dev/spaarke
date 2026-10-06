@@ -13,13 +13,16 @@
 //
 // FLOW:
 //   (1) Load ProvisioningRun.
-//   (2) Parameter guards (subscriptionId, keyVaultName, resourceGroupName,
-//       appServiceName, environmentName, secretsVer).
-//   (3) Idempotency Level-3: appsettings-{environmentName}-{secretsVer}.
-//   (4) Read per_env_settings manifest.
-//   (5) Resolve each entry from envelope.Parameters.NonSecret (literal /
-//       from-handler-output / from-handler-parameter); required-and-missing
-//       = Resumable Failure BEFORE any script call.
+//   (2) Guards: intake tenantId / subscriptionId; H2a outputs
+//       InterStepState.KeyVaultName / ResourceGroupName / AppServiceName
+//       (task 245a — these were read from run parameters nobody wrote).
+//       environmentName = IntakeParameterCatalog.ResolveEnvironmentName.
+//   (3) Read the per_env_settings manifest; its content version is secretsVer
+//       (task 245b — formerly a run parameter nothing wrote).
+//   (4) Idempotency Level-3: appsettings-{environmentName}-{secretsVer}.
+//   (5) Resolve each non-literal entry through PerEnvSourceCatalog (typed
+//       InterStepState output or intake value); required-and-missing =
+//       Resumable Failure BEFORE any script call.
 //   (6) Shell pwsh Configure-AppServiceSettings.generated.ps1 with fixed
 //       args (-VaultName / -AppServiceName / -ResourceGroupName) + one
 //       -<PsVarName> per unique per-env source. Non-zero exit = Resumable.
@@ -57,21 +60,6 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
 
     /// <summary>Non-secret parameter key carrying the target subscription id.</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
-
-    /// <summary>Non-secret parameter key carrying the target Key Vault name (script's -VaultName arg).</summary>
-    public const string KeyVaultNameParameterKey = "keyVaultName";
-
-    /// <summary>Non-secret parameter key carrying the App Service resource group.</summary>
-    public const string ResourceGroupNameParameterKey = "resourceGroupName";
-
-    /// <summary>Non-secret parameter key carrying the App Service name (script's -AppServiceName arg + /healthz + Kudu URLs).</summary>
-    public const string AppServiceNameParameterKey = "appServiceName";
-
-    /// <summary>Non-secret parameter key carrying the environment name — feeds idempotency key.</summary>
-    public const string EnvironmentNameParameterKey = "environmentName";
-
-    /// <summary>Non-secret parameter key carrying the manifest content hash / semantic version — feeds idempotency key.</summary>
-    public const string SecretsVersionParameterKey = "secretsVer";
 
     /// <summary>
     /// Parses the first fail-fast IOptions module name from a container docker
@@ -185,56 +173,37 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H4b.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+        // Customer-stamp identifiers are H2a outputs (task 245a): H2a persists them from the
+        // ARM deployment; nothing ever wrote them as run parameters.
+        var keyVaultName = run.InterStepState.KeyVaultName;
+        if (string.IsNullOrWhiteSpace(keyVaultName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingKeyVaultName,
-                "Run parameter 'keyVaultName' is required by H4b (Configure script -VaultName arg).",
+                "InterStepState.KeyVaultName (H2a output) is required by H4b (Configure script -VaultName arg). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, ResourceGroupNameParameterKey, out var resourceGroupName))
+        var resourceGroupName = run.InterStepState.ResourceGroupName;
+        if (string.IsNullOrWhiteSpace(resourceGroupName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingResourceGroupName,
-                "Run parameter 'resourceGroupName' is required by H4b (Configure script -ResourceGroupName arg).",
+                "InterStepState.ResourceGroupName (H2a output) is required by H4b (Configure script -ResourceGroupName arg). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, AppServiceNameParameterKey, out var appServiceName))
+        var appServiceName = run.InterStepState.AppServiceName;
+        if (string.IsNullOrWhiteSpace(appServiceName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BulkAppSettingsRejectionCodes.MissingAppServiceName,
-                "Run parameter 'appServiceName' is required by H4b (Configure script -AppServiceName arg + /healthz + Kudu URLs).",
+                "InterStepState.AppServiceName (H2a output) is required by H4b (Configure script -AppServiceName arg + /healthz + Kudu URLs). H2a must complete first.",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var environmentName))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                BulkAppSettingsRejectionCodes.MissingEnvironmentName,
-                "Run parameter 'environmentName' is required by H4b (feeds idempotency key appsettings-{env}-{secretsVer}).",
-                cancellationToken).ConfigureAwait(false);
-        }
-        if (!TryGetNonEmpty(parameters, SecretsVersionParameterKey, out var secretsVer))
-        {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                BulkAppSettingsRejectionCodes.MissingSecretsVersion,
-                "Run parameter 'secretsVer' is required by H4b (manifest content hash — feeds idempotency key).",
-                cancellationToken).ConfigureAwait(false);
-        }
-
-        var idempotencyKey = BuildIdempotencyKey(environmentName, secretsVer);
-
-        // (3) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
-        {
-            _logger.LogInformation(
-                "H4b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
-        }
-
-        // (4) Read manifest.
+        // One stamp environment for every handler (CreateRun stores it; a pre-245a run resolves
+        // to the same default H2a/H2b use).
+        var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
+        // (3) Read the manifest. Its content version is this handler's secretsVer (task 245b) — the
+        //     same manifest H4 reads, so the same value.
         PerEnvSettingsManifestReadResult manifestResult;
         try
         {
@@ -257,14 +226,29 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 $"Manifest reader reported failure: {manifestFailure.Diagnostic}",
                 cancellationToken).ConfigureAwait(false);
         }
-        var entries = ((PerEnvSettingsManifestReadResult.Success)manifestResult).Entries;
+        var manifest = (PerEnvSettingsManifestReadResult.Success)manifestResult;
 
-        // (5) Resolve per-env values. Non-literal entries look up their
-        //     ParameterKey in envelope.Parameters.NonSecret; required-and-missing
-        //     fails early BEFORE any script call. Deduplicate by source
-        //     (multiple manifest entries may share one source, e.g.
-        //     Graph__ManagedIdentity__ClientId + ManagedIdentity__ClientId
-        //     both reference uami_client_id).
+        var idempotencyKey = BuildIdempotencyKey(environmentName, manifest.ContentVersion);
+
+        // (4) Level-3 idempotency: durable no-op on duplicate.
+        if (run.CompletedPhases.Any(cp =>
+                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
+                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        {
+            _logger.LogInformation(
+                "H4b idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, idempotencyKey);
+            return new HandlerResult.Success(idempotencyKey);
+        }
+
+        var entries = manifest.Entries;
+
+        // (5) Resolve per-env values through PerEnvSourceCatalog (task 245a): each
+        //     source names the typed InterStepState output or intake value it
+        //     reads. Required-and-missing fails early BEFORE any script call.
+        //     Deduplicate by source key (several manifest entries may share one
+        //     source, e.g. Graph__ManagedIdentity__ClientId + ManagedIdentity__ClientId
+        //     both use uami_client_id).
         var resolvedPerEnv = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var entry in entries)
         {
@@ -278,7 +262,18 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             var sourceKey = entry.ParameterKey!;
             if (resolvedPerEnv.ContainsKey(sourceKey)) continue;  // dedup
 
-            if (!TryGetNonEmpty(parameters, sourceKey, out var value))
+            if (!PerEnvSourceCatalog.BySourceKey.TryGetValue(sourceKey, out var source))
+            {
+                // FilePerEnvSettingsManifest rejects unknown sources at load; this guards a
+                // hand-built manifest (tests) or a future reader that skips the check.
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    BulkAppSettingsRejectionCodes.ManifestReadFailed,
+                    $"per_env_settings entry '{entry.Key}' uses source '{sourceKey}', which is not in PerEnvSourceCatalog.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            var value = source.Resolve(run);
+            if (string.IsNullOrWhiteSpace(value))
             {
                 if (!entry.Required)
                 {
@@ -289,8 +284,10 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
                 }
                 var diagnostic =
                     $"per_env_settings entry '{entry.Key}' (BFF module '{entry.IOptionsModuleName}') requires " +
-                    $"envelope.Parameters.NonSecret['{sourceKey}'] but the source key is absent or empty. " +
-                    "Upstream handler MUST populate this parameter before H4b dispatches.";
+                    $"'{sourceKey}' from {source.Location}, which is absent or empty" +
+                    (source.ProducerHandlerId is null
+                        ? $" — supply it at intake ({source.Location})."
+                        : $" — {source.ProducerHandlerId} must complete before H4b.");
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BulkAppSettingsRejectionCodes.PerEnvInputMissing, diagnostic, cancellationToken)
                     .ConfigureAwait(false);
@@ -360,6 +357,19 @@ public sealed class H4bBulkAppSettingsHandler : IProvisioningHandler
             entries.Count(e => e.PerEnvSource == PerEnvSettingSource.Literal));
 
         // (7) Poll /healthz.
+        //
+        // FIC-PROPAGATION-FLAP TOLERANCE (task 205c / punch row A39, §5 item 4
+        // verifier addition): this backoff-poll (5 probes / ~8-min budget, see
+        // HttpHealthzProbe.DefaultBackoffSchedule) is the CHOSEN mechanism for
+        // tolerating Entra's measured ~130s AADSTS70025 federated-credential
+        // propagation flap after the auth-v4 §10.2 entries (Graph__Credentials__
+        // Order__0 / RequireSecretFreeIdentity, applied via per_env_settings
+        // above) are written. Full rationale + the rejected alternative (a
+        // pre-apply verified-exchange gate, infeasible because H13's post-
+        // App-Service verification runs AFTER H4b in the DAG) is documented in
+        // scripts/canonical-secret-catalog/manifest.yaml directly above the
+        // Graph__Credentials__Order__0 entry — read that comment before
+        // changing this probe's budget or the credential-selection entries.
         var healthzUrl = new Uri(_options.HealthzUrlTemplate.Replace("{appServiceName}", appServiceName, StringComparison.Ordinal));
         var healthResult = await _healthzProbe.ProbeWithBackoffAsync(healthzUrl, cancellationToken).ConfigureAwait(false);
 

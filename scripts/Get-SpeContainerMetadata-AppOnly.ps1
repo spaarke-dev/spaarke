@@ -1,5 +1,11 @@
 # Get SPE container metadata via APP-ONLY (confidential-client, cert-based) token
 #
+# T248 NOTE (2026-10-03): for owning apps set up per the MI-FIC runbook (e.g. `Spaarke SPE Model 1 Owner`)
+# there is NO certificate or secret — L2 acts as the owning app through the Worker UAMI's federated
+# credential (H8 creates customer containers). This script works only with a LEGACY owning app that still
+# has a certificate in Key Vault; it cannot act as an MI-FIC owning app from a workstation.
+#
+#
 # WHY THIS SCRIPT EXISTS (T6 post-condition verification, spec.md FR-33):
 #   scripts/Get-ContainerMetadata.ps1 acquires its Graph token via
 #   `az account get-access-token` — a DELEGATED token bound to the identity of
@@ -14,7 +20,7 @@
 #   matching the auth posture Create-NewContainerType.ps1 /
 #   New-BusinessUnitContainer.ps1 already use (task 011 hardening).
 #
-# Usage: H8SpeContainerTypeHandler's ISpeContainerVerifier production impl
+# Usage: H8SpeContainerHandler's ISpeContainerVerifier production impl (Handlers/SpeContainer/)
 # invokes this AFTER container creation to prove the container is readable
 # via the app-only identity path (§4D I4/I5 post-condition).
 

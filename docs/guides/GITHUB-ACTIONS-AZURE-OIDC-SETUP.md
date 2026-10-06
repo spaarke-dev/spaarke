@@ -17,6 +17,8 @@ Azure accepts that token only if the **exact sentence** has been pre-registered 
 **Nothing is broken or expired when you see this.** The entry was never created. This is first-time setup.
 
 > **Verified 2026-08-27**: no workflow in this repository had ever successfully authenticated to Azure via OIDC. `deploy-infrastructure` showed 4/4 green runs, but its `azure/login` steps sit in jobs that are skipped on push — only "Validate Bicep" actually ran. Do not read a green deploy workflow as evidence that OIDC works.
+>
+> *(Since task 249, 2026-10-02, `deploy-infrastructure.yml` — now "Validate Bicep Infrastructure" — has no `azure/login` step at all: it only lints and compiles Bicep. It no longer needs any federated credential.)*
 
 ---
 
@@ -27,8 +29,8 @@ GitHub's assertion changes depending on **how the job runs**. A job that declare
 | Subject | Needed by |
 |---|---|
 | `repo:spaarke-dev/spaarke:ref:refs/heads/master` | `publish-provisioning-arm-artifacts`, `build-provisioning-sidecar`, `publish-dataverse-solutions-manifest` |
-| `repo:spaarke-dev/spaarke:pull_request` | `deploy-infrastructure` (PR validation) |
-| `repo:spaarke-dev/spaarke:environment:dev` | `deploy-infrastructure`, `deploy-spaarke-ai` |
+| `repo:spaarke-dev/spaarke:pull_request` | none today — its only user, `deploy-infrastructure`'s PR what-if, was retired by task 249 (2026-10-02); harmless to keep |
+| `repo:spaarke-dev/spaarke:environment:dev` | `deploy-spaarke-ai` |
 | `repo:spaarke-dev/spaarke:environment:staging` | `deploy-bff-api` |
 | `repo:spaarke-dev/spaarke:environment:production` | `deploy-bff-api`, `deploy-spaarke-ai` |
 
@@ -129,7 +131,7 @@ The FIC lets the workflow **prove who it is**. It grants **no permissions**. Eac
 | `publish-provisioning-arm-artifacts` | `Storage Blob Data Contributor` on the account in `PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT` |
 | `publish-dataverse-solutions-manifest` | same storage account |
 | `build-provisioning-sidecar` | `AcrPush` on the registry in `SIDECAR_ACR_LOGIN_SERVER` |
-| `deploy-bff-api`, `deploy-infrastructure`, `deploy-spaarke-ai` | scope-appropriate role on the target resource group / subscription |
+| `deploy-bff-api`, `deploy-spaarke-ai` | scope-appropriate role on the target resource group / subscription |
 
 **If login succeeds and the next step returns 403, that is the RBAC gap — not a regression in this setup.** The two failure modes look similar in the log and are commonly conflated.
 

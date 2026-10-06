@@ -89,10 +89,12 @@ public sealed class SpeAdminContainerBindingGuardTests
     /// </summary>
     private static readonly IReadOnlyDictionary<string, string> DeferredBinders = new Dictionary<string, string>
     {
-        // H8 creates the root container in CreateAsync, records it, and binds it after the app-only GET verification (an
+        // H8 creates the container in CreateInTypeAsync, records it, and binds it after the app-only GET verification (an
         // SPE container may be unaddressable for up to 24h after creation — binding earlier would delete a healthy one).
-        ["src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphContainerTypeProvisioner.cs"] =
-            "H8SpeContainerTypeHandler.HandleAsync -> ISpeContainerTypeProvisioner.BindRootContainerAsync -> BindNewContainerAsync",
+        // Master's single-container H8 (task 214, Handlers/SpeContainer/), with task 165's bind ported onto it at the
+        // 2026-10-05 master merge.
+        ["src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/GraphContainerProvisioner.cs"] =
+            "H8SpeContainerHandler.HandleAsync -> ISpeContainerProvisioner.BindRootContainerAsync -> BindNewContainerAsync",
     };
 
     [Fact(DisplayName = "Every SPE container created anywhere in src/ is bound to its business unit")]
@@ -148,13 +150,13 @@ public sealed class SpeAdminContainerBindingGuardTests
             "containers only through a path that binds them:\n  " + string.Join("\n  ", hits));
     }
 
-    [Fact(DisplayName = "The L2 H8 root container is bound by the handler after verification, before the KV write and the H7 handoff")]
+    [Fact(DisplayName = "The L2 H8 container is bound by the handler after verification, before the H7 handoff")]
     public void TheDeferredBinderIsReal()
     {
         var provisioner = LexCSharp(File.ReadAllText(Path.Combine(RepoRoot,
-            "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SpeContainerType", "GraphContainerTypeProvisioner.cs")));
+            "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SpeContainer", "GraphContainerProvisioner.cs")));
         var handlerSource = LexCSharp(File.ReadAllText(Path.Combine(RepoRoot,
-            "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SpeContainerType", "H8SpeContainerTypeHandler.cs")));
+            "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "SpeContainer", "H8SpeContainerHandler.cs")));
         var handler = handlerSource.Text;
 
         // The provisioner's bind step really stamps, reads back and removes.
@@ -165,8 +167,8 @@ public sealed class SpeAdminContainerBindingGuardTests
         Assert.Contains("BindNewContainerAsync(", MethodBody(provisioner, "BindRootContainerAsync("));
 
         // The handler reads its own creation record, creates only without one, RECORDS what it created, then verifies,
-        // binds (the root, then every container adopted with it), writes the KV secret and completes — in that order
-        // (owner rounds 41 + 49).
+        // binds (the container, then any further one on record) and completes — in that order (owner rounds 41 + 49).
+        // Master's single-container H8 writes no Key Vault secret, so there is no KV step.
         var handle = MethodBody(handlerSource, "HandleAsync(");
         var recorded = handle.IndexOf("ReadRecordedCreation(", StringComparison.Ordinal);
         var provision = handle.IndexOf("_provisioner.ProvisionAsync(", StringComparison.Ordinal);
@@ -174,13 +176,12 @@ public sealed class SpeAdminContainerBindingGuardTests
         var verify = handle.IndexOf("_verifier.VerifyAsync(", StringComparison.Ordinal);
         var bind = handle.IndexOf("_provisioner.BindRootContainerAsync(", StringComparison.Ordinal);
         var bindAdopted = handle.IndexOf("BindAdditionalContainersAsync(", StringComparison.Ordinal);
-        var kv = handle.IndexOf("_kvWriter.WriteAsync(", StringComparison.Ordinal);
         var complete = handle.IndexOf("MarkCompleteAsync(", StringComparison.Ordinal);
         Assert.True(recorded > 0 && provision > recorded && record > provision && verify > record && bind > verify
-                    && bindAdopted > bind && kv > bindAdopted && complete > kv,
-            "H8 must read its creation record, create, record, verify, bind (root, then adopted containers), write the KV " +
-            $"secret, then complete (offsets: read {recorded}, provision {provision}, record {record}, verify {verify}, " +
-            $"bind {bind}, bind adopted {bindAdopted}, kv {kv}, complete {complete})");
+                    && bindAdopted > bind && complete > bindAdopted,
+            "H8 must read its creation record, create, record, verify, bind (the container, then any further one on " +
+            $"record), then complete (offsets: read {recorded}, provision {provision}, record {record}, verify {verify}, " +
+            $"bind {bind}, bind further {bindAdopted}, complete {complete})");
 
         // The resume record is read from TYPED fields only — never from gate evidence (owner round 49 item 2: Newtonsoft
         // stored a JsonElement as {"valueKind":1}).

@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="242b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Dev + demo Redis → Azure Managed Redis B0 non-HA, Entra-only (owner D12) — preflight, create, no-outage cut-over of the shared dev BFF and the L2 Worker, demo BFF wired, retire dev key rotation</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T242 (live half)</phase>
+    <gate>T242 code complete (committed on the branch); every live step needs owner confirmation; the ordering constraint below is binding</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live, irreversible infrastructure change (cache recreation, data loss of cached entries) on resources two running services depend on; edits deploy scripts, a CI workflow and Bicep.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Ordered live cut-over across two services with an outage window; judgment on rollback.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live operations; touches .claude/ docs and a CI workflow</parallel-reason>
+    <tags>provisioning, redis, deploy, azure, bicep, ci-workflows, l2-controlplane, model1-dedicated</tags>
+    <deps>242</deps>
+  </metadata>
+
+  <prompt>
+    Replace the dev per-environment cache `spaarke-bff-redis-dev` (Azure Cache for Redis Basic C0, access key) with an Azure
+    Managed Redis Balanced_B0 non-HA, Entra-only cache, switch the dev BFF and the dev L2 Worker to it with their managed
+    identities without breaking other worktrees that deploy older BFF builds to dev, and give the demo BFF its own Entra-only
+    Managed Redis — each live step confirmed with the owner first.
+  </prompt>
+
+  <role>SPAARKE platform operator-developer (Azure, Bicep, App Service). Follow ADRs and the live-action rules strictly.</role>
+
+  <goal>
+    A Managed Redis B0 non-HA cache in dev, Entra-only, with access-policy assignments for the dev BFF identity and the L2
+    Worker UAMI; `spaarke-bff-dev` and `spaarke-provisioning-controlplane-worker-dev` use `Redis__Endpoint` (no Redis key or
+    connection string in their settings or the vaults they read); both healthy; the dev key-rotation workflow entry, the
+    rotation alert and the seed/deploy scripts no longer reference a dev Redis key; the old dev cache deleted only after
+    the owner confirms. Demo: `spaarke-bff-redis-demo` (Managed Redis B0 non-HA, Entra-only, access policy for
+    `mi-bff-api-demo`) exists and `spaarke-bff-demo` carries `Redis__Enabled=true` + `Redis__Endpoint` and no
+    `ConnectionStrings__Redis`; the app's run state is the owner's choice (it is stopped today).
+  </goal>
+
+  <context>
+    <background>
+      From the 2026-10-04 inventory (docs/assessments/azure-resource-group-review-2026-08-30.md): `spaarke-bff-redis-dev`
+      (Basic C0, `spe-infrastructure-westus2`, westus2) is read by the dev BFF (`ConnectionStrings__Redis` → KV
+      `spaarke-spekvcert` / `Redis-ConnectionString`) and by the L2 Worker (`ConnectionStrings__Redis` → KV
+      `sprk-controlplane-dev-kv` / `Redis-ConnectionString`, seeded by `Seed-PlatformKeyVault.ps1`). `spe-redis-dev-67e2xz` is
+      already tagged for decommission (owner sign-off pending — not this task). Managed Redis: HA can only be chosen at
+      create; no scale-down; capacity failures have been reported for HA creates (preflight in westus2).
+      Live check 2026-10-04 (session 35, read-only): every deployed BFF/Worker runs `ASPNETCORE_ENVIRONMENT=Production`, so
+      T242's rule (a connection string without an endpoint fails at startup outside Development/Testing) applies to all of
+      them. Dev BFF `spaarke-bff-dev` (UAMI `mi-bff-api-dev`, `ManagedIdentity__ClientId` set) and the Worker use
+      `ConnectionStrings__Redis`. Demo BFF `spaarke-bff-demo` (subscription "Spaarke Demo Environment" 2ff9ee48-…, rg
+      `rg-spaarke-demo`, westus2, UAMI `mi-bff-api-demo`, `ManagedIdentity__ClientId` + `AZURE_CLIENT_ID` set, app
+      **Stopped**) has `Redis__Enabled=false` and an empty `ConnectionStrings__Redis`, and no cache exists in its
+      subscription (with today's code it would already fail at startup, CacheModule branch d); `Microsoft.Cache` is
+      registered there. `sprksharedprod-redis` (Spaarke Shared Production) has no BFF consumer and is on T241's
+      decommission list, not here.
+      No-outage mechanism: with `Redis__Endpoint` set, T242 code uses only the endpoint (managed identity) and ignores any
+      connection string, while pre-T242 builds read only the connection string. So the dev BFF can carry BOTH settings
+      (old cache still running) during the transition: a T242 build uses the new cache, an older build deployed from another
+      worktree still uses the old one. The connection string and the old cache are removed only after master carries T242.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/parameters/redis-dev.bicepparam (B0, highAvailability Disabled, principals)</file>
+      <file>infrastructure/bicep/modules/controlplane-worker-app-service.bicep (`ConnectionStrings__Redis` → `Redis__Endpoint`), platform-controlplane.bicep (+ json), parameters/platform-controlplane-dev.bicepparam</file>
+      <file>scripts/Deploy-RedisCache.ps1, scripts/Rotate-RedisKey.ps1, .github/workflows/redis-key-rotation.yml, infrastructure/bicep/alerts.bicep, scripts/provisioning/Seed-PlatformKeyVault.ps1</file>
+      <file>docs/guides/redis-cache-azure-setup.md, docs/guides/SECRET-ROTATION-PROCEDURES.md, docs/architecture/caching-architecture.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/tasks/242-stamp-redis-managed-entra-only.poml (notes)</file>
+      <file>.claude/agent-memory/researcher/redis-per-customer-stamp-amr-decision-2026-09-30.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="live-action rule (owner)">Ask the owner before each live step (preflight create, dev cache create, app-setting changes and restarts, deletion of the old cache). Never delete a Key Vault secret — leave `Redis-ConnectionString` in place and stop referencing it.</constraint>
+    <constraint source="D12 / D13">Dev cache: Balanced_B0, `highAvailability: Disabled`, Entra only (`accessKeysAuthentication: Disabled`), access-policy assignments for the dev BFF's identity and the Worker UAMI only.</constraint>
+    <constraint source="scope">Staging/prod per-env cache entries in scripts/workflows untouched (their rotation entries stay); `spe-redis-dev-67e2xz` untouched (decommission tag, separate sign-off); `sprksharedprod-redis` belongs to T241; BYOK template untouched.</constraint>
+    <constraint source="ordering (owner 2026-10-04: do not defer, nothing breaks)">(1) Never remove `ConnectionStrings__Redis` from the dev BFF, nor delete `spaarke-bff-redis-dev`, before T242 is on master AND the coordination note is posted in `projects/INDEX.md` (other worktrees deploying a BFF to dev must merge master first). (2) The Worker's setting switches together with its T242 build (only this project deploys the Worker). (3) This branch is not merged to master until the dev BFF carries `Redis__Endpoint` (step 4), so no master-based BFF build reaches dev without an endpoint.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>The westus2 B0 create fails for capacity, or the dev BFF's identity is not a user-assigned identity the cache can name → STOP and report options.</trigger>
+    <trigger>Either service fails to start against the new cache and the cause is not a setting typo → roll the setting back to the old connection-string reference (old cache still running) and escalate.</trigger>
+    <trigger>The demo create fails, or `mi-bff-api-demo` cannot be named in an access-policy assignment → STOP and report.</trigger>
+  </escalation>
+
+  <steps mode="prescriptive">
+    <step order="1">Owner OK → preflight: create a throwaway B0 non-HA cache in westus2 from the module, confirm it provisions, delete it.</step>
+    <step order="2">Owner OK → create the dev Managed Redis from `redis-dev.bicepparam` with both principals (dev BFF UAMI + Worker UAMI).</step>
+    <step order="3">Owner OK → Worker: add a `redisEndpoint` parameter to `modules/controlplane-worker-app-service.bicep` (emits `Redis__Endpoint`; drop the `ConnectionStrings__Redis` KV reference) + platform-controlplane bicep/json/dev bicepparam; platform-controlplane dev deploy with the T242 Worker build (only this project deploys the Worker); `/healthz` 200; Worker log shows the managed-identity Redis mode.</step>
+    <step order="4">Owner OK → dev BFF: ADD `Redis__Endpoint` (`Deploy-RedisCache.ps1 -Environment dev -CutoverBffSettings` does exactly this since T242; it keeps `ConnectionStrings__Redis` → old cache for older builds); deploy the T242 BFF build; restart; `/healthz` 200, log shows "Redis authentication is managed identity", one cached read/write path exercised, a pub/sub round-trip works (RESP3 — confirm the library kept `Protocol=Resp3` after `ConfigureForAzureWithTokenCredentialAsync`), and one membership-cache invalidation (SCAN over `GetEndPoints()` under OSS clustering) evicts the expected keys.</step>
+    <step order="5">Owner OK → demo: create `spaarke-bff-redis-demo` (B0 non-HA, Entra-only, access policy for `mi-bff-api-demo`) in `rg-spaarke-demo` via `redis-demo.bicepparam`; set `Redis__Enabled=true` + `Redis__Endpoint`, remove the empty `ConnectionStrings__Redis`; the app stays stopped unless the owner says start (if started: deploy the T242 BFF build, `/healthz` 200).</step>
+    <step order="6">Owner OK → merge this branch to master, then post the coordination note in `projects/INDEX.md`: the dev BFF is on Entra-only Redis; any worktree deploying a BFF to dev must merge master first.</step>
+    <step order="7">Owner OK → dev BFF: remove `ConnectionStrings__Redis` / `Redis__ConnectionString`; restart; `/healthz` 200.</step>
+    <step order="8">Repo: retire dev entries in `Rotate-RedisKey.ps1`, `redis-key-rotation.yml`, the dev rotation alert; `alerts.bicep` memory alert → `Microsoft.Cache/redisEnterprise` metrics (it still targets `Microsoft.Cache/Redis`); `Seed-PlatformKeyVault.ps1` no longer resolves/seeds `Redis-ConnectionString` for dev (`Deploy-RedisCache.ps1` was made keyless by T242); `config/spaarke-resources.yaml` dev BFF `redis_connection_string` entry; docs (caching-architecture, redis-cache-azure-setup, SECRET-ROTATION-PROCEDURES, environment inventory).</step>
+    <step order="9">Owner OK → delete `spaarke-bff-redis-dev`. Close: POML notes, TASK-INDEX, plan T242 ✅, current-task live-changes log, commit + push.</step>
+  </steps>
+
+  <outputs>
+    <output type="live">dev + demo Managed Redis caches; dev BFF, Worker and demo BFF settings; old dev cache deleted (owner-confirmed)</output>
+    <output type="file-modified">redis-dev.bicepparam, redis-demo.bicepparam (new), worker module + platform bicep/json, rotation script/workflow/alert, seed/deploy scripts, docs, projects/INDEX.md coordination note</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The dev cache is `Microsoft.Cache/redisEnterprise` Balanced_B0, HA disabled, access keys disabled, with exactly the two access-policy assignments.</criterion>
+    <criterion testable="true">Dev BFF and Worker `/healthz` 200; neither has a Redis connection-string setting; their logs show the managed-identity Redis mode; one BFF cache round-trip succeeds.</criterion>
+    <criterion testable="true">No script, workflow or alert reads or rotates a dev Redis key; staging/prod entries unchanged.</criterion>
+    <criterion testable="true">Demo: `spaarke-bff-redis-demo` is Balanced_B0, HA disabled, access keys disabled, exactly one access-policy assignment (`mi-bff-api-demo`); `spaarke-bff-demo` has `Redis__Enabled=true`, `Redis__Endpoint` and no Redis connection-string setting.</criterion>
+    <criterion testable="true">Ordering held: the dev BFF's connection string was removed and the old cache deleted only after T242 reached master and the INDEX.md coordination note was posted; no BFF/Worker health failure during the cut-over.</criterion>
+    <criterion testable="true">The old dev cache is deleted only after the owner confirmed; every live step and its approval is logged in current-task.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Filed 2026-10-04 as the live half of plan §7 T242 (see T242 notes). Extended 2026-10-04 session 35 after a read-only live check found every deployed BFF/Worker runs as Production (owner: additional cache migration work is not deferred, it is addressed in this project): demo BFF cache, no-outage dev cut-over, ordering gates. COMPLETED 2026-10-06 (session 36). Live: dev cache spaarke-bff-redis-dev = Azure Managed Redis Balanced_B0 non-HA, Entra only, two assignments (mi-bff-api-dev, sprk-controlplane-dev-uami); dev BFF + L2 Worker on Redis__Endpoint, no connection string; old classic cache deleted (owner OK); dev alerts on the new cluster, missed-rotation alert deleted; demo cache spaarke-bff-redis-demo created (demo BFF stopped -> T242c, re-scoped by D27). Ordering held: T242 reached master in PR #1298 (2677d48c0) with the INDEX.md note before the connection string was removed and the old cache deleted; no BFF/Worker health failure. Repo: dev entries retired, then (owner) the whole Redis key-rotation tooling removed; alerts.bicep on redisEnterprise; Seed-PlatformKeyVault no longer seeds Redis-ConnectionString; inventory drift fixed (validator 0/0); docs rewritten. Step 9.5: two code reviews (0 Critical) + adr-check (ArchTests 349/349) - findings fixed; ADR-009 amended (latency alert = average BFF-observed per op, owner Path B). Found + fixed on the way: CustomerRunGuard REG-02/05 restore, Worker boot-test race, Tier 2 sharding, BFF redis health check leaking a service provider per minute (3f48f6a87, deployed to dev, publish +0.00 MB). Every live step and its approval is in current-task.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; prescriptive steps; owner confirmation before every live step.</protocol>
+  </execution>
+</task>

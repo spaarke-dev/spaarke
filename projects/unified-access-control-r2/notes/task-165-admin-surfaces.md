@@ -2514,3 +2514,43 @@ Two classification changes followed:
 ADR-010's ceiling went 158 → 159 for `ISpeAdminContainerScopedRequest`, a request contract the filter reads, with its
 justification in the test.
 
+## 17. Master merge (2026-10-05): H8 ported onto master's single-container H8
+
+Master's `customer-provisioning-orchestration-r1` task 214 DELETED the H8 this task had changed
+(`Handlers/SpeContainerType/`, which created a container TYPE and a container). It REPLACED it with
+`Handlers/SpeContainer/`: `H8SpeContainerHandler`, `GraphContainerProvisioner` and `ISpeContainerProvisioner`, which create
+ONE container in a pre-existing container type. Creating a type is now delegated operator work. At the integration merge
+of origin/master, this task's binding H8 intent was ported onto the new files. The sections above name the old files; read
+them as history.
+
+- **Kept, on the new files:**
+  - Every container H8 creates is stamped with the environment's ROOT business unit, read back, and removed if the stamp
+    did not land (round 35 item 1). `DataverseRootBusinessUnitReader` moved to `Handlers/SpeContainer/`.
+  - H8 records what it created, in the typed `interStepState.speContainerCreation`, and resumes with it (rounds 41 + 49).
+    The record survives the production Cosmos serializer.
+  - The container is handed to H7 only once bound. `DagAdvancer` gives H8 the dependencies H3 and H5, and H7 depends on H8.
+- **Two gaps in master's new H8, closed in the port:**
+  - A timeout after the create was sent is reported as "a container may exist". It no longer creates a second container.
+  - A container whose activation failed is re-activated on resume.
+- **In-doubt creation (ACCEPTED by the main session).** A create whose answer was lost is QuarantineRequired
+  `spe-container-creation-in-doubt`, and H8 NEVER auto-adopts a container it finds by listing. Master's container type is
+  shared across customers, so adopting what a listing finds could adopt another customer's container (class (a));
+  quarantining fails closed.
+  - H8 writes the run id into every container's description.
+  - The operator lists the type, finds the container whose description names this customer and run, then records its id
+    (`interStepState.speContainerCreation.rootContainerId`) or removes it, and clears the quarantine.
+- **Dropped as moot:**
+  - everything about container-TYPE creation: the type-creation in-doubt quarantine, reuse of an existing type, the type
+    registration;
+  - the KV write of the container id (master's H8 writes no Key Vault secret).
+- **Tests:**
+  - L2: `H8SpeContainerHandlerTests`, `GraphContainerProvisionerBindTests`, plus H7 and DagAdvancer. They replace
+    `H8SpeContainerTypeHandlerTests`.
+  - ArchTests: `SpeAdminContainerBindingGuardTests` names `Handlers/SpeContainer/GraphContainerProvisioner.cs` as the
+    deferred binder, and checks the order read record → create → record → verify → bind → bind further → complete. The KV
+    step is gone.
+- **Also from master:**
+  - `stacks/model2-full.bicep` and its parameter files were deleted (task 249). No Bicep template names the operator marker
+    now; `NoBicepTemplate_EmitsTheOperatorMarker` replaces the Bicep-stack test.
+  - `demo` is in `Deploy-BffApi.ps1`'s `-Environment` set (T242b), which answers round 62 item 2.
+

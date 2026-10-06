@@ -51,9 +51,11 @@ public enum VersionCompatVerdict
 }
 
 /// <summary>
-/// A (BFF version, Solution-set version) pair. BFF version format per matrix
-/// doc §3.1 (e.g. <c>1.0.0-net10</c>); Solution-set version per §3.2
-/// (e.g. <c>S2026.08</c>). Comparison is case-insensitive at the matrix impl.
+/// A (BFF version, Solution-set version) pair. Target formats per matrix doc §3.1 (e.g.
+/// <c>1.0.0-net10</c>) and §3.2 (e.g. <c>S2026.08</c>) — but neither has a producer yet, so the
+/// registry currently carries what H13 writes (task 245b, matrix doc §2 note): the deployed CI build id
+/// (e.g. <c>2026.09.30-123</c>) and the <c>ImportedSolutionSet</c> fingerprint. Matrix rows must use the
+/// same values; an unknown pair is Red. Comparison is case-insensitive at the matrix impl.
 /// </summary>
 /// <param name="BffVersion">BFF binary version (registry column <c>sprk_bffversion</c> / release manifest).</param>
 /// <param name="SolutionVersion">Aggregate Solution-set version (registry column <c>sprk_solutionversion</c> / release manifest).</param>

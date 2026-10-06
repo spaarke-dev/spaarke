@@ -46,7 +46,7 @@
 //                               references exactly ONE hop, so ANY secret
 //                               consumed via a customer-vault KV-ref app
 //                               setting (e.g. TenantId, Dataverse-ServiceUrl,
-//                               BingSearch-ApiKey) needs its REAL cleartext
+//                               ContentSafety-ApiKey) needs its REAL cleartext
 //                               landed in the target vault — a nested
 //                               "write the pointer, not the value" behavior
 //                               would silently break every such consumer,
@@ -58,7 +58,7 @@
 //                               mental model doesn't map 1:1 onto the real
 //                               4-member enum; this is the evidence-grounded
 //                               resolution, not an invented shortcut).
-//     - FromBicepOutput       -> NO REACHABLE SOURCE from H4's writer today.
+//     - FromBicepOutput      -> NO REACHABLE SOURCE from H4's writer today.
 //                               task 084's own kv-secrets.generated.bicep
 //                               module (not yet wired into customer.bicep —
 //                               that's a still-open follow-on beyond task
@@ -190,17 +190,57 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                     "this resolver branch when the secret does NOT already exist. H4 has no plumbing today " +
                     "to read ARM deployment outputs directly (InterStepState is a locked enumerated POCO " +
                     "without a slot for this entry). See notes/task-126-deviations.md 'FromBicepOutput gap'.")),
-            KvSecretValueSource.FromSharedService => Task.FromResult<KvSecretValueResolution>(
+            KvSecretValueSource.FromTopologyConstants => Task.FromResult(ResolveTopologyConstant(entry, request)),
+            KvSecretValueSource.FromIntakeParameter => Task.FromResult(ResolveIntakeParameter(entry, request)),
+            KvSecretValueSource.WrittenByEntraAppReg => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
-                    $"value_source=FromSharedService on '{entry.CanonicalName}' is owned by " +
-                    "H4SharedKvSecretsPopulationHandler (task 200) — NOT the per-tenant H4 flow. " +
-                    "The per-tenant H4 handler filters these entries out before invoking the writer; " +
-                    "if this resolver call is reached, the per-tenant filter has regressed. See " +
-                    "H4SharedKvSecretsPopulationHandler.cs for the source-extraction pipeline.")),
+                    $"'{entry.CanonicalName}' is written by H3 (EntraAppReg), which runs after H4 — H4 must skip " +
+                    "value_source=written-by-h3 entries, never resolve them (task 245a).")),
             _ => Task.FromResult<KvSecretValueResolution>(
                 new KvSecretValueResolution.Failed(
                     $"Unrecognized KvSecretValueSource '{entry.ValueSource}' for '{entry.CanonicalName}'.")),
         };
+    }
+
+    /// <summary>
+    /// TOPOLOGY-CONSTANT branch (T226): the value is a Spaarke-wide constant the run
+    /// carries as a non-secret parameter, projected by H4 into
+    /// <see cref="KvSecretWriteRequest.IntakeValues"/>. Fails loudly when the
+    /// run has none — never a blank or fabricated secret.
+    /// </summary>
+    private static KvSecretValueResolution ResolveTopologyConstant(KvSecretEntry entry, KvSecretWriteRequest request)
+    {
+        if (request.IntakeValues.TryGetValue(entry.CanonicalName, out var value)
+            && !string.IsNullOrWhiteSpace(value))
+        {
+            return new KvSecretValueResolution.Resolved(value);
+        }
+
+        return new KvSecretValueResolution.Failed(
+            $"value_source=FromTopologyConstants on '{entry.CanonicalName}' but the run carries no value for it. " +
+            "Topology constants come from spaarke-constants.yaml per_env_constants.<env> and reach the run as " +
+            "non-secret parameters (e.g. 'containerTypeId' for SPE-ContainerTypeId, set by the " +
+            "/provision-environment intake from spaarke-constants.yaml). Run parameters are fixed at intake, " +
+            "so populate the constant and start the run with it.");
+    }
+
+    /// <summary>
+    /// INTAKE-PARAMETER branch (task 245a): a non-secret intake value (e.g. TenantId ← intake
+    /// <c>tenantId</c>), projected by H4 into <see cref="KvSecretWriteRequest.IntakeValues"/>.
+    /// Fails loudly when absent — never a blank or fabricated value.
+    /// </summary>
+    private static KvSecretValueResolution ResolveIntakeParameter(KvSecretEntry entry, KvSecretWriteRequest request)
+    {
+        if (request.IntakeValues.TryGetValue(entry.CanonicalName, out var value)
+            && !string.IsNullOrWhiteSpace(value))
+        {
+            return new KvSecretValueResolution.Resolved(value);
+        }
+
+        return new KvSecretValueResolution.Failed(
+            $"value_source=from-intake-parameter on '{entry.CanonicalName}' but the run carries no intake value for it " +
+            "(H4KvSecretsPopulationHandler.IntakeValueParameterKeys names the intake key). Intake values are fixed at " +
+            "POST /api/runs — start the run with the value supplied.");
     }
 
     /// <summary>
@@ -234,6 +274,15 @@ public sealed class KvSecretValueResolver : IKvSecretValueResolver
                 "resolve a functional value for this entry — H4 will NOT fabricate a placeholder.");
         }
 
+        return await CopyFromVaultAsync(entry, reference, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Reads the REAL cleartext of <paramref name="reference"/> for the writer to copy.</summary>
+    private async Task<KvSecretValueResolution> CopyFromVaultAsync(
+        KvSecretEntry entry,
+        Models.KeyVaultSecretRef reference,
+        CancellationToken cancellationToken)
+    {
         SecretClient sourceClient;
         try
         {

@@ -109,7 +109,7 @@ The Model 1 / Model 2 columns are gone deliberately: **the disposition is the sa
 | **App Service Plan** | Compute for BFF API | **Dedicated per customer** | A plan cannot span subscriptions — forced by the per-customer subscription. Largest single per-customer fixed cost |
 | **App Service** | Sprk.Bff.Api hosting | **One BFF app per customer** | Each BFF is bound to one Dataverse environment through per-deployment config (`AzureAd:TenantId`, Dataverse URL) |
 | **Key Vault** | Secrets, certificates | **Dedicated per customer** | Holds secrets; vault-scoped RBAC; ~free to dedicate |
-| **Redis Cache** | Token caching, sessions | **Dedicated per customer, at Standard tier** | Auth is **per-instance, not per-keyspace** — a connection string reaches the whole keyspace. Standard gives SLA + replication; Premium's exclusives (VNet injection — unused and Microsoft-deprecated, RDB persistence, geo-replication, clustering) are not required, since a Redis loss costs a cold start, not data |
+| **Redis Cache** | Token caching, sessions | **Dedicated per customer — Azure Managed Redis Balanced_B0, high availability, Entra only** (owner D12, task 242) | Auth is **per-instance, not per-keyspace** — any identity with access reaches the whole keyspace, so each customer gets its own cache. Access keys are disabled; the stamp UAMI holds the only access-policy assignment. Azure Cache for Redis (Basic/Standard/Premium) retires 2028-09-30 and blocks new-customer creation since 2026-04-01. A Redis loss costs a cold start, not data |
 | **Service Bus** | Job queue | **Dedicated namespace per customer** | Already per-customer; ~free |
 | **Storage** | Document/temp bytes | **Dedicated per customer** | Holds data at rest |
 | **Cosmos DB** | Audit, sessions, memory | **Dedicated account per customer** | Holds data at rest. Serverless ⇒ no fixed floor. ⚠️ A `/tenantId` partition does **not** separate Model 1 customers |
@@ -158,14 +158,18 @@ Infrastructure is organized into two parallel packaging tracks:
 
 **Azure (Bicep)**:
 - `infrastructure/bicep/modules/` — Reusable Bicep modules per resource type
-- `infrastructure/bicep/stacks/` — Composed deployments. The **full per-customer stack** (`model2-full.bicep`) is the only customer-facing shape; it deploys the same set of dedicated resources in both models. Plus `ai-foundry-stack.bicep`.
-  > 🔴 **Retired artifacts**: `model1-shared.bicep` (+ its manifest entry), `model1-customer.bicep`,
-  > `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam`. These encoded the shared-then-overlay shape and
-  > have no successor. Retirement is a **coordinated multi-surface change** (the stacks, the parameter files
-  > that `using` them, `scripts/tests/bicep-e2e-dry-run.ps1`'s polarity-inverted assertion, the
-  > `provisioning-arm-manifest.json` `required` key, and the publish workflow) — tracked in D-12 §6, not
-  > done here.
-- `infrastructure/bicep/parameters/` — One parameter file **per customer**, plus environment files: `dev.bicepparam`, `staging.bicepparam`, `prod.bicepparam`, `customer-template.bicepparam`, `model2-customer-template.bicepparam`, `demo-customer.bicepparam`
+- `infrastructure/bicep/customer.bicep` — The **full per-customer stack** and the **only** customer-stamp template (owner decision D19, 2026-10-02). It deploys the same set of dedicated resources in both models, and only the L2 control plane deploys it — handler H2a, into the customer's own subscription (amended ADR-027).
+- `infrastructure/bicep/stacks/` — Holds only the standalone `ai-foundry-stack.bicep` (not used by `customer.bicep`).
+  > 🔴 **Retired and deleted** (task 225a, 2026-10-01): `model1-shared.bicep` (+ its manifest entry),
+  > `model1-customer.bicep`, `model1-shared-l2-rbac.bicep`, `model1-prod.bicepparam` and the
+  > `parameters/{dev,staging,prod}.bicepparam` that `using` them. They encoded the shared-then-overlay shape
+  > and have no successor.
+  >
+  > 🔴 **Retired and deleted** (task 249, 2026-10-02): `stacks/model2-full.{bicep,json}`,
+  > `stacks/{dev,staging,prod}.bicepparam`, `parameters/model2-customer-template.bicepparam` and
+  > `customer-deployment.bicepparam`. `model2-full.bicep` deployed no live environment and could not deploy as
+  > written; `customer.bicep` is its successor. Git history keeps the files.
+- `infrastructure/bicep/parameters/` — `customer-template.bicepparam` and `demo-customer.bicepparam` (both `using '../customer.bicep'`) are compile-checked **reference** parameter sets — H2a does not read them; it sends a computed parameter payload per run (task 249). Plus `platform-*` / `redis-*` files for non-customer infrastructure.
 
 **Power Platform**:
 - `power-platform/solutions/SpaarkeCore/` — Core entities, forms, views (managed solution ZIP)
@@ -181,16 +185,17 @@ single full-stack deployment into that customer's own subscription and resource 
    in the customer's for Model 2).
 2. **Model 2 only** — obtain H0.5 admin consent and establish Azure Lighthouse delegation. *Model 1 requires
    neither: Spaarke already owns the tenant.*
-3. **Deploy the full per-customer Azure stack via Bicep** — App Service Plan + BFF App Service, Key Vault,
-   Redis (Standard), Service Bus, Storage, Cosmos, App Insights / Log Analytics, Azure OpenAI, AI Search,
-   Document Intelligence.
+3. **Deploy the full per-customer Azure stack via Bicep** (`customer.bicep`, deployed by L2 handler H2a) —
+   App Service Plan + BFF App Service, Key Vault, Redis (Azure Managed Redis B0, Entra only), Service Bus, Storage, Cosmos,
+   App Insights / Log Analytics, Azure OpenAI, AI Search, Document Intelligence.
 4. **Create App Registrations** and the per-customer BFF identity (applies to **both** models).
 5. **Create the SPE Container**, import the Power Platform managed solutions, create the Application User,
    and set the Dataverse environment variables.
 
-> `Deploy-Model1-Shared.ps1` and `Deploy-Model1-Customer.ps1` implemented the retired shared-then-overlay
-> shape and have no successor. `Deploy-Model2-Full.ps1` is the shape both models now use; its name is a
-> leftover from the retired vocabulary and is a rename candidate, not a behavioural difference.
+> There is **no standalone deployment script** for the customer stack: the L2 control plane (handler H2a)
+> is its only deployer, driven by the `/provision-environment` operator skill. The `Deploy-Model1-Shared.ps1`,
+> `Deploy-Model1-Customer.ps1` and `Deploy-Model2-Full.ps1` scripts named in earlier revisions of this
+> document never existed in the repository *(references retired by task 249, 2026-10-02)*.
 
 ---
 
@@ -284,21 +289,23 @@ An explicit transitive override patches CVEs (GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m
 
 ## 6. The per-customer deployment package
 
-The same package deploys the same stack in both models. What differs is **who runs it and where**: under
-Model 1 Spaarke runs it against the customer's subscription inside Spaarke's tenant; under Model 2 the
-customer (or Spaarke via Lighthouse delegation, after H0.5 consent) runs it in the customer's own tenant.
+The same template deploys the same stack in both models. What differs is **where**: under Model 1 the stamp
+lands in the customer's subscription inside Spaarke's tenant; under Model 2 (via Lighthouse delegation,
+after H0.5 consent) in the customer's own tenant. In both, the **L2 control plane is the only deployer** —
+handler H2a deploys `customer.bicep` into the customer's own subscription (owner decision D19, amended
+ADR-027). There is no hand-carried package or customer-run script; the Azure inputs are:
 
 ```
-model2-deployment-package/
-├── README.md                    # Step-by-step deployment guide
-├── PREREQUISITES.md             # Required permissions, licenses
-├── Deploy-Model2-Full.ps1       # Main deployment script
-├── bicep/                       # All Bicep templates
-├── power-platform/              # Solution files
-├── validation/                  # Post-deployment health checks
-└── config/
-    └── customer-template.json   # Config template to fill out
+infrastructure/bicep/
+├── customer.bicep                         # The customer-stamp template (deployed by H2a)
+├── modules/                               # Modules it composes
+└── parameters/customer-template.bicepparam  # Reference parameter set (H2a computes its own payload)
 ```
+
+The operator entry point is the `/provision-environment` skill; the end-to-end procedure is
+[`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md). *(The
+`model2-deployment-package/` layout around a `Deploy-Model2-Full.ps1` script that this section showed
+before task 249 was never built.)*
 
 ---
 

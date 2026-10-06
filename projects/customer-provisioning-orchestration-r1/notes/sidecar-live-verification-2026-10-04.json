@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-10-04T20:39:11.4787586+00:00",
+  "environment": "dev",
+  "worker": "spaarke-provisioning-controlplane-worker-dev",
+  "sidecar": "exchange-policy-sidecar",
+  "inTenant": true,
+  "counts": {
+    "FAIL": 0,
+    "WARN": 1,
+    "SKIP": 0,
+    "PASS": 5
+  },
+  "checks": {
+    "CONTAINER_HEALTH": {
+      "status": "PASS",
+      "message": "sitecontainer 'exchange-policy-sidecar' on port 8091, image 'sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest'",
+      "details": {
+        "targetPort": "8091",
+        "image": "sprkcontrolplanedevacr.azurecr.io/provisioning-sidecar:latest",
+        "authType": "UserAssigned"
+      }
+    },
+    "LOCALHOST_BIND": {
+      "status": "PASS",
+      "message": "Sidecar bound http://127.0.0.1:8091/ at 2026-10-04 20:19:36Z, all settings present",
+      "details": {
+        "prefix": "http://127.0.0.1:8091/",
+        "timestamp": "2026-10-04 20:19:36Z",
+        "degraded": false
+      }
+    },
+    "PUBLIC_ISOLATION": {
+      "status": "PASS",
+      "message": "port 8091 not reachable at the public hostname (TaskCanceledException)",
+      "details": {
+        "probe": "https://spaarke-provisioning-controlplane-worker-dev.azurewebsites.net:8091/healthz"
+      }
+    },
+    "ROUND_TRIP_AUTH": {
+      "status": "PASS",
+      "message": "read as 46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7 via spaarke.onmicrosoft.com : HTTP 200, Success (App 46670ee2-ac0c-44b0-9ac2-d40ae4dcbdd7 holds 4 application role assignment(s).)",
+      "details": {
+        "assignments": 4,
+        "outcome": "Success",
+        "organization": "spaarke.onmicrosoft.com"
+      }
+    },
+    "ROUND_TRIP_IDEMP": {
+      "status": "WARN",
+      "message": "Not run: needs -AppId, -ServicePrincipalObjectId and -PolicyScopeGroupId for a TEST app and group (it creates a role assignment)",
+      "details": {}
+    },
+    "AUTH_REJECTION": {
+      "status": "PASS",
+      "message": "wrong shared secret -> 401; tenant id as organization -> 400",
+      "details": {}
+    }
+  }
+}

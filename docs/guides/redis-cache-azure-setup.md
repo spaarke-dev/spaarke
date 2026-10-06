@@ -1,10 +1,12 @@
 # Redis Cache — Azure Setup & Operational Guide
 
-> **Last Updated**: 2026-06-26 (§10 Lessons Learned filled in by task 056)
+> **Last Updated**: 2026-10-05 (T242b: Azure Managed Redis, Microsoft Entra only)
 > **Audience**: BFF operators, infrastructure engineers
 > **Status**: Authoritative
 
-This guide is the canonical operational reference for provisioning, cutting over, validating, rolling back, rotating secrets for, and decommissioning the Spaarke BFF Redis cache (`spaarke-bff-redis-{env}`) in any environment. A fresh operator should be able to provision a new environment's Redis end-to-end in under 30 minutes by following only this document (per FR-19, Success Criterion #6).
+This guide is the canonical operational reference for provisioning, cutting over, validating, rolling back and decommissioning the Spaarke BFF Redis cache (`spaarke-bff-redis-{env}`) in any environment. A fresh operator should be able to provision a new environment's Redis end-to-end in under 30 minutes by following only this document (per FR-19, Success Criterion #6).
+
+**Every Spaarke Redis is Azure Managed Redis (`Microsoft.Cache/redisEnterprise`), Microsoft Entra only** (customer-provisioning-orchestration-r1 tasks T242 / T242b, owner decisions D12 / D13). Access keys are disabled on the database: there is no key, no connection string and no Key Vault secret. Each client signs in with its managed identity, which must hold an access-policy assignment on the cache. Classic Azure Cache for Redis (`Microsoft.Cache/Redis`) is no longer provisioned.
 
 For architectural context (tenant isolation, multi-instance behavior, Cache Instance Registry, failure modes), see [`docs/architecture/caching-architecture.md`](../architecture/caching-architecture.md). For the binding constraints, see [`.claude/adr/ADR-009-redis-caching.md`](../../.claude/adr/ADR-009-redis-caching.md) (concise) and [`docs/adr/ADR-009-caching-redis-first.md`](../adr/ADR-009-caching-redis-first.md) (full).
 
@@ -28,38 +30,67 @@ For architectural context (tenant isolation, multi-instance behavior, Cache Inst
 
 ## 1. Prerequisites
 
-Before running any command in this guide, confirm each of the following:
+### What exists today
 
-- **Azure subscription access** with at least Contributor on the target resource group (`spe-infrastructure-westus2` for dev; `rg-spaarke-{staging|prod}` for higher environments).
-- **Azure CLI installed and logged in** — verify with `az account show`; ensure the active subscription matches the target environment.
-- **Key Vault exists** in the target environment (`spaarke-spekvcert` is the assumed dev KV; verify the actual KV per the target environment's cutover baseline notes before secret upsert — see [`projects/spaarke-redis-cache-remediation-r1/notes/dev-cutover-baseline.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/dev-cutover-baseline.md) for the dev pattern).
-- **App Service Managed Identity has `Key Vault Secrets User` role** on the target Key Vault. Verify with `az role assignment list --assignee <MI-objectId> --scope <KV-resourceId>`.
-- **`spaarke-bff-{env}` App Service exists and is running** — verify with `az webapp show -g rg-spaarke-{env} -n spaarke-bff-{env} --query state`.
-- **App Settings template loaded** — see [`src/server/api/Sprk.Bff.Api/appsettings.template.json`](../../src/server/api/Sprk.Bff.Api/appsettings.template.json) for the Redis settings shape (`Redis__Enabled`, `Redis__InstanceName`, `ConnectionStrings__Redis`, `Redis__AllowInMemoryFallback`).
+| Environment | Cache | Resource group / subscription | High availability | Access-policy assignments |
+|---|---|---|---|---|
+| dev | `spaarke-bff-redis-dev` — endpoint `spaarke-bff-redis-dev.westus2.redis.azure.net:10000` | `spe-infrastructure-westus2` / "Spaarke Devlopment Environment" `484bc857-3802-427f-9ea5-ca47b43db0f0` | Disabled | `9fd47efb-…` = `mi-bff-api-dev` (the dev BFF `spaarke-bff-dev` runs as it); `38f7693f-…` = `sprk-controlplane-dev-uami` (L2 Worker) |
+| demo | `spaarke-bff-redis-demo` | `rg-spaarke-demo` / "Spaarke Demo Environment" `2ff9ee48-6f1d-4664-865c-f11868dd1b50` | Disabled | `eaf9591e-…` = `mi-bff-api-demo`. The demo BFF is stopped pending task T242c. |
+| staging / prod | not created yet (no Spaarke staging or prod BFF exists) | `rg-spaarke-staging` / `rg-spaarke-prod` | Enabled | placeholders in the `.bicepparam` — replace before deploying |
+| customer stamps | `sprk-{customer}-{env}-redis`, created by [`infrastructure/bicep/customer.bicep`](../../infrastructure/bicep/customer.bicep), not by this guide's script | per-customer stamp | Enabled | the stamp's user-assigned identity |
+
+All caches share one shape, set by [`infrastructure/bicep/modules/redis.bicep`](../../infrastructure/bicep/modules/redis.bicep):
+
+| Property | Value |
+|---|---|
+| SKU | `Balanced_B0` (size up only on a measured memory metric — Managed Redis has no scale-down) |
+| High availability | Chosen at create time only; cannot be changed later |
+| Database | `default`, port **10000**, TLS only (`clientProtocol: Encrypted`, minimum TLS 1.2) |
+| Clustering policy | **OSSCluster** (immutable; clients must be cluster-aware — StackExchange.Redis is) |
+| Eviction | `AllKeysLRU` |
+| Authentication | `accessKeysAuthentication: Disabled` — access only through per-identity assignments of the built-in `default` access policy, by principal **object ID** |
+
+### Before running any command in this guide
+
+- **Azure subscription access** with at least Contributor on the target resource group (see the table above).
+- **Azure CLI installed and logged in** — verify with `az account show`. Pass the subscription explicitly (`-SubscriptionId` on the scripts, `--subscription` on `az`) rather than running `az account set`: the CLI context is shared by every session on the machine. Demo lives in its own subscription.
 - **PowerShell 7+ available** — verify with `pwsh -Version` (must be 7.0 or later). Windows PowerShell 5.1 is NOT supported.
+- **The object ID of every identity that needs the cache** is listed in `accessPolicyPrincipalIds` of the environment's `.bicepparam`. With access keys disabled, an identity that is not listed cannot connect (the module refuses an empty list).
+- **The BFF runs as a user-assigned managed identity** and its App Service carries that identity's **client ID** in `ManagedIdentity__ClientId` (or `Graph__ManagedIdentity__ClientId`). The BFF refuses to start with `Redis__Endpoint` set and no client ID.
+- **The BFF build is T242 or later** (master ≥ `2677d48c0`). Older builds read only `ConnectionStrings__Redis` and refuse to start once it is removed.
+- **`spaarke-bff-{env}` App Service exists** in `rg-spaarke-{env}` — verify with `az webapp show -g rg-spaarke-{env} -n spaarke-bff-{env} --query state`.
+- **App Settings template loaded** — see [`src/server/api/Sprk.Bff.Api/appsettings.template.json`](../../src/server/api/Sprk.Bff.Api/appsettings.template.json) for the Redis settings shape (`Redis__Enabled`, `Redis__Endpoint`, `Redis__InstanceName`, `Redis__AllowInMemoryFallback`).
 - **Bicep module + parameter file present**:
   - [`infrastructure/bicep/modules/redis.bicep`](../../infrastructure/bicep/modules/redis.bicep)
-  - [`infrastructure/bicep/parameters/redis-{env}.bicepparam`](../../infrastructure/bicep/parameters/)
-- **Validation harness present** — [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) (used by `Deploy-RedisCache.ps1 -VerifyOnly`).
+  - [`infrastructure/bicep/parameters/redis-{env}.bicepparam`](../../infrastructure/bicep/parameters/) (`dev`, `demo`, `staging`, `prod`)
+- **Validation harness present** — [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) (used by `Deploy-RedisCache.ps1` after a deploy and by `-VerifyOnly`).
+
+No Key Vault is involved: the BFF setting `Redis__Endpoint` is a plain value (host:port, not a secret).
 
 ---
 
 ## 2. Provision Command — Per Environment
 
-All environments use the same idempotent script: [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1). The script:
+All Spaarke BFF environments use the same idempotent script: [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1). The script:
 
-- Detects existing instances in `Succeeded` provisioning state and skips redeploy (NFR-01).
+- Detects an existing `Microsoft.Cache/redisEnterprise` cache in `Succeeded` provisioning state and skips the template deploy (NFR-01).
 - Rejects `prod` and `demo` without `-Force` (NFR-05).
-- Supports `-WhatIf` (plan-only, NFR-06) and `-VerifyOnly` (run validation harness against existing instance, NFR-06).
-- Optionally upserts the connection string to Key Vault and cuts over App Settings when `-CutoverBffSettings` is passed.
+- Supports `-WhatIf` (plan-only, NFR-06) and `-VerifyOnly` (run the validation harness against the existing cache, NFR-06).
+- `-CutoverBffSettings` sets `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `Redis__Endpoint={host}:10000` and `Redis__AllowInMemoryFallback=false` on `spaarke-bff-{env}` (resource group `rg-spaarke-{env}`). An existing `ConnectionStrings__Redis` is left in place on purpose.
+- `-RemoveBffConnectionString` deletes `ConnectionStrings__Redis` and `Redis__ConnectionString` from the BFF. It refuses if the app has no `Redis__Endpoint`. The Key Vault secret the setting referenced is left alone.
+- `-SubscriptionId` names the subscription on every `az` call.
+- `-DeployAlerts` deploys the alert rules (§8).
+- Runs the validation harness after the deploy (with the BFF checks when `-CutoverBffSettings` or `-RemoveBffConnectionString` was passed).
+
+Customer stamps do not use this script: `customer.bicep` creates the stamp's cache (HA on) and sets the stamp BFF's `Redis__Endpoint`.
 
 ### Dev
 
 ```powershell
-pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -KeyVaultName spaarke-spekvcert -CutoverBffSettings
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -SubscriptionId 484bc857-3802-427f-9ea5-ca47b43db0f0 -CutoverBffSettings
 ```
 
-Expected `-WhatIf` plan output (from task 028's integration check; production run emits the same plan header followed by an actual `az deployment group create` invocation):
+Expected banner:
 
 ```
 Deploy-RedisCache.ps1 starting
@@ -68,33 +99,59 @@ Deploy-RedisCache.ps1 starting
   Redis name     : spaarke-bff-redis-dev
   Bicep module   : <repo>/infrastructure/bicep/modules/redis.bicep
   Bicep param    : <repo>/infrastructure/bicep/parameters/redis-dev.bicepparam
-  KeyVault       : spaarke-spekvcert
+  Redis          : spaarke-bff-redis-dev (Azure Managed Redis, Entra only)
   Mode           : deploy
-
-Deploy-RedisCache.ps1 completed successfully.
 ```
 
 To preview without changes, add `-WhatIf`:
 
 ```powershell
-pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -WhatIf
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment dev -SubscriptionId 484bc857-3802-427f-9ea5-ca47b43db0f0 -WhatIf
 ```
+
+A create takes about 8 minutes.
+
+### Demo (requires explicit `-Force`)
+
+```powershell
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment demo -Force `
+  -SubscriptionId 2ff9ee48-6f1d-4664-865c-f11868dd1b50 -CutoverBffSettings -RemoveBffConnectionString
+```
+
+This is the command T242b ran. The demo BFF had no previous cache, so the connection-string removal could run in the same call.
 
 ### Staging
 
+Replace the placeholder in [`redis-staging.bicepparam`](../../infrastructure/bicep/parameters/redis-staging.bicepparam) with the staging BFF identity's **object ID** first (the placeholder is deliberately not a GUID, so Azure rejects it), then:
+
 ```powershell
-pwsh ./scripts/Deploy-RedisCache.ps1 -Environment staging -KeyVaultName <staging-kv> -CutoverBffSettings
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment staging -SubscriptionId <staging-sub> -CutoverBffSettings
 ```
 
-Replace `<staging-kv>` with the staging Key Vault name. Default resource group: `rg-spaarke-staging` (override with `-ResourceGroup` if your environment uses a different RG).
+Default resource group: `rg-spaarke-staging` (override with `-ResourceGroup`). High availability is Enabled.
 
 ### Prod (requires explicit `-Force`)
 
+Replace the placeholder in [`redis-prod.bicepparam`](../../infrastructure/bicep/parameters/redis-prod.bicepparam) the same way, then:
+
 ```powershell
-pwsh ./scripts/Deploy-RedisCache.ps1 -Environment prod -KeyVaultName <prod-kv> -CutoverBffSettings -Force
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment prod -SubscriptionId <prod-sub> -CutoverBffSettings -Force
 ```
 
-Replace `<prod-kv>` with the prod Key Vault name. The `-Force` flag is required per NFR-05; without it the script exits non-zero with an `NFR-05` message. Production provisioning is a separate go/no-go with finance + security review per [`spec.md`](../../projects/spaarke-redis-cache-remediation-r1/spec.md) §Out of Scope.
+The `-Force` flag is required per NFR-05; without it the script exits with code 2 and an `NFR-05` message. No Spaarke prod BFF exists today (customer production runs on per-customer stamps); deploying this needs a separate owner go/no-go.
+
+### Granting another identity access
+
+Add its object ID to `accessPolicyPrincipalIds` in the `.bicepparam`. Because `Deploy-RedisCache.ps1` skips the template when the cache already exists, apply the change with the deployment the parameter file documents:
+
+```powershell
+az deployment group create --subscription <sub> `
+  --resource-group <rg> `
+  --template-file infrastructure/bicep/modules/redis.bicep `
+  --parameters infrastructure/bicep/parameters/redis-{env}.bicepparam
+```
+
+Assignments are named after the object ID without dashes, so a re-deploy shows no change for identities already listed. Removing an ID from the list does not remove its assignment (incremental deployment); delete the assignment resource explicitly.
 
 ---
 
@@ -102,41 +159,58 @@ Replace `<prod-kv>` with the prod Key Vault name. The `-Force` flag is required 
 
 After a deploy completes, verify each of the following before declaring success.
 
-1. **Redis instance is in `Succeeded` provisioning state**:
+1. **Cache is in `Succeeded` provisioning state**:
 
    ```powershell
-   az redis show -g <rg> -n spaarke-bff-redis-{env} --query provisioningState
+   az resource show --subscription <sub> -g <rg> -n spaarke-bff-redis-{env} `
+     --resource-type Microsoft.Cache/redisEnterprise --query properties.provisioningState
    ```
 
-   Expect: `"Succeeded"`.
+   Expect: `"Succeeded"`. Use the resource type: during a cutover a classic `Microsoft.Cache/Redis` cache of the same name may still exist.
 
-2. **Connection string is present in Key Vault**:
+2. **Validation harness** — a read-only Azure Resource Manager check (no data-plane access):
 
    ```powershell
-   az keyvault secret show --vault-name <kv> --name Redis-ConnectionString --query value -o tsv
+   pwsh ./scripts/Deploy-RedisCache.ps1 -Environment {env} -SubscriptionId <sub> -VerifyOnly
    ```
 
-   Expect: a non-empty StackExchange.Redis-compatible connection string referencing the new instance hostname.
+   [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) checks:
+   - the cluster is `Microsoft.Cache/redisEnterprise`, provisioningState `Succeeded`, resourceState `Running`, a `Balanced_*` SKU (high availability is reported);
+   - database `default`: access keys disabled, TLS only, `OSSCluster`, port 10000;
+   - at least one `default` access-policy assignment; with `-ExpectedPrincipalIds` the set must match exactly;
+   - with `-BffAppName`: the app's `Redis__Endpoint` equals `{hostName}:10000`; with `-RequireNoBffConnectionString`, no `ConnectionStrings__Redis` / `Redis__ConnectionString` setting remains.
 
-3. **Restart the BFF**:
+   `-VerifyOnly` runs only the first three. For the full check, call the harness directly, for example for dev:
 
    ```powershell
-   az webapp restart -g rg-spaarke-{env} -n spaarke-bff-{env}
+   pwsh tests/manual/RedisValidationTests.ps1 -RedisName spaarke-bff-redis-dev -ResourceGroup spe-infrastructure-westus2 `
+     -SubscriptionId 484bc857-3802-427f-9ea5-ca47b43db0f0 `
+     -ExpectedPrincipalIds 9fd47efb-7962-492b-ac44-e5ccd0268ebb,38f7693f-e6e2-4a3e-9acf-7f9e29dd4044 `
+     -BffAppName spaarke-bff-dev -BffResourceGroup rg-spaarke-dev -RequireNoBffConnectionString
+   ```
+
+   Non-zero exit = at least one check failed. Code-level behavior (endpoint → managed identity, the connection-string refusal, the Null-Object kill switch) is covered by `tests/unit/Sprk.Bff.Api.Tests/Infrastructure/DI/CacheModuleTests.cs`, not by this harness.
+
+3. **Restart the BFF** (if the settings changed without a restart):
+
+   ```powershell
+   az webapp restart --subscription <sub> -g rg-spaarke-{env} -n spaarke-bff-{env}
    ```
 
 4. **Stream the startup log**:
 
    ```powershell
-   az webapp log tail -g rg-spaarke-{env} -n spaarke-bff-{env}
+   az webapp log tail --subscription <sub> -g rg-spaarke-{env} -n spaarke-bff-{env}
    ```
 
-   Expect, verbatim, the line:
+   Expect, verbatim, the two lines:
 
    ```
    Distributed cache: Redis enabled with instance name 'spaarke:'
+   Distributed cache: Redis authentication is managed identity (Microsoft Entra)
    ```
 
-   The log MUST NOT contain any in-memory fallback warning. If it does, the cutover did not take effect — see §5 Rollback.
+   The log MUST NOT contain an in-memory fallback warning. The container log does not always retain startup lines; step 6 is the decisive check.
 
 5. **Health check returns 200**:
 
@@ -146,43 +220,25 @@ After a deploy completes, verify each of the following before declaring success.
 
    Expect HTTP `200 OK`.
 
-6. **Smoke test — chat session creation produces a tenant-prefixed key**:
-
-   Exercise a chat-session creation through the BFF (e.g., via the BFF API or a code-page client). Then inspect Redis for the resulting key:
-
-   ```powershell
-   az redis show-access-keys -g <rg> -n spaarke-bff-redis-{env}
-   # then connect via redis-cli or use a script that runs SCAN with pattern:
-   #   spaarke:tenant:*:session:*:v1
-   ```
-
-   Expect: at least one key in the form `spaarke:tenant:{tenantId}:session:{sessionId}:v1`. This verifies the tenant prefix invariant (FR-05, FR-06, NFR-08) and the `spaarke:` InstanceName (FR-07).
-
-7. **Validation harness** (full invariant sweep):
-
-   ```powershell
-   pwsh ./scripts/Deploy-RedisCache.ps1 -Environment {env} -VerifyOnly
-   ```
-
-   Runs [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1), which includes `Test-TenantPrefixInvariant` and `Test-FailFastBehavior` (added in task 026). Non-zero exit = a key invariant is violated.
-
-8. **App Insights telemetry pipeline verification** (R7-S7 closure 2026-06-26 — REQUIRED). After 10 min of post-deploy traffic, both queries below MUST return non-empty results. If either is empty, the telemetry pipeline is broken — see ADR-009 §9 for the required wiring (`UseAzureMonitor()` + `AddRedisInstrumentation()` + `RedisCacheOptions.ConnectionMultiplexerFactory`).
+6. **App Insights — Redis traffic reaches the new cache** (REQUIRED). After about 10 minutes of traffic (exercise the BFF, e.g. open a chat session from a code page), run:
 
    ```bash
+   # Redis dependencies by target — expect the new host:10000 plus node IP:85xx, and zero failures
+   az monitor app-insights query \
+     --app spe-insights-dev-67e2xz \
+     --resource-group spe-infrastructure-westus2 \
+     --analytics-query "dependencies | where timestamp > ago(30m) | where type contains 'redis' | summarize calls=count(), failures=countif(success == false), last=max(timestamp) by target"
+
    # Custom cache metrics — expect cache.hits, cache.misses, cache.redis_call_duration_ms
    az monitor app-insights query \
      --app spe-insights-dev-67e2xz \
      --resource-group spe-infrastructure-westus2 \
      --analytics-query "customMetrics | where timestamp > ago(10m) | where name startswith 'cache.' | summarize total=sum(value), records=count() by name"
-
-   # Redis dependency telemetry — expect HMGET / UNLINK / CLIENT / GET / SET
-   az monitor app-insights query \
-     --app spe-insights-dev-67e2xz \
-     --resource-group spe-infrastructure-westus2 \
-     --analytics-query "dependencies | where timestamp > ago(10m) | where type contains 'Redis' | summarize count() by type, name"
    ```
 
-   **Common failure modes**:
+   With the OSS clustering policy, calls appear under the endpoint (`spaarke-bff-redis-{env}.westus2.redis.azure.net:10000`) and under the node address (`<node IP>:85xx`). Because the cache accepts only Microsoft Entra, successful calls also prove managed-identity authentication. No calls should target the old `*.redis.cache.windows.net` host.
+
+   **Common failure modes** (wiring per ADR-009 §9: `UseAzureMonitor()` + `AddRedisInstrumentation()` + `RedisCacheOptions.ConnectionMultiplexerFactory`):
    - `customMetrics` query empty → `UseAzureMonitor()` not wired in `Program.cs` (still using classic `AddApplicationInsightsTelemetry()`)
    - `dependencies` query empty even though custom metrics flow → `RedisCacheOptions.ConnectionMultiplexerFactory` not wired in `CacheModule.cs` (DI-registered multiplexer is idle; `Microsoft.Extensions.Caching.StackExchangeRedis` built its own internal one)
    - Both queries empty → either `APPLICATIONINSIGHTS_CONNECTION_STRING` not set on the BFF App Service, or the exporter package (`Azure.Monitor.OpenTelemetry.AspNetCore`) is missing from `Sprk.Bff.Api.csproj`
@@ -191,338 +247,72 @@ After a deploy completes, verify each of the following before declaring success.
 
 ## 4. Cutover Protocol
 
-The cutover procedure differs depending on whether the legacy Redis instance holds production-relevant cache data.
+This is the sequence T242b used to move the dev BFF from a classic key-based cache to Azure Managed Redis with no outage. It applies to any environment still on a classic `Microsoft.Cache/Redis` cache.
 
-### Dev (clean slate — legacy Redis is empty)
+1. **Create the new cache** via §2. The name may differ from the old one or be the same: Azure accepted `spaarke-bff-redis-dev` for the new cluster while the old `Microsoft.Cache/Redis` cache of the same name still existed (different resource types, different DNS zones — `*.redis.azure.net` vs `*.redis.cache.windows.net`).
+2. **Grant access** — the BFF's identity (and any other client, such as the L2 Worker) is in `accessPolicyPrincipalIds`; confirm with the harness (§3 step 2, `-ExpectedPrincipalIds`).
+3. **Set the endpoint** — `Deploy-RedisCache.ps1 -Environment {env} -SubscriptionId <sub> -CutoverBffSettings`. The BFF keeps its old `ConnectionStrings__Redis`: a T242+ build uses `Redis__Endpoint` when both are set, while an older build still reads the connection string and stays on the old cache.
+4. **Deploy a BFF build that has T242** (master ≥ `2677d48c0`), per the BFF deploy procedure.
+5. **Verify** per §3 — in particular step 6: App Insights `redis` dependencies target the new host (endpoint host:10000 plus node IP:85xx), zero failures, none to the old host.
+6. **Only then remove the connection string** — `Deploy-RedisCache.ps1 -Environment {env} -SubscriptionId <sub> -RemoveBffConnectionString`. The harness then confirms no connection-string setting remains. In a shared environment, do this only once every build deployed there is T242+: **any BFF build older than T242 refuses to start once the connection string is gone.** The Key Vault secret `Redis-ConnectionString` is left in place, unreferenced.
+7. **Delete the old cache** per §7, with owner approval.
 
-The dev environment legacy instance `spe-redis-dev-67e2xz` is empty; no key migration is required.
-
-1. **Provision the new instance** via §2.
-2. **Upsert the connection string** to the dev Key Vault (handled by `-CutoverBffSettings`).
-3. **Update App Settings** to point `ConnectionStrings__Redis` at the new KV reference; set `Redis__Enabled=true`, `Redis__InstanceName=spaarke:`, `Redis__AllowInMemoryFallback=false` (handled by `-CutoverBffSettings`).
-4. **Restart** the BFF and **verify** per §3.
-5. **24-hour verification window** — let dev BFF operate against the new instance for 24 hours; monitor App Insights for Redis dependency calls, cache hit rate, P95 latency. If no regressions, proceed to step 6.
-6. **Decommission the legacy instance** per §7 — either DELETE or tag `decommission=YYYY-MM-DD`.
-
-### Staging / Prod (data resides in legacy)
-
-When the legacy instance holds cache data with operational value, two options are available; document the chosen path in the cutover record (`notes/cutover-deploy-log.md`).
-
-**Option A — key warming (preferred for high-traffic resources)**:
-
-1. Provision the new instance via §2.
-2. Pre-populate hot keys from legacy via a batch migration script (read from legacy, write to new with the same TTL — the canonical key format `spaarke:tenant:{tenantId}:{resource}:{id}:v{version}` is identical between legacy and new instances when `InstanceName=spaarke:` is already in use; if legacy still uses `sdap:`, this option requires explicit re-prefixing).
-3. Cut over App Settings, restart, verify.
-4. Allow stragglers (long-tail keys) to cache-miss and refill organically.
-
-Option A minimizes P95 latency degradation during cutover at the cost of an extra batch script execution.
-
-**Option B — cache-miss window (preferred for low-traffic resources)**:
-
-1. Provision the new instance via §2.
-2. Cut over App Settings, restart, verify.
-3. Accept a short period (typically 5–30 minutes) of elevated P95 latency as the new cache fills from cold misses.
-
-Option B is operationally simpler but produces a brief, observable P95 spike. Choose Option B only when traffic is low enough that the user-visible impact is acceptable. **Production should typically use Option A for high-traffic resources, Option B for low-traffic.**
-
-In either case, follow the 24-hour verification window before decommissioning legacy.
+**Cache contents are not migrated.** The new cache starts cold and fills from cache misses; expect a short period (typically minutes) of elevated latency. Spaarke cache entries are regenerable by design.
 
 ---
 
 ## 5. Rollback Procedure
 
-If post-cutover verification fails (`/healthz` returns non-200, startup log shows in-memory warning, smoke test does not produce `spaarke:tenant:*` keys, or P95 latency is unacceptable):
+If post-cutover verification fails (`/healthz` returns non-200, the BFF does not start, App Insights shows Redis failures, or P95 latency is unacceptable):
 
-1. **Revert `ConnectionStrings__Redis`** in App Settings to point at the legacy Key Vault secret version (or the legacy KV reference if a separate secret was used):
+1. **Fix forward first.** Most failures are an identity missing from the access policy, a missing `ManagedIdentity__ClientId`, or a wrong endpoint — see §8 "Connection failures". The new cache can stay provisioned; idempotent re-deploys are safe (NFR-01).
+2. **Before step 6 of §4** (the connection string is still set): redeploy the previous BFF build. A pre-T242 build ignores `Redis__Endpoint` and reads `ConnectionStrings__Redis`, so it runs on the old cache again.
+3. **After step 6 but before the old cache is deleted**: a T242+ build cannot use a connection string outside Development/Testing, so going back to the old cache means restoring the setting AND redeploying a pre-T242 build:
 
    ```powershell
-   az webapp config appsettings set `
+   az webapp config appsettings set --subscription <sub> `
      -g rg-spaarke-{env} -n spaarke-bff-{env} `
-     --settings ConnectionStrings__Redis='@Microsoft.KeyVault(VaultName=<kv>;SecretName=<legacy-secret-name>)'
+     --settings ConnectionStrings__Redis='@Microsoft.KeyVault(VaultName=<kv>;SecretName=Redis-ConnectionString)'
    ```
 
-2. **Restart** the BFF:
+   The Key Vault secret still exists (secrets are never deleted).
+4. **After the old cache is deleted** there is nothing to roll back to — fix forward.
 
-   ```powershell
-   az webapp restart -g rg-spaarke-{env} -n spaarke-bff-{env}
-   ```
-
-3. **Verify** the startup log shows the OLD instance name in `"Distributed cache: Redis enabled with instance name 'spaarke:'"` confirms via dependency endpoint, App Insights Redis dependency calls show the legacy hostname).
-4. **The new instance can remain provisioned** — idempotent re-deploys are safe (NFR-01). Investigate the failure root cause, then re-attempt cutover when ready.
+Investigate the root cause, then re-attempt the cutover when ready.
 
 ---
 
 ## 6. Secret Rotation Procedure
 
-Rotate the Redis primary key with minimal downtime. Frequency: per organizational policy (typical: every 90 days).
+**There is nothing to rotate.** Every Spaarke Redis — dev, demo and every customer stamp — is Azure Managed Redis with access keys disabled: no key, no connection string, no Key Vault secret in use. The BFF and the L2 Worker sign in with their managed identities, whose tokens Azure issues and refreshes automatically. Access is changed by editing the access-policy assignments (§2 "Granting another identity access"), not by rotating anything.
 
-### 6.1 Per-Environment OIDC Service-Principal Provisioning (one-time setup, per FR-09)
-
-**Operator must complete this section BEFORE enabling the automated rotation workflow** ([`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml), provisioned by task 011 of `spaarke-redis-cache-remediation-r2`). The workflow consumes three distinct GitHub Environment secrets — one per Azure environment — each backed by a separate Azure AD service principal scoped to ONLY that environment's resources.
-
-#### Rationale (why three SPs, not one)
-
-- **Blast-radius isolation**: a compromised prod SP MUST NOT be able to rotate dev (and vice versa). A single shared SP with org-wide write across all three envs collapses the blast radius of any credential leak to "all envs at once."
-- **Compliance posture**: per-env separation of duties is a standard audit expectation (SOC 2 CC6.1, ISO 27001 A.9.2). Per-env SPs make the access boundary auditable via a single `az role assignment list` per principal.
-- **Least privilege**: each SP holds only the three role assignments needed to rotate one env (KV secret write, Redis key regenerate, App Service restart). No cross-env grants.
-
-#### Step 1 — Create one service principal per environment
-
-Replace `{SUB_ID}` with the target Azure subscription ID for each env (dev/staging/prod may share a subscription or use separate ones; commands below are per-env regardless).
-
-```bash
-# Dev
-az ad sp create-for-rbac \
-  --name "sp-spaarke-redis-rotation-dev" \
-  --role "Reader" \
-  --scopes "/subscriptions/{SUB_ID_DEV}/resourceGroups/rg-spaarke-dev" \
-  --query "{clientId:appId, tenantId:tenant}" -o json
-# Record output clientId → AZURE_CLIENT_ID_DEV
-
-# Staging
-az ad sp create-for-rbac \
-  --name "sp-spaarke-redis-rotation-staging" \
-  --role "Reader" \
-  --scopes "/subscriptions/{SUB_ID_STAGING}/resourceGroups/rg-spaarke-staging" \
-  --query "{clientId:appId, tenantId:tenant}" -o json
-# Record output clientId → AZURE_CLIENT_ID_STAGING
-
-# Prod
-az ad sp create-for-rbac \
-  --name "sp-spaarke-redis-rotation-prod" \
-  --role "Reader" \
-  --scopes "/subscriptions/{SUB_ID_PROD}/resourceGroups/rg-spaarke-prod" \
-  --query "{clientId:appId, tenantId:tenant}" -o json
-# Record output clientId → AZURE_CLIENT_ID_PROD
-```
-
-The `Reader` grant at RG scope is a placeholder so `create-for-rbac` succeeds; the operationally meaningful grants are the three narrow role assignments in Step 3. The Reader grant MAY be removed after Step 3 completes if your security policy prefers a strict "only the three rotation roles" posture.
-
-#### Step 2 — Configure federated identity credentials (OIDC, no client secrets)
-
-For each SP, add a federated identity credential that trusts GitHub Actions running in the corresponding GitHub Environment. Repeat per env (replace `{APP_ID}` with the SP's appId from Step 1, `{ENV}` with `dev`/`staging`/`prod`):
-
-```bash
-az ad app federated-credential create \
-  --id {APP_ID} \
-  --parameters '{
-    "name": "github-spaarke-redis-rotation-{ENV}",
-    "issuer": "https://token.actions.githubusercontent.com",
-    "subject": "repo:spaarke-dev/spaarke:environment:{ENV}",
-    "audiences": ["api://AzureADTokenExchange"]
-  }'
-```
-
-The `subject` claim binds the credential to the specific GitHub Environment, so a workflow job running in env `dev` cannot mint a token for the `prod` SP even if it knows the prod clientId.
-
-#### Step 3 — Assign narrowly-scoped roles (env-specific resource IDs only)
-
-For each env, run all three assignments. **Critical**: scopes MUST be the env-specific resource ID, not the RG or subscription. Replace `{SUB_ID}`, `{KV_NAME}`, `{REDIS_NAME}`, `{APP_SERVICE_NAME}`, `{SP_OBJECT_ID}` (the SP's objectId — get via `az ad sp show --id {APP_ID} --query id -o tsv`).
-
-```bash
-# (a) Key Vault Secrets Officer — write Redis-ConnectionString secret
-az role assignment create \
-  --assignee {SP_OBJECT_ID} \
-  --role "Key Vault Secrets Officer" \
-  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.KeyVault/vaults/{KV_NAME}"
-
-# (b) Redis cache contributor — regenerate primary key
-# Built-in "Redis Cache Contributor" includes Microsoft.Cache/redis/regenerateKey/action and listKeys/action.
-# If your security policy disallows the built-in (it also grants write/delete on the cache resource),
-# create a custom role "spaarke-redis-key-rotator" with ONLY:
-#   - Microsoft.Cache/redis/listKeys/action
-#   - Microsoft.Cache/redis/regenerateKey/action
-#   - Microsoft.Cache/redis/read
-# and assign that instead.
-az role assignment create \
-  --assignee {SP_OBJECT_ID} \
-  --role "Redis Cache Contributor" \
-  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.Cache/Redis/{REDIS_NAME}"
-
-# (c) Website Contributor — restart App Service so the new KV reference is picked up
-# "Website Contributor" includes Microsoft.Web/sites/restart/action. A tighter custom role
-# limited to restart/action only is acceptable if preferred.
-az role assignment create \
-  --assignee {SP_OBJECT_ID} \
-  --role "Website Contributor" \
-  --scope "/subscriptions/{SUB_ID}/resourceGroups/rg-spaarke-{ENV}/providers/Microsoft.Web/sites/{APP_SERVICE_NAME}"
-```
-
-For env `dev`, the resource names per current cutover baseline are: `{KV_NAME}=spaarke-spekvcert`, `{REDIS_NAME}=spaarke-bff-redis-dev`, `{APP_SERVICE_NAME}=spaarke-bff-dev`. Staging and prod names follow the same `{prefix}-{env}` pattern (confirm against env-specific cutover records).
-
-#### Step 4 — Publish the clientId to the corresponding GitHub Environment
-
-Create the three GitHub Environments first (if they do not already exist) at `https://github.com/spaarke-dev/spaarke/settings/environments` — names: `dev`, `staging`, `prod`. Add required reviewers + deployment branch rules on `prod` per organizational policy.
-
-Then publish each SP's clientId as an environment-scoped secret (per spec FR-09 naming):
-
-```bash
-gh secret set AZURE_CLIENT_ID_DEV     --env dev     --body "{APP_ID_DEV}"
-gh secret set AZURE_CLIENT_ID_STAGING --env staging --body "{APP_ID_STAGING}"
-gh secret set AZURE_CLIENT_ID_PROD    --env prod    --body "{APP_ID_PROD}"
-```
-
-Also publish `AZURE_TENANT_ID` and `AZURE_SUBSCRIPTION_ID` per env (these may be repo-level secrets if all envs share the same tenant/sub, or env-scoped if they differ).
-
-#### Step 5 — Verify isolation
-
-For each SP, list ALL role assignments across ALL subscriptions and confirm the only env-meaningful grants are scoped to that SP's env.
-
-```bash
-az role assignment list --assignee {SP_OBJECT_ID_DEV}     --all -o table
-az role assignment list --assignee {SP_OBJECT_ID_STAGING} --all -o table
-az role assignment list --assignee {SP_OBJECT_ID_PROD}    --all -o table
-```
-
-Expected shape per SP (three rows, plus the placeholder `Reader` from Step 1 if retained):
-
-```
-Principal                                Role                          Scope
---------------------------------------   ---------------------------   -----------------------------------------------------------------------------
-sp-spaarke-redis-rotation-{env}          Key Vault Secrets Officer     /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.KeyVault/vaults/...
-sp-spaarke-redis-rotation-{env}          Redis Cache Contributor       /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.Cache/Redis/...
-sp-spaarke-redis-rotation-{env}          Website Contributor           /subscriptions/.../rg-spaarke-{env}/providers/Microsoft.Web/sites/...
-```
-
-**FR-09 acceptance**: every Scope column value MUST contain the SP's own env name (`rg-spaarke-{env}`) and MUST NOT reference any other env's resources. If `az role assignment list --assignee {SP_OBJECT_ID_PROD}` shows any scope under `rg-spaarke-dev` or `rg-spaarke-staging`, isolation is broken — remove the cross-env assignment before enabling the workflow.
-
-#### Operator one-time setup checklist
-
-- [ ] 1. Create three SPs via Step 1 (`sp-spaarke-redis-rotation-{dev|staging|prod}`); record each appId + objectId.
-- [ ] 2. Add federated identity credential per SP, bound to `repo:spaarke-dev/spaarke:environment:{env}` (Step 2).
-- [ ] 3. Assign three narrow roles per SP — KV Secrets Officer, Redis Cache Contributor, Website Contributor — at env-specific resource scopes (Step 3).
-- [ ] 4. Create three GitHub Environments (`dev`, `staging`, `prod`) with required reviewers on prod; publish `AZURE_CLIENT_ID_{ENV}` as env-scoped secret (Step 4).
-- [ ] 5. Verify isolation per SP via `az role assignment list --assignee {SP_OBJECT_ID} --all` (Step 5); confirm no cross-env scopes.
-- [ ] 6. Enable the cron schedule in [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) (the workflow is dormant until these SPs exist).
-
-Once this section is complete, the automated rotation workflow (task 011) consumes these SPs via OIDC token exchange — no client secrets stored anywhere.
-
-### 6.2 Automated rotation (primary path, per FR-10)
-
-**This is the canonical rotation path.** The 90-day rotation is performed by the GitHub Actions workflow [`.github/workflows/redis-key-rotation.yml`](../../.github/workflows/redis-key-rotation.yml) (provisioned by task 011 of `spaarke-redis-cache-remediation-r2`), which invokes [`scripts/Rotate-RedisKey.ps1`](../../scripts/Rotate-RedisKey.ps1) (provisioned by task 010) under the per-env OIDC service principal configured in §6.1.
-
-#### How the cron fires
-
-The workflow is scheduled (per the YAML `on.schedule.cron` value) to run automatically every 90 days against each environment in turn. Each scheduled invocation:
-
-1. Selects the matching GitHub Environment (`dev` / `staging` / `prod`) so OIDC mints a token for the env-specific SP.
-2. Runs `scripts/Rotate-RedisKey.ps1 -Environment {env}` (with `-Force` for staging/prod per NFR-05).
-3. The script executes the safe-window algorithm: regenerate Secondary → upsert KV secret → restart BFF → poll `/healthz` for 120s → on success, regenerate Primary (eliminating the old key); on failure, roll back by restoring the previous KV secret version and restart BFF.
-4. Every step emits a `RedisKeyRotation` customEvent to Application Insights (see §6.4 for the verification query).
-
-#### Manually trigger an out-of-band rotation
-
-For ad-hoc rotation (e.g., scheduled maintenance window, post-incident, or compliance attestation):
-
-```bash
-# Trigger rotation against dev
-gh workflow run redis-key-rotation.yml --ref master -f environment=dev
-
-# Trigger rotation against staging (requires environment approvers per §6.1 Step 4)
-gh workflow run redis-key-rotation.yml --ref master -f environment=staging
-
-# Trigger rotation against prod (requires environment approvers per §6.1 Step 4)
-gh workflow run redis-key-rotation.yml --ref master -f environment=prod
-```
-
-Follow the run via `gh run watch` or in the Actions UI. The workflow's environment-approval gate (prod, optionally staging) enforces dual-control per organizational policy.
-
-#### Local invocation (developer / operator pre-prod testing)
-
-The same script can be invoked locally for dev-environment rotation by an operator with the appropriate Azure CLI login:
-
-```powershell
-# Plan only — no Azure mutations, shows planned actions
-./scripts/Rotate-RedisKey.ps1 -Environment dev -WhatIf
-
-# Execute against dev (no -Force required)
-./scripts/Rotate-RedisKey.ps1 -Environment dev
-
-# Execute against staging/prod (NFR-05 gate)
-./scripts/Rotate-RedisKey.ps1 -Environment staging -Force
-./scripts/Rotate-RedisKey.ps1 -Environment prod -Force
-```
-
-Local invocation is operationally identical to the workflow invocation; the workflow simply hosts the same script under OIDC auth. Prefer the workflow for production rotations so the run is auditable in Actions.
-
-### 6.3 Emergency fallback — manual rotation
-
-> **Use ONLY when the automated path cannot run.** The automated workflow (§6.2) is the canonical rotation path. Reach for this section only in the scenarios below — every routine 90-day rotation MUST go through §6.2 so the App Insights audit trail (§6.4) is preserved.
-
-#### When to use this fallback
-
-Use the manual procedure if AND ONLY IF one of the following applies:
-
-- [ ] **Suspected key compromise** requiring immediate rotation faster than the workflow can be triggered or approved (e.g., out-of-band incident response while environment approvers are unavailable).
-- [ ] **Workflow disabled or broken** — `.github/workflows/redis-key-rotation.yml` is disabled, deleted, or failing in a way that blocks even manual `gh workflow run` invocation.
-- [ ] **SP expired or de-provisioned** — the per-env OIDC service principal (§6.1) is expired, has lost a required role assignment, or has been deleted, and rotation must proceed before §6.1 can be re-completed.
-- [ ] **Tenant-level GitHub outage** preventing Actions from running.
-
-If none of these apply, STOP and use §6.2 instead. The manual procedure lacks the App Insights audit trail and the safe-window automatic rollback that the script provides.
-
-#### Manual steps (preserved from pre-automation procedure)
-
-1. **Verify current state** — capture current secret version: `az keyvault secret show --vault-name <kv> --name Redis-ConnectionString --query attributes.version -o tsv`. Record in cutover/rotation log.
-2. **Regenerate primary key** in Azure: `az redis regenerate-key -g <rg> -n spaarke-bff-redis-<env> --key-type Primary`.
-3. **Build new connection string**: `{host}:6380,password={newPrimaryKey},ssl=True,abortConnect=False`. Get host: `az redis show -g <rg> -n spaarke-bff-redis-<env> --query hostName -o tsv`.
-4. **Upsert KV secret** with new value: `az keyvault secret set --vault-name <kv> --name Redis-ConnectionString --value "<new-conn-string>" --output none`. Capture new version.
-5. **Pick up rotation** — Key Vault references on App Service cache for ~24 hours by default. Two options:
-   - **Option A (immediate)**: Force pickup by restarting BFF: `az webapp restart -g rg-spaarke-<env> -n spaarke-bff-<env>`. ~30-second downtime per instance.
-   - **Option B (background)**: Let KV reference TTL expire naturally over ~24 hours. Zero downtime but each instance picks up new value at staggered times.
-6. **Verify** — after BFF picks up new value, hit `/healthz` and confirm a fresh chat-session creates a key in Redis (verifies the new connection string works).
-7. **Decommission previous key** — `az redis regenerate-key --key-type Secondary` is a separate, optional step to invalidate any lingering use of the OLD primary (now-secondary) key. Do AFTER verifying step 6.
-8. **Audit** — record rotation in `notes/cutover-deploy-log.md` with timestamps + KV secret version + which option (A/B) was used + downtime observed. **Additionally**: file a follow-up to restore the automated path (re-provision SP per §6.1 / re-enable workflow / re-trigger §6.2) so the next rotation returns to the canonical path.
-
-#### Expected Downtime
-
-- Option A: ~30 seconds per BFF instance during restart.
-- Option B: 0 downtime; rotation completes within ~24 hours.
-
-#### Failure Recovery
-
-- If new connection string is wrong or KV upsert fails: revert by restoring the previous secret version (`az keyvault secret set` with the old value, captured in step 1) and restart BFF.
-
-### 6.4 Verification (post-rotation)
-
-After EITHER the automated (§6.2) or manual (§6.3) procedure completes, the operator confirms the last successful rotation by running the following KQL query against the env-specific App Insights workspace (`spaarke-{env}-appi`):
-
-```kusto
-customEvents
-| where name == 'RedisKeyRotation' and outcome == 'success'
-| top 1 by timestamp desc
-| project environment, timestamp, duration_ms
-```
-
-Expected result: exactly one row showing the target `environment`, the rotation `timestamp`, and `duration_ms` (typical end-to-end safe-window rotation: ~60-180 seconds depending on App Service restart time).
-
-> **Note**: The `RedisKeyRotation` customEvent is emitted by `scripts/Rotate-RedisKey.ps1` (every step → `RedisKeyRotation` with `step` / `outcome` properties). Manual rotations performed via §6.3 will NOT produce this event, so the query will return the most-recent automated rotation only. If the latest automated timestamp is older than the rotation cadence (90 days for routine; same day for incident-response), investigate via Actions run history and §6.2 + §6.1 health.
+The key-rotation tooling — `scripts/Rotate-RedisKey.ps1`, `.github/workflows/redis-key-rotation.yml` and the missed-rotation alert — was **removed on 2026-10-05** (task 242b): it could only operate a classic key-based `Microsoft.Cache/Redis` cache, none exists, ADR-009 forbids a Redis key in Key Vault, and a current BFF refuses a connection string outside Development/Testing. Its scheduled runs had all failed since 2026-07-01. The dev vault's old `Redis-ConnectionString` secret stays in place, unreferenced (Key Vault secrets are never deleted).
 
 ---
 
 ## 7. Decommission Procedure
 
-After the 24-hour verification window for dev (or the environment-specific window for staging/prod) has passed without regressions:
+After the verification window has passed without regressions (dev used the same day; staging/prod per the environment's go/no-go):
 
-1. **Choose decommission method**:
-   - **Delete** (preferred for empty legacy resources):
+1. **Get owner approval.** Old `Microsoft.Cache/Redis` caches are deleted only with explicit owner approval.
+2. **Delete with the type-specific command.** The old and new caches may share a name (dev did), so never delete by name alone through a generic command:
 
-     ```powershell
-     az redis delete -g <rg> -n <legacy-redis-name> --yes
-     ```
+   ```powershell
+   az redis delete --subscription <sub> -g <rg> -n <legacy-redis-name> --yes
+   ```
 
-   - **Tag for delayed deletion** (preferred when historical data may be needed for audit):
+   `az redis` addresses only `Microsoft.Cache/Redis`; confirm with §3 step 1 afterwards that the `Microsoft.Cache/redisEnterprise` cache is untouched.
 
-     ```powershell
-     az resource tag --tags decommission=YYYY-MM-DD `
-       -g <rg> -n <legacy-redis-name> `
-       --resource-type Microsoft.Cache/Redis
-     ```
+   Where historical data may be needed for audit, tag for delayed deletion instead:
 
-2. **Record the decommission** in [`projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/cutover-deploy-log.md):
-   - Date of decommission
-   - Method (delete vs. tag)
-   - Decommission tag value (if tagged)
-   - Operator who executed the decommission
+   ```powershell
+   az resource tag --tags decommission=YYYY-MM-DD `
+     -g <rg> -n <legacy-redis-name> `
+     --resource-type Microsoft.Cache/Redis
+   ```
+
+3. **Never delete Key Vault secrets.** `Redis-ConnectionString` stays in place, unreferenced.
+4. **Record the decommission** in the project's task notes: date, method (delete vs. tag), tag value if tagged, operator, and the owner approval.
 
 ---
 
@@ -530,35 +320,30 @@ After the 24-hour verification window for dev (or the environment-specific windo
 
 ### Connection failures (BFF cannot reach Redis)
 
-**Symptoms**: BFF startup logs show connection errors; `/healthz` returns 503; App Insights logs `RedisConnectionException` or similar.
+**Symptoms**: the BFF does not start (`Failed to connect to Redis at startup …`, or a configuration error naming `Redis__Endpoint`); `/healthz` returns 503; App Insights shows failed `redis` dependencies.
+
+**Common causes** (Microsoft Entra only):
+
+1. **Identity not in the access-policy list** — authentication error at connect. Run the harness with `-ExpectedPrincipalIds` (§3 step 2); add the identity's **object ID** per §2 "Granting another identity access".
+2. **No managed-identity client ID** — `'Redis__Endpoint' is set but no managed-identity client id is configured`. Set `ManagedIdentity__ClientId` (or `Graph__ManagedIdentity__ClientId`) to the user-assigned identity's **client ID** (not its object ID), and confirm that identity is attached to the App Service.
+3. **BFF build older than T242 with no connection string** — the old build reads only `ConnectionStrings__Redis` and refuses to start. Deploy a T242+ build (master ≥ `2677d48c0`).
+4. **Connection string instead of endpoint** — a T242+ build outside Development/Testing refuses to start when `Redis__Endpoint` is unset (`A Redis connection string … is accepted only in Development and Testing`). Run `-CutoverBffSettings`.
+5. **Wrong port** — Managed Redis listens on **10000**, not 6380. `Redis__Endpoint` is `host:10000` and must not contain a password or user.
+6. **Network path blocked** — with the OSS clustering policy the client connects to the endpoint on 10000 and then directly to the node ports **85xx**; outbound traffic to both must be allowed (check NSG / VNet integration rules, and DNS resolution of `*.redis.azure.net`).
+7. **Cache down** — `az resource show … --resource-type Microsoft.Cache/redisEnterprise --query properties.provisioningState` (§3 step 1). If `Failed`, re-run the provision command.
+
+The L2 Worker uses the same pattern: `Redis__Endpoint` plus its user-assigned identity (`src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchModule.cs`); outside Development/Testing it refuses a connection string the same way.
+
+### Latency spikes (average call latency > 100 ms sustained)
+
+**Symptoms**: the average of the `cache.redis_call_duration_ms` histogram exceeds 100 ms for sustained windows (§8 Alert 2); user-visible BFF latency increases.
 
 **Common causes**:
 
-1. **Key Vault reference unresolved** — App Service cannot read the `Redis-ConnectionString` secret.
-   - Verify with `az webapp config appsettings list -g rg-spaarke-{env} -n spaarke-bff-{env} --query "[?name=='ConnectionStrings__Redis']"`.
-   - If the value shows `@Microsoft.KeyVault(...)` literally (not resolved), check the Managed Identity has `Key Vault Secrets User` role on the KV.
-2. **Managed Identity missing role** — assign the role:
-
-   ```powershell
-   az role assignment create `
-     --assignee <MI-objectId> `
-     --role "Key Vault Secrets User" `
-     --scope $(az keyvault show -n <kv> --query id -o tsv)
-   ```
-
-3. **Redis instance down** — verify with `az redis show -g <rg> -n spaarke-bff-redis-{env} --query provisioningState`. Expect `Succeeded`. If `Failed` or `Deleting`, re-run the provision command.
-4. **Network path blocked** (private endpoint / VNet integration) — verify DNS resolution from the App Service to the Redis hostname; check NSG rules on the integration subnet.
-
-### Latency spikes (P95 > 100 ms sustained)
-
-**Symptoms**: App Insights `cache.redis_p95_ms` custom metric exceeds 100 ms for sustained windows; user-visible BFF latency increases.
-
-**Common causes**:
-
-1. **SKU undersize** — check `serverLoad` and `usedmemorypercentage` Azure Monitor metrics. If `serverLoad > 80%` or `usedmemorypercentage > 70%`, scale up via `infrastructure/bicep/parameters/redis-{env}.bicepparam` (update `redisSkuName` / `redisSkuFamily` / `redisSkuCapacity`) and redeploy.
+1. **SKU undersize** — check the `usedmemorypercentage` Azure Monitor metric on the cache. If it is sustained above 70%, scale up via `skuName` in `infrastructure/bicep/parameters/redis-{env}.bicepparam` (`Balanced_B0` → `B1` → `B3` …) and redeploy with `az deployment group create` (§2). There is no scale-down.
 2. **Network issue** — check Azure Service Health for `Cache` in the deployment region. If a regional incident is active, ride it out (auto-mitigates).
-3. **Hot keys** — a small set of keys receives disproportionate traffic, exhausting Redis CPU. Identify via `redis-cli --hotkeys` (Premium SKU) or App Insights dependency call breakdown by operation name. Consider sharding the hot key by tenant or adding a brief client-side cache for the specific resource.
-4. **Client-side connection pool exhaustion** — symptom: BFF-side P95 is high but Azure Monitor `cacheLatency` is normal. Check `StackExchange.Redis.ConnectionMultiplexer` configuration; verify thread-pool sizing on the App Service plan.
+3. **Hot keys** — a small set of keys receives disproportionate traffic. Identify via the App Insights dependency call breakdown by operation name. Consider sharding the hot key by tenant or adding a brief client-side cache for the specific resource.
+4. **Client-side connection pool exhaustion** — symptom: BFF-side P95 is high while the cache's own metrics are normal. Check `StackExchange.Redis.ConnectionMultiplexer` configuration; verify thread-pool sizing on the App Service plan.
 
 ### Hit-rate degradation (`cache.hit_rate < 80%` sustained)
 
@@ -569,18 +354,25 @@ After the 24-hour verification window for dev (or the environment-specific windo
 1. **TTL too short** — a recently-tuned TTL evicts entries before normal re-access. Check `RedisCacheOptions` and `IDistributedCache.Set*` TTL values vs. prior versions.
 2. **Key drift** (version mismatch) — a recent deploy wrote keys without the `:v{n}` suffix or with the wrong version. Check `git log` on `CacheKeys.cs` and any `IDistributedCache.Set*` callsites in the last 24 hours.
 3. **Tenant ID computation bug** — a code path bypassed the `tenant:{tenantId}:` prefix derivation. Grep the BFF for direct `IDistributedCache` usage outside the `ITenantCache` wrapper (per NFR-08, only allow-listed exceptions are valid).
-4. **Cold start after restart / scale event** — transient; resolves naturally within ~30 minutes as the cache warms. Verify against App Service restart events in the same window.
+4. **Cold start after restart, scale event or cutover** — transient; resolves naturally within ~30 minutes as the cache warms.
 
 ### Alert Definitions (FR-17)
 
-Three alerts MUST be configured against each environment's Redis cache and App Insights workspace. These were drafted in [`projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md) and are restated here as the operational source of truth.
+The alerts are deployed from [`infrastructure/bicep/alerts.bicep`](../../infrastructure/bicep/alerts.bicep) by:
 
-All three alerts are **Sev 2 (Warning)** by convention. Sustained or co-occurring firings (e.g., latency + memory together) escalate via the runbook in §8.
+```powershell
+pwsh ./scripts/Deploy-RedisCache.ps1 -Environment {env} -SubscriptionId <sub> -DeployAlerts `
+  -ActionGroupResourceId /subscriptions/{sub}/resourceGroups/{rg}/providers/Microsoft.Insights/actionGroups/{name}
+```
+
+`-AppInsightsName` defaults per environment (dev: `spe-insights-dev-67e2xz`). `alerts.bicep` accepts `environment` `dev`, `demo`, `staging` or `prod`. They were drafted in [`projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md); the definitions below are the operational source of truth.
+
+All alerts are **Sev 2 (Warning)** by convention. Sustained or co-occurring firings escalate via the runbook below.
 
 #### Alert 1 — Cache Hit Rate Below 80%
 
-- **Name**: `redis-cache-hit-rate-low`
-- **Resource scope**: App Insights (`spaarke-{env}-appi`)
+- **Name**: `redis-cache-hit-rate-low-{env}`
+- **Resource scope**: App Insights
 - **Severity**: Warning (Sev 2)
 - **Evaluation frequency**: 5 minutes
 - **Window**: 15 minutes
@@ -607,46 +399,44 @@ hits
 | where avg_hit_rate < 0.80
 ```
 
-#### Alert 2 — Redis P95 Latency Above 100 ms
+#### Alert 2 — Redis call latency above 100 ms
 
-- **Name**: `redis-cache-p95-latency-high`
-- **Resource scope**: App Insights (`spaarke-{env}-appi`) — wrapper-emitted P95 is preferred over Azure Monitor `cacheLatency` because it reflects BFF-observed latency, not Redis-side only.
+- **Name**: `redis-cache-p95-latency-high-{env}` (name kept so the deployed rule updates in place)
+- **Resource scope**: App Insights — BFF-observed latency of each `IDistributedCache` call, not cache-side only.
 - **Severity**: Warning (Sev 2)
 - **Evaluation frequency**: 1 minute
 - **Window**: 5 minutes
-- **Threshold**: `avg(cache.redis_p95_ms) > 100` for the window
-- **Metric source**: App Insights custom metric `cache.redis_p95_ms` (FR-16, emitted from cache wrapper)
-- **Suggested action**: "Network issue or SKU undersize."
+- **Threshold**: the **average** call duration per operation (`get`, `set`, `refresh`, `remove`) over 5 minutes `> 100` ms
+- **Metric source**: the histogram `cache.redis_call_duration_ms`, recorded by `Infrastructure/Cache/MetricsDistributedCache.cs` (tags `op`, `tier`). App Insights stores it pre-aggregated (sum, count, min, max), so a true P95 is not available from `customMetrics`; the average is what can be alerted on.
+- **History**: until 2026-10-05 the rule queried `cache.redis_p95_ms`, which nothing emits, so it could never fire.
+- **Suggested action**: "Network issue, SKU undersize, or client-side delay." Compare with the `redis` dependency durations — if those are low while this is high, the time is spent in the BFF's cache client, not in Redis.
 
 KQL expression (scheduledQueryRules):
 
 ```kusto
 customMetrics
-| where name == "cache.redis_p95_ms"
-| extend resource = tostring(customDimensions.resource)
-| summarize avg_p95_ms = avg(valueSum / valueCount) by bin(timestamp, 1m), resource
-| summarize windowed_p95 = avg(avg_p95_ms) by bin(timestamp, 5m), resource
-| where windowed_p95 > 100
+| where name == "cache.redis_call_duration_ms"
+| extend op = tostring(customDimensions.op)
+| summarize avg_ms = sum(valueSum) / sum(valueCount) by bin(timestamp, 5m), op
+| where avg_ms > 100
 ```
-
-Alternative (Azure Monitor platform metric, less precise): `Microsoft.Cache/Redis/cacheLatency` (Premium SKU only) or `serverLoad > 80%` as a proxy on Basic/Standard.
 
 #### Alert 3 — Redis Memory Usage Above 80% of SKU Limit
 
-- **Name**: `redis-cache-memory-high`
-- **Resource scope**: Redis (`spaarke-bff-redis-{env}`) — Azure Monitor platform metric
+- **Name**: `redis-cache-memory-high-{env}`
+- **Resource scope**: the cache (`spaarke-bff-redis-{env}`, `Microsoft.Cache/redisEnterprise`) — Azure Monitor platform metric
 - **Severity**: Warning (Sev 2)
 - **Evaluation frequency**: 5 minutes
 - **Window**: 15 minutes (sustained)
 - **Threshold**: `usedmemorypercentage > 80` for the window
-- **Metric source**: Azure Monitor platform metric `Microsoft.Cache/Redis/usedmemorypercentage`
-- **Suggested action**: "Scale to next SKU." See [`notes/alert-definitions-draft.md`](../../projects/spaarke-redis-cache-remediation-r1/notes/alert-definitions-draft.md) §Alert 3 for the SKU decision matrix (Basic C0 → C1 → Standard C2 → C3/Premium P1 → P2).
+- **Metric source**: Azure Monitor platform metric `Microsoft.Cache/redisEnterprise` / `usedmemorypercentage`
+- **Suggested action**: "Scale to the next Balanced SKU" (`B0` → `B1` → `B3` → `B5` → `B10`; no scale-down).
 
 Azure Monitor metric alert (no KQL required):
 
-- Namespace: `Microsoft.Cache/Redis`
+- Namespace: `Microsoft.Cache/redisEnterprise`
 - Metric name: `usedmemorypercentage`
-- Aggregation: Average (or Maximum for tighter)
+- Aggregation: Average
 - Operator: GreaterThan
 - Threshold: 80
 - Window: PT15M
@@ -654,12 +444,12 @@ Azure Monitor metric alert (no KQL required):
 
 #### Threshold Tuning — Dev vs. Prod
 
-Defaults above are dev/staging-appropriate. Prod tuning is tighter (finalize during prod provisioning):
+Defaults above are dev/staging-appropriate. Prod tuning is tighter (finalize during prod provisioning; `alerts.bicep` parameters `hitRateThreshold`, `p95LatencyMsThreshold`, `memoryPercentThreshold`):
 
 | Alert | Dev/Staging | Prod (proposed) |
 |---|---|---|
 | Hit rate | < 80% | < 90% |
-| P95 latency | > 100 ms | > 50 ms |
+| Average call latency | > 100 ms | > 50 ms |
 | Memory | > 80% | > 70% |
 
 #### Cross-alert correlation runbook
@@ -669,15 +459,11 @@ Defaults above are dev/staging-appropriate. Prod tuning is tighter (finalize dur
 - **(1) alone without (2) or (3)** → likely TTL / key-naming bug from a recent commit. Code review focus.
 - **(3) alone without (1) or (2)** → healthy growth signal; scale before it impacts latency.
 
-#### Deployment mechanism
-
-Whether to deploy these alerts via Bicep (extension to `infrastructure/bicep/modules/alerts.bicep`) or via Portal / App Insights workbook is a Phase 4 implementation choice (both satisfy FR-17 acceptance). See `notes/alert-definitions-draft.md` §"Bicep deployment" for skeleton resource definitions.
-
 ---
 
 ## 9. Known Limitation — In-Memory Fallback Mode
 
-> **WARNING — In-memory fallback mode does NOT support multi-instance deployment.** When `Redis:Enabled=false` and `Redis:AllowInMemoryFallback=true` (Development only — non-Development environments throw at startup per FR-03), Pub/Sub cache invalidations are no-op (`NullConnectionMultiplexer.GetSubscriber().Subscribe(...)` registers but never delivers). This means cache entries can become stale across instances. **The in-memory mode is for local, single-instance development only.** Any deployed environment MUST run with `Redis:Enabled=true` against a real Redis instance.
+> **WARNING — In-memory fallback mode does NOT support multi-instance deployment.** When `Redis:Enabled=false` and `Redis:AllowInMemoryFallback=true` (Development and Testing only — other environments throw at startup per FR-03), Pub/Sub cache invalidations are no-op (`NullConnectionMultiplexer.GetSubscriber().Subscribe(...)` registers but never delivers). This means cache entries can become stale across instances. **The in-memory mode is for local, single-instance development only.** Any deployed environment MUST run with `Redis:Enabled=true` against a real Redis instance.
 
 This is by design (per Q-B in `spec.md`) — documented, not engineered around. The Null-Object `IConnectionMultiplexer` (per ADR-032) preserves symmetric DI registration without requiring callers to null-check the multiplexer.
 
@@ -703,13 +489,17 @@ The combination produced a deployed environment running on in-memory cache with 
 
 Each guardrail below independently breaks the failure chain above.
 
-1. **Fail-fast in deployed environments.** `CacheModule` now throws `InvalidOperationException` at startup when Redis is configured-but-unreachable (`AbortOnConnectFail = true` + environment-guarded fallback). A deployed BFF either runs on Redis or it does not start. Reference: `src/server/api/Sprk.Bff.Api/Modules/CacheModule.cs`, ADR-009 (amended).
+1. **Fail-fast in deployed environments.** `CacheModule` now throws `InvalidOperationException` at startup when Redis is configured-but-unreachable (`AbortOnConnectFail = true` + environment-guarded fallback). A deployed BFF either runs on Redis or it does not start. Reference: `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs`, ADR-009 (amended).
 2. **Explicit opt-in for fallback.** `Redis:AllowInMemoryFallback` defaults `false`. Even the Development environment requires it `true` to use in-memory cache. The deployed dev App Service ships with `false`; in-memory mode is now a local-developer-laptop-only state.
 3. **Null-Object `IConnectionMultiplexer`.** Symmetric DI registration (per [ADR-032](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md)) means consumers in dev see no-op Pub/Sub + an explicit `NotSupportedException` on direct database access — never a missing-service error. This eliminates an entire class of `IConnectionMultiplexer?` nullable-defensive code that previously masked degraded state.
 4. **Canonical naming.** `spaarke-bff-redis-{env}` (top-level env-suffix) per NFR-03 makes off-pattern legacy instances visible at a glance in resource lists and lifecycle scripts.
 5. **Tenant-prefix mandatory in keys.** The canonical key format `{InstanceName}tenant:{tenantId}:{resource}:{id}:v{version}` is enforced at every call site via the `ITenantCache` wrapper. System-level exceptions (feature flags, system config) are explicitly allow-listed with JSON-comment justification (NFR-08).
-6. **App Insights observability.** Redis dependency telemetry (auto) + `cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` custom metrics (wrapper-emitted) + three alert rules (§8: hit rate < 80%, P95 latency > 100 ms, memory > 80%) make any future degradation visible within minutes.
-7. **Deployment checklist.** [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1) (idempotent, multi-env, `-WhatIf` / `-VerifyOnly` / `-CutoverBffSettings` / `-Force` per NFR-01/05/06) and this runbook (§§1–9) let any future operator provision a new env Redis end-to-end in under 30 minutes (FR-19, Success Criterion #6).
+6. **App Insights observability.** Redis dependency telemetry (auto) + `cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` custom metrics (wrapper-emitted) + the §8 alert rules (hit rate < 80%, P95 latency > 100 ms, memory > 80%) make any future degradation visible within minutes.
+7. **Deployment checklist.** [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1) (idempotent, multi-env, `-WhatIf` / `-VerifyOnly` / `-CutoverBffSettings` / `-RemoveBffConnectionString` / `-Force` per NFR-01/05/06) and this runbook (§§1–9) let any future operator provision a new env Redis end-to-end in under 30 minutes (FR-19, Success Criterion #6).
+
+### 2026-10-05 — Azure Managed Redis, Microsoft Entra only (T242 / T242b)
+
+Classic Azure Cache for Redis (Basic/Standard/Premium) retires on 2028-09-30 and has refused new customers since 2026-04-01, so the owner decided (D12) that every Spaarke Redis is Azure Managed Redis, and (D13) that caches are keyless. T242 changed `redis.bicep`, `customer.bicep`, the BFF and the L2 Worker to sign in with managed identities through `Redis__Endpoint`; T242b created `spaarke-bff-redis-dev` and `spaarke-bff-redis-demo` as Managed Redis, cut the dev BFF over with no outage (§4), removed its connection string, retired dev key rotation and the dev missed-rotation alert, and pointed the memory alert at `Microsoft.Cache/redisEnterprise`. Two lessons: the post-deploy harness had been checking a source layout that no longer existed and failed on every run since 2025, so it was rewritten as a read-only ARM check of what actually matters (keys disabled, access policy, endpoint); and the cutover worked without an outage only because the BFF kept its connection string until a T242+ build was deployed and verified in App Insights — removing it first would have stopped every older build. The old classic cache is deleted only with owner approval, and its Key Vault secret stays in place.
 
 ---
 
@@ -718,11 +508,13 @@ Each guardrail below independently breaks the failure chain above.
 - [`docs/architecture/caching-architecture.md`](../architecture/caching-architecture.md) — design rationale: Tenant Isolation, Multi-instance Behavior, Cache Instance Registry, Failure Mode Catalog.
 - [`.claude/adr/ADR-009-redis-caching.md`](../../.claude/adr/ADR-009-redis-caching.md) — concise ADR-009 constraints (MUST / MUST NOT).
 - [`docs/adr/ADR-009-caching-redis-first.md`](../adr/ADR-009-caching-redis-first.md) — full ADR-009 rationale.
-- [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1) — provisioning automation (idempotent, multi-env, `-WhatIf`, `-VerifyOnly`, `-CutoverBffSettings`, `-Force`).
-- [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) — validation harness (extended with `Test-TenantPrefixInvariant` and `Test-FailFastBehavior` in task 026).
-- [`infrastructure/bicep/modules/redis.bicep`](../../infrastructure/bicep/modules/redis.bicep) — IaC module.
-- [`infrastructure/bicep/parameters/redis-dev.bicepparam`](../../infrastructure/bicep/parameters/redis-dev.bicepparam) — dev parameter file (staging / prod parameter files follow the same shape).
+- [`scripts/Deploy-RedisCache.ps1`](../../scripts/Deploy-RedisCache.ps1) — provisioning automation (idempotent, multi-env, `-WhatIf`, `-VerifyOnly`, `-CutoverBffSettings`, `-RemoveBffConnectionString`, `-SubscriptionId`, `-Force`, `-DeployAlerts`).
+- [`tests/manual/RedisValidationTests.ps1`](../../tests/manual/RedisValidationTests.ps1) — read-only ARM validation harness (cluster state, SKU, keys disabled, TLS, OSSCluster, port 10000, access-policy assignments, BFF `Redis__Endpoint`, no connection string).
+- [`infrastructure/bicep/modules/redis.bicep`](../../infrastructure/bicep/modules/redis.bicep) — Azure Managed Redis module (also used by `customer.bicep`).
+- [`infrastructure/bicep/parameters/redis-dev.bicepparam`](../../infrastructure/bicep/parameters/redis-dev.bicepparam) / [`redis-demo.bicepparam`](../../infrastructure/bicep/parameters/redis-demo.bicepparam) — live environments; staging / prod parameter files follow the same shape with placeholders.
+- [`infrastructure/bicep/alerts.bicep`](../../infrastructure/bicep/alerts.bicep) — alert rules (§8).
+- [`src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs) — BFF cache registration (endpoint → managed identity, RESP3; connection string only in Development/Testing).
 
 ---
 
-*This guide is the operational source of truth for Redis cache management across all Spaarke environments. Updates SHOULD accompany any change to `Deploy-RedisCache.ps1`, `redis.bicep`, `RedisValidationTests.ps1`, or ADR-009.*
+*This guide is the operational source of truth for Redis cache management across all Spaarke environments. Updates SHOULD accompany any change to `Deploy-RedisCache.ps1`, `redis.bicep`, `alerts.bicep`, `RedisValidationTests.ps1`, `CacheModule.cs`, or ADR-009.*

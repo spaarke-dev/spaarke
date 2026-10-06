@@ -4,7 +4,7 @@
     <title>Sidecar live verification against dev L2 Worker App Service (localhost sitecontainer binding + per-boot shared-secret header)</title>
     <phase>C'' Wave G-6 -- Integration wiring</phase>
     <gate>unblocked</gate>
-    <status>authoring-complete-live-verification-pending</status>
+    <status>blocked-shipped</status>
     <rigor>FULL</rigor>
     <rigor-reason>Live verification of a security-sensitive component (Exchange-admin cert capability) against a real dev App Service -- deploy-adjacent, escalation-worthy if verification fails.</rigor-reason>
     <model-tier>opus</model-tier>

@@ -4,7 +4,7 @@
     <title>Author 5 new ArchTests for §4D I1-I5 tenant-isolation invariants</title>
     <phase>C Wave C6 — Tenant-Isolation ArchTests + Audit Sweep</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'testing','integration-test'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Enforces 5 binding tenant-isolation invariants; blast-radius = entire BFF (a wrong assertion breaks every PR).</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -2,8 +2,8 @@
 // FileKvSecretManifest.cs
 //
 // Task 126 (Wave G-2 Batch G-2C) — the "task-084 canonical manifest DI-swap
-// (C2.2)" half of this task. Replaces the interim <see cref="StaticKvSecretManifest"/>
-// (7 hardcoded entries) with a reader over the REAL Phase H canonical
+// (C2.2)" half of this task. Replaced the interim StaticKvSecretManifest
+// (7 hardcoded entries; deleted by T226, 2026-09-30) with a reader over the REAL Phase H canonical
 // secret-catalog manifest (task 084, scripts/canonical-secret-catalog/
 // manifest.yaml — 26 entries as of 2026-08-19).
 //
@@ -52,9 +52,37 @@
 //   never_delete: true. This reader refuses to SERVE entries (returns
 //   Failure) if that invariant is violated — the C# read-time mirror of the
 //   PowerShell generator's write-time refusal.
+//
+// A38a SECRET-FREE SERVED-ENTRY FILTER (task 205a, 2026-08-25 — auth-v4
+// §9.1 OMIT-is-the-signal + §10.1 Δ1/Δ2; peer escalation record in
+// notes/auth-v4-integration-draft-punch-rows.md "A38 execution record";
+// §6.5 record notes/decisions/adr-028-a4-integration-conflict-resolution.md;
+// remediation plan §5 item 3):
+//   On secret-free environments (KvSecretsPopulationOptions.
+//   RequireSecretFreeIdentity=true, mirroring the BFF's
+//   Graph__Credentials__RequireSecretFreeIdentity), the A38a credential
+//   slots (SecretFreeIdentityOmitTargets — BFF-API-ClientSecret + Dataverse-ClientSecret
+//   since task 225b; the Service Bus connection string and AI Search admin key left
+//   the catalog for every stamp in T226) are FILTERED from the
+//   SERVED entry list — DOWNSTREAM of the BINDING never-delete invariant
+//   check above, which runs against the RAW yaml document and is unaffected.
+//   The manifest.yaml rows themselves are NEVER deleted (the invariant
+//   REQUIRES BFF-API-ClientSecret's row to stay present with
+//   never_delete=true; omit is a served-entry filter, not a catalog edit).
+//   OMIT — never a sentinel value — is the §9.1-ruled signal: a sentinel in
+//   the slot produces an opaque AADSTS7000215 at runtime, indistinguishable
+//   from real misconfiguration. The positive migration marker lives OUTSIDE
+//   the credential slots (KV resource tag + sprk_dataverseenvironment state
+//   field — see ISecretFreeMarkerApplier).
+//   Q3 Path A rollback (SecretFreeIdentityRollback=true) re-includes ONLY
+//   the A38a targets. Task 225b (G21): Dataverse-ClientSecret is now an
+//   omit target too — the BINDING rule forbids CREATING either credential
+//   secret in a secret-free environment; the Q3 Path A hold (sunset
+//   2026-11-23) only protects the EXISTING live copy from deletion.
 // -----------------------------------------------------------------------------
 
 using System.Reflection;
+using Microsoft.Extensions.Options;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
 
@@ -63,7 +91,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 /// <summary>
 /// Reads the Phase H canonical secret-catalog manifest (task 084,
 /// scripts/canonical-secret-catalog/manifest.yaml) from an embedded resource.
-/// Production replacement for the interim <see cref="StaticKvSecretManifest"/>.
+/// The only production <see cref="IKvSecretManifest"/> (the interim static list was deleted by T226).
 /// </summary>
 public sealed class FileKvSecretManifest : IKvSecretManifest
 {
@@ -77,19 +105,52 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
     internal const string EmbeddedResourceName =
         "Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml";
 
+    /// <summary>
+    /// Row A38a — credential slots omitted from SERVED entries on secret-free
+    /// environments (auth-v4 §10.1 Δ1/Δ2; §9.1 OMIT-is-the-signal). Originally three;
+    /// T226 (owner 2026-09-30) removed <c>ServiceBus-ConnectionString</c> and
+    /// <c>AiSearch--AdminKey</c> from the catalog for EVERY stamp (the BFF reaches both
+    /// with the stamp UAMI), leaving <c>BFF-API-ClientSecret</c>; task 225b (G21) added
+    /// <c>Dataverse-ClientSecret</c> — neither credential secret is ever created in a
+    /// secret-free environment (the Q3 Path A hold, sunset 2026-11-23, protects only the
+    /// existing live copy from deletion).
+    /// Shared with H4, which unions these into the task-126 FR-39
+    /// <see cref="KvSecretWriteRequest.OmitCanonicalNames"/> seam as
+    /// defense-in-depth (covers any manifest implementation that does not filter).
+    /// </summary>
+    public static readonly IReadOnlySet<string> SecretFreeIdentityOmitTargets = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "BFF-API-ClientSecret",
+        // Task 225b (G21): the BINDING rule covers both credential secrets — never created in a
+        // secret-free environment. The Q3 hold protects the existing dev copy from deletion only.
+        "Dataverse-ClientSecret",
+    };
+
     private static readonly IDeserializer Deserializer = new DeserializerBuilder()
         .WithNamingConvention(UnderscoredNamingConvention.Instance)
         .IgnoreUnmatchedProperties()
         .Build();
 
     private readonly ILogger<FileKvSecretManifest> _logger;
+    private readonly KvSecretsPopulationOptions _options;
     private readonly Lazy<KvSecretManifestReadResult> _cached;
 
-    /// <summary>Constructs the reader. Parsing happens once, lazily, on first <see cref="ReadAsync"/> call (Singleton lifetime — see IKvSecretManifest.cs's thread-safety contract).</summary>
-    public FileKvSecretManifest(ILogger<FileKvSecretManifest> logger)
+    /// <summary>
+    /// Constructs the reader. Parsing happens once, lazily, on first
+    /// <see cref="ReadAsync"/> call (Singleton lifetime — see
+    /// IKvSecretManifest.cs's thread-safety contract). Options are read at
+    /// parse time: <see cref="KvSecretsPopulationOptions.RequireSecretFreeIdentity"/>
+    /// drives the A38a served-entry filter; changing it requires a redeploy
+    /// (same reload semantics as the manifest itself).
+    /// </summary>
+    public FileKvSecretManifest(
+        ILogger<FileKvSecretManifest> logger,
+        IOptions<KvSecretsPopulationOptions> options)
     {
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(options);
         _logger = logger;
+        _options = options.Value;
         _cached = new Lazy<KvSecretManifestReadResult>(LoadFromEmbeddedResource, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
@@ -125,6 +186,20 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
             return new KvSecretManifestReadResult.Failure(diagnostic);
         }
 
+        return ParseYaml(yaml);
+    }
+
+    /// <summary>
+    /// Test seam (A38a): parses a caller-supplied yaml document through the
+    /// EXACT production pipeline (BINDING invariant check + entry emission +
+    /// A38a served-entry filter + sort) so the invariant's refusal branches
+    /// and the filter's downstream-of-invariant ordering are unit-testable
+    /// without mutating the embedded canonical manifest.
+    /// </summary>
+    internal KvSecretManifestReadResult ParseYamlForTest(string yaml) => ParseYaml(yaml);
+
+    private KvSecretManifestReadResult ParseYaml(string yaml)
+    {
         ManifestYamlDocument document;
         try
         {
@@ -178,24 +253,7 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
                 var diagnostic =
                     $"manifest.yaml entry '{secret.CanonicalName}' has unrecognized value_source " +
                     $"'{secret.ValueSource}' (expected one of: from-existing-kv, from-bicep-output, " +
-                    "from-run-parameter, generated, from-shared-service).";
-                _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
-                return new KvSecretManifestReadResult.Failure(diagnostic);
-            }
-
-            // Task 200: enforce parser-side that from-shared-service entries
-            // carry a non-empty service_ref (mirrors the PowerShell generator's
-            // conditional-required check in Test-ManifestShape). Without a
-            // service_ref the downstream H4-shared handler has no source to
-            // extract from, so the entry is malformed — fail loud rather than
-            // silently swallow.
-            if (valueSource == KvSecretValueSource.FromSharedService
-                && string.IsNullOrWhiteSpace(secret.ServiceRef))
-            {
-                var diagnostic =
-                    $"manifest.yaml entry '{secret.CanonicalName}' has value_source=from-shared-service " +
-                    "but missing/empty service_ref. service_ref is CONDITIONALLY required for this " +
-                    "value_source (format '<type>:<az-resource-name>', e.g. 'search:sprksharedprod-search').";
+                    "from-run-parameter, generated, from-topology-constants, from-intake-parameter, written-by-h3).";
                 _logger.LogError("H4 FileKvSecretManifest: {Diagnostic}", diagnostic);
                 return new KvSecretManifestReadResult.Failure(diagnostic);
             }
@@ -206,8 +264,29 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
             entries.Add(new KvSecretEntry(
                 secret.CanonicalName,
                 KvSecretOperation.Upsert,
-                valueSource,
-                ServiceRef: valueSource == KvSecretValueSource.FromSharedService ? secret.ServiceRef : null));
+                valueSource));
+        }
+
+        // A38a served-entry filter (task 205a — auth-v4 §9.1 OMIT-is-the-signal).
+        // Runs DOWNSTREAM of the BINDING never-delete invariant above (which
+        // validated the RAW yaml document — BFF-API-ClientSecret's yaml row
+        // stays present + never_delete=true; only the SERVED list shrinks).
+        // Q3 Path A rollback (SecretFreeIdentityRollback) re-includes the
+        // targets (BFF-API-ClientSecret + Dataverse-ClientSecret).
+        if (_options.RequireSecretFreeIdentity && !_options.SecretFreeIdentityRollback)
+        {
+            var beforeCount = entries.Count;
+            var removedNames = entries
+                .Where(e => SecretFreeIdentityOmitTargets.Contains(e.CanonicalName))
+                .Select(e => e.CanonicalName)
+                .ToList();
+            entries.RemoveAll(e => SecretFreeIdentityOmitTargets.Contains(e.CanonicalName));
+            _logger.LogInformation(
+                "H4 FileKvSecretManifest: A38a secret-free served-entry filter active " +
+                "(RequireSecretFreeIdentity=true) — serving {After} of {Before} entries; omitted: {Omitted}. " +
+                "manifest.yaml rows unchanged; §9.1 OMIT-is-the-signal (never sentinel).",
+                entries.Count, beforeCount,
+                removedNames.Count > 0 ? string.Join(", ", removedNames) : "(none present in manifest)");
         }
 
         // Determinism contract parity with the PowerShell generator: sort
@@ -218,7 +297,7 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
         _logger.LogInformation(
             "H4 FileKvSecretManifest: loaded {Count} canonical entries from manifest.yaml (task 084 Phase H manifest)",
             entries.Count);
-        return new KvSecretManifestReadResult.Success(entries);
+        return new KvSecretManifestReadResult.Success(entries, ArtifactVersion.Of(yaml));
     }
 
     private static bool TryMapValueSource(string? raw, out KvSecretValueSource valueSource)
@@ -237,11 +316,16 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
             case "generated":
                 valueSource = KvSecretValueSource.Generated;
                 return true;
-            case "from-shared-service":
-                // Task 200: shared-tier secrets extracted by H4-shared from
-                // source Azure services (Search / CognitiveServices / Service
-                // Bus / Storage / Redis).
-                valueSource = KvSecretValueSource.FromSharedService;
+            case "from-topology-constants":
+                // Task 214 added this value_source to manifest.yaml (SPE-ContainerTypeId) without
+                // teaching this reader — every H4 run failed ManifestReadFailed. Fixed T226.
+                valueSource = KvSecretValueSource.FromTopologyConstants;
+                return true;
+            case "from-intake-parameter":
+                valueSource = KvSecretValueSource.FromIntakeParameter;   // task 245a
+                return true;
+            case "written-by-h3":
+                valueSource = KvSecretValueSource.WrittenByEntraAppReg;  // task 245a
                 return true;
             default:
                 valueSource = default;
@@ -261,14 +345,5 @@ public sealed class FileKvSecretManifest : IKvSecretManifest
         public string? CanonicalName { get; set; }
         public bool NeverDelete { get; set; }
         public string? ValueSource { get; set; }
-
-        /// <summary>
-        /// Task 200 addition. CONDITIONALLY required (populated) only when
-        /// <see cref="ValueSource"/> == <c>from-shared-service</c>. Format
-        /// <c>&lt;type&gt;:&lt;az-resource-name&gt;</c>. Absent for every other
-        /// value_source — the deserializer leaves this null, which the loop
-        /// above enforces explicitly.
-        /// </summary>
-        public string? ServiceRef { get; set; }
     }
 }

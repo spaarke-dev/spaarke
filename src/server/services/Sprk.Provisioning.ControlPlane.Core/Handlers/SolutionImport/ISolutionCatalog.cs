@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // ISolutionCatalog.cs
 //
-// L2 abstraction over the canonical list of 8 authoritative Spaarke managed
+// L2 abstraction over the canonical list of 9 authoritative Spaarke managed
 // solutions H6 imports (spec.md §11.1a + FR-09). The catalog IS a C#-side
 // mirror of scripts/Deploy-DataverseSolutions.ps1's $SolutionImportOrder
 // hashtable per task 008 R5 binding:
@@ -26,7 +26,7 @@
 //
 // ADR-039 GUARD:
 //   The catalog exposes RetiredSolutionUniqueNames — a defense-in-depth list
-//   of solution unique-names that MUST NOT appear in the 8 authoritative
+//   of solution unique-names that MUST NOT appear in the 9 authoritative
 //   solutions per ADR-039 amendment 2026-07-05 ("MUST NOT land new capability
 //   on the frozen node-graph engine"). If any of the 8 catalog entries
 //   overlaps this list, H6 emits RetiredSolutionReintroduction at pre-check
@@ -47,7 +47,7 @@ using System.Collections.Immutable;
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
-/// Canonical list of the 8 authoritative Spaarke managed solutions (Tier 1
+/// Canonical list of the 9 authoritative Spaarke managed solutions (Tier 1
 /// SpaarkeCore, Tier 2 webresources, Tier 3 six feature solutions).
 /// C#-side mirror of <c>scripts/Deploy-DataverseSolutions.ps1</c>'s
 /// <c>$SolutionImportOrder</c> per task 008 R5 binding.
@@ -55,7 +55,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 public interface ISolutionCatalog
 {
     /// <summary>
-    /// The 8 authoritative solutions in dependency order (Tier 1 first, Tier
+    /// The 9 authoritative solutions in dependency order (Tier 1 first, Tier
     /// 2 second, Tier 3 members in enumeration order). Consumers MUST NOT
     /// re-order; the tier ordering is dependency-load-bearing per spec.md
     /// §11.1a. Empty is a compile / config error.

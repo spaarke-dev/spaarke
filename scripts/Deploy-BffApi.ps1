@@ -12,14 +12,14 @@
     6. Verifies health check on production after swap
     7. Rolls back via swap-back if post-swap health check fails
 
-    Supports dev, staging, and production environments.
+    Supports dev, staging, production and demo environments. Targets the az CLI's current subscription — for demo (its own subscription) run it with AZURE_CONFIG_DIR pointing at a private copy of the az config set to that subscription, rather than `az account set` on the shared context.
     Default parameters preserve backward compatibility with existing dev workflow.
 
 .PARAMETER SkipBuild
     Skip the build step (use existing publish folder).
 
 .PARAMETER Environment
-    Target environment name (dev, staging, production). Used for display and publish configuration.
+    Target environment name (dev, staging, production, demo — demo is declared in config/environments.json; task 242b). Used for display and publish configuration.
     Default: dev
 
 .PARAMETER ResourceGroupName
@@ -86,7 +86,7 @@
 param(
     [switch]$SkipBuild,
 
-    [ValidateSet("dev", "staging", "production")]
+    [ValidateSet("dev", "staging", "production", "demo")]
     [string]$Environment = "dev",
 
     [string]$ResourceGroupName = "rg-spaarke-dev",
@@ -114,6 +114,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# The resource-group and app-name defaults are dev's. For any other environment they must be passed
+# explicitly, or a "-Environment demo" deploy would silently land on spaarke-bff-dev (T242b review W8).
+if ($Environment -ne 'dev' -and -not ($PSBoundParameters.ContainsKey('ResourceGroupName') -and $PSBoundParameters.ContainsKey('AppServiceName'))) {
+    Write-Host "ERROR: -Environment $Environment requires explicit -ResourceGroupName and -AppServiceName (the defaults are dev's: rg-spaarke-dev / spaarke-bff-dev)." -ForegroundColor Red
+    exit 2
+}
 
 # --- Configuration ---
 $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path

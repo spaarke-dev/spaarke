@@ -13,7 +13,7 @@ This document is the operator-facing index of every workflow in `.github/workflo
 |---|---|---|---|---|
 | `adr-audit.yml` | Weekly ADR-compliance audit; opens/updates tracking issue | `schedule` (Monday 09:00 UTC), `workflow_dispatch` | DevOps | Best-effort weekly |
 | `deploy-bff-api.yml` | Build + test + deploy BFF API to Azure App Service via staging slot + swap | `push` on master (`src/server/api/**`), `workflow_dispatch` | Platform | Same-day deploy |
-| `deploy-infrastructure.yml` | Validate + what-if + deploy Bicep templates (Model 1 + Model 2) | `pull_request` + `push` on master (`infrastructure/bicep/**`), `workflow_dispatch` | Platform | Same-day deploy |
+| `deploy-infrastructure.yml` ("Validate Bicep Infrastructure") | Lint every Bicep file + compile `customer.bicep` and the remaining `stacks/*.bicep`. **Deploys nothing** — customer stamps are deployed only by the L2 control plane (H2a) | `pull_request` + `push` on master (`infrastructure/bicep/**`), `workflow_dispatch` (no inputs) | Platform | Per-PR (validation only) |
 | `deploy-office-addins.yml` | Build + deploy Office Add-ins to Azure Static Web App | `push` on master (`src/client/office-addins/**`), `workflow_dispatch` | Apps | Same-day deploy |
 | `deploy-promote.yml` | Multi-stage promotion dev→staging→prod with smoke tests + manual gate | `workflow_dispatch`, `workflow_run` after SDAP CI success on master | Platform | Manual + ~10 min |
 | `sdap-ci.yml` | Primary CI: security scan, build/test matrix (Debug+Release), client quality, ADR checks | `pull_request`, `push` on master | Platform | Per-PR ~15 min |
@@ -56,9 +56,10 @@ It also enforces `non_fast_forward`, `deletion` (no force-push/delete), and a `p
 
 ### deploy-infrastructure.yml
 
-- **Purpose**: Bicep IaC for Model 1 (shared multi-tenant) and Model 2 (customer-dedicated) stacks. Validates Bicep, runs what-if preview, posts PR comment, deploys on manual approval. Path-filtered to `infrastructure/bicep/**` (fixed in Wave B — FR-04).
-- **Triggers**: `pull_request` + `push` on master scoped to `infrastructure/bicep/**`; `workflow_dispatch` (env + stack + deploy-bool).
-- **Common failures**: Bicep parameter file missing for the selected environment, OIDC federated credential expired, deployment quota exceeded.
+- **Name**: "Validate Bicep Infrastructure" (file name kept).
+- **Purpose**: Validates the Bicep IaC; **deploys nothing**. One `validate` job: `az bicep lint` on every `.bicep` file under `infrastructure/bicep/`, then `az bicep build --outfile` of `customer.bicep` and the remaining standalone `stacks/*.bicep`. `permissions: contents: read`; no Azure login, no GitHub Environment. `customer.bicep` is the only customer-stamp template and is deployed only by the L2 control plane's handler H2a (owner decision D19). Path-filtered to `infrastructure/bicep/**` (fixed in Wave B — FR-04). *(The what-if + deploy stages, the env/stack/deploy dispatch inputs and their `stacks/model2-full.bicep` target were retired by task 249, 2026-10-02.)*
+- **Triggers**: `pull_request` + `push` on master scoped to `infrastructure/bicep/**`; `workflow_dispatch` (no inputs).
+- **Common failures**: a Bicep lint error (warnings do not fail the job — there is no `bicepconfig.json` raising them), a template that no longer compiles (e.g. a module param rename not propagated), or a `parameters/*.bicepparam` that still sets a parameter its template no longer declares.
 - **Escalation**: see [`workflow-incident-response.md`](../docs/procedures/workflow-incident-response.md).
 
 ### deploy-office-addins.yml

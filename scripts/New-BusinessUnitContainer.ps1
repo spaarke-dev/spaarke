@@ -1,4 +1,10 @@
 # Create SPE Container for a Business Unit
+#
+# T248 NOTE (2026-10-03): for owning apps set up per the MI-FIC runbook (e.g. `Spaarke SPE Model 1 Owner`)
+# there is NO certificate or secret — L2 acts as the owning app through the Worker UAMI's federated
+# credential (H8 creates customer containers). This script works only with a LEGACY owning app that still
+# has a certificate in Key Vault; it cannot act as an MI-FIC owning app from a workstation.
+#
 # Purpose: Creates a new SharePoint Embedded container, BINDS it to the business unit, and sets sprk_containerid on it
 # Usage: Run when a new business unit is created and needs document storage
 #

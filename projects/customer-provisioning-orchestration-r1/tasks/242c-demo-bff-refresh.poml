@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="242c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Demo BFF refresh — .NET 10 runtime, settings parity, start and /healthz 200 (found by T242b)</title>
+    <phase>Model 1 dedicated-stamp remediation — follow-on of plan §7 T242 (filed 2026-10-04, owner: "file a demo-refresh task")</phase>
+    <gate>T242b merged to master (a master build is T242+); every live step needs owner confirmation</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live configuration of an App Service in its own subscription; the setting values decide which resources the demo BFF talks to.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Judgment per missing setting (which demo resource, whether it exists, whether the feature should be off) and an owner decision on rebuilding demo as a stamp.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>live operations in the demo subscription</parallel-reason>
+    <tags>deploy, azure, bff-api, demo, model1-dedicated</tags>
+    <deps>242b</deps>
+  </metadata>
+
+  <prompt>
+    Bring the demo BFF `spaarke-bff-demo` up to the current build's requirements so it starts and serves /healthz 200,
+    then leave it in the run state the owner chooses — each live step confirmed with the owner first.
+  </prompt>
+
+  <role>SPAARKE platform operator-developer (Azure App Service, BFF configuration). Follow the live-action rules strictly.</role>
+
+  <goal>
+    `spaarke-bff-demo` runs on the `DOTNETCORE|10.0` stack with every setting the current BFF requires at startup (or the
+    owning feature explicitly disabled), a current master build deployed, /healthz 200, Redis on `spaarke-bff-redis-demo`
+    (managed identity, already set by T242b), and the run state the owner picks.
+  </goal>
+
+  <context>
+    <background>
+      Found 2026-10-04 by T242b step 5 (owner chose "start demo"): `spaarke-bff-demo` (subscription "Spaarke Demo
+      Environment" 2ff9ee48-6f1d-4664-865c-f11868dd1b50, rg-spaarke-demo, westus2, UAMI `mi-bff-api-demo` client
+      b0ce4ca4-…, `ASPNETCORE_ENVIRONMENT=Production`) had been Stopped. The T242 build deployed (hashes verified) but the
+      container could not launch: linuxFxVersion `DOTNETCORE|8.0`, only .NET 8.0.31 installed, the BFF targets .NET 10
+      (dotnet-10-upgrade-r1). Demo also carries 157 settings vs dev's 206; 81 dev settings are absent (by prefix: AiSearch
+      10, Communication 7, Membership 7, Ciam 7, Logging 5, Compose 3, RecordSync 3, PublicConfig 3, AiSafety 3, and one
+      each of AzureAd, AzureOpenAI, DocumentIntelligence, ServiceBus, SharePointEmbedded, EmailProcessing,
+      ExternalAccess, Features, APPLICATIONINSIGHTS_CONNECTION_STRING, …). The app was stopped again; Redis is done
+      (`spaarke-bff-redis-demo`, `Redis__Enabled=true`, `Redis__Endpoint`, no connection string — T242b).
+      Demo is not a provisioned stamp (no customer.bicep deployment); whether to keep hand-maintaining it or rebuild it
+      as a stamp through L2 is an owner decision this task surfaces, not one it makes.
+    </background>
+    <relevant-files>
+      <file>scripts/Deploy-BffApi.ps1 (`-Environment demo` accepted since T242b; demo is in its own subscription — run with AZURE_CONFIG_DIR on a private copy of the az config, never `az account set`)</file>
+      <file>config/environments.json (`demo` entry, requiredCorsOrigins empty)</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (per_env_settings = the settings a stamp BFF needs)</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/DI/*Module.cs (which settings each module validates on start)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/tasks/242b-dev-redis-managed-recreate.poml (notes)</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="live-action rule (owner)">Ask the owner before each live step (runtime change, each settings batch, deploy, start/stop). Never create, seed or restore `BFF-API-ClientSecret` (either casing) or `Dataverse-ClientSecret`; never delete Key Vault secrets.</constraint>
+    <constraint source="scope">Only `spaarke-bff-demo` and its settings in rg-spaarke-demo. Create no new Azure resource without a separate owner OK; a setting that needs a resource demo does not have is an escalation, not a guess.</constraint>
+    <constraint source="no placeholders">Never set a placeholder or a dev resource's value on demo. A feature whose resource is absent is turned off through its own Enabled flag (ADR-032 null objects) or escalated.</constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>A required setting points at a resource that does not exist in the demo subscription → STOP and list the options (create it, disable the feature, or rebuild demo as a stamp).</trigger>
+    <trigger>The gap is large enough that rebuilding demo as a provisioned stamp is the cheaper path → STOP and put that choice to the owner.</trigger>
+  </escalation>
+
+  <steps mode="prescriptive">
+    <step order="1">Read-only: list every setting the current BFF requires at startup (ValidateOnStart options + throwing module guards) and diff against demo's settings; for each missing one record the demo resource it needs and whether that resource exists. Present the table and a recommendation (hand-maintain vs. rebuild as stamp) to the owner.</step>
+    <step order="2">Owner OK → set linuxFxVersion `DOTNETCORE|10.0`.</step>
+    <step order="3">Owner OK → apply the agreed settings in one batch (one restart).</step>
+    <step order="4">Owner OK → deploy the current master BFF build (`Deploy-BffApi.ps1 -Environment demo -ResourceGroupName rg-spaarke-demo -AppServiceName spaarke-bff-demo`), start, /healthz 200, log shows "Redis authentication is managed identity".</step>
+    <step order="5">Leave the app in the owner's chosen run state; record every live change in current-task.md; close POML notes, TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="live">demo BFF on .NET 10 with complete settings, healthy, in the owner's chosen run state</output>
+    <output type="file-modified">this POML notes, TASK-INDEX, current-task live-changes log</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`spaarke-bff-demo` linuxFxVersion is `DOTNETCORE|10.0`.</criterion>
+    <criterion testable="true">With the app started, /healthz returns 200 and the log shows "Redis authentication is managed identity".</criterion>
+    <criterion testable="true">No setting on demo holds a placeholder or another environment's resource value; every disabled feature is disabled through its Enabled flag and listed in the notes.</criterion>
+    <criterion testable="true">The app's final run state is the one the owner chose; every live step and its approval is logged in current-task.md.</criterion>
+  </acceptance-criteria>
+
+  <notes>Filed 2026-10-04 (session 36) from T242b step 5 at the owner's request ("Stop it; file a demo-refresh task"). Not a prerequisite of T186. OWNER DECISION 2026-10-05 (D27): demo is the next environment used to test the provisioning orchestration — this answers the escalation question above (rebuild through L2 rather than hand-maintain). Re-scope before executing: provision demo with the orchestration instead of hand-refreshing spaarke-bff-demo; confirm the scope with the owner first. Facts read 2026-10-05: rg-spaarke-demo has no AI Search service (spaarke-search-demo absent); spaarke-bff-demo has no deployment slot; config/environments.json + spaarke-resources.yaml corrected.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>FULL rigor; prescriptive steps; owner confirmation before every live step.</protocol>
+  </execution>
+</task>

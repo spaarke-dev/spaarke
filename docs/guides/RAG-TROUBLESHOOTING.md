@@ -835,16 +835,24 @@ foreach (var result in results)
 **Check 1: Redis Connection**
 
 ```bash
-# Test Redis connection
-redis-cli -h <your-redis-host> -p 6380 -a <your-redis-password> --tls ping
+# Azure Managed Redis is Microsoft Entra only (task 242): no password, port 10000, OSS cluster (-c).
+# Your identity must be in the cache's access policy (accessPolicyPrincipalIds in
+# infrastructure/bicep/parameters/redis-{env}.bicepparam; today only the BFF and L2 Worker identities are,
+# so adding yourself is an owner-approved change). Then sign in with an Entra token:
+TOKEN=$(az account get-access-token --resource https://redis.azure.com --query accessToken -o tsv)
+OID=$(az ad signed-in-user show --query id -o tsv)
+redis-cli -c -h <cache-name>.<region>.redis.azure.net -p 10000 --tls --user "$OID" --pass "$TOKEN" ping
 ```
+
+Without access to the cache, use App Insights instead: `redis` dependency telemetry and the
+`cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` custom metrics.
 
 **Check 2: Cache Keys Exist**
 
 ```bash
-# List embedding cache keys
-redis-cli -h <your-redis-host> -p 6380 -a <your-redis-password> --tls \
-  keys "sdap:embedding:*" | head -20
+# List embedding cache keys (SCAN per node — KEYS on one connection sees one shard of the OSS cluster)
+redis-cli -c -h <cache-name>.<region>.redis.azure.net -p 10000 --tls --user "$OID" --pass "$TOKEN" \
+  --scan --pattern "sdap:embedding:*" | head -20
 ```
 
 **Check 3: Cache Metrics**
@@ -1032,12 +1040,13 @@ curl -X POST "https://spe-api-dev-67e2xz.azurewebsites.net/api/ai/rag/embedding"
 ### Check Redis Cache
 
 ```bash
-# Count embedding keys
-redis-cli -h <redis-host> -p 6380 -a <password> --tls \
-  eval "return #redis.call('keys','sdap:embedding:*')" 0
+# Entra only: get $TOKEN / $OID as in "Embedding Cache Not Working" above.
+# Count embedding keys (SCAN, not EVAL+KEYS: a script runs on one shard of the OSS cluster)
+redis-cli -c -h <cache-name>.<region>.redis.azure.net -p 10000 --tls --user "$OID" --pass "$TOKEN" \
+  --scan --pattern "sdap:embedding:*" | wc -l
 
 # Check specific key TTL
-redis-cli -h <redis-host> -p 6380 -a <password> --tls \
+redis-cli -c -h <cache-name>.<region>.redis.azure.net -p 10000 --tls --user "$OID" --pass "$TOKEN" \
   ttl "sdap:embedding:your-key-hash"
 ```
 

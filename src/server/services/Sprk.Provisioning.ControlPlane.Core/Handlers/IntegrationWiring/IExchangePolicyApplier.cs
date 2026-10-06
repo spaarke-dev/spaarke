@@ -1,113 +1,74 @@
 // -----------------------------------------------------------------------------
 // IExchangePolicyApplier.cs
 //
-// Seam abstraction over Exchange Online's ApplicationAccessPolicy
-// action-and-verify semantics (spec.md T4). Owns the FULL T4 dance in one
-// call: list existing policies for the expected AppId set, create any
-// missing (0 or 1 present), and — critically — VERIFY parity when 2+ are
-// already present rather than silently overwriting (the T4 silent-fail trap
-// this seam exists to close).
+// Seam over H14a's Exchange step (spec.md T4). Since task 251 (owner D26) the step is Exchange
+// "RBAC for Applications": grant ONE app — the customer stamp's managed identity — the Exchange
+// "Application Mail.*" roles, scoped to the customer's mail-enabled security group, so the
+// stamp's Graph mail calls reach that group's mailboxes and no others. It replaces
+// ApplicationAccessPolicy, which Microsoft now calls legacy (and caps at a few hundred policies
+// per tenant — every Model 1 stamp lives in Spaarke's tenant).
 //
-// SEAM JUSTIFICATION (ADR-010):
-//   ≥2 implementations exist from day 1:
-//     - Production (task 161, Wave G-6): <see cref="ExchangePolicySidecarClient"/>
-//       — HttpClient POSTing to the sitecontainer-private sidecar (task 114's
-//       `Listener.ps1` on http://127.0.0.1:8091/apply-policy) with the
-//       per-boot X-Sidecar-Auth shared-secret header sourced from platform KV
-//       via <see cref="IKvSecretReader"/> (task 160's SecretClientKvReader).
-//       The sidecar owns the EXO module + Connect-ExchangeOnline; the client
-//       maps the sidecar's 4-outcome wire envelope
-//       (Success|AlreadyCompliant|Drift|Failure — see task 114's Listener.ps1
-//       .DESCRIPTION envelope-mapping rules; the 4th outcome is deliberate,
-//       preserving Drift as a distinct state to close the T4 silent-fail
-//       regression this seam exists to close) onto the same 3-case
-//       <see cref="ExchangePolicyApplyOutcome"/> the retired script applier
-//       mapped exit codes onto — wire Success/AlreadyCompliant collapse to
-//       <see cref="ExchangePolicyApplyOutcome.Applied"/> (differentiated by
-//       CreatedCount).
-//     - Retired (task 073, kept on disk unregistered): <see cref="ExchangePolicyScriptApplier"/>
-//       — shelled out to scripts/Set-ExchangeApplicationAccessPolicy.ps1.
-//       Superseded by the sidecar client for security-and-supply-chain reasons
-//       per DS-1b §3 (defense-in-depth: the sole EXO shell-out lives in a
-//       non-routable sidecar container, one localhost route, one signed
-//       Microsoft module — instead of the main Worker process carrying pwsh +
-//       ExchangeOnlineManagement + an ambient auth session).
-//     - Test: per-unit-test fakes returning canned outcomes.
+// The FULL T4 dance is one call: inspect every expected assignment; if anything differs (a named
+// assignment with another role / app / scope, or the app holding one of these roles under another
+// name) return Drift WITHOUT creating anything; otherwise create the missing ones and read back.
+//
+// SEAM JUSTIFICATION (ADR-010): production ExchangePolicySidecarClient (HTTP to the sidecar, which
+// owns the Exchange PowerShell module) + per-test fakes.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 
 /// <summary>
-/// Applies + verifies Exchange Online <c>ApplicationAccessPolicy</c> entries
-/// for the customer's BFF app-registration + UAMI. Encapsulates the full T4
-/// action-and-verify semantics (spec.md FR-33 T4).
+/// Grants + verifies the group-scoped Exchange application roles for a customer's managed identity
+/// (RBAC for Applications). Encapsulates the T4 action-and-verify semantics (spec.md FR-33 T4).
 /// </summary>
 public interface IExchangePolicyApplier
 {
     /// <summary>
-    /// Executes the T4 action-and-verify sequence: list existing policies for
-    /// <paramref name="request"/>'s expected AppId set; if 0 or 1 present,
-    /// create the missing entries; if 2+ present, verify the observed AppIds
-    /// equal the expected set exactly — MUST NOT silently overwrite on a
-    /// mismatch (returns <see cref="ExchangePolicyApplyOutcome.Drift"/> instead).
+    /// Inspects, then creates any missing assignment, then reads back. MUST NOT change an existing
+    /// assignment that differs from the request — returns <see cref="ExchangePolicyApplyOutcome.Drift"/> instead.
     /// </summary>
-    Task<ExchangePolicyApplyOutcome> ApplyAsync(
-        ExchangePolicyApplyRequest request,
-        CancellationToken cancellationToken);
+    Task<ExchangePolicyApplyOutcome> ApplyAsync(ExchangePolicyApplyRequest request, CancellationToken cancellationToken);
 }
 
-/// <summary>
-/// One T4 apply invocation input.
-/// </summary>
-/// <param name="TenantId">Explicit Entra tenant id (§4D I1 + I5 — never an ambient default-tenant credential).</param>
-/// <param name="ExpectedAppIds">The exactly-2-entry expected AppId set: [BFF app-reg id, UAMI client id].</param>
-/// <param name="PolicyScopeGroupId">Mail-enabled security group id scoping the ApplicationAccessPolicy (New-ApplicationAccessPolicy -PolicyScopeGroupId — customer-tenant-specific, run-parameter supplied).</param>
-/// <param name="DescriptionPrefix">Description prefix applied to newly created policies (greppability).</param>
-/// <param name="CorrelationId">
-/// ProvisioningRun id (invoking handler's <c>envelope.RunId</c>) — placed on the
-/// sidecar's <c>correlationId</c> wire field so its structured stdout log lines
-/// interleave with the main Worker's own <c>correlationId=RunId</c> logs in the
-/// shared Log Analytics workspace (task 114's Listener.ps1 .OBSERVABILITY note).
-/// Defaulted to <c>""</c> so the retired <see cref="ExchangePolicyScriptApplier"/>
-/// remains constructible without ceremony; production callers (H14a sub-handler)
-/// MUST pass the RunId — the sidecar client's own validation returns a
-/// <see cref="ExchangePolicyApplyOutcome.Failure"/> if CorrelationId is empty.
-/// </param>
+/// <summary>One Exchange role assignment H14a expects: its deterministic name and the application role.</summary>
+/// <param name="Name">Assignment name (≤ 64 chars) — H14a's idempotency key in Exchange.</param>
+/// <param name="Role">Exchange application role, e.g. <c>Application Mail.Send</c>.</param>
+public sealed record ExchangeRoleAssignmentSpec(string Name, string Role);
+
+/// <summary>One H14a apply.</summary>
+/// <param name="TenantId">Explicit Entra tenant id (§4D I1 — never an ambient default tenant).</param>
+/// <param name="AppId">Client id of the app being granted access — the stamp's managed identity.</param>
+/// <param name="ServicePrincipalObjectId">That app's Entra service-principal object id (New-ServicePrincipal -ObjectId).</param>
+/// <param name="DisplayName">Name the sidecar gives the Exchange service principal when it registers it.</param>
+/// <param name="ScopeGroupId">Entra object id of the customer's mail-enabled security group (operator intake).</param>
+/// <param name="Assignments">The expected assignments (one per application role).</param>
+/// <param name="CorrelationId">ProvisioningRun id — logged by the sidecar so its lines interleave with the Worker's.</param>
 public sealed record ExchangePolicyApplyRequest(
     string TenantId,
-    IReadOnlyList<string> ExpectedAppIds,
-    string PolicyScopeGroupId,
-    string DescriptionPrefix,
-    string CorrelationId = "");
+    string AppId,
+    string ServicePrincipalObjectId,
+    string DisplayName,
+    string ScopeGroupId,
+    IReadOnlyList<ExchangeRoleAssignmentSpec> Assignments,
+    string CorrelationId);
 
-/// <summary>
-/// Discriminated outcome of <see cref="IExchangePolicyApplier.ApplyAsync"/>.
-/// Exhaustive: <see cref="Applied"/> | <see cref="Drift"/> | <see cref="Failure"/>.
-/// </summary>
+/// <summary>Discriminated outcome of <see cref="IExchangePolicyApplier.ApplyAsync"/>: Applied | Drift | Failure.</summary>
 public abstract record ExchangePolicyApplyOutcome
 {
     private ExchangePolicyApplyOutcome() { }
 
-    /// <summary>
-    /// Both expected AppIds are confirmed present after the apply — either
-    /// because they already were (CreatedCount == 0, a natural no-op) or
-    /// because this call created the missing ones.
-    /// </summary>
-    /// <param name="CreatedCount">Number of policies newly created by this invocation (0, 1, or 2).</param>
-    /// <param name="ObservedAppIds">The final observed AppId set post-apply.</param>
-    public sealed record Applied(int CreatedCount, IReadOnlyList<string> ObservedAppIds) : ExchangePolicyApplyOutcome;
+    /// <summary>Every expected assignment is present and limited to the scope group.</summary>
+    /// <param name="CreatedCount">Assignments created by this call (0 = already compliant).</param>
+    /// <param name="AssignmentNames">The assignments read back.</param>
+    public sealed record Applied(int CreatedCount, IReadOnlyList<string> AssignmentNames) : ExchangePolicyApplyOutcome;
 
     /// <summary>
-    /// T4 SILENT-FAIL TRAP: 2+ policies already exist for the expected AppIds
-    /// but the observed set does NOT match the expected set. The applier did
-    /// NOT create or modify anything — per the POML constraint, no silent
-    /// overwrite. Caller classifies this as Quarantine-required.
+    /// T4 SILENT-FAIL TRAP: existing assignments differ from the expected set. Nothing was created or
+    /// changed; the caller classifies this as Quarantine-required.
     /// </summary>
-    public sealed record Drift(IReadOnlyList<string> ExpectedAppIds, IReadOnlyList<string> ObservedAppIds) : ExchangePolicyApplyOutcome;
+    public sealed record Drift(IReadOnlyList<string> Conflicts) : ExchangePolicyApplyOutcome;
 
-    /// <summary>
-    /// Infrastructure-level failure (connect, throttle, PS exception) before
-    /// a conclusive Applied/Drift outcome could be determined.
-    /// </summary>
+    /// <summary>No conclusive result (sign-in, sidecar, Exchange or transport failure).</summary>
     public sealed record Failure(string Diagnostic) : ExchangePolicyApplyOutcome;
 }

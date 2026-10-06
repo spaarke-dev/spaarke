@@ -2,8 +2,8 @@
 // CompositeTrapVerifier.cs
 //
 // Task 185 (Phase C'' Wave G-7 Batch G-7D) — TERMINAL aggregation. Production
-// <see cref="IE2ETrapVerifier"/> that composes the 6 real per-trap probes
-// (tasks 171/172/175/177/178/180) into the aggregate H13 acceptance-gate
+// <see cref="IE2ETrapVerifier"/> that composes the 7 real per-trap probes
+// (tasks 171/172/175/177/178/180; T7 task 238) into the aggregate H13 acceptance-gate
 // consumes. REPLACES <see cref="PlaceholderTrapVerifier"/>'s DI registration.
 //
 // DIRECT PARITY with <see cref="CompositeInvariantVerifier"/> (Batch G-7A1 /
@@ -13,7 +13,7 @@
 // vs <see cref="InvariantKind"/>.
 //
 // SEMANTICS:
-//   For each canonical <see cref="TrapKind"/> (T1–T6):
+//   For each canonical <see cref="TrapKind"/> (T1–T7):
 //     - If exactly ONE <see cref="ITrapProbe"/> is registered for that kind →
 //       invoke it, forward its outcome verbatim.
 //     - If ZERO probes are registered → return
@@ -21,7 +21,7 @@
 //       <see cref="TrapProbeDeferralMessages.DeferralDiagnostic"/> — preserves
 //       the Wave-C4 "InfraFault-so-Resumable" semantics for un-wired kinds
 //       until their own probe tasks land (this is defense-in-depth; task 185's
-//       module wires all 6, so this branch is not expected to hit in
+//       module wires all 7, so this branch is not expected to hit in
 //       production).
 //     - If TWO OR MORE probes register for the same kind → throw
 //       <see cref="InvalidOperationException"/> at composition time (fail
@@ -29,7 +29,7 @@
 //       H13 acceptance gate).
 //
 // PROBE ORDER + FAULT ISOLATION:
-//   Probes are invoked in <see cref="TrapKind"/> enum-declaration order (T1–T6)
+//   Probes are invoked in <see cref="TrapKind"/> enum-declaration order (T1–T7)
 //   — parity with the retired <see cref="PlaceholderTrapVerifier"/>'s outcomes-
 //   array order so H13's aggregate log summary reads identically pre/post-
 //   migration. Each probe runs independently — a Failed / InfraFault from one
@@ -73,7 +73,7 @@
 //   Extension — REUSES <see cref="CompositeInvariantVerifier"/>'s composition
 //     pattern verbatim; no new abstractions beyond <see cref="ITrapProbe"/>.
 //   Cost-of-doing-nothing — H13's trap surface would remain wired to
-//     PlaceholderTrapVerifier → every T1–T6 verdict returns InfraFault
+//     PlaceholderTrapVerifier → every T1–T7 verdict returns InfraFault
 //     UNCONDITIONALLY (Resumable), meaning EVERY future customer provision
 //     would be blocked at the trap gate. This is the terminal wiring that
 //     unblocks r1's Ready transition per spec.md FR-18 / SC #6.
@@ -98,7 +98,8 @@ public sealed class CompositeTrapVerifier : IE2ETrapVerifier
             TrapKind.T3GraphAppRoleParity,
             TrapKind.T4ExchangePolicyCount,
             TrapKind.T5SlotMiKvRbac,
-            TrapKind.T6SpeConfidentialClient);
+            TrapKind.T6SpeConfidentialClient,
+            TrapKind.T7CustomerIdentityExplicit);
 
     private readonly ImmutableDictionary<TrapKind, ITrapProbe> _probesByKind;
     private readonly ILogger<CompositeTrapVerifier> _logger;

@@ -12,9 +12,10 @@
 //
 // DELIBERATELY OUT OF SCOPE — moved / owned elsewhere per D12 + Wave C2 topology
 //   * Per-customer AI resources (OpenAI, AI Search, Doc Intelligence, per-customer Cosmos)
-//         → `stacks/model2-full.bicep`  (Model 2 dedicated per-customer stack)
-//         → `stacks/model1-shared.bicep` (Model 1 fixed-floor shared + per-tenant Cosmos)
-//         → `customer.bicep`             (per-customer Cosmos + optional SignalR, task 027)
+//         → `customer.bicep`             (the customer stamp, both models — D-12; the ONLY
+//                                          customer-stamp template per D19, deployed by L2 H2a)
+//         (`stacks/model1-shared.bicep` — the Model 1 shared tier — was retired by task 225a;
+//          `stacks/model2-full.bicep` was retired by task 249, 2026-10-02.)
 //         Rationale: D12 mandates "per-customer AI resources move to `customer.bicep`";
 //         spec.md §7.2 disposition table classifies OpenAI/AI Search as 🟡 fixed-floor
 //         (shared only in Model 1) and Doc Intel/Cosmos as 🔴 dedicated in both tiers.
@@ -26,13 +27,12 @@
 //         (`cosmos-spaarke-platform-{env}` — for provisioning-run state, distinct
 //         from the retired per-customer AI Cosmos this stack used to declare).
 //   * SPAARKE-INTERNAL BFF App Service
-//         → `stacks/model1-shared.bicep` (multi-tenant BFF for Model 1 shared tier)
-//         → `stacks/model2-full.bicep`   (dedicated BFF per Model 2 customer)
+//         → `customer.bicep`             (the stamp's own BFF, both models — D-12)
 //         Rationale: after D12, per-customer AI wiring is a runtime-per-request
 //         concern; the BFF's AI dependencies (KV refs for OpenAI/AI Search/Doc Intel
 //         endpoints + keys) can no longer be baked into a platform-scope App
-//         Service. Both first-class stacks already provision their own BFF with
-//         the correct AI wiring for their tier. Additionally, `modules/app-service.bicep`
+//         Service. The customer stamp already provisions its own BFF with
+//         the correct AI wiring. Additionally, `modules/app-service.bicep`
 //         was refactored in this project (Wave C2 sibling task 029) to require
 //         `userAssignedIdentityResourceId` and to drop `enableManagedIdentity` +
 //         `keyVaultName` — a structural signal that BFF App Services must now be
@@ -53,8 +53,8 @@
 //   Key Vault references pointed at those modules' outputs). Rather than leave a
 //   BFF App Service with dangling KV refs and no legitimate home for its AI
 //   wiring, the whole BFF chain (Plan + App + Config + Slot) is also removed —
-//   its correct home is `stacks/model1-shared.bicep` (Model 1) or
-//   `stacks/model2-full.bicep` (Model 2). This is consistent with the Wave C2
+//   its correct home is the customer stamp (`customer.bicep`, both models since D-12; the
+//   Model 1 shared stack was retired by task 225a, `stacks/model2-full.bicep` by task 249). This is consistent with the Wave C2
 //   sibling task 029 refactor of `modules/app-service.bicep` (which structurally
 //   requires UAMI-first composition — a pattern the stacks already follow).
 //

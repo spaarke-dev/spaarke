@@ -100,6 +100,12 @@
     Application (client) ID of the L2 control-plane UAMI (e.g.
     '965a4a01-01e1-442b-97a6-6a98308018b3'). This is what Dataverse stores
     on the systemuser row's applicationid column. MANDATORY. Obtain via:
+      # PREFERRED — deterministic ARM resource ID lookup (no name ambiguity):
+      az identity show --ids /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<mi-name> --query clientId -o tsv
+
+      # ⚠️ NAME-BASED LOOKUP (fragile — SF-1 decoy trap per remediation plan §5):
+      # the dev subscription has 5 UAMIs; 'spaarke-bff-identity' is NOT the BFF's UAMI.
+      # If you use this shape, confirm --resource-group matches the intended UAMI's RG.
       az identity show --name <mi-name> --resource-group <rg>
           --query clientId -o tsv
 
@@ -108,6 +114,12 @@
     appId/clientId). Needed for the C5.8 Graph app-role grants (delegated
     to Grant-GraphAppRoles.ps1). MANDATORY unless -SkipGraphGrants is
     passed. Obtain via:
+      # PREFERRED — deterministic ARM resource ID lookup (no name ambiguity):
+      az identity show --ids /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<mi-name> --query principalId -o tsv
+
+      # ⚠️ NAME-BASED LOOKUP (fragile — SF-1 decoy trap per remediation plan §5):
+      # the dev subscription has 5 UAMIs; 'spaarke-bff-identity' is NOT the BFF's UAMI.
+      # If you use this shape, confirm --resource-group matches the intended UAMI's RG.
       az identity show --name <mi-name> --resource-group <rg>
           --query principalId -o tsv
 

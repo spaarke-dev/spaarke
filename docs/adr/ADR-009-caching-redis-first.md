@@ -4,7 +4,7 @@
 |-------|-------|
 | Status | **Accepted** |
 | Date | 2025-09-27 |
-| Updated | 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`) |
+| Updated | 2026-06-26 (operational MUSTs added by `spaarke-redis-cache-remediation-r1`); 2026-10-04 (§2/§3 amended: Azure Managed Redis, Microsoft Entra only — owner D12/D13, `customer-provisioning-orchestration-r1` task 242); 2026-10-05 (latency alert = average BFF-observed call latency per operation — owner, task 242b) |
 | Authors | Spaarke Engineering |
 
 ## Context
@@ -43,8 +43,8 @@ Custom HybridCacheService wrapping L1+L2. **Rejected** as premature complexity.
 | Cache targets | UAC snapshots, document metadata, embeddings, Graph tokens, session data |
 | Never cache | Authorization decisions |
 | Instrumentation | `cache.hits`, `cache.misses`, `cache.redis_call_duration_ms` (custom metrics emitted from `TenantCache` wrapper); App Insights Redis dependency telemetry |
-| Connection string | Key Vault secret `Redis-ConnectionString` referenced via `@Microsoft.KeyVault(VaultName=...;SecretName=Redis-ConnectionString)` syntax in App Settings |
-| Failure mode | Fail-fast at BFF startup when Redis configured-but-unreachable; in-memory fallback gated to Development + explicit opt-in |
+| Authentication | Microsoft Entra with the app's user-assigned managed identity (`Redis__Endpoint` host:10000 + `ManagedIdentity__ClientId`, RESP3) — access keys disabled on the cache; no connection string or Key Vault secret (amended 2026-10-04, task 242) |
+| Failure mode | Fail-fast at BFF startup when Redis configured-but-unreachable; in-memory fallback gated to Development/Testing + explicit opt-in |
 
 ## Operational MUSTs (added 2026-06-26 by `spaarke-redis-cache-remediation-r1`)
 
@@ -53,29 +53,46 @@ These constraints were introduced after the dev environment drifted (Redis delet
 ### 1. Canonical resource naming (two-tier rule)
 
 - Top-level resource: `spaarke-bff-redis-{env}` (env-suffixed).
-- Sub-resources (cache keys, Key Vault secret names like `Redis-ConnectionString`): **env-agnostic**. Environment is implicit in the parent service hostname.
+- Sub-resources (cache keys, settings): **env-agnostic**. Environment is implicit in the parent service hostname.
+- Customer stamps: `sprk-{customerId}-{env}-redis` (`customer.bicep`).
 - Rationale: future provisioning of new environments follows a predictable formula; off-pattern instances stand out in resource lists.
 
-### 2. SKU sizing per environment
+### 2. Product and SKU (amended 2026-10-04 — owner D12, task 242)
 
-| Environment | SKU | Capacity | Rationale |
+Every Spaarke Redis is **Azure Managed Redis** (`Microsoft.Cache/redisEnterprise`, `infrastructure/bicep/modules/redis.bicep`):
+one database `default`, port 10000, `OSSCluster`, `AllKeysLRU`. Azure Cache for Redis Basic/Standard/Premium retires
+2028-09-30 and has blocked new-customer creation since 2026-04-01.
+
+| Environment | SKU | High availability | Rationale |
 |---|---|---|---|
-| dev | Basic | C0 | ~$15/mo; no HA; acceptable for dev (Q1) |
-| staging | Standard | C0+ | HA fidelity to prod |
-| prod | Standard C2+ or Premium P1+ | sized to traffic | Standard C2 as starting recommendation; Premium for VNet injection, geo-replication, or Entra ID auth (S1 stretch) |
+| dev / demo | Balanced_B0 | Disabled | Cost; dev fidelity (task 242b) |
+| staging | Balanced_B0 | Enabled | Fidelity to customer stamps |
+| platform prod (`spaarke-bff-redis-prod`, not deployed) | Balanced_B0 | Enabled | Template only (`redis-prod.bicepparam`); its access-policy principal is a placeholder that blocks deploy until filled |
+| customer stamp (prod, both models) | Balanced_B0 | Enabled | Owner D12; size up only on a measured memory metric — Managed Redis has no scale-down, and HA is fixed at create |
 
-### 3. Connection string lives in Key Vault
+*(Was: Basic C0 dev / Standard C0+ staging / Standard C2+ or Premium prod; and, from 2026-09-28, Standard per customer.)*
 
-- App Setting MUST use `@Microsoft.KeyVault(VaultName={vault};SecretName=Redis-ConnectionString)` syntax. Plain-text connection strings in App Settings are prohibited.
-- App Service Managed Identity MUST have "Key Vault Secrets User" role on the target KV.
-- See ADR-028 for KV reference syntax and Managed Identity boundaries.
+### 3. Authentication — managed identity only (amended 2026-10-04 — owner D13, ADR-028 A4; task 242)
+
+- The database MUST have `accessKeysAuthentication: Disabled`. No access key, connection string or Key Vault secret
+  exists for a deployed Redis.
+- Access is granted per identity through `databases/accessPolicyAssignments` (`accessPolicyName: 'default'`) to the
+  user-assigned managed identity the app runs as — for a customer stamp, the stamp UAMI only.
+- Apps connect with `Redis__Endpoint` (host:10000, a **plain** app setting, never a Key Vault reference) and
+  `ManagedIdentity__ClientId`, via `Microsoft.Azure.StackExchangeRedis`
+  `ConfigureForAzureWithUserAssignedManagedIdentityAsync` over **RESP3** (RESP2 cannot re-authenticate the pub/sub
+  connection when the token refreshes).
+- Outside Development/Testing the BFF and the L2 Worker refuse to start on a Redis connection string without
+  `Redis__Endpoint`; a connection string is a local-development convenience only.
+- *(Was: "App Setting MUST use `@Microsoft.KeyVault(VaultName={vault};SecretName=Redis-ConnectionString)` syntax"
+  with the App Service identity holding Key Vault Secrets User on the vault.)*
 
 ### 4. Fail-fast at startup in deployed environments
 
 - `CacheModule` implements 4-branch logic:
   - Redis-on (`Enabled=true`): `ConfigurationOptions.AbortOnConnectFail = true`; connection failure throws `InvalidOperationException` at startup naming the configuration source.
-  - Redis-off + `AllowInMemoryFallback=true` + `IHostEnvironment.IsDevelopment()`: in-memory `IDistributedCache` + `NullConnectionMultiplexer` registered (Pub/Sub no-op).
-  - Redis-off + `AllowInMemoryFallback=true` + NOT Development: throws.
+  - Redis-off + `AllowInMemoryFallback=true` + Development or Testing (CI fixtures): in-memory `IDistributedCache` + `NullConnectionMultiplexer` registered (Pub/Sub no-op).
+  - Redis-off + `AllowInMemoryFallback=true` + any other environment: throws.
   - Redis-off + no fallback opt-in: throws.
 - Rationale: silent degradation is the failure mode that caused this project. Throwing surfaces the problem at startup, not on the first cache call hours later.
 
@@ -107,8 +124,10 @@ overstated it.** A collision needs `{resource}:{id}` to repeat across customers 
 exposure is the keys whose id is *not* unique, which is exactly what the new MUST above forbids. Three such
 sites exist today (`agent-thread`, `agent-config`, `approle-module-map`).
 
-✅ **DECIDED (owner, 2026-09-28): one Redis instance per customer, at STANDARD tier**, in that customer's
-own subscription. *(This paragraph previously said the question was open — it was, for part of that day.)*
+✅ **DECIDED (owner, 2026-09-28): one Redis instance per customer**, in that customer's own subscription.
+*(The tier in that decision — STANDARD — was superseded on 2026-09-30 by owner D12: Azure Managed Redis
+Balanced_B0 with high availability, Entra only; see §2/§3. The tier reasoning below is kept as the record.)*
+*(This paragraph previously said the question was open — it was, for part of that day.)*
 **Premium is not required**: RDB persistence is unneeded (the upload-bytes entry is *"the hot-tier peer of
 the durable blob copy"*), and VNet injection is unused and Microsoft-deprecated in favour of private
 endpoint, which works on all tiers. Standard restores the SLA and replication that Basic C0 lacks.
@@ -189,7 +208,7 @@ customMetrics
 **Alerts (3 minimum) MUST be Bicep-deployed:**
 
 - Hit_rate <80% / 15min → "cache key/version drift; investigate"
-- P95 >100ms / 5min → "network issue or SKU undersize"
+- Average BFF-observed cache call latency per operation (`cache.redis_call_duration_ms`) >100ms / 5min → "network issue, SKU undersize or client-side delay" *(amended 2026-10-05, owner, task 242b — was "P95 >100ms": App Insights stores the histogram pre-aggregated, so a true P95 is not available there, and the previous alert queried a metric nothing emits, so it never fired. Compare with the `redis` dependency durations to tell server time from client time.)*
 - `usedmemorypercentage` >80 / 15min → "scale to next SKU"
 
 Markdown-only alert documentation (`docs/guides/redis-cache-azure-setup.md` §8) is NOT sufficient — alerts must be deployed via `infrastructure/bicep/alerts.bicep` and verified firing in a test condition. Markdown-only fails the operational MUST.
@@ -256,12 +275,12 @@ Markdown-only alert documentation (`docs/guides/redis-cache-azure-setup.md` §8)
 
 **Operational references**:
 - `docs/architecture/caching-architecture.md` — design (tenant isolation, multi-instance behavior, instance registry, failure mode catalog)
-- `docs/guides/redis-cache-azure-setup.md` — operational runbook (provision, cutover, rollback, secret rotation, troubleshooting, lessons learned)
-- `scripts/Deploy-RedisCache.ps1` — provisioning automation
+- `docs/guides/redis-cache-azure-setup.md` — operational runbook (provision, cutover, rollback, troubleshooting, lessons learned; key-rotation sections retired by task 242b)
+- `scripts/Deploy-RedisCache.ps1` — per-environment provisioning (Azure Managed Redis; sets `Redis__Endpoint`, no Key Vault step since task 242)
 
 **Related ADRs**:
 - [ADR-010 DI Minimalism](../../.claude/adr/ADR-010-di-minimalism.md) — `ITenantCache` interface justification (≥2 future implementations: default today + named instances per NFR-12)
-- [ADR-028 Spaarke Auth Architecture](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — Key Vault reference syntax
+- [ADR-028 Spaarke Auth Architecture](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) — A4 secret-free identity: Redis is reached with the app's user-assigned managed identity (task 242)
 - [ADR-029 BFF Publish Hygiene](../../.claude/adr/ADR-029-bff-publish-hygiene.md) — publish-size delta rule
 - [ADR-032 BFF Null-Object Kill-Switch](../../.claude/adr/ADR-032-bff-nullobject-kill-switch.md) — symmetric `IConnectionMultiplexer` registration
 

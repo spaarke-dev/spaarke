@@ -40,6 +40,7 @@ using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Endpoints;
 using Sprk.Provisioning.ControlPlane.Middleware;
 using Sprk.Provisioning.ControlPlane.Modules;
+using Sprk.Provisioning.ControlPlane.Registry;
 using Sprk.Provisioning.ControlPlane.Rollback;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -94,6 +95,20 @@ builder.Services.AddTelemetryModule(builder.Configuration, builder.Environment.E
 // mapping). Do NOT drop these from either host without an ADR-tracked
 // contract change.
 builder.Services.AddCustomerRunGuard(builder.Configuration);
+
+// REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+// 2026-08-27): the CreateRun endpoint uses IDataverseEnvironmentRegistryClient
+// to sanity-check the operator-supplied environmentId against the registry
+// (customerId match + setupStatus==InProgress) before writing to Cosmos.
+// The Api project registers the real Path X impl via
+// DataverseEnvironmentRegistryModule.AddDataverseEnvironmentRegistry (parity
+// with the Worker Program.cs task-122 wiring). When
+// DataverseEnvironmentRegistry:AdminEnvironmentUrl is unset the module's
+// PostConfigure fails fast — but the Api test host overrides the endpoint
+// gracefully because the endpoint catches lookup faults + proceeds without
+// the strict check (REG-07 fault-tolerance branch).
+builder.Services.AddDataverseEnvironmentRegistry(builder.Configuration);
+
 builder.Services.AddRollbackModule();
 
 var app = builder.Build();

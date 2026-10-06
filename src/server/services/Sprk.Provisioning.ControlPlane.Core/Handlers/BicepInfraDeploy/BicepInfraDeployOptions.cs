@@ -2,17 +2,17 @@
 // BicepInfraDeployOptions.cs
 //
 // Bound options for the H2a handler's collaborators (runner + probes +
-// inspector). Loaded from the "BicepInfraDeploy" configuration section by
-// <see cref="Sprk.Provisioning.ControlPlane.Modules.HandlersModule"/> —
+// inspector). Loaded from the "BicepInfraDeployOptions" configuration section by
+// Worker/Program.cs and validated at Worker startup (ValidateOnStart, task 249) —
 // runtime-configurable so the linux-x64 App Service publish layout can be
 // honored without recompiling.
 //
 // TASK 123 (Wave G-2, Option D hybrid): ProvisioningArtifactsContainerUri +
 // ArmManifestBlobName added for <see cref="ArmDeploymentRunner"/> — the SDK
 // port no longer shells out to Provision-Customer.ps1 / az CLI (those two
-// legacy fields + PwshExecutable/AzCliExecutable stay ONLY for
-// <see cref="FileBicepTemplateInspector"/>'s on-disk template reads and any
-// residual scaffold consumers; ArmDeploymentRunner, ArmKeyVaultRefProbe, and
+// legacy fields + PwshExecutable/AzCliExecutable stay ONLY for residual
+// scaffold consumers (task 245b removed BicepDirectory with the on-disk
+// template inspector); ArmDeploymentRunner, ArmKeyVaultRefProbe, and
 // ArmWhatIfDriftDetector consume none of them). See task 117's
 // .github/workflows/publish-provisioning-arm-artifacts.yml for the artifact
 // shape this options class points at.
@@ -22,7 +22,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy;
 
 /// <summary>
 /// Bound options for <see cref="H2aBicepInfraDeployHandler"/> collaborators.
-/// Configuration key: <c>BicepInfraDeploy</c>.
+/// Configuration section: <c>BicepInfraDeployOptions</c>.
 /// </summary>
 public sealed class BicepInfraDeployOptions
 {
@@ -79,8 +79,8 @@ public sealed class BicepInfraDeployOptions
 
     /// <summary>
     /// Validates required fields are present. Called from
-    /// <c>PostConfigure&lt;BicepInfraDeployOptions&gt;</c> at composition-root
-    /// registration time (Worker/Program.cs) so a misconfigured deploy fails
+    /// <c>AddOptions&lt;BicepInfraDeployOptions&gt;().Validate(...).ValidateOnStart()</c>
+    /// (Worker/Program.cs, task 249) so a misconfigured deploy fails
     /// at boot (NFR-05), not on the first customer's H2a dispatch.
     /// </summary>
     public void Validate()
@@ -100,14 +100,6 @@ public sealed class BicepInfraDeployOptions
                 "BicepInfraDeployOptions:ArmManifestBlobName is required.");
         }
     }
-
-    /// <summary>
-    /// Absolute path to the <c>infrastructure/bicep/</c> tree — used by
-    /// <see cref="FileBicepTemplateInspector"/> to walk template + module
-    /// files. Defaults relative to <see cref="AppContext.BaseDirectory"/>.
-    /// </summary>
-    public string BicepDirectory { get; set; }
-        = Path.Combine(AppContext.BaseDirectory, "infrastructure", "bicep");
 
     /// <summary>
     /// Absolute path to the runNotes directory used for upgrade-mode drift
@@ -137,4 +129,46 @@ public sealed class BicepInfraDeployOptions
     /// <c>keyVaultReferenceIdentity</c>. Defaults to 60 seconds.
     /// </summary>
     public TimeSpan ArmProbeTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5 verbatim.
+    /// Policy for the OpenAI model-deployment set on a fresh subscription
+    /// with mixed model-tier TPM grants.
+    ///   - <c>Strict</c> (default) — the customer.bicep template deploys
+    ///     the full canonical model set; H2a fails if any pin has zero
+    ///     auto-granted TPM (matching pre-Wave-2 behavior; the frontier-
+    ///     tier customer waits for a support ticket).
+    ///   - <c>AutoRecompose</c> — H2a inspects auto-granted TPM per model
+    ///     and drops zero-TPM models from the deploy set with an operator-
+    ///     visible warning. Trades frontier-tier coverage for immediate
+    ///     H2a success on fresh subs where only mini + embedding TPM was
+    ///     auto-granted.
+    /// </summary>
+    public OpenAiDeploymentSetPolicy OpenAiDeploymentSetPolicy { get; set; }
+        = OpenAiDeploymentSetPolicy.Strict;
+
+    // Task 249: the L2 principal H2a sends as customer.bicep's controlPlaneUamiPrincipalId is
+    // ControlPlaneIdentityOptions.PrincipalObjectId (shared with H4) — not a field of this class.
+}
+
+/// <summary>
+/// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5 verbatim.
+/// Deployment-set policy for the customer OpenAI account.
+/// </summary>
+public enum OpenAiDeploymentSetPolicy
+{
+    /// <summary>
+    /// Deploy the full canonical model set unconditionally. Fresh subs
+    /// without frontier-tier TPM (gpt-5.4 / gpt-5-pro) fail H2a's OpenAI
+    /// step and require a support ticket for TPM before re-running.
+    /// </summary>
+    Strict = 0,
+
+    /// <summary>
+    /// Read auto-granted TPM per model and DROP zero-TPM models from the
+    /// deployment set before H2a fires. Records an operator-visible
+    /// warning in the run's Cosmos notes. Trades frontier coverage for
+    /// fresh-sub deploy success.
+    /// </summary>
+    AutoRecompose = 1,
 }

@@ -10,6 +10,55 @@
     Prerequisites:
     - Azure CLI logged in (az login)
     - Appropriate permissions on resource group and Key Vault
+
+    ============================================================================
+    DEPRECATION NOTICE (2026-08-26 — task 205h A38c fold-in per owner disposition)
+    ============================================================================
+    This script is LEGACY dev-bootstrap and is now MOSTLY SUPERSEDED:
+
+    - Step 1 (SB namespace) — LIVE and idempotent: `spaarke-servicebus-dev` in RG
+      `SharePointEmbedded` already exists (created 2025-09-29). Canonical
+      infrastructure now provisions Service Bus via Bicep — see
+      `infrastructure/bicep/modules/service-bus.bicep` (used by both `platform.bicep`
+      and `customer.bicep`). This step remains a safe no-op.
+
+    - Step 2 (3 Office queues) — LIVE and idempotent: `office-upload-finalization`,
+      `office-profile`, `office-indexing` all exist since 2026-01-26 and are actively
+      polled by `src/server/api/Sprk.Bff.Api/Workers/Office/*.cs` (queue names are
+      hardcoded `const string QueueName = ...`). Queue creation for new environments
+      belongs in canonical infrastructure, not this script.
+
+    - Step 3 (get SAS connection string) — the OUTPUT is unused by current BFF.
+      auth-v4 task 051 (FR-E2) migrated ServiceBus authentication to Managed Identity
+      via `ServiceBusOptions.FullyQualifiedNamespace`; see
+      `src/server/api/Sprk.Bff.Api/Configuration/ServiceBusOptions.cs:19-25` +
+      `src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ServiceBusClientFactory.cs`.
+      SAS connection strings are a bearer-secret with no rotation story and are the
+      exact retirement target of the ADR-028 Amendment A4 secret-free BFF-identity
+      contract (E-3 closed 2026-08-24).
+
+    - Step 4 (write `ServiceBus-ConnectionString` to Key Vault) — GATED (see below).
+      auth-v4 task 033 deliberately deleted this KV secret; re-seeding it silently
+      resurrects a retired SAS auth path. This script would write to the caller-
+      supplied `-KeyVaultName` (default: legacy dev vault `spaarke-spekvcert` where
+      the secret was already removed). An operator overriding with a canonical vault
+      name (e.g. `-KeyVaultName sprk-{env}-kv`) would resurrect the exact reversal
+      vector that A38a's manifest omit contract exists to prevent. Gated below with
+      `Assert-SpaarkeSecretFreeGateNotTripped` (task 205h A38c pattern).
+
+    - Step 5 (configure App Service `spe-api-dev-67e2xz` with KV-ref) —
+      HARDCODED TARGET APP SERVICE NO LONGER EXISTS. Verified 2026-08-26:
+      `az webapp show --name spe-api-dev-67e2xz --resource-group spe-infrastructure-westus2`
+      returns ResourceNotFound. This step will fail on any invocation.
+
+    Bottom line: this script is retained as a historical reference and remains
+    partially runnable (idempotent no-ops on the SB infra it verifies), but its
+    Step 4 credential-write is now gated on the secret-free migration marker,
+    and its Step 5 App Service config is expected to fail against current state.
+    Do not use for new environments; use canonical Bicep instead.
+
+    Row: customer-provisioning-orchestration-r1 A38c (see
+    projects/customer-provisioning-orchestration-r1/notes/auth-v4-integration-draft-punch-rows.md).
 #>
 
 param(
@@ -30,6 +79,13 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+# A38c secret-free marker pre-check gate (task 205h fold-in 2026-08-26 per owner disposition).
+# See scripts/common/Assert-SpaarkeSecretFreeGate.ps1 header for full rationale + §11 justification.
+# Gates Step 4 (ServiceBus-ConnectionString KV write) ONLY — Steps 1/2 (SB namespace + queues) are
+# idempotent no-ops against current live state (verified 2026-08-26) and remain unrestricted; Step 5
+# targets a non-existent App Service (`spe-api-dev-67e2xz`) and will fail independently of this gate.
+. (Join-Path $PSScriptRoot 'common/Assert-SpaarkeSecretFreeGate.ps1')
 
 Write-Host "=== Office Service Bus Setup ===" -ForegroundColor Cyan
 Write-Host "Service Bus Resource Group: $ResourceGroup"
@@ -166,6 +222,13 @@ Write-Host "  Connection string retrieved" -ForegroundColor Green
 # Step 4: Store in Key Vault
 Write-Host ""
 Write-Host "[4/5] Storing connection string in Key Vault..." -ForegroundColor Yellow
+
+# A38c gate: refuse to re-seed the ServiceBus-ConnectionString KV secret on any environment that
+# carries the auth-v4 secret-free migration marker. On secret-free envs, BFF authenticates to
+# Service Bus via Managed Identity (`ServiceBus__FullyQualifiedNamespace`) — a re-seeded SAS
+# connection string would silently resurrect a retired credential path. Fails LOUD if tripped
+# (Write-Error + non-zero exit); passes through when marker is absent (pre-migration envs).
+Assert-SpaarkeSecretFreeGateNotTripped -SecretName "ServiceBus-ConnectionString" -KeyVaultName $KeyVaultName
 
 $kvResult = az keyvault secret set `
     --vault-name $KeyVaultName `

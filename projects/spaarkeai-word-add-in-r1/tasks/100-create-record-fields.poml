@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 5 (3) — richer "+ New" create forms: Matter (Name, Description, Matter Type, Practice Area, Assigned To Internal), Project (Name, Project Type, Description, Assigned To Internal), Invoice (Name, Description, Assigned To), created through the BFF quick-create</title>
+    <phase>6 UAT round 5 (2026-10-05)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Extends a BFF write path (`.cs`: quick-create request + record creation, reference lists) and the pane's create form (`.tsx`), with tests.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Write-path change on invariant-bearing tables (ownership, numbering, field mapping, assigned-to default) across BFF and client; schema facts must be verified live.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT5-W2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Runs AFTER 099 (both edit `RelatedToPicker.tsx` / `SaveFlow.tsx`). Edits the BFF Office module — run `/conflict-check` first.</parallel-reason>
+    <deps>099</deps>
+    <tags>bff-api, frontend, office-addins, dataverse, record-creation, unit-test</tags>
+    <estimated-effort>1.5 days</estimated-effort>
+  </metadata>
+
+  <prompt>Owner UAT round 5 (2026-10-05), item 3 + decisions B and C. Record: `notes/042-uat-round5-2026-10-05.md` §1-§3.</prompt>
+
+  <role>SPAARKE full-stack developer: BFF Minimal API Office module (ADR-001/008/010) and the Office add-in pane (React 19, Fluent v9).</role>
+
+  <goal>"+ New" creates a Matter, Project or Invoice with the fields the owner listed, through the existing BFF quick-create, so the new record is useful without opening Spaarke.</goal>
+
+  <context>
+    <background>
+      - **Fields (owner item 3)** — Matter: Name, Description, Practice Area, Assigned To Internal (contact lookup); the
+        existing required Matter Type stays. Project: Name, Project Type, Description, Assigned To Internal (contact
+        lookup). Invoice: Name, Description, Assigned To (contact lookup).
+      - **Decision B**: Assigned To is prefilled with the signed-in user's contact (the server's current default,
+        `RecordCreationService.cs:255-288` / `AssignedToDefaults.cs`) and is **optional** — clearing it is allowed and
+        the server then applies its existing default (state which). **Practice Area is required for a Matter**, like
+        Matter Type.
+      - **Decision C**: build the form from shared field components — `LookupField`
+        (`Spaarke.UI.Components/src/components/LookupField/LookupField.tsx`, host-agnostic, `onSearch` injected) by
+        exact-path alias (task 096's mechanism) for the contact picker, backed by the existing contact search
+        `GET /api/office/search/entities?type=Contact` (task 091). Practice Area and Project Type are dropdowns like
+        Matter Type (`GET /api/office/search/matter-types`, `OfficeEndpoints.cs:1069`, task 038). Creation goes through
+        the BFF quick-create (WP-3). Do NOT reuse the shared Create*Wizard steps (direct Dataverse writes, `Xrm`).
+      - **Schema (from code, verify live with the Dataverse MCP before building)**: `sprk_matter` — `sprk_mattername`,
+        `sprk_matterdescription`, `sprk_practicearea` → `sprk_practicearea_ref`, `sprk_mattertype` →
+        `sprk_mattertype_ref`; `sprk_project` — `sprk_projectname`, `sprk_projectdescription`, project type →
+        `sprk_projecttype_ref`; `sprk_invoice` — `sprk_name`, `sprk_description`. `sprk_assignedtointernal` is written as
+        a **contact** lookup by the BFF, but `docs/data-model/sprk_matter-related-tables.md:23` says systemuser — resolve
+        from live metadata. The Invoice "Assigned To" column is unknown — find it in live metadata.
+      - **Server today**: `QuickCreateRequest.cs:31-105` (Name, Description, MatterTypeId, source record); Matter/Project
+        through `RecordCreationService` (`:416-424`), Invoice through a separate minimal path. The pane sends
+        `onCreateRecord(type, name, matterTypeId?)` (`RelatedToPicker.tsx:139`) — no description today.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 3 + decision B">Exactly the listed fields per type. Required: Name (all), Matter Type + Practice Area (Matter). Optional: Description, Project Type, Assigned To. Assigned To prefilled with the user's contact when one is linked; otherwise empty.</constraint>
+    <constraint source="decision C / ADR-012 amended">Contact picker = shared `LookupField` by exact-path alias (never the barrel). Dropdown lists come from the BFF, load-once, same shape as matter types; prefer extending the existing matter-types route into one parameterized reference-list route over adding near-identical routes (CLAUDE.md §11) — state the choice.</constraint>
+    <constraint source="ADR-002 / write path">All writes through the BFF quick-create. Existing invariants unchanged: ownership (I-6), autonumber (I-11), field mapping, container. A posted lookup id the caller cannot read is refused like other filing targets (reuse the existing access check; denied and not-found look the same).</constraint>
+    <constraint source="schema">No new Dataverse column or table. If a field the owner listed has no column (e.g. Invoice Assigned To), ESCALATE (trigger 1) — do not create schema.</constraint>
+    <constraint source="CLAUDE.md §10">BFF obligations: placement stated; publish size measured master-vs-branch from fresh SHORT-path worktrees (Compress-Archive Optimal, equal file counts); CVE check; tests in `tests/unit/Sprk.Bff.Api.Tests/` and contract tests for the request.</constraint>
+    <constraint source="NFR-10 / ADR-021">Same form in both hosts; Fluent v9 tokens; fits at 320 px; required markers and validation messages accessible.</constraint>
+    <constraint source="099">Keep 099's create-focus behaviour (only the create form shows while creating).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Matter form shows Name*, Description, Matter Type*, Practice Area*, Assigned To Internal (prefilled); Create stays disabled until the required fields are set; the created row carries every value entered.</criterion>
+    <criterion testable="true">Project form shows Name*, Project Type, Description, Assigned To Internal (prefilled); the created row carries every value entered.</criterion>
+    <criterion testable="true">Invoice form shows Name*, Description, Assigned To; the created row carries every value entered (or the task escalated on a missing column).</criterion>
+    <criterion testable="true">Clearing Assigned To creates the record with the server's stated default; a contact id the caller cannot read is refused (403/404 indistinguishable) and nothing is created.</criterion>
+    <criterion testable="true">Practice Area and Project Type lists load from the BFF; a failed load shows a retry message, never an empty required field that blocks silently.</criterion>
+    <criterion testable="true">Existing behaviour unchanged: numbering, ownership, field mapping and the 404/409 handling of quick-create (existing tests green).</criterion>
+    <criterion testable="true">Gates: BFF build 0/0; Office test scopes + ArchTests green; gated jest green; lint 0; typecheck 0 production; publish-size delta reported; CVE clean.</criterion>
+    <criterion testable="true">Live (after deploy): create one Matter, Project and Invoice from the pane with every field; open each in Spaarke and see the values. If unavailable, leave open.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>A listed field has no Dataverse column, or `sprk_assignedtointernal` targets a different table than the BFF assumes — STOP and report.</trigger>
+    <trigger>`/conflict-check` shows another active project editing `RecordCreationService.cs` / `QuickCreateRequest.cs` / `OfficeEndpoints.cs` — coordinate before editing.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step>`/conflict-check`; verify the schema live (Dataverse MCP); read the quick-create request/service, the matter-types route and the pane's create form.</step>
+    <step>BFF: request fields, reference lists, access check, creation; tests.</step>
+    <step>Pane: per-type forms with `LookupField` + dropdowns; tests.</step>
+    <step>Gates, publish size; `notes/100-create-record-fields.md`; POML status.</step>
+  </steps>
+
+  <justification>
+    <existing>The BFF quick-create (`QuickCreateRequest`, `RecordCreationService`), the matter-types list route, the contact search route and the shared `LookupField` exist.</existing>
+    <extension>Yes — adds fields to the existing request and form, and generalizes the existing reference-list route; no new service or component.</extension>
+    <cost-of-doing-nothing>A record created from the pane has only a name (and matter type), so the user must open Spaarke to finish it (owner, round 5 item 3).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Create forms">
+      <steps>
+        <step>"+ New" → Matter: fill every field; Create enabled only when required ones are set; the new Matter shows the values in Spaarke.</step>
+        <step>Same for Project and Invoice.</step>
+      </steps>
+    </test>
+  </ui-tests>
+
+  <relevant-files>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Models/Office/QuickCreateRequest.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+    <file role="edit">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+    <file role="read">src/client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx</file>
+    <file role="new">projects/spaarkeai-word-add-in-r1/notes/100-create-record-fields.md</file>
+  </relevant-files>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/042-uat-round5-2026-10-05.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/076-record-numbering.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/084-pickable-equals-savable.md</file>
+      <file>docs/architecture/DATAVERSE-WRITE-PATH-ARCHITECTURE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <outputs>
+    <file>projects/spaarkeai-word-add-in-r1/notes/100-create-record-fields.md</file>
+  </outputs>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all files in &lt;knowledge&gt;&lt;files&gt; before starting.</protocol>
+  </execution>
+
+  <notes>
+    Completed 2026-10-05 (record: notes/100-create-record-fields.md). Live schema verified first; no escalation
+    (Invoice "Assigned To" = sprk_assignedto1; sprk_assignedtointernal → contact on matter + project). BFF: request
+    fields practiceAreaId / projectTypeId / assignedToContactId (+ invoice description); /search/matter-types generalized
+    to ONE route /search/{list} (closed table); new GET /quickcreate/defaults (the prefill = the server's own default);
+    Read gate on the posted contact in QuickCreateSourceAccessFilter, one constant 403 body. Pane: CreateRecordForm with
+    the shared LookupField by exact alias. Gates: build 0/0, ArchTests 349/349, jest 77/1075, lint 0, tsc 0 production,
+    publish +15,634 B (212 = 212 files), CVE none. Live acceptance (create one of each from the pane, see values in
+    Spaarke) OPEN — needs a deploy.
+  </notes>
+</task>

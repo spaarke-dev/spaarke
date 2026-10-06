@@ -13,7 +13,9 @@ namespace Spaarke.ArchTests;
 ///   <item>the marker is named only by the BFF itself and the Spaarke-environment deployment surface — never by customer
 ///   provisioning (the L2 control plane, the canonical app-settings catalog, the customer/Model 1 Bicep);</item>
 ///   <item><c>config/environments.json</c> declares it true only for the Spaarke-operated environments listed here;</item>
-///   <item>the Bicep stack defaults it to false and only the Spaarke-operated parameter files set it true.</item>
+///   <item>no Bicep template emits it (master T249, 2026-10-05: the only stamp template is the customer stamp, and the
+///   Spaarke Model 2 stack that carried the dev declaration is gone) — the marker reaches an App Service only through
+///   <c>Deploy-BffApi.ps1</c>, bound to its registry entry's App Service (round 62 item 1).</item>
 /// </list>
 /// </summary>
 public sealed class SpeAdminOperatorEnvironmentMarkerGuardTests
@@ -25,7 +27,7 @@ public sealed class SpeAdminOperatorEnvironmentMarkerGuardTests
     /// <summary>
     /// The environments Spaarke itself operates. Today only <c>dev</c> (owner round 57 item 1): Spaarke's production
     /// operator environment does not exist yet (the stopped <c>spaarke-bff-prod</c> / "demo"), and the change that stands it
-    /// up adds it here together with its registry key, its <c>.bicepparam</c> line and its App Service setting.
+    /// up adds it here together with its registry key and its App Service setting (Deploy-BffApi.ps1 sets it).
     /// </summary>
     private static readonly HashSet<string> SpaarkeOperatedEnvironments = new(StringComparer.Ordinal) { "dev" };
 
@@ -43,9 +45,6 @@ public sealed class SpeAdminOperatorEnvironmentMarkerGuardTests
         "config/environments.json",
         "scripts/Deploy-BffApi.ps1",
         MarkerModule,
-        "infrastructure/bicep/stacks/model2-full.bicep",
-        "infrastructure/bicep/stacks/model2-full.json",
-        "infrastructure/bicep/stacks/dev.bicepparam",
     };
 
     [Fact(DisplayName = "The operator-environment marker is named only by the BFF and the Spaarke-environment deployment surface")]
@@ -319,18 +318,25 @@ public sealed class SpeAdminOperatorEnvironmentMarkerGuardTests
             "proven without one. Install PowerShell 7.");
     }
 
-    [Fact(DisplayName = "The Bicep stack defaults the marker to false and emits it only when a Spaarke parameter file sets it")]
-    public void TheBicepStack_DefaultsTheMarkerToFalse_AndOnlySpaarkeParameterFilesSetIt()
+    [Fact(DisplayName = "No Bicep template or parameter file emits the operator marker (master T249: only the customer stamp remains)")]
+    public void NoBicepTemplate_EmitsTheOperatorMarker()
     {
-        var stack = File.ReadAllText(Path.Combine(RepoRoot, "infrastructure", "bicep", "stacks", "model2-full.bicep"));
-        Assert.Matches(new Regex(@"^param speAdminPlatformOperatorEnvironment bool = false\s*$", RegexOptions.Multiline), stack);
-        Assert.Matches(new Regex(@"speAdminPlatformOperatorEnvironment \? \{\s*SpeAdmin__PlatformOperatorEnvironment: 'true'\s*\} : \{\}"), stack);
-
-        var setters = Directory.EnumerateFiles(Path.Combine(RepoRoot, "infrastructure"), "*.bicepparam", SearchOption.AllDirectories)
-            .Where(f => Regex.IsMatch(File.ReadAllText(f), @"^param speAdminPlatformOperatorEnvironment = true\b", RegexOptions.Multiline))
+        // Master T249 (2026-10-05) deleted the Model 2 stack (stacks/model2-full.bicep and its dev/staging/prod parameter
+        // files) that carried dev's declaration; infrastructure/bicep/customer.bicep is the one stamp template, and a
+        // customer stamp never carries the marker. So the marker reaches an App Service ONLY through Deploy-BffApi.ps1, from
+        // the registry, bound to the entry's App Service (round 62 item 1). A template that named it would set it on a
+        // stamp no registry entry describes.
+        var naming = Directory.EnumerateFiles(Path.Combine(RepoRoot, "infrastructure"), "*.*", SearchOption.AllDirectories)
+            .Where(f => f.EndsWith(".bicep", StringComparison.OrdinalIgnoreCase)
+                        || f.EndsWith(".bicepparam", StringComparison.OrdinalIgnoreCase)
+                        || f.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            .Where(f => !IsBuildOutput(f) && Marker.IsMatch(File.ReadAllText(f)))
             .Select(Rel)
             .ToList();
-        Assert.Equal(new[] { "infrastructure/bicep/stacks/dev.bicepparam" }, setters);
+        Assert.True(naming.Count == 0,
+            "These infrastructure templates name the SPE admin operator marker. Only Deploy-BffApi.ps1 may set it, from "
+            + "config/environments.json, for a Spaarke-operated environment:" + Environment.NewLine + "  "
+            + string.Join(Environment.NewLine + "  ", naming));
     }
 
     private static bool IsTestProject(string rel) =>

@@ -5,7 +5,7 @@
     "_generator": {
       "name": "bicep",
       "version": "0.46.1.21595",
-      "templateHash": "4754688269262039436"
+      "templateHash": "1534481943534081023"
     }
   },
   "parameters": {
@@ -246,7 +246,7 @@
             "_generator": {
               "name": "bicep",
               "version": "0.46.1.21595",
-              "templateHash": "9958944522423890649"
+              "templateHash": "5920606518685923232"
             }
           },
           "parameters": {
@@ -355,7 +355,7 @@
               "type": "string",
               "defaultValue": "",
               "metadata": {
-                "description": "Log Analytics workspace ID for audit logs (empty to skip)"
+                "description": "ARM resource ID of the Log Analytics workspace for audit logs (monitoring.bicep output logAnalyticsId — NOT its customerId GUID output logAnalyticsWorkspaceId); empty to skip"
               }
             }
           },
@@ -474,29 +474,17 @@
                 "logs": [
                   {
                     "categoryGroup": "audit",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 90
-                    }
+                    "enabled": true
                   },
                   {
                     "categoryGroup": "allLogs",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 30
-                    }
+                    "enabled": true
                   }
                 ],
                 "metrics": [
                   {
                     "category": "AllMetrics",
-                    "enabled": true,
-                    "retentionPolicy": {
-                      "enabled": true,
-                      "days": 30
-                    }
+                    "enabled": true
                   }
                 ]
               },

@@ -167,13 +167,14 @@ const EMAIL_INLINE_AI_ACTIONS: InlineAiAction[] = [
 ];
 
 /**
- * Resolve recipient-openable SPE sharing links for the attachments the author toggled **Link** on
- * (owner UAT 2026-07-30 R2 item 12). Runs at SEND: for each `linkSelected` attachment that has a
- * `documentId`, calls the host `onResolveShareLink(documentId)` and overrides `linkUrl` with the
- * returned sharing URL so the body-link block points at the actual file (not the internal
- * Dataverse/SPE-storage URL). Best-effort + non-blocking: a null/throw keeps the prior `linkUrl`, so
- * a share-link hiccup never fails the send. No handler → attachments returned unchanged. Exported for
- * unit tests. This lives here (not the pure reducer) because it performs host I/O.
+ * Resolve the body link for the attachments the author toggled **Link** on. Runs at SEND: for each
+ * `linkSelected` attachment that has a `documentId`, calls the host `onResolveShareLink(documentId)` and
+ * overrides `linkUrl` with the returned URL — the Spaarke RECORD link (task 098, owner decision
+ * 2026-10-05; never a file sharing link). When the host cannot produce one (null / throw) the link is
+ * OMITTED (`linkUrl` cleared) rather than left at the prior internal SPE/Dataverse URL — the caller
+ * reports it with {@link findUnresolvedLinks} so the author sees why. No handler → attachments
+ * returned unchanged. Exported for unit tests. This lives here (not the pure reducer) because it
+ * performs host I/O.
  */
 export async function resolveAttachmentShareLinks(
   attachments: readonly IAttachmentItem[],
@@ -187,12 +188,21 @@ export async function resolveAttachmentShareLinks(
           const url = await onResolveShareLink(a.documentId);
           if (url) return { ...a, linkUrl: url };
         } catch {
-          /* best-effort — keep the prior linkUrl; never block the send */
+          /* fall through — omitted below, reported to the author by the caller */
         }
+        return { ...a, linkUrl: undefined };
       }
       return a;
     })
   );
+}
+
+/**
+ * The attachments the author toggled **Link** on whose link could not be produced (still `linkSelected`
+ * but no `linkUrl` after {@link resolveAttachmentShareLinks}). Empty when every requested link resolved.
+ */
+export function findUnresolvedLinks(resolved: readonly IAttachmentItem[]): IAttachmentItem[] {
+  return resolved.filter(a => a.linkSelected === true && !!a.documentId && !a.linkUrl);
 }
 
 // ---------------------------------------------------------------------------
@@ -1077,12 +1087,24 @@ export const EmailComposer = forwardRef<IEmailComposerHandle, IEmailComposerProp
 
     dispatch({ type: 'BEGIN_SEND' });
     try {
-      // R2 item 12: swap linked document attachments' internal URL for a recipient-openable SPE
-      // sharing link (best-effort; a failure keeps the prior URL and never blocks the send).
+      // Task 098: swap linked document attachments' URL for the Spaarke record link. A link the host
+      // cannot produce is omitted AND the send is refused with a message the author can act on —
+      // never an email that silently lacks (or carries a dead) link.
       const resolvedAttachments = await resolveAttachmentShareLinks(
         stateRef.current.attachments,
         props.onResolveShareLink
       );
+      const unresolved = findUnresolvedLinks(resolvedAttachments);
+      if (unresolved.length > 0) {
+        const message =
+          `Can't link to the Spaarke record for ${unresolved.map(a => a.fileName).join(', ')}: ` +
+          `the Spaarke address isn't available here. Untick "Link to Spaarke record" to send without it.`;
+        dispatch({
+          type: 'SET_VALIDATION_ERRORS',
+          result: { ok: false, errors: [{ field: 'attachments', code: 'ATTACHMENT_LINK_UNAVAILABLE', message }] },
+        });
+        throw new Error(message);
+      }
       const request = mapStateToSendRequest({ ...stateRef.current, attachments: resolvedAttachments }, props.threadId);
       const response = await sendCommunication(request, {
         authenticatedFetch: props.authenticatedFetch,

@@ -23,7 +23,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using FluentAssertions;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Xunit;
@@ -56,10 +56,10 @@ public sealed class ProvisioningRunProductionSerializerTests
         var readBack = ProductionCosmosSerializer.Deserialize<ProvisioningRun>(stored);
 
         stored.Should().NotContain("valueKind", "Newtonsoft without the converter wrote a JsonElement as {\"valueKind\":1}");
-        var evidence = readBack.GateStates[SpeContainerTypeGates.T6Verified].Evidence!.Value;
+        var evidence = readBack.GateStates[SpeContainerGates.T6Verified].Evidence!.Value;
         JsonNode.DeepEquals(
                 JsonNode.Parse(evidence.GetRawText()),
-                JsonNode.Parse(run.GateStates[SpeContainerTypeGates.T6Verified].Evidence!.Value.GetRawText()))
+                JsonNode.Parse(run.GateStates[SpeContainerGates.T6Verified].Evidence!.Value.GetRawText()))
             .Should().BeTrue("the evidence reads back as the JSON it was");
         evidence.GetProperty("verifiedAt").GetString().Should().Be("2026-10-05T03:31:00.1234567+00:00",
             "a date-shaped string stays the string it was");
@@ -105,7 +105,6 @@ public sealed class ProvisioningRunProductionSerializerTests
         record.RootContainerId.Should().Be("b!root");
         record.AdditionalContainerIds.Should().Equal("b!extra");
         record.RootContainerInDoubtSince.Should().Be(run.InterStepState.SpeContainerCreation!.RootContainerInDoubtSince);
-        record.ContainerTypeInDoubtSince.Should().Be(run.InterStepState.SpeContainerCreation.ContainerTypeInDoubtSince);
         record.Status.Should().Be(SpeContainerCreationRecord.StatusReplicationPending);
         record.OwningBusinessUnitId.Should().Be("0b0b0b0b-1111-2222-3333-444444444444");
     }
@@ -188,14 +187,14 @@ public sealed class ProvisioningRunProductionSerializerTests
             IdempotencyKey = "k",
             JobId = "j",
         });
-        run.GateStates[SpeContainerTypeGates.T6Verified] = new GateEntry
+        run.GateStates[SpeContainerGates.T6Verified] = new GateEntry
         {
             Status = GateState.Pending,
             VerifiedAt = DateTimeOffset.Parse("2026-10-05T03:00:00+00:00"),
             VerifierHandler = "H8",
             Evidence = JsonSerializer.SerializeToElement(new
             {
-                rootContainerId = "b!root",
+                containerId = "b!root",
                 verifiedStatus = "replication-pending",
                 verifiedViaAppOnlyToken = false,
                 owningBusinessUnitId = (string?)null,
@@ -224,13 +223,23 @@ public sealed class ProvisioningRunProductionSerializerTests
         s.BffAppRegSystemUserId = "bsu";
         s.SpeConsentCorrelationId = "corr";
         s.ImportedSolutions = new List<ImportedSolutionRecord> { new("Spaarke.Core", "1.0.0.0", "sol-id", 1) };
+        s.ResourceGroupName = "rg-acme";
+        s.AppServiceName = "app-acme";
+        s.AppServiceStagingSlotName = "staging";
+        s.KeyVaultName = "kv-acme";
+        s.KeyVaultUri = "https://kv-acme.vault.azure.net/";
+        s.MiResourceId = "/subscriptions/x/resourceGroups/rg-acme/providers/Microsoft.ManagedIdentity/userAssignedIdentities/mi";
+        s.ServiceBusFullyQualifiedNamespace = "sb-acme.servicebus.windows.net";
+        s.RedisEndpoint = "redis-acme.redis.cache.windows.net:6380";
+        s.FicPendingPostAppServiceVerification = true;
+        s.BffApiUrl = "https://app-acme.azurewebsites.net";
+        s.BffBuildId = "build-1";
         s.SpeContainerId = null;
         s.ProvisionedUsers = new List<ProvisionedUserRecord> { new("uid", "a@acme.com", "NativeAccount") };
         s.SpeContainerCreation = new SpeContainerCreationRecord
         {
             RootContainerId = "b!root",
             AdditionalContainerIds = new List<string> { "b!extra" },
-            ContainerTypeInDoubtSince = DateTimeOffset.Parse("2026-10-04T00:00:00.7654321+00:00"),
             RootContainerInDoubtSince = DateTimeOffset.Parse("2026-10-05T03:30:00.1234567+00:00"),
             OwningBusinessUnitId = "0b0b0b0b-1111-2222-3333-444444444444",
             Status = SpeContainerCreationRecord.StatusReplicationPending,

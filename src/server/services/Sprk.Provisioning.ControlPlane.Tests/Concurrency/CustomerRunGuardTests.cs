@@ -51,8 +51,8 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Concurrency;
 /// </summary>
 public sealed class CustomerRunGuardTests
 {
-    private const string CustomerA = "acme-corp";
-    private const string CustomerB = "beta-industries";
+    private const string CustomerA = "acme";
+    private const string CustomerB = "beta";
     private const string RunA = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
     private const string RunB = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
 
@@ -91,8 +91,8 @@ public sealed class CustomerRunGuardTests
             RunId = RunA,
             CustomerId = CustomerA,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
-            Profile = "spaarke-hosted-model1-trial",
+            TenancyModel = "Model1",
+            Profile = "spaarke-hosted-model2",
             Status = RunStatus.Running,
         });
         var guard = BuildGuard(store, repo);
@@ -273,8 +273,8 @@ public sealed class CustomerRunGuardTests
             RunId = RunB,
             CustomerId = CustomerA,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
-            Profile = "spaarke-hosted-model1-trial",
+            TenancyModel = "Model1",
+            Profile = "spaarke-hosted-model2",
             Status = RunStatus.Running,
         });
         var guard = BuildGuard(store, repo);
@@ -369,8 +369,8 @@ public sealed class CustomerRunGuardTests
             RunId = RunA,
             CustomerId = CustomerA,
             EnvironmentId = "env-1",
-            TenancyModel = "Model1Shared",
-            Profile = "spaarke-hosted-model1-trial",
+            TenancyModel = "Model1",
+            Profile = "spaarke-hosted-model2",
             Status = RunStatus.Quarantined,
             Quarantine = new QuarantineInfo { Reason = "partial Bicep deploy", QuarantinedAt = DateTimeOffset.UtcNow },
         });

@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="221" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Investigate + reconcile 23 pre-existing Sprk.Provisioning.ControlPlane.Tests baseline failures surfaced post-SESSION-23 master merge</title>
+    <phase>Post-STEP-1 hygiene (does NOT block INCOMING-D12-D13-REMEDIATION.md §5 Items 1-4; filed for future execution)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying per root CLAUDE.md §8 override (will touch tests/**) AND may modify production code depending on root-cause per class. Unconditional FULL rigor + unconditional Step 9.5 quality gates. Cross-domain investigation (KV manifest reader + CustomerRunGuardModule post-configure validation).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Investigative work with well-scoped domain (two test classes, all failures against known files after known master-merge event). No architectural judgment expected; root-cause analysis + targeted fixes.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>~4-8h. 23 failures across 2 test classes need per-class root-cause investigation (are the tests stale? is the production code stale? is there a hybrid where SESSION 23 took master's version of one file but the test fixtures point at another?). FileKvSecretManifestTests (17× — A38a auth-v4 credential-mode logic + real embedded manifest reader) + CustomerRunGuardModulePostConfigureTests (6× — post-configure URL validation). Both classes span the SESSION 23 master-merge boundary. This is brownfield diagnostic work — Sonnet 5 xhigh is right per the effort rubric.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Cross-class investigation may require synchronized changes to KV manifest reader + CustomerRunGuardModule + their test fixtures. Single-agent serial best.</parallel-reason>
+    <deps>220</deps>
+    <tags>testing, test-reset, provisioning, auth, kv-manifest, customer-run-guard, non-blocking, hygiene</tags>
+    <estimated-effort>4-8h xhigh (brownfield diagnostic)</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Investigate the 23 pre-existing baseline test failures in `Sprk.Provisioning.ControlPlane.Tests` that were surfaced during T220 (SESSION 24 2026-09-29) regression check. Confirmed pre-existing via stash-and-compare against pre-T220 baseline (same 23 tests fail with T220 changes stashed). Root cause is SESSION 23 (2026-09-28) master merge that pulled 812 commits including auth-v4 A38a work + master's version of `CustomerRunGuardModule.cs` (taken to resolve compile cascade). Determine per class whether the tests are stale, the production code is stale, or both — and reconcile. Does NOT block INCOMING-D12-D13-REMEDIATION.md §5 Items 1-4 per doc §3 (only the ArchTest suite is the STEP 1 gate, and that's 326/326 GREEN per T220). This is hygiene cleanup.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with expertise in: (1) the auth-v4 A38a credential-mode logic + KV secret manifest reader flow (`FileKvSecretManifest`, `KvSecretManifestReadResult`), (2) the CustomerRunGuardModule post-configure validation (URL parity, section-name binding, admin-URL fallback logic), (3) SESSION 23 master merge history — specifically the `CustomerRunGuardModule.cs` auto-merge cascade fix that took master's version.
+  </role>
+
+  <goal>
+    `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` reports 0 failures (or, if some failures are DELIBERATELY-STALE tests that should be deleted per ADR-038 §7 test-diet reasoning, they are removed with same-PR replacement + rationale). Root cause documented per class in commit + task notes. NO tests silently deleted/skipped without documented rationale.
+  </goal>
+
+  <context>
+    <background>
+      SESSION 24 (2026-09-29, T220 execution) discovered 23 test failures in `Sprk.Provisioning.ControlPlane.Tests` when running the standard post-T220 regression check. Investigation:
+
+      **Step 1 — Verified failures are pre-existing (not T220-caused)**:
+      Stashed T220's 4 file changes via `git stash push -u -m t220-inflight-fixes-baseline-check-1790689526` (unique tag; captured SHA `15e2c91a9c3452ace302d7f22c30385c4909abed`) + ran test suite at pre-T220 baseline. Result: EXACT SAME 23 failures. Restored T220 via `git stash apply <sha>` + `git stash drop stash@{0}`. Zero T220-caused regressions.
+
+      **Step 2 — Failure classification**:
+
+      Class A (17 failures, `FileKvSecretManifestTests`):
+        - `A38a_DataverseClientSecret_ServedUnderEveryBranch(secretFree: True, rollback: False)` [130ms]
+        - `A38a_DataverseClientSecret_ServedUnderEveryBranch(secretFree: False, rollback: False)`
+        - `A38a_DataverseClientSecret_ServedUnderEveryBranch(secretFree: True, rollback: True)`
+        - `A38a_SecretFreeTrue_ExcludesThreeTargets_CountShrinksByExactlyThree`
+        - `A38a_SecretFreeFalse_Default_IncludesAllThreeTargets`
+        - `A38a_Q3PathARollback_ReIncludesAllThreeTargets`
+        - `ReadAsync_RealEmbeddedManifest_FromSharedServiceEntries_CarryServiceRef`
+        - `ReadAsync_RealEmbeddedManifest_ReturnsPopulatedSuccess`
+        - `ReadAsync_RealEmbeddedManifest_ContainsBothBindingNeverDeleteSecrets` — sample failure: "Expected type to be `KvSecretManifestReadResult+Success`, but found `KvSecretManifestReadResult+Failure`"
+        - `ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly` (parameterized × 5 canonical names: TenantId, Dataverse-ClientSecret, AiSearch--AdminKey, SPE-ContainerTypeId, Communication-Webhook-SigningKey)
+        - `ReadAsync_RealEmbeddedManifest_EveryEntryIsUpsert`
+        - `ReadAsync_RealEmbeddedManifest_EntriesSortedAlphabeticallyByCanonicalName`
+        - `ReadAsync_CalledTwice_ReturnsSameEntryCount`
+        Domain: `FileKvSecretManifest` reader — reads embedded YAML manifest resource + maps to canonical secret entries. Depends on: `KvSecretsPopulationOptions`, `KvSecretManifestReadResult`, the embedded YAML resource itself. Failures center on the manifest returning `Failure` when tests expect `Success`, and on A38a auth-v4 credential-mode behavior (secretFree flag branching).
+
+      Class B (6 failures, `CustomerRunGuardModulePostConfigureTests`):
+        - `PostConfigure_EnabledTrue_Throws_When_Both_Urls_Are_Absent`
+        - `PostConfigure_FallsBack_TargetDataverseUrl_To_RegistryAdminUrl`
+        - `PostConfigure_Throws_When_TwoAdminUrls_Point_To_Different_Hosts`
+        - `PostConfigure_DefaultEnabled_IsTrue_WithNoCustomerRunGuardSection`
+        - `PostConfigure_Passes_When_TwoAdminUrls_Match_CaseInsensitive`
+        - `PostConfigure_EnabledTrue_Succeeds_Without_ClientSecret_Or_TenantId_Or_ClientId`
+        Domain: `CustomerRunGuardModule.cs` `PostConfigure` validation. SESSION 23 handoff explicitly notes this file was auto-merge cascade fixed by taking MASTER's version (to resolve a compile error where our code from commit `3d60b9e591e` referenced `DataverseEnvironmentRegistryConfigKeys.AdminEnvironmentUrl` which master's refactor removed). This is EXACTLY the "clean-merge-with-contradictory-prose" failure mode the INCOMING doc §3 warned about — the code compiled but the tests didn't catch up.
+
+      **Master-side status**: On master (as of 2026-09-29), these tests may already be passing OR the test class was updated post-r1-branch-point. Not verified in this task; assumption: our branch's test fixtures point at r1-specific config-key expectations that master's version of `CustomerRunGuardModule` no longer honors.
+
+      **Not urgent**: T220 verified 326/326 ArchTest → INCOMING §5 Items 1-4 UNBLOCKED. Task 221 is hygiene, not gating. Owner said "proceed to address these" for follow-up hygiene tasks; file capture + defer execution to when Items 1-4 land.
+    </background>
+    <relevant-files>
+      <file role="test-class-a">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/FileKvSecretManifestTests.cs</file>
+      <file role="test-class-b">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Concurrency/CustomerRunGuardModulePostConfigureTests.cs</file>
+      <file role="production-class-a">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/FileKvSecretManifest.cs</file>
+      <file role="production-class-b">src/server/services/Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardModule.cs</file>
+      <file role="context-doc">projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md (§3 STEP 1 warning about master-side / branch-side text landing in the same file without conflict)</file>
+      <file role="context-doc">projects/customer-provisioning-orchestration-r1/current-task.md (SESSION 23 history — CustomerRunGuardModule.cs auto-merge cascade fix)</file>
+      <file role="baseline-evidence">runs/t220-baseline-failure-list-2026-09-29.md (TO BE CREATED as part of this task — captures the stash-and-compare evidence + full failure list with stack traces for each of the 23 failures)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="220" status="completed">T220 STEP 1 completion landed 2026-09-29 (commit `78a8ce665`). ArchTest 326/326 GREEN. The regression check in T220 Step 8b is where these 23 failures were surfaced + verified pre-existing.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="root-CLAUDE.md-section-8">Test-modifying override: unconditional FULL rigor + unconditional Step 9.5 quality gates. If any deletion under `tests/integration/{auth,regression,data-mutation,tenant}/**` is proposed (unlikely here — these tests are in `src/server/services/Sprk.Provisioning.ControlPlane.Tests/`, not integration paths), same-PR replacement required per FR-B06.</constraint>
+    <constraint source="ADR-038">Tests are KEEP-path protected. Any deletion requires §6.5-documented rationale + reviewer sign-off. DO NOT silently delete failing tests to make CI green — that's the exact anti-pattern the whole test-strategy ADR exists to prevent.</constraint>
+    <constraint source="test-diet-classification">Per ADR-038 §7 (build-vs-maintain criteria), classify each failing test: MAINTAIN (fix the test) / DELETE (test was scaffolding, drop) / AMBIGUOUS (reviewer judgment). Document classification per test in task notes. If the test is MAINTAIN, fix it (either update test expectations to match new prod code, OR update prod code to honor test's contract, per root-cause).</constraint>
+    <constraint source="§6.5">Silent violation of any ADR rule FORBIDDEN. If the investigation reveals an ADR conflict (e.g., the test asserts an invariant that a later ADR amendment removed), surface via §6.5 path A/B/C — do not silently pick a path.</constraint>
+    <constraint source="branch-hygiene">Any master-side changes required (e.g., "the test is correct; master's `CustomerRunGuardModule` regressed on the config-key contract") must be filed as a separate cross-project coordination item — do NOT try to fix master from within this r1 worktree.</constraint>
+    <constraint source="INCOMING-doc-§3">INCOMING §3 explicitly warned: "Where the two sides touched different lines of the same file, git merges cleanly and you get master's text sitting beside your shared-tier-premised prose, with no conflict marker." Class B failures may be exactly this failure mode — treat with extra care.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/testing.md (ADR-038 KEEP paths + test-scope clause)</file>
+      <file>.claude/constraints/provisioning.md (§ KV credential lifecycle)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (A4 + E-3 CLOSED + r1 downstream exception note added 2026-09-29)</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md (test-diet §7 classification)</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/decisions/adr-028-a4-integration-conflict-resolution.md (§6.5 resolution — the FR-F1 allowlist citation)</file>
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md (§3 STEP 1 + §5 Items 1-4 context)</file>
+    </files>
+    <patterns>
+      <pattern name="stash-and-compare baseline verification" location="in-session-T220-precedent">
+        The technique T220 used to prove pre-existing failures: (a) `git stash push -u -m &lt;unique-tag&gt;` captures inflight changes; (b) capture SHA via `git stash list --format='%H %gs' | head -1`; (c) run test at baseline; (d) `git stash apply &lt;sha&gt;` (never `pop` per worktree shared-stash-stack protocol); (e) find current stash@{n} by tag + `git stash drop stash@{n}`. Same technique will confirm any proposed fix's per-failure impact.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step n="1">Reproduce + document — run `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` at HEAD. Capture stack traces for each of the 23 failures to `runs/t220-baseline-failure-list-2026-09-29.md` (create the file). Group by failure class (A: FileKvSecretManifestTests × 17; B: CustomerRunGuardModulePostConfigureTests × 6).</step>
+    <step n="2">Class B investigation (CustomerRunGuardModule) — highest signal for master-merge drift. Read `CustomerRunGuardModule.cs` (master's version, taken during SESSION 23 auto-merge). Compare against pre-master-merge version (SESSION 22 tip). Understand what changed in the config-key contract. Read the 6 failing test bodies; determine per test whether the test asserts an r1-specific contract that master's refactor removed, OR whether master's code regressed on a contract our tests correctly still assert.</step>
+    <step n="3">Class A investigation (FileKvSecretManifestTests) — read `FileKvSecretManifest.cs` + the embedded YAML manifest resource. Understand the `KvSecretManifestReadResult.Failure` vs `Success` split. The `A38a_*` prefix suggests these tests were added for auth-v4 A38a work (credential-mode branching). Determine whether the embedded YAML manifest is out of date, the reader logic changed but tests didn't, or the tests assert an r1-specific credential-mode contract master doesn't honor.</step>
+    <step n="4">Per-class disposition — for each failure, apply ADR-038 §7 test-diet classification: MAINTAIN (fix test or fix prod) / DELETE (scaffolding) / AMBIGUOUS (owner input). Document classification + rationale in task notes.</step>
+    <step n="5">Apply fixes — MAINTAIN cases: implement the fix per root cause (test update or prod update). DELETE cases: remove with rationale + same-PR replacement per FR-B06 if any are under integration paths (they're not; these are unit-test-adjacent). AMBIGUOUS cases: escalate via AskUserQuestion per §6.5.</step>
+    <step n="6">Re-run full Sprk.Provisioning.ControlPlane.Tests suite. Goal: 0 failures. If any residual failures, investigate + fix or escalate.</step>
+    <step n="7">Re-run full Spaarke.ArchTests suite. MUST stay at 326/326 (no regression from any prod-side changes).</step>
+    <step n="8">Regression check adjacent — BFF build clean (0/0). Any other suites that may depend on the modified prod files.</step>
+    <step n="9">Step 9.5 quality gates (UNCONDITIONAL) — code-review + adr-check on all modified files.</step>
+    <step n="10">Commit + push. Update POML status + TASK-INDEX + current-task.md. Cite §6.5 disposition per failure class in commit message.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Class B investigation reveals master's `CustomerRunGuardModule.cs` regressed on a contract our tests correctly assert — file cross-project coordination item; do NOT attempt to fix master from within this r1 worktree.</trigger>
+    <trigger>Class A investigation reveals the embedded YAML manifest resource itself is out of date — coordinate with `spaarke-auth-v4-dataverse-MI` project (A38a work owner) before regenerating.</trigger>
+    <trigger>Any AMBIGUOUS test-diet classification — MANDATORY owner escalation before delete/maintain decision (per §6.5).</trigger>
+    <trigger>Any proposed test deletion would violate ADR-038 KEEP-path — same-PR replacement required; if no natural replacement exists, escalate rather than silently delete.</trigger>
+    <trigger>Fix scope discovers changes required to `.claude/adr/ADR-028-spaarke-auth-architecture.md` beyond the narrow r1 exception note added 2026-09-29 — ADR amendment territory, escalate per §6.5 path B.</trigger>
+  </escalation>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the current 23-failure baseline in Sprk.Provisioning.ControlPlane.Tests, when this task's fixes are applied, then `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` reports 0 failures.</criterion>
+    <criterion testable="true">Given fixes may touch production code, when `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` runs, then it stays at 326/326 (no regression from T220's green state).</criterion>
+    <criterion testable="true">Given fixes may touch shared BFF code, when `dotnet build src/server/api/Sprk.Bff.Api/` runs, then it reports 0 errors.</criterion>
+    <criterion testable="true">Each of the 23 failures documented per test-diet classification (MAINTAIN / DELETE / AMBIGUOUS with rationale). Documentation lives in task completion notes + commit body.</criterion>
+    <criterion testable="true">NO test silently deleted or scope-narrowed without documented §6.5 rationale.</criterion>
+    <criterion testable="true">`runs/t220-baseline-failure-list-2026-09-29.md` exists with full failure stack traces + classifications.</criterion>
+    <criterion testable="true">Master-side coordination required? Filed as separate cross-project item; not attempted from this worktree.</criterion>
+    <criterion testable="true">POML `&lt;status&gt;` → completed. TASK-INDEX row 221 → ✅ [done]. current-task.md updated.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Test-scope clause per task-create Step 3.5.5b: cover the 23 specific failing tests + regression-check the adjacent test classes (H10SeamsSmoke, DataverseRegistrySetupStatusUpdaterSmoke, CosmosSmoke) that were passing at baseline. No new test additions unless a fix's root cause reveals a coverage gap.
+
+    §6.5 disposition prediction (author's guess — task-execute may adjust with owner input):
+    - Class A most likely: test-updates (embedded YAML manifest changed post-A38a; tests need to update to new canonical secret list)
+    - Class B most likely: split — some tests are MAINTAIN (fix by updating test expectations to master's new contract), some may need cross-project coordination (Item 4 §5 territory — model1-*.bicep retirement changes CustomerRunGuardModule config-key semantics)
+
+    Cross-reference with INCOMING §5 Item 4: retiring `model1-*.bicep` may change what `CustomerRunGuardModule` needs to validate. Task 221 execution SHOULD wait until Items 1-4 land, so the config-key contract is stable. Consider deferring Class B fix to post-Item-4.
+
+    Task 221 execution guidance: consider tackling Class A first (independent of Items 1-4) + Class B after Items 1-4 land (when config-key contract is stable). Two-phase execution acceptable if noted.
+
+    COMPLETED 2026-10-05 (session 36, during T242b step 6 — merging to master would have put these failures on master).
+    Class A (17 FileKvSecretManifestTests) was fixed by T226. Class B (the 6 CustomerRunGuardModulePostConfigureTests):
+    root cause = lost code, not stale tests. Commit 3d60b9e59 (REG-02 + REG-05, 2026-08-27) made the guard default ON,
+    dropped the TenantId requirement, fell back to DataverseEnvironmentRegistry:AdminEnvironmentUrl and cross-checked the
+    two admin URLs; a later master merge (9480f9c4e, via unified-access-control-r2) kept #847's version of
+    CustomerRunGuardOptions/Module — the managed-identity half of the same change — and silently dropped the rest.
+    Restored on top of #847's credential code. Found alongside: the L2 Api module never emitted
+    DataverseEnvironmentRegistry__AdminEnvironmentUrl although REG-07 makes the Api host require it, nor a
+    CustomerRunGuard switch although the Api acquires the lock the Worker releases — controlplane-app-service.bicep now
+    takes adminDataverseEnvironmentUrl + customerRunGuardEnabled (same values as the Worker). Also fixed: the L2 load-test
+    fixture (same REG-07 gap). ControlPlane tests 2113/2114 (0 failed), LoadTests 5/5, ArchTests 349/349.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      FULL rigor per test-modifying override. Directional step mode (investigation-heavy; sequence adaptable to root-cause discovery). Load all constraint + ADR files per Step 4a/5. Step 8.5 checkpoint every 3 steps (investigation is stateful — losing context would require re-diagnosis). Step 9.5 UNCONDITIONAL quality gates. Step 10.6 conflict-sync check (Item 4 §5 execution may land during this task's timeline — coordinate).
+    </protocol>
+  </execution>
+</task>

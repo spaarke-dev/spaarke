@@ -61,7 +61,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Reconciler;
 
 public sealed class HandlerOutcomeApplierTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
 
     // -----------------------------------------------------------------------
@@ -79,7 +79,7 @@ public sealed class HandlerOutcomeApplierTests
         var run = MakeRun(RunStatus.Running, "H0", "H1");
 
         var applied = await sut.ApplyHandlerOutcomeAsync(
-            run, ifMatchEtag: "etag-1", outcome: new HandlerResult.Success("h2a-test-customer-idem"), handlerId: "H2a", CancellationToken.None);
+            run, ifMatchEtag: "etag-1", outcome: new HandlerResult.Success("h2a-testcust-idem"), handlerId: "H2a", CancellationToken.None);
 
         applied.TargetStatus.Should().Be(RunStatus.Running, "Success returns the run's CURRENT status unchanged.");
         applied.Reenqueued.Should().BeFalse();
@@ -87,7 +87,49 @@ public sealed class HandlerOutcomeApplierTests
 
         repository.ReplaceCalls.Should().BeEmpty("handlers own the CompletedPhases append + Cosmos write on Success.");
         enqueuer.Envelopes.Should().BeEmpty();
-        guard.ReleaseCalls.Should().BeEmpty();
+        guard.ReleaseCalls.Should().BeEmpty(
+            "Bucket B HIGH#6 SESSION 18: mid-DAG Success (run.Status = Running) MUST NOT release the guard — " +
+            "release fires ONLY when run.Status is Completed (i.e., H13 terminal completion).");
+    }
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_Success_WithCompletedStatus_ReleasesCustomerGuardExactlyOnce_BucketB_HIGH6()
+    {
+        // Bucket B HIGH#6 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the happy-path terminal
+        // completion (H13 writes Cosmos RunStatus.Completed + returns
+        // HandlerResult.Success) MUST release the I5 concurrency guard
+        // explicitly from THIS applier — the policy layer that already owns
+        // Failure-branch releases via ShouldReleaseCustomerGuard. Prior to
+        // this test the release path depended IMPLICITLY on H13's registry
+        // Ready PATCH also clearing sprk_currentrunid as a side effect, which
+        // was structurally unsafe (unconditional PATCH vs ETag-safe
+        // ICustomerRunGuard.ReleaseAsync — see Bucket B HIGH#7). Any future
+        // refactor that moves H13's Ready-writer or drops ClearCurrentRunId
+        // would silently lock the customer forever on every successful
+        // terminal completion.
+        var repository = new RecordingRunRepository();
+        var enqueuer = new RecordingEnqueuer();
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _, repository: repository, enqueuer: enqueuer, guard: guard);
+        // Terminal H13 completion — run.Status is RunStatus.Completed BEFORE
+        // the applier is called (H13 has already written the terminal
+        // transition to Cosmos).
+        var run = MakeRun(RunStatus.Completed, "H0", "H1", "H2a", "H2b", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "H10", "H11", "H12", "H13");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-completed", outcome: new HandlerResult.Success("h13-idem"), handlerId: "H13", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Completed);
+        applied.Reenqueued.Should().BeFalse();
+        applied.FailureClass.Should().BeNull();
+
+        repository.ReplaceCalls.Should().BeEmpty("H13 owns the Cosmos-Completed write; applier does not double-write.");
+        enqueuer.Envelopes.Should().BeEmpty("terminal Completed does not re-enqueue.");
+        guard.ReleaseCalls.Should().ContainSingle(
+            "Bucket B HIGH#6 SESSION 18: terminal-Completed Success MUST fire ICustomerRunGuard.ReleaseAsync " +
+            "exactly once so the release path does not depend on H13's registry Ready PATCH side effect.")
+            .Which.Should().Be((TestCustomerId, TestRunId));
     }
 
     // -----------------------------------------------------------------------
@@ -250,9 +292,24 @@ public sealed class HandlerOutcomeApplierTests
             run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H13", CancellationToken.None);
 
         applied.TargetStatus.Should().Be(RunStatus.Completed);
-        guard.ReleaseCalls.Should().BeEmpty(
-            "OUR write did not land -- the concurrent winner (or its own ApplyHandlerOutcomeAsync call) " +
-            "owns the release decision for its own committed transition; releasing here too would double-release.");
+        // Bucket B MED#11 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we) INVERTS the prior test's
+        // expectation: on Conflict where winningStatus == targetStatus AND
+        // ShouldReleaseCustomerGuard(failureClass) is true, fire the release
+        // as stale-value-safe belt-and-suspenders. Prior behavior "skip release
+        // on Conflict" was correct for the common case (both writers race to
+        // the same terminal state), but left a rare hole where a partial-replay
+        // winner never reached its own applier release call (mid-flow host
+        // crash, ServiceBus lock loss). ICustomerRunGuard.ReleaseAsync is
+        // stale-value-safe by contract (Mismatched = no-op), so this
+        // additional release is safe under all winner-ordering permutations.
+        guard.ReleaseCalls.Should().ContainSingle(
+            because: "Bucket B MED#11 SESSION 18: Conflict.Current.Run.Status == targetStatus (both Completed) " +
+                     "AND SuccessfulButDrifted requires guard release per ShouldReleaseCustomerGuard — fire " +
+                     "stale-value-safe belt-and-suspenders release. The concurrent winner's own applier will " +
+                     "also attempt release; ICustomerRunGuard's LookupAsync-equality check ensures one clears " +
+                     "and the other returns Mismatched (no-op).")
+            .Which.Should().Be((TestCustomerId, TestRunId));
     }
 
     // -----------------------------------------------------------------------
@@ -309,8 +366,16 @@ public sealed class HandlerOutcomeApplierTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task ApplyHandlerOutcomeAsync_Resumable_TransitionsToFailed_DoesNotReenqueueOrReleaseGuard()
+    public async Task ApplyHandlerOutcomeAsync_Resumable_TransitionsToFailed_ReleasesGuardForFreshRun()
     {
+        // EXEC-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27): Resumable now RELEASES the guard so a Failed run does
+        // NOT permanently poison the customerId. Prior semantic (guard held
+        // "so the operator's resume targets the SAME run") caused a single
+        // Failed run to 409 forever on the next POST /api/runs until an
+        // operator manually PATCHed sprk_currentrunid via pac data. The
+        // resume path (/api/runs/{id}/resume) does not check the guard;
+        // trade-off documented in RollbackTransitions.ShouldReleaseCustomerGuard.
         var enqueuer = new RecordingEnqueuer();
         var guard = new RecordingCustomerRunGuard();
         var sut = BuildSut(out _,
@@ -328,7 +393,10 @@ public sealed class HandlerOutcomeApplierTests
         applied.TargetStatus.Should().Be(RunStatus.Failed);
         applied.Reenqueued.Should().BeFalse("Resumable requires operator POST /api/runs/{id}/resume.");
         enqueuer.Envelopes.Should().BeEmpty();
-        guard.ReleaseCalls.Should().BeEmpty("the guard stays held so the operator's resume targets the SAME run.");
+
+        guard.ReleaseCalls.Should().ContainSingle().Which.Should().Be((run.CustomerId, run.RunId),
+            because: "EXEC-07 — a Failed run must release the guard so a fresh POST /api/runs succeeds " +
+                     "(the resume path still targets the SAME failed runId without a guard check).");
     }
 
     // -----------------------------------------------------------------------
@@ -361,7 +429,7 @@ public sealed class HandlerOutcomeApplierTests
             RunId = TestRunId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
         };

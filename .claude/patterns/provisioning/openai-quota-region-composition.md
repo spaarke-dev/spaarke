@@ -17,7 +17,7 @@ Load this pattern when:
 
 1. `projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md` § F1 / F2 / F4 / F5 / L-o1 / L-o2 — regional gotchas + tier gates + support-ticket workflow.
 2. `docs/guides/PROVISIONING-PREREQUISITES.md` PRQ-C-01 (TPM headroom for pinned frontier models) + PRQ-C-02 (model GA per region for pinned versions) + PRQ-S-02 (Support Plan required for quota-bump tickets).
-3. `infrastructure/bicep/stacks/model1-shared.bicep` — the `sharedOpenAiDeployments` param + `sharedOpenAiLocation` param (per F4 fix; westus2 platform + westus3 OpenAI).
+3. `infrastructure/bicep/customer.bicep` — `param openAiLocation` (default `westus3`, per the F4 fix: westus2 platform + westus3 OpenAI) passed to the `openAi` module. It does not yet pass a deployment set (the module's defaults apply). The F4-era `sharedOpenAiDeployments` / `sharedOpenAiLocation` params lived in `stacks/model1-shared.bicep`, retired by T225a (2026-10-01).
 4. `infrastructure/bicep/modules/openai.bicep` — the module that emits `Microsoft.CognitiveServices/accounts/deployments` resources.
 5. **User memory** `reference_azure_fresh_sub_openai_tier_gates.md` — fresh subs auto-grant mini/embedding tiers generously but ZERO for frontier tiers.
 6. **User memory** `reference_azure_fresh_sub_regional_gotchas.md` — canonical Spaarke strategy: `westus2` platform + `westus3` OpenAI.
@@ -121,18 +121,19 @@ if ($headroom -lt $expectedTpm) {
 }
 ```
 
-Region composition example (Model 1 canonical, per F4):
+Region composition (the customer stamp, both models — per F4):
 
 ```bicep
-// stacks/model1-shared.bicep
-param location string = 'westus2'                   // platform default
-param sharedOpenAiLocation string = 'westus3'       // OpenAI in westus3 for gpt-5 family GA
+// customer.bicep
+param location string = 'westus2'          // platform default
+param openAiLocation string = 'westus3'    // OpenAI in westus3 for gpt-5 family GA
 
-module openai 'modules/openai.bicep' = {
-  name: 'openai'
+module openAi 'modules/openai.bicep' = {
+  name: 'openAi-${baseName}'
   params: {
-    location: sharedOpenAiLocation  // OVERRIDES the platform default
-    deployments: sharedOpenAiDeployments
+    openAiName: openAiName
+    location: openAiLocation               // OVERRIDES the platform default
+    // deployments: not passed yet — openai.bicep's defaults apply
   }
 }
 ```

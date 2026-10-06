@@ -2334,10 +2334,19 @@ public partial class RouteAuthorizationGuardTests
         Permanent("GET /api/v1/external/api/dataverse/savedqueries/{entityLogicalName}", PermanentBasis.ReferenceData, "167",
             "System view list for a REGISTERED module entity only, fail-closed otherwise "
             + "(ExternalModuleDataEndpoints.cs:491, :505). View definitions, no record data."),
-        Permanent("GET /api/office/search/matter-types", PermanentBasis.ReferenceData, "167",
-            "REFERENCE-DATA READ: the active sprk_mattertype_ref rows behind the pane's Matter Type field "
-            + "(OfficeEndpoints.cs:1254, :1280) — a load-once lookup list, takes no id. If it ever takes a record "
-            + "id or returns customer rows, re-classify."),
+        // Master merge 2026-10-05 (spaarkeai-word-add-in-r1 task 100): /search/matter-types was GENERALIZED into ONE
+        // parameterized route (CLAUDE.md §11); {list} = matter-types is the same URL. Ported from master's old-format waiver.
+        Permanent("GET /api/office/search/{list}", PermanentBasis.ReferenceData, "167",
+            "REFERENCE-DATA READ: the active rows of one create-form reference list — matter types, practice areas, project "
+            + "types (OfficeEndpoints.cs:1067, :1280). {list} is a list NAME looked up in the CLOSED "
+            + "OfficeSearchService.ReferenceLists table (OfficeSearchService.cs:473, :484; anything else is 404), not a "
+            + "record id. Small, organization-owned lookup lists, not customer record content. If it ever takes a record "
+            + "id, lets the caller name a table, or returns customer rows, re-classify."),
+        Permanent("GET /api/office/quickcreate/defaults", PermanentBasis.CallerScopedOnly, "167",
+            "CALLER'S OWN IDENTITY (master, spaarkeai-word-add-in-r1 task 100): returns the caller's own linked contact as "
+            + "the Assigned To prefill, resolved from the caller's own systemuserid (OfficeEndpoints.cs:1391, :1433), never "
+            + "a client-supplied value. Takes no id. The contact the pane then POSTS is gated by QuickCreateSourceAccessFilter "
+            + "(Read on assignedToContactId). If it ever takes an id or returns another person's data, re-classify."),
         Permanent("GET /api/workspace/sections", PermanentBasis.ReferenceData, "167",
             "Static section catalog AvailableSections (WorkspaceLayoutEndpoints.cs:541-544). Compiled "
             + "configuration, no id."),

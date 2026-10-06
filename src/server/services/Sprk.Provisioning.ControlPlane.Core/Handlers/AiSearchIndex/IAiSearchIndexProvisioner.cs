@@ -23,12 +23,9 @@
 //       (see H2bAiSearchIndexHandlerTests).
 //   Interface earns its keep — no NIH.
 //
-// MODEL 1 vs MODEL 2 SCOPE:
-//   This provisioner runs ONLY for Model 2 (dedicated). The Model 1 branch of
-//   H2b does NOT invoke a provisioner — it only VERIFIES presence (via
-//   <see cref="IAiSearchIndexVerifier"/>) and provisions a per-tenant filter
-//   template (via <see cref="IAiSearchTenantFilterTemplateProvisioner"/>) per
-//   design.md §4.1a.
+// TENANCY SCOPE:
+//   Runs for every customer stamp, Model 1 and Model 2 alike (task 225b, D-12 —
+//   each stamp has its own AI Search service deployed by H2a).
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;
@@ -36,8 +33,8 @@ using System.Collections.Immutable;
 namespace Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex;
 
 /// <summary>
-/// Executes the 7-index deploy for Model 2 (dedicated) AI Search services.
-/// Production impl shells out to <c>scripts/ai-search/Deploy-AllIndexes.ps1</c>;
+/// Executes the 7-index deploy on a customer stamp's own AI Search service.
+/// Production impl is <see cref="SearchIndexClientProvisioner"/> (SDK, UAMI RBAC);
 /// test impls return canned <see cref="AiSearchIndexProvisionOutcome"/>s.
 /// </summary>
 public interface IAiSearchIndexProvisioner
@@ -60,12 +57,12 @@ public interface IAiSearchIndexProvisioner
 /// from <see cref="Models.ProvisioningRun.Parameters"/> +
 /// <see cref="Models.InterStepState.AiSearchEndpoint"/> populated by H2a.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">Entra tenant id (§4D I1 — must be explicit, never default).</param>
 /// <param name="EnvironmentName">Target environment (<c>dev</c> / <c>staging</c> / <c>prod</c> / <c>demo</c>) — the script's <c>-Environment</c> parameter.</param>
 /// <param name="SearchEndpoint">Customer's dedicated AI Search endpoint URI from H2a's <see cref="Models.InterStepState.AiSearchEndpoint"/>. Empty for Model 1 (not used).</param>
 /// <param name="RequestedIndexNames">Subset of canonical 7 to provision — empty means "all". Never contains retired names (H2b guard rejects earlier).</param>
-/// <param name="IndexVersion">Manifest hash of the schema JSONs in <c>scripts/ai-search/</c> — feeds the idempotency key <c>aisearch-{customerId}-{indexVer}</c> per POML constraint.</param>
+/// <param name="IndexVersion">Content version of the schema set being applied (<see cref="IndexSchemaSet"/>, task 245b) — the <c>indexVer</c> of the idempotency key <c>aisearch-{customerId}-{indexVer}</c>.</param>
 public sealed record AiSearchIndexProvisionRequest(
     string CustomerId,
     string TenantId,

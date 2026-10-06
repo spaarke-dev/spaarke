@@ -27,7 +27,7 @@
 
     Phase 4 hardening (Gap 2 / FR-28 / §4D I1): -CustomerId is Mandatory. Phase 4
     resolves its target Dataverse environment via the sprk_dataverseenvironment
-    registry (customer lookup on sprk_name / sprk_envaccountdomain). No hardcoded
+    registry (customer lookup on sprk_customerid; platform rows by sprk_name / sprk_envaccountdomain). No hardcoded
     default tenant or environment is permitted in this script. Missing -CustomerId
     fails fast with a mandatory-parameter diagnostic before any deployment side-effect.
 
@@ -38,11 +38,11 @@
     Examples: "https://{tenant}.crm.dynamics.com", "dev", "demo"
 
 .PARAMETER CustomerId
-    Customer identifier (lowercase alphanumeric + hyphens, 2-64 chars). MANDATORY.
+    Customer identifier — the customerId standard ^[a-z][a-z0-9]{2,7}$ (T237). MANDATORY.
     Drives Phase 4 (Web Resources) target env resolution: the sprk_dataverseenvironment
-    registry is queried for a row where sprk_name eq '{CustomerId}' OR
-    sprk_envaccountdomain eq '{CustomerId}'; the row's sprk_dataverseurl becomes the
-    Phase 4 deployment target. Per §4D I1 / FR-28: NO hardcoded default; missing
+    registry is queried for the row whose sprk_customerid eq '{CustomerId}'; platform rows
+    with no customerId (e.g. 'Dev') fall back to sprk_name / sprk_envaccountdomain. The
+    row's sprk_dataverseurl becomes the Phase 4 deployment target. Per §4D I1 / FR-28: NO hardcoded default; missing
     -CustomerId errors immediately.
 
 .PARAMETER AdminEnvironmentUrl
@@ -105,7 +105,7 @@ param(
     # Missing value produces PowerShell's built-in mandatory-parameter diagnostic
     # (non-zero exit) BEFORE any deployment side-effect.
     [Parameter(Mandatory)]
-    [ValidatePattern('^[a-z0-9][a-z0-9-]{1,63}$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (AZURE-RESOURCE-NAMING-CONVENTION.md; T237)
     [string]$CustomerId,
 
     [ValidatePattern('^v\d+\.\d+\.\d+$')]
@@ -242,7 +242,9 @@ function Resolve-CustomerEnvironmentFromRegistry {
         registry (Gap 2 / FR-28 / §4D I1 — no hardcoded tenant/env in provisioning scripts).
     .DESCRIPTION
         Queries the platform admin Dataverse env for a sprk_dataverseenvironment record
-        matching the supplied CustomerId (against sprk_name OR sprk_envaccountdomain).
+        matching the supplied CustomerId: sprk_customerid first (the id of record — T237 made
+        sprk_name the customer's display name), then sprk_name OR sprk_envaccountdomain among
+        platform rows only (sprk_customerid eq null).
         Returns the record's sprk_dataverseurl (customer's environment URL) plus metadata.
         Fails fast (throws) if the registry lookup returns zero rows OR the row has an
         empty sprk_dataverseurl. Called by Phase 4 to determine its deployment target.
@@ -261,11 +263,8 @@ function Resolve-CustomerEnvironmentFromRegistry {
     }
 
     $escapedId = $CustomerId.Replace("'", "''")
-    $filter = "sprk_name eq '$escapedId' or sprk_envaccountdomain eq '$escapedId'"
     $select = "sprk_dataverseenvironmentid,sprk_name,sprk_dataverseurl,sprk_environmenttype,sprk_envaccountdomain"
-    $encodedFilter = [System.Uri]::EscapeDataString($filter)
     $encodedSelect = [System.Uri]::EscapeDataString($select)
-    $uri = "$normalizedAdminUrl/api/data/v9.2/sprk_dataverseenvironments?`$filter=$encodedFilter&`$select=$encodedSelect&`$top=1"
 
     $headers = @{
         'Authorization'    = "Bearer $tokenRaw"
@@ -274,14 +273,27 @@ function Resolve-CustomerEnvironmentFromRegistry {
         'OData-Version'    = '4.0'
     }
 
-    try {
-        $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET -ErrorAction Stop
-    } catch {
-        throw "Registry lookup HTTP failure at $normalizedAdminUrl : $_"
+    # sprk_customerid is the id of record (alternate key). Platform rows (Dev, Demo) carry none and
+    # are matched by name / account domain only when no customer row matches. The fallback is limited
+    # to rows WITHOUT a customerId: sprk_name now holds a customer's display name, so an unregistered
+    # id that equals some customer's display name must not resolve to that customer's environment.
+    $response = $null
+    foreach ($filter in @(
+        "sprk_customerid eq '$escapedId' and statecode eq 0",
+        "(sprk_name eq '$escapedId' or sprk_envaccountdomain eq '$escapedId') and sprk_customerid eq null and statecode eq 0"
+    )) {
+        $encodedFilter = [System.Uri]::EscapeDataString($filter)
+        $uri = "$normalizedAdminUrl/api/data/v9.2/sprk_dataverseenvironments?`$filter=$encodedFilter&`$select=$encodedSelect&`$top=1"
+        try {
+            $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET -ErrorAction Stop
+        } catch {
+            throw "Registry lookup HTTP failure at $normalizedAdminUrl : $_"
+        }
+        if ($response.value -and $response.value.Count -gt 0) { break }
     }
 
     if (-not $response.value -or $response.value.Count -eq 0) {
-        throw "Registry lookup found NO sprk_dataverseenvironment row for customerId='$CustomerId' in $normalizedAdminUrl. Verify the customer registry record exists with sprk_name eq '$CustomerId' OR sprk_envaccountdomain eq '$CustomerId'. No hardcoded fallback — Gap 2 / FR-28 forbids default env."
+        throw "Registry lookup found NO sprk_dataverseenvironment row for customerId='$CustomerId' in $normalizedAdminUrl. Verify the customer registry record exists with sprk_customerid eq '$CustomerId' (or, for a platform row, sprk_name / sprk_envaccountdomain eq '$CustomerId'). No hardcoded fallback — Gap 2 / FR-28 forbids default env."
     }
 
     $rec = $response.value[0]

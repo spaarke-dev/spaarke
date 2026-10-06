@@ -35,10 +35,19 @@
 //   - IDistributedCache             : Singleton. Redis
 //                                     (Microsoft.Extensions.Caching.
 //                                     StackExchangeRedis, added to
-//                                     .Core.csproj by task 102) when
-//                                     "Redis:ConnectionString" (or
-//                                     ConnectionStrings:Redis) is set.
-//                                     UNSET is handled per environment,
+//                                     .Core.csproj by task 102).
+//                                     Task 242 (owner D12/D13): when
+//                                     "Redis:Endpoint" is set the Worker
+//                                     connects to the Entra-only Azure
+//                                     Managed Redis with its UAMI
+//                                     (ManagedIdentity:ClientId), RESP3, no
+//                                     key. A connection string
+//                                     ("Redis:ConnectionString" /
+//                                     ConnectionStrings:Redis) is accepted
+//                                     only in Development/Testing and only
+//                                     without an endpoint; elsewhere it
+//                                     THROWS naming Redis__Endpoint.
+//                                     NEITHER set is handled per environment,
 //                                     ENVIRONMENT-GATED exactly like BFF's
 //                                     CacheModule (added 2026-08-19 review
 //                                     fix -- an UNGATED silent in-memory
@@ -98,6 +107,7 @@
 
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using StackExchange.Redis;
 
 namespace Sprk.Provisioning.ControlPlane.Dispatch;
 
@@ -122,8 +132,10 @@ public static class DispatchModule
     /// <param name="services">Service collection.</param>
     /// <param name="configuration">
     /// Bound configuration (reads the <c>Dispatcher</c> section for
-    /// <see cref="DispatcherOptions"/> + <c>Redis:ConnectionString</c> /
-    /// <c>ConnectionStrings:Redis</c> for the Level-2 cache backing store).
+    /// <see cref="DispatcherOptions"/> + <c>Redis:Endpoint</c> with
+    /// <c>ManagedIdentity:ClientId</c> — or, in Development/Testing only,
+    /// <c>Redis:ConnectionString</c> / <c>ConnectionStrings:Redis</c> — for the
+    /// Level-2 cache backing store).
     /// </param>
     /// <param name="environment">
     /// Host environment -- gates whether a missing Redis connection string
@@ -153,11 +165,51 @@ public static class DispatchModule
         // register IDistributedCache.
         if (!services.Any(d => d.ServiceType == typeof(IDistributedCache)))
         {
+            var redisEndpoint = configuration["Redis:Endpoint"];
             var redisConnectionString = configuration.GetConnectionString("Redis")
                 ?? configuration["Redis:ConnectionString"];
+            var isLocalLike = environment.IsDevelopment()
+                || string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
 
-            if (!string.IsNullOrWhiteSpace(redisConnectionString))
+            if (!string.IsNullOrWhiteSpace(redisEndpoint))
             {
+                // Task 242: Entra-only Azure Managed Redis with the Worker UAMI. Validated here (startup);
+                // the connection itself is made lazily on first cache use, as before.
+                var clientId = configuration["ManagedIdentity:ClientId"];
+                if (string.IsNullOrWhiteSpace(clientId))
+                {
+                    throw new InvalidOperationException(
+                        $"'{RedisEndpointSettingName}' is set but '{ClientIdSettingName}' is not. Set it to the client " +
+                        "id of the Worker's user-assigned identity, which holds the cache's access policy -- the cache " +
+                        "has access keys disabled, so the managed identity is the only way in.");
+                }
+
+                _ = ParseEndpoint(redisEndpoint);
+                services.AddStackExchangeRedisCache(options =>
+                {
+                    options.InstanceName = "provisioning:";
+                    options.ConnectionMultiplexerFactory = async () =>
+                    {
+                        var configurationOptions = await BuildManagedIdentityOptionsAsync(
+                            redisEndpoint,
+                            clientId,
+                            (o, id) => o.ConfigureForAzureWithUserAssignedManagedIdentityAsync(id)).ConfigureAwait(false);
+                        return await ConnectionMultiplexer.ConnectAsync(configurationOptions).ConfigureAwait(false);
+                    };
+                });
+            }
+            else if (!string.IsNullOrWhiteSpace(redisConnectionString))
+            {
+                if (!isLocalLike)
+                {
+                    throw new InvalidOperationException(
+                        $"Dispatcher Level-2 idempotency cache: a Redis connection string is set but " +
+                        $"'{RedisEndpointSettingName}' is not, and ASPNETCORE_ENVIRONMENT='{environment.EnvironmentName}' " +
+                        "is not Development or Testing. Deployed environments are keyless (task 242): set " +
+                        $"'{RedisEndpointSettingName}' to the Azure Managed Redis host:port (the Worker connects with " +
+                        $"'{ClientIdSettingName}') and remove the connection-string setting.");
+                }
+
                 services.AddStackExchangeRedisCache(options =>
                 {
                     options.Configuration = redisConnectionString;
@@ -174,9 +226,6 @@ public static class DispatchModule
                 // WebApplicationFactory<Program>-based fixtures work without
                 // a live Redis dependency; CI doesn't deploy, so this never
                 // masks a real deployment gap).
-                var isLocalLike = environment.IsDevelopment()
-                    || string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
-
                 if (isLocalLike)
                 {
                     services.AddDistributedMemoryCache();
@@ -184,12 +233,10 @@ public static class DispatchModule
                 else
                 {
                     throw new InvalidOperationException(
-                        $"Dispatcher Level-2 idempotency cache is unconfigured: neither " +
-                        "'ConnectionStrings:Redis' nor 'Redis:ConnectionString' is set, and " +
-                        $"ASPNETCORE_ENVIRONMENT='{environment.EnvironmentName}' is not " +
-                        "Development or Testing. Set the Redis connection string (typically a " +
-                        "Key Vault reference '@Microsoft.KeyVault(VaultName=<vault>;SecretName=<secret>)' " +
-                        "against the per-environment Redis -- see Deploy-RedisCache.ps1) before " +
+                        $"Dispatcher Level-2 idempotency cache is unconfigured: '{RedisEndpointSettingName}' is not " +
+                        $"set, and ASPNETCORE_ENVIRONMENT='{environment.EnvironmentName}' is not " +
+                        $"Development or Testing. Set '{RedisEndpointSettingName}' to the per-environment Azure " +
+                        $"Managed Redis host:port (the Worker connects with '{ClientIdSettingName}') before " +
                         "deploying this Worker host. An unconfigured Level-2 cache in a deployed, " +
                         "multi-instance environment would silently degrade to same-instance-only " +
                         "duplicate suppression with no operator signal -- exactly the class of " +
@@ -205,5 +252,53 @@ public static class DispatchModule
         services.TryAddSingleton<IDispatchIdempotencyService, DispatchIdempotencyService>();
 
         return services;
+    }
+
+    /// <summary>The Worker setting that names the Azure Managed Redis (named in startup errors).</summary>
+    internal const string RedisEndpointSettingName = "Redis__Endpoint";
+
+    /// <summary>The Worker setting that names its user-assigned managed identity (named in startup errors).</summary>
+    internal const string ClientIdSettingName = "ManagedIdentity__ClientId";
+
+    /// <summary>
+    /// Connection options for the Entra-only cache: host:port from <c>Redis:Endpoint</c>, TLS, RESP3 (so the
+    /// token refresh can re-authenticate every connection), authenticated by <paramref name="configureForManagedIdentity"/>
+    /// with the user-assigned identity's client id. Never a password.
+    /// </summary>
+    internal static async Task<ConfigurationOptions> BuildManagedIdentityOptionsAsync(
+        string endpoint,
+        string clientId,
+        Func<ConfigurationOptions, string, Task> configureForManagedIdentity)
+    {
+        var options = ParseEndpoint(endpoint);
+        options.Ssl = true;
+        options.Protocol = RedisProtocol.Resp3;
+        await configureForManagedIdentity(options, clientId).ConfigureAwait(false);
+        return options;
+    }
+
+    private static ConfigurationOptions ParseEndpoint(string endpoint)
+    {
+        ConfigurationOptions options;
+        try
+        {
+            options = ConfigurationOptions.Parse(endpoint);
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"'{RedisEndpointSettingName}' could not be parsed. It must be host:port of the Azure Managed Redis " +
+                "(e.g. name.region.redis.azure.net:10000).", ex);
+        }
+
+        if (!string.IsNullOrEmpty(options.Password) || !string.IsNullOrEmpty(options.User))
+        {
+            // Value deliberately not echoed: it carries a credential.
+            throw new InvalidOperationException(
+                $"'{RedisEndpointSettingName}' contains a credential. It must be host:port only -- the Worker " +
+                "authenticates with its managed identity.");
+        }
+
+        return options;
     }
 }

@@ -57,14 +57,20 @@ public sealed class RollbackTransitionsTests
     }
 
     [Theory]
-    [InlineData(FailureClass.Resumable, false)]  // Operator may still resume — keep guard.
+    // EXEC-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    // 2026-08-27): Resumable now RELEASES the guard so a Failed run does
+    // NOT permanently poison the customerId (fresh POST /api/runs is
+    // possible). Prior semantic ("Operator may still resume — keep guard")
+    // caused a single Failed run to 409 forever until manual pac data
+    // registry PATCH.
+    [InlineData(FailureClass.Resumable, true)]  // EXEC-07 (2026-08-27): unblock fresh runs after Failed.
     [InlineData(FailureClass.RetryableWithCleanup, false)]  // Auto-retry in flight — keep guard.
     [InlineData(FailureClass.QuarantineRequired, false)]  // spec FR-24 SCOPE: BLOCK new runs until cleared.
     [InlineData(FailureClass.SuccessfulButDrifted, true)]   // Run is Completed — customer may start a new run.
     public void ShouldReleaseCustomerGuard_MatchesSpecFR24Scope(FailureClass failureClass, bool expected)
     {
         RollbackTransitions.ShouldReleaseCustomerGuard(failureClass).Should().Be(expected,
-            "spec FR-24 guard policy for {0}", failureClass);
+            "spec FR-24 + EXEC-07 guard policy for {0}", failureClass);
     }
 
     // -----------------------------------------------------------------------

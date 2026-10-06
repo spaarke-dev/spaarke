@@ -192,12 +192,20 @@ public sealed class GraphAppRoleParityTest
                 ex);
         }
 
+        // Task 251 (owner D26): a stamp UAMI holds the ENTRA-granted roles only. The mailbox roles
+        // (IGraphAppRolesRegistry.ExchangeScopedValues) are granted through Exchange RBAC for
+        // Applications, scoped to the customer's group — if one is present in Entra it voids that
+        // scope, so it is reported below as an EXTRA.
+        var entraExpected = expectedRoles
+            .Where(r => !IGraphAppRolesRegistry.ExchangeScopedValues.Contains(r.Value))
+            .ToList();
+
         // Compute the diff (both directions) and format for operator triage.
-        var expectedIdIndex = expectedRoles
+        var expectedIdIndex = entraExpected
             .Where(r => !string.IsNullOrWhiteSpace(r.AppRoleId))
             .ToDictionary(r => r.AppRoleId!, r => r, StringComparer.OrdinalIgnoreCase);
 
-        var missing = expectedRoles
+        var missing = entraExpected
             .Where(r => !string.IsNullOrWhiteSpace(r.AppRoleId)
                         && !actualGraphAppRoleIds.Contains(r.AppRoleId!))
             .ToList();
@@ -210,7 +218,7 @@ public sealed class GraphAppRoleParityTest
 
         var msg = FormatParityDiff(
             tenantId: tenantId!, uamiSpObjectId: uamiSpObjectId!,
-            expectedRoles: expectedRoles, missing: missing, extra: extra);
+            expectedRoles: entraExpected, missing: missing, extra: extra);
         Assert.Fail(msg);
     }
 
@@ -475,9 +483,9 @@ public sealed class GraphAppRoleParityTest
             + "GraphAppRoles.cs (15-role canonical catalog).");
         sb.AppendLine($"Tenant: {tenantId}");
         sb.AppendLine(
-            $"Expected: {expectedRoles.Count} roles from Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All"
-            + $" (r1 task 005 populated 14 GUIDs 2026-08-17; task 144 added a 15th, User.Invite.All, "
-            + "2026-08-20).");
+            $"Expected: {expectedRoles.Count} Entra-granted roles from Sprk.Bff.Api.Infrastructure.Auth.GraphAppRoles.All"
+            + " — the mailbox roles are granted through Exchange, scoped to the customer's group (task 251), and"
+            + " count as EXTRA if present in Entra.");
         sb.AppendLine();
         if (missing.Count > 0)
         {

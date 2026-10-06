@@ -1,4 +1,7 @@
-import { cleanGuid } from '../cleanGuid';
+// Task 099 (ADR-012 amended 2026-10-05 / ADR-044): this package's local `cleanGuid` copy is deleted — the add-in
+// consumes the ONE shared implementation by exact-path alias (`@spaarke/ui-components/guid`, webpack + jest +
+// tsconfig), and this suite now pins THAT implementation's contract as the add-in depends on it.
+import { cleanGuid } from '@spaarke/ui-components/guid';
 
 describe('cleanGuid', () => {
   it('returns an already-bare-lowercase GUID unchanged (no-op)', () => {

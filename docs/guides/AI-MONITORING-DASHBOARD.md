@@ -7,7 +7,9 @@
 
 ## Overview
 
-The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature health, performance, and reliability. It is deployed as an Azure Dashboard and integrates with Application Insights metrics collected from the Sprk.Bff.Api.
+The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature health, performance, and reliability. It is defined as an Azure Dashboard (`infrastructure/bicep/modules/dashboard.bicep`, with alert rules in `modules/alerts.bicep`) and integrates with Application Insights metrics collected from the Sprk.Bff.Api.
+
+> ⚠️ **Not deployed for customer stamps today** (task 249, 2026-10-02). The dashboard and its alert rules were composed only by `stacks/model2-full.bicep`, which deployed no live environment and is deleted. `customer.bicep` — the only customer-stamp template (owner decision D19) — does not include them; D19 deferred them. The modules remain in-tree, uncomposed. See [Deployment](#deployment).
 
 ## Dashboard Panels
 
@@ -48,7 +50,7 @@ The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature h
 
 ## Alert Rules
 
-The following alerts are configured for critical thresholds:
+The following alerts are defined (in `modules/alerts.bicep`; not deployed for customer stamps today — see [Deployment](#deployment)) for critical thresholds:
 
 | Alert | Condition | Severity | Description |
 |-------|-----------|----------|-------------|
@@ -185,24 +187,15 @@ Real-time circuit breaker status is also available via API:
 
 ### Bicep Deployment
 
-The dashboard is deployed via the `model2-full.bicep` stack:
+**There is currently no deployment path for customer stamps.** Customer stamps are deployed only by the L2
+control plane's handler H2a from `infrastructure/bicep/customer.bicep`, which does not compose
+`modules/dashboard.bicep` or `modules/alerts.bicep` — owner decision D19 (2026-10-02) deferred them.
 
-```bash
-az deployment sub create \
-  --location eastus \
-  --template-file infrastructure/bicep/stacks/model2-full.bicep \
-  --parameters customerId=contoso \
-               environment=prod \
-               enableMonitoringDashboard=true \
-               alertNotificationEmail=ops@contoso.com
-```
-
-### Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `enableMonitoringDashboard` | `true` | Deploy AI monitoring dashboard |
-| `alertNotificationEmail` | `''` | Email for alert notifications |
+*(Retired by task 249, 2026-10-02: the `az deployment sub create --template-file
+infrastructure/bicep/stacks/model2-full.bicep … enableMonitoringDashboard=true alertNotificationEmail=…`
+command and its `enableMonitoringDashboard` / `alertNotificationEmail` parameters belonged to the deleted
+`model2-full.bicep` stack.)* Adding the dashboard to customer stamps means composing both modules into
+`customer.bicep` — a new owner decision, not an operator step.
 
 ---
 

@@ -22,9 +22,9 @@ The Spaarke BFF API follows ADR-009 (Redis-First Caching) as its primary caching
 
 | Component | Path | Responsibility |
 |-----------|------|---------------|
-| CacheModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs` | DI registration: **fail-fast** Redis connection with `AbortOnConnectFail=true` in deployed envs; env-guarded in-memory `AllowFallback` for local dev only; **symmetric Null-Object `IConnectionMultiplexer`** registration when Redis disabled (ADR-032); throws at startup if `Redis:Enabled=false` in non-Development environment unless `AllowFallback=true` |
+| CacheModule | `src/server/api/Sprk.Bff.Api/Infrastructure/DI/CacheModule.cs` | DI registration: **fail-fast** Redis connection with `AbortOnConnectFail=true` in deployed envs; env-guarded in-memory fallback (`Redis:AllowInMemoryFallback`) for Development and Testing only; **symmetric Null-Object `IConnectionMultiplexer`** registration when Redis disabled (ADR-032); throws at startup if `Redis:Enabled=false` outside Development/Testing — with or without the fallback flag |
 | ITenantCache | `src/server/shared/Spaarke.Core/Cache/ITenantCache.cs` | **Mandatory wrapper** over `IDistributedCache`; injects `tenant:{tenantId}:` prefix; central seam for metrics, key validation, and future multi-Redis routing (NFR-12). **All Sprk.Bff.Api cache call sites MUST use this wrapper** (FR-06 atomic migration) |
-| RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Configuration: `Enabled`, `ConnectionString` (Key Vault reference MANDATORY in deployed envs per ADR-028), `InstanceName=spaarke:`, `AllowFallback` (env-guarded; `true` only valid in Development) |
+| RedisOptions | `src/server/api/Sprk.Bff.Api/Configuration/RedisOptions.cs` | Configuration: `Enabled`, `Endpoint` (Azure Managed Redis host:10000 — the BFF authenticates with its managed identity over RESP3; required in deployed envs, task 242), `ConnectionString` (Development/Testing only), `InstanceName=spaarke:`, `AllowInMemoryFallback` (env-guarded; honoured only in Development and Testing) |
 | DistributedCacheExtensions | `src/server/shared/Spaarke.Core/Cache/DistributedCacheExtensions.cs` | GetOrCreateAsync with versioned keys, standard key builder, TTL constants. **Now invoked via ITenantCache, not directly** |
 | RequestCache | `src/server/shared/Spaarke.Core/Cache/RequestCache.cs` | Scoped per-request in-memory cache to collapse duplicate loads within a single HTTP request |
 | GraphTokenCache | `src/server/api/Sprk.Bff.Api/Services/GraphTokenCache.cs` | Caches OBO Graph tokens by SHA256 hash of user token; 55-min TTL; tenant-scoped via `ITenantCache` |
@@ -129,11 +129,12 @@ as customer isolation, which it never was.
 
 **What delivers customer separation is the dedicated per-customer Redis instance** — a resource boundary in
 the customer's own Azure subscription, not a key convention. Per D-12 §3, Redis is **dedicated per customer
-in both models, at Standard tier** (Standard supplies the SLA and replication that Basic lacks; Premium's
-exclusives — VNet injection, which is unused and Microsoft-deprecated, RDB persistence, geo-replication,
-clustering — are not in use, and losing this cache costs a cold start, not data). Redis is the clearest case
-for a boundary rather than a filter because **its auth is per-instance, not per-keyspace**: a connection
-string reaches every key.
+in both models** — since owner decision D12 (2026-09-30, task 242) **Azure Managed Redis `Balanced_B0` with
+high availability, Microsoft Entra only** (access keys disabled; the stamp UAMI holds the only access-policy
+assignment). Azure Cache for Redis Basic/Standard/Premium retires 2028-09-30 and has blocked new-customer
+creation since 2026-04-01. Losing this cache costs a cold start, not data. Redis is the clearest case for a
+boundary rather than a filter because **its access control is per-instance, not per-keyspace**: any identity
+the cache admits reaches every key.
 
 ⚠️ **How much the shared case would have mattered, stated precisely.** A collision also needs
 `{resource}:{id}` to repeat across customers. At most call sites `{id}` is a GUID or hash (conversation id,
@@ -194,9 +195,9 @@ The BFF API is designed to run as multiple App Service instances behind a load b
 
 ### Local development (in-memory mode)
 
-- When `Redis:Enabled=false` AND `Redis:AllowFallback=true` AND `ASPNETCORE_ENVIRONMENT=Development`, `CacheModule` registers `AddDistributedMemoryCache()` for `IDistributedCache` AND a **Null-Object `IConnectionMultiplexer`** (per ADR-032) so consumers depending on the multiplexer interface don't crash.
+- When `Redis:Enabled=false` AND `Redis:AllowInMemoryFallback=true` AND `ASPNETCORE_ENVIRONMENT` is `Development` or `Testing` (the latter for CI test hosts), `CacheModule` registers `AddDistributedMemoryCache()` for `IDistributedCache` AND a **Null-Object `IConnectionMultiplexer`** (per ADR-032) so consumers depending on the multiplexer interface don't crash.
 - **Known limitation (Q-B)**: In-memory mode is **single-instance only**. The Null-Object's `Subscribe(...)` is a no-op — Pub/Sub messages are never delivered. Running multiple local instances against in-memory cache will produce stale views; the operational guide [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) documents this limitation.
-- This mode is **forbidden** in deployed environments. `CacheModule` throws at startup if `Redis:Enabled=false` AND `ASPNETCORE_ENVIRONMENT != "Development"` AND `AllowFallback != true` (and even with `AllowFallback=true`, non-Development envs log a CRITICAL warning).
+- This mode is **forbidden** in deployed environments. `CacheModule` throws at startup if `Redis:Enabled=false` in any environment other than Development or Testing — `AllowInMemoryFallback=true` does not change that (CacheModule branch c).
 
 ## Cache Instance Registry
 
@@ -208,9 +209,10 @@ non-production rows below are shared development infrastructure, not a customer-
 
 | Environment | Redis instance | Resource group | SKU |
 |-------------|---------------|----------------|-----|
-| dev | `spaarke-bff-redis-dev` | `rg-spaarke-dev` | Basic C0 |
-| staging | `spaarke-bff-redis-staging` | `rg-spaarke-staging` | Standard C0+ |
-| customer (prod, both models) | one per customer, in the customer's own subscription | the customer's own resource group | **Standard C2+** (D-12 §3 — Premium is not justified by any feature in use) |
+| dev | `spaarke-bff-redis-dev` | `spe-infrastructure-westus2` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-dev.bicepparam`; access policy: the dev BFF's and the L2 Worker's managed identities). Cut over 2026-10-05 (task 242b): the BFF and Worker reach it through `Redis__Endpoint`; the old Basic C0 cache of the same name is being retired |
+| demo | `spaarke-bff-redis-demo` | `rg-spaarke-demo` | Azure Managed Redis Balanced_B0 non-HA, Entra only (`redis-demo.bicepparam`; access policy: the demo BFF's managed identity) |
+| staging | `spaarke-bff-redis-staging` (not deployed) | — | Azure Managed Redis Balanced_B0, HA (`redis-staging.bicepparam`) |
+| customer (prod, both models) | `sprk-{customerId}-{env}-redis`, one per customer, in the customer's own subscription | the customer's own resource group | **Azure Managed Redis Balanced_B0, high availability, Entra only** (owner D12; size up only on a measured memory metric — no scale-down) |
 
 **Customer separation is the dedicated instance, not the key prefix.** The `tenant:{tenantId}:` prefix and
 the subject segment remain mandatory on top of it (see Tenant Isolation).
@@ -295,12 +297,12 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 
 | Failure mode | Environment | Detection | System behavior | Alert threshold | Operator action |
 |--------------|-------------|-----------|-----------------|-----------------|-----------------|
-| **Redis unreachable at startup** | Deployed (dev/staging/prod) | `AbortOnConnectFail=true` raises `RedisConnectionException` during `CacheModule` init | Process exits non-zero; App Service restart loop; health probe fails | First failed startup (immediate page) | Verify Key Vault reference resolves; check Redis instance status; check NSG / private endpoint; check Managed Identity has KV read; consult [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) §Troubleshooting |
+| **Redis unreachable at startup** | Deployed (dev/staging/prod) | `AbortOnConnectFail=true` raises `RedisConnectionException` during `CacheModule` init (or the Entra token request fails) | Process exits non-zero; App Service restart loop; health probe fails | First failed startup (immediate page) | Verify `Redis__Endpoint` (host:10000) and that the identity named by `ManagedIdentity__ClientId` holds an access-policy assignment on the cache's database; check Redis instance status; check NSG / private endpoint; consult [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) §Troubleshooting |
 | **Redis unreachable at runtime (transient)** | All | Per-call exception caught in `ITenantCache` | Cache treated as miss; falls through to source; warning logged; latency increases | >5% miss-rate spike over baseline for 5 min | Investigate Redis CPU / memory / network; check for failover event |
 | **Pub/Sub channel degraded** | Deployed (multi-instance) | Subscriber message delivery latency > 1s OR delivery failures | Stale-cache risk: invalidation events do not fan out; tenants on instance A may see stale data after instance B writes | Pub/Sub delivery latency P95 > 500 ms for 5 min | Investigate Redis Pub/Sub channel health; consider scaling SKU; check `JobStatusService` connection state |
 | **Pub/Sub absent (in-memory dev mode)** | Local dev only | Null-Object `Subscribe(...)` no-op | **Single-instance only invariant** holds; multi-instance dev = stale views | N/A (dev-only; documented limitation) | Single instance only locally; switch to deployed dev for multi-instance validation |
-| **SKU undersize (memory or throughput)** | All | Redis memory usage > 80%, eviction rate spike, or Redis CPU > 70% | Eviction of hot keys → cache hit rate drops; P95 endpoint latency degrades (Graph round-trips no longer absorbed) | Memory > 75%, hit rate < 60% sustained for 10 min, OR P95 endpoint latency > 1.5x baseline | Scale Redis SKU (e.g., Basic C0 → Standard C1 → Premium P1); check for runaway cache writes / TTL misconfig |
-| **Connection-string secret rotation lag** | Deployed | App Settings still references old secret URI after rotation | Cache connections fail with auth error after rotation | Any auth failure on Redis connection | Update KV reference URI; force App Service restart; consult [`redis-cache-azure-setup.md`](../guides/redis-cache-azure-setup.md) §Secret Rotation |
+| **SKU undersize (memory or throughput)** | All | Redis memory usage > 80%, eviction rate spike, or Redis CPU > 70% | Eviction of hot keys → cache hit rate drops; P95 endpoint latency degrades (Graph round-trips no longer absorbed) | Memory > 75%, hit rate < 60% sustained for 10 min, OR P95 endpoint latency > 1.5x baseline | Scale the Azure Managed Redis SKU up (e.g., Balanced_B0 → B1 → B3; there is no scale-down); check for runaway cache writes / TTL misconfig |
+| **Access-policy assignment missing** | Deployed | The managed identity has no access-policy assignment on the Managed Redis database (e.g. a re-created identity) | Startup connect fails with an authentication error (no key fallback exists) | First failed startup | Re-deploy the Bicep that assigns it (`customer.bicep` / `redis-{env}.bicepparam` principal list) |
 | **In-memory fallback in non-Development env** | Deployed (misconfig) | `CacheModule` throws at startup if `Redis:Enabled=false` AND env != Development | Process exits non-zero (fail-fast); prevents silent degraded prod | Any occurrence | Restore Redis config; do NOT use `AllowFallback=true` outside local dev |
 | **Cross-tenant key leakage** | All | Code path bypassing `ITenantCache`; key missing `tenant:` segment | Stored data potentially served to wrong tenant | Any direct `IDistributedCache.*` invocation outside wrapper + tests (grep gate) | Treat as security incident; rotate affected keys; PR fix via wrapper |
 
@@ -308,8 +310,8 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 
 | Direction | Subsystem | Interface | Notes |
 |-----------|-----------|-----------|-------|
-| Depends on | Redis (Azure Cache for Redis) | StackExchange.Redis via `ITenantCache` → `IDistributedCache` | Required in deployed envs; Null-Object in local dev only |
-| Depends on | Key Vault | App Settings KV reference for `Redis-ConnectionString` | MANDATORY per ADR-028; no plaintext in App Settings (FR-14) |
+| Depends on | Redis (Azure Managed Redis) | StackExchange.Redis + `Microsoft.Azure.StackExchangeRedis` (Entra, RESP3) via `ITenantCache` → `IDistributedCache` | Required in deployed envs; Null-Object in local dev only |
+| Depends on | Managed identity | `Redis__Endpoint` + `ManagedIdentity__ClientId` (plain settings) | No Redis key, connection string or Key Vault secret exists (task 242, ADR-028 A4 / D13) |
 | Consumed by | GraphClientFactory | GraphTokenCache → ITenantCache | OBO token caching |
 | Consumed by | RagService, SemanticSearchService | EmbeddingCache → ITenantCache | AI embedding caching |
 | Consumed by | SpeFileStore, DriveItemOperations | GraphMetadataCache → ITenantCache | Graph API response caching |
@@ -340,7 +342,7 @@ Both queries returning empty after 10 min of traffic = exporter / instrumentatio
 - **MUST**: Every cache key carry `tenant:{tenantId}:` prefix UNLESS on the System-Level Exception Allow-List (FR-05). ⚠️ This separates **Entra tenants**, not customers — customer separation is the dedicated per-customer Redis instance (D-12 §3)
 - **MUST**: The key part **after** the tenant segment discriminate the subject (user / session / record) whenever the cached value is not identical for every principal in the tenant — `{resource}:{id}` MUST NOT both be compile-time constants (ADR-009 §5, added 2026-09-28)
 - **MUST**: `Redis:InstanceName = "spaarke:"` in all environments (FR-07)
-- **MUST**: Redis connection string sourced from Key Vault via `@Microsoft.KeyVault(...)` reference in deployed envs (FR-14, ADR-028)
+- **MUST**: Deployed envs authenticate to Redis with the managed identity only (`Redis__Endpoint`, RESP3; access keys disabled on the cache). A connection string is accepted only in Development/Testing (task 242, owner D12/D13; supersedes FR-14's Key Vault-reference rule)
 - **MUST**: Fail-fast (`AbortOnConnectFail=true`) when Redis is configured but unreachable in deployed envs (ADR-009 amended)
 - **MUST**: Handle runtime cache errors gracefully; never let cache errors propagate to the caller
 - **MUST**: Keep authorization cache TTLs at 2 minutes or less (security-sensitive data) — true of the code since unified-access-control-r2 task 132 (identity / membership / impersonated root sets 2 min; snapshots and grant sets 60 s)

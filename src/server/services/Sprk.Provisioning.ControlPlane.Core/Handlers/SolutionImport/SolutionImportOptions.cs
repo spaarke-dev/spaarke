@@ -8,6 +8,8 @@
 // DataverseEnvCreationOptions + AiSeedChainOptions.
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Handlers.Credentials;
+
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
@@ -16,6 +18,9 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 /// </summary>
 public sealed class SolutionImportOptions
 {
+    /// <summary>Configuration section name (bound via Program.cs <c>GetSection(nameof(SolutionImportOptions))</c>).</summary>
+    public const string SectionName = nameof(SolutionImportOptions);
+
     /// <summary>
     /// Path to the pwsh executable. Defaults to <c>pwsh</c> (resolved via
     /// PATH). Parity with <see cref="AiSeedChain.AiSeedChainOptions.PwshExecutable"/>.
@@ -53,7 +58,7 @@ public sealed class SolutionImportOptions
 
     /// <summary>
     /// Maximum wall-clock time for a single <see cref="DeployDataverseSolutionsScriptPath"/>
-    /// invocation. Defaults to 60 minutes — 8 solutions × up to 5 min per
+    /// invocation. Defaults to 60 minutes — 9 solutions × up to 5 min per
     /// large solution + per-tier verification overhead. If exceeded, the
     /// importer returns Timeout which the handler maps to
     /// <see cref="SolutionImportRejectionCodes.ImportTimeout"/> (Resumable —
@@ -95,6 +100,19 @@ public sealed class SolutionImportOptions
     /// </remarks>
     public string? ClientSecret { get; set; }
 
+    /// <summary>
+    /// FR-39 ordered credential chain for H6's Dataverse auth (A44.5, task
+    /// 205i — SAME seam H7's <see cref="EnvVarValues.EnvVarValuesOptions.Credentials"/>
+    /// carries; both sections are driven from ONE Bicep param so the two
+    /// chains cannot drift). Bound from <c>SolutionImportOptions:Credentials</c>
+    /// (<c>SolutionImportOptions__Credentials__Order__0=ManagedIdentityFederated</c>
+    /// on secret-free environments). Unconfigured = legacy <c>[ClientSecret]</c>
+    /// chain — task-141/204a behavior preserved (empty secret stays a RUNTIME
+    /// Resumable <c>MissingClientSecret</c>, never a boot fail — see
+    /// <see cref="Validate"/> remarks).
+    /// </summary>
+    public WorkerCredentialSelectionOptions Credentials { get; set; } = new();
+
     // ---- task 141 (Wave G-4, Option D hybrid) additions ----
     // The fields above (PwshExecutable/PacCliExecutable/DeployDataverseSolutionsScriptPath/
     // SolutionPath/ImportMode) remain UNCHANGED — they stay load-bearing for the
@@ -112,7 +130,7 @@ public sealed class SolutionImportOptions
     /// <c>BicepInfraDeployOptions.ProvisioningArtifactsContainerUri</c>
     /// EXACTLY (DS-1b §1 H6 row: "coordinate the packaging mechanism with
     /// task 116's blob-artifact pattern"). Required for
-    /// <see cref="DataverseWebApiSolutionImporter"/> to resolve the 8 solution
+    /// <see cref="DataverseWebApiSolutionImporter"/> to resolve the 9 solution
     /// ZIPs as versioned artifacts rather than a local filesystem path.
     /// </summary>
     public string ProvisioningArtifactsContainerUri { get; set; } = string.Empty;
@@ -120,7 +138,7 @@ public sealed class SolutionImportOptions
     /// <summary>
     /// Blob name of the solution-artifact manifest — the mutable "latest"
     /// pointer <see cref="DataverseWebApiSolutionImporter"/> reads to resolve
-    /// each of the 8 catalog solutions' blob name (+ optional version) inside
+    /// each of the 9 catalog solutions' blob name (+ optional version) inside
     /// <see cref="ProvisioningArtifactsContainerUri"/>. Defaults to
     /// <c>dataverse-solutions-latest.json</c> (parity with H9's
     /// <c>latest.json</c> naming convention). Manifest shape:
@@ -136,7 +154,7 @@ public sealed class SolutionImportOptions
     /// exercise the manifest-driven resolution path); a live E2E run
     /// additionally requires (a) the provisioning-artifacts storage account
     /// to exist (Wave G-1 live-ceremony backlog item #4) and (b) a NEW CI
-    /// publish step producing this manifest + the 8 solution ZIPs — tracked
+    /// publish step producing this manifest + the 9 solution ZIPs — tracked
     /// as a follow-on live-ceremony backlog item, out of scope for task 141's
     /// 2-collaborator-file deliverable per the POML's <c>&lt;outputs&gt;</c>.
     /// </remarks>
@@ -147,7 +165,7 @@ public sealed class SolutionImportOptions
     /// solutions GET, ImportSolution/StageAndUpgrade POST, or a single
     /// importjobs poll GET). Defaults to 100 seconds — generous headroom for
     /// the ImportSolution/StageAndUpgrade POST's base64-encoded solution ZIP
-    /// payload (largest of the 8 solutions is still well under Dataverse's
+    /// payload (largest of the 9 solutions is still well under Dataverse's
     /// binary-parameter size limits). Distinct from <see cref="ImportTimeout"/>
     /// (the OVERALL 8-solution deadline).
     /// </summary>
@@ -168,14 +186,29 @@ public sealed class SolutionImportOptions
     /// with <c>BffDeployOptions.Validate</c> / <c>BicepInfraDeployOptions.Validate</c>).
     /// Wired via <c>PostConfigure&lt;SolutionImportOptions&gt;(o =&gt; o.Validate())</c>
     /// in Worker/Program.cs.
+    ///
+    /// <para><b>A44.5 addition — chain SHAPE only:</b> the FR-39 credential
+    /// chain is validated for shape (unknown kind / duplicate /
+    /// RequireSecretFreeIdentity contradiction fail fast), but an empty
+    /// <see cref="ClientSecret"/> deliberately does NOT fail here even on a
+    /// secret-first chain — H6's missing-secret classification is a RUNTIME
+    /// Resumable failure on the affected run
+    /// (<see cref="SolutionImportRejectionCodes.MissingClientSecret"/>, per
+    /// the §4C rollback classification task 204a documented), unlike H7's
+    /// boot fail-fast. That existing lifecycle difference is preserved.</para>
     /// </summary>
     public void Validate()
     {
+        // A44.5: fail-fast on invalid FR-39 provider-chain configuration
+        // (throws with an actionable message; result discarded — only the
+        // shape check is wanted at this boundary).
+        _ = Credentials.ResolveEffectiveOrder(SectionName);
+
         if (string.IsNullOrWhiteSpace(ProvisioningArtifactsContainerUri))
         {
             throw new InvalidOperationException(
                 "SolutionImportOptions:ProvisioningArtifactsContainerUri is required — " +
-                "DataverseWebApiSolutionImporter cannot resolve the 8 solution ZIPs as versioned " +
+                "DataverseWebApiSolutionImporter cannot resolve the 9 solution ZIPs as versioned " +
                 "artifacts without it. Set the app-setting to the provisioning-artifacts storage " +
                 "account (same container task 116/117/132 publish to — live-ceremony backlog item #4).");
         }

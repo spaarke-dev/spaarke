@@ -137,7 +137,7 @@ Cors__AllowedOrigins__1 = https://spaarkedev1.api.crm.dynamics.com
 | Setting | Format |
 |---------|--------|
 | `ConnectionStrings__ServiceBus` | `@Microsoft.KeyVault(SecretUri=https://{vault}.vault.azure.net/secrets/ServiceBus-ConnectionString)` |
-| `ConnectionStrings__Redis` | `@Microsoft.KeyVault(SecretUri=https://{vault}.vault.azure.net/secrets/Redis-ConnectionString)` |
+| `Redis__Endpoint` | Plain `host:10000` of the Azure Managed Redis — **not** a Key Vault reference; the app authenticates with `ManagedIdentity__ClientId` (task 242; no Redis connection string exists for a deployed environment) |
 
 ### AI Services (Optional)
 

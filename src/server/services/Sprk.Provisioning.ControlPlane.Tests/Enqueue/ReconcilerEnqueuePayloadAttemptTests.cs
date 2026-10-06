@@ -58,7 +58,7 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Enqueue;
 
 public sealed class ReconcilerEnqueuePayloadAttemptTests
 {
-    private const string TestCustomerId = "test-customer";
+    private const string TestCustomerId = "testcust";
     private const string TestRunId = "00000000-0000-0000-0000-000000000001";
 
     // -----------------------------------------------------------------------
@@ -190,7 +190,7 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
         HandlerId = "H1",
         RunId = TestRunId,
         CustomerId = TestCustomerId,
-        ParametersJson = "{\"customerId\":\"test-customer\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"action\":\"reconciler-advance\",\"handlerId\":\"H1\"}",
+        ParametersJson = "{\"customerId\":\"testcust\",\"runId\":\"00000000-0000-0000-0000-000000000001\",\"action\":\"reconciler-advance\",\"handlerId\":\"H1\"}",
         EnqueuedAt = DateTimeOffset.Parse("2026-08-19T12:00:00Z"),
         Attempt = attempt,
     };
@@ -202,7 +202,7 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
             RunId = TestRunId,
             CustomerId = TestCustomerId,
             EnvironmentId = "env-1",
-            TenancyModel = "Model2Dedicated",
+            TenancyModel = "Model2",
             Profile = "spaarke-hosted-model2",
             Status = status,
         };
@@ -247,6 +247,10 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
         public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs) => _runs = runs.ToList();
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+        // Bucket B MED#12 SESSION 18: orphan-guard sweep — this stub is used
+        // by reconciler-payload tests that don't exercise the sweep path.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ProvisioningRun>>(Array.Empty<ProvisioningRun>());
     }
 
     /// <summary>Records every enqueued envelope in call order -- no dedup (unlike StateReconcilerServiceTests' DedupingRecordingEnqueuer) so tests can inspect each individual dispatch.</summary>

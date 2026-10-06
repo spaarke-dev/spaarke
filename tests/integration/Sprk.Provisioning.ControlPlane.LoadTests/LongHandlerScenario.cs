@@ -105,7 +105,7 @@ public sealed class LongHandlerScenario
         // Step 1 — POST /api/runs; expect 202 with Location + a well-under-
         //          budget elapsed time.
         // ------------------------------------------------------------------
-        const string customerId = "long-handler-customer";
+        const string customerId = "longhdlr";
         var postSw = Stopwatch.StartNew();
         HttpResponseMessage postResponse = await client.SendAsync(BuildPostRequest(customerId));
         postSw.Stop();
@@ -249,8 +249,21 @@ public sealed class LongHandlerScenario
             {
                 customerId,
                 environmentId = "env-longhandler",
-                tenancyModel = "Model2Dedicated",
-                profile = "spaarke-hosted-model2",
+                // T224 renamed the tenancy values (Model2Dedicated → Model2); CreateRun requires
+                // tenantId, and subscriptionId for Model 2.
+                tenancyModel = "Model2",
+                profile = "customer-owned-model2", // T225b pairing: Model2 ↔ customer-owned-model2
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-2222-3333-4444-555555555555",
+                    ["subscriptionId"] = "66666666-7777-8888-9999-000000000000",
+                    // T245c: the operator intake H11 / H14 / H4 need — POST /api/runs refuses a run without it.
+                    ["identityPreset"] = "NativeAccount",
+                    ["usersJson"] = "[{\"firstName\":\"Load\",\"lastName\":\"Test\"}]",
+                    ["exchangePolicyScopeGroupId"] = "load-scope@contoso.example",
+                    ["communicationGraphResource"] = "users/load@contoso.example/messages",
+                    ["communicationDefaultMailbox"] = "load@contoso.example",
+                },
             }),
         };
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", "load-test-token");

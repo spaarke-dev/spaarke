@@ -103,20 +103,22 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Lists the active <c>sprk_mattertype_ref</c> reference rows for the pane's required Matter Type
-    /// field (spaarkeai-word-add-in-r1 task 038).
+    /// Lists the active rows of one of the create form's reference lists — matter types (task 038), practice
+    /// areas and project types (task 100). See <see cref="OfficeSearchService.ReferenceLists"/>.
     /// </summary>
+    /// <param name="list">The list, from <see cref="OfficeSearchService.TryGetReferenceList"/>.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>The active matter types, ordered by name.</returns>
+    /// <returns>The active rows, ordered by name.</returns>
     /// <remarks>
     /// <para>
-    /// A small (five rows in dev), load-once reference list — a sibling of <see cref="SearchEntitiesAsync"/>
-    /// under the same <c>/api/office/search</c> group, not a filter on it. <c>sprk_mattertype_ref</c> is a
-    /// reference/lookup table, not an association-target entity, and the caller loads this once rather than
-    /// per keystroke, so it does not fit the 2-character-minimum typeahead contract.
+    /// Small, load-once reference lists — siblings of <see cref="SearchEntitiesAsync"/> under the same
+    /// <c>/api/office/search</c> group, not filters on it. They are reference/lookup tables, not association-target
+    /// entities, and the caller loads each once rather than per keystroke, so they do not fit the
+    /// 2-character-minimum typeahead contract.
     /// </para>
     /// </remarks>
-    Task<MatterTypeListResponse> GetMatterTypesAsync(
+    Task<ReferenceListResponse> GetReferenceListAsync(
+        OfficeReferenceList list,
         CancellationToken cancellationToken = default);
 
     /// <summary>

@@ -3,7 +3,7 @@
 //
 // L2 CONTROL-PLANE unit tests for SearchIndexClientProvisioner (task 124,
 // Wave G-2). Same fake-transport philosophy as ArmSubscriptionReadinessProbeTests
-// / KeyVaultCertBootstrapProbeTests: builds a REAL SearchIndexClient against a
+// (and the retired KeyVaultCertBootstrapProbeTests): builds a REAL SearchIndexClient against a
 // fake HttpClientTransport (reuses the shared FakeArmHttpMessageHandler from
 // ArmSubscriptionReadinessProbeTests.cs — internal, same test assembly) so the
 // SDK's own request construction, URL building, and pipeline auth-header
@@ -81,7 +81,7 @@ public sealed class SearchIndexClientProvisionerTests
     [InlineData("spaarke-invoices-index.json")]
     public void LoadAndStripSchema_AllSevenCanonicalFiles_ProduceValidJsonWithNoCommentKeys(string resourceFileName)
     {
-        var json = SearchIndexClientProvisioner.LoadAndStripSchema(resourceFileName);
+        var json = IndexSchemaSet.LoadAndStripSchema(resourceFileName);
 
         json.Should().NotContain("\"//", "comment keys must be stripped before PUT (Azure AI Search rejects unknown properties)");
         json.Should().NotContain("\"_comment_\"", "the insights-index underscore-comment convention must also be stripped");
@@ -100,7 +100,7 @@ public sealed class SearchIndexClientProvisionerTests
     [Fact]
     public void LoadAndStripSchema_UnknownResource_Throws()
     {
-        var act = () => SearchIndexClientProvisioner.LoadAndStripSchema("does-not-exist.json");
+        var act = () => IndexSchemaSet.LoadAndStripSchema("does-not-exist.json");
         act.Should().Throw<InvalidOperationException>().WithMessage("*not found*");
     }
 
