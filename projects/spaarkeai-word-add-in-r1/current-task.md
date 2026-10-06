@@ -1,6 +1,6 @@
 # Current Task State — spaarkeai-word-add-in-r1
 
-> **Last Updated**: 2026-10-06. UAT round 6 (101/102/103) merged #1315 `dc469d4a2`; add-in site deployed; next = owner UAT round 7
+> **Last Updated**: 2026-10-06 (by context-handoff, before /compact + new session). Rounds 5-7 + 097 shipped except PR #1323 (in CI)
 > **Recovery**: read **Quick Recovery** first. Everything below it is history and detail.
 
 ---
@@ -9,24 +9,26 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **UAT round 6 shipped to dev** — PR #1315 merged `dc469d4a2` (101 create form title/type switch/buttons; 102 Find split sections + divider; 103 hidden main scroll bar + toolbar Expand/Collapse). Client-only: add-in site deployed `dc469d4a2` (success); dev BFF unchanged since `91a16326e`. Package 1.1.1 — no re-upload |
-| **Next Action** | Owner tests round 6 (and any open round-5 checks): create-form type switch/Cancel/Create; Find divider + independent scrolls; Expand/Collapse in Word desktop and on the web (web caps at 500 px). Record results; close 099-103 live criteria. Optional: log the Find label defect (server `VisualizationService.cs:836/:1258` fallbacks when the index lacks MatterName/DocumentType) as an issue for the indexing owner. |
-| **Waiting on others** | UAC-r2: task 161 (+146) → then 097 (flip `ADDIN_EMAIL_TAB_ENABLED`, archive fix, live checks); retiring the now-unused `POST /api/documents/{id}/share-link` + its UAC tests (`notes/098-share-link-route-refusal.patch`). |
-| **098 reach** | The composer's record-link change lives in `@spaarke/ui-components`; it reaches users only when each consumer is rebuilt + deployed (Email code page, SpaarkeAi Console, DocumentUploadWizard, TrackingFieldTrio / Communication PCFs). Not deployed by this project yet. |
-| **Main checkout** | `C:\code_files\spaarke` may be on another session's branch — check first; never `git pull` there unless it is on master and clean (memory: main-checkout-may-be-on-another-branch) |
+| **Task** | **UAT rounds 5-7 + task 097 — all built; one PR left.** Merged: #1301 (098/099/100, BFF deployed), #1315 (101-103), #1316 (Word Email tab ON + Outlook footer shows package version), #1321 (097 archive option A + copies as protected as the source). Dev BFF deployed from master `11a8ba203` (36.14 MB — master shrank; 4/4 SHA-256; routes 401). Add-in site live from `b403c7713` (Email tab verified `canEmailFromPane:!0` in the deployed bundle). |
+| **Next Action** | 1) **PR #1323** (round 7: 104 expand-to-window, 105 post-save Copied/Opened + resizable Profile Summary via shared `ResizeHandle`) — `Router` passed; merge when `Build & Test (Debug)` passes: `gh pr merge 1323 --merge` (NEVER `--delete-branch`); the add-in site auto-deploys (client-only, no BFF deploy). 2) Owner live checks: rounds 5-7, Word Email tab (sends own doc; foreign doc → `sdap.access.deny.communication.send`), archive (Spaarke email page, archive on, secure + >4 MB attachment → separate files; secure copy in the secure container). 3) Outlook desktop pane does not open — waiting on owner: classic vs new Outlook, version/build, which buttons show (Quick Save present?), what happens on click; cache-clear steps already given (Wef + HubAppFileCache; `olk.exe --devtools`). |
+| **Waiting on others** | UAC-r2: retire the unused `POST /api/documents/{id}/share-link` + its tests (`notes/098-share-link-route-refusal.patch`); settle the cross-secure archive copy (keeps `sprk_relatedcommunication`) before switching on `DocumentPointer__StrictDerivedContainer` (097 note §11.4). Indexing owner: Find's "Matter: Matter" / "Unknown" are server fallbacks (`VisualizationService.cs:836/:1258`) — pane masks them. |
+| **Later / next re-upload** | Remove the 404 `CommandRuntime.code.script` (`outlook/manifest.json:84`, `word/manifest.json:78`) at the next package version bump. 098's composer record-link reaches users only when the Email page / Console / upload wizard / communication PCFs are rebuilt + deployed. 090 wrap-up (`/test-diet`) after UAT ends. |
+| **Out of scope here** | Owner 2026-10-06: an Outlook "submit Service Request" add-in for license-free workforce users is a SEPARATE project, aligned with the external-access SPA; nothing to record in this project. |
+| **Main checkout** | `C:\code_files\spaarke` — check its branch first; fast-forward only when it is on master and clean; otherwise `git branch -f master origin/master` (memory). |
+| **Tree** | Branch `work/spaarkeai-word-add-in-r1` clean and pushed (merged with master). Temp worktrees removed. Branch `work/word-addin-097-archive-optionA` is merged (#1321) — may be left as is (never delete branches as part of merge). |
+
 ### State of every open item
 
 | Item | State |
 |---|---|
-| 083 (Office To Do defaults to its creator) | ✅ merged PR #1289 `c2ef1857b`; **deployed** to dev 2026-10-05 (BFF from master `293fcd4c8`) |
-| 088–094 | ✅ merged (#1124 `fb8280aee`, #1284 `6932582b1`); BFF `fb8280aee` + add-in site `6932582b1` deployed; package 1.1.1 |
-| 095 (Related-to row, Save-as link, +75 px pane via `Office.extensionLifeCycle.taskpane.setWidth`) | ✅ on branch (`26a020004`), not in a PR. Its review was inline — run `code-review` + `adr-check` skills on the round-4 diff before the PR |
-| 096 (Word Email tab on shared `EmailComposer` via new wrapper `SendEmailPane`; `shareLinkService` deleted) | ✅ on branch (`26a020004`), not in a PR; shipping depends on the 097 decision. Decision row added to project CLAUDE.md (ADR-012 Path A narrowed) |
-| 097 | ⛔ waits on UAC-r2 161 (+146) reaching master and dev; then: flip `ADDIN_EMAIL_TAB_ENABLED` on, archive fix, live checks (note §6) |
-| 042 | 🔄 UAT rounds continue (round 4 recorded in `notes/042-uat-round4-2026-10-04.md`) |
+| 083, 088–096 | ✅ merged and deployed |
+| 097 | ✅ #1316 (Email tab on) + #1321 (archive option A, protected copies); BFF `11a8ba203` deployed; live checks open |
+| 098–100 (round 5) | ✅ #1301, deployed; 098 route refusal reverted (UAC-r2 tests) — record link shipped |
+| 101–103 (round 6) | ✅ #1315, add-in site deployed |
+| 104–105 (round 7) | ✅ built; **PR #1323 open** (Router passed, legacy Build & Test pending) |
+| 042 | 🔄 UAT continues (notes `042-uat-round5/6/7-*.md`); Outlook desktop issue open (owner info needed) |
 | 090 | 🔲 wrap-up with `/test-diet` after 042 |
-| Publish size | measured for 083 (+353 B). Round 4: 095 is client-only; 096 changed no BFF file → none owed unless 097 adds code |
-
+| Publish size | 097: +4,188 B vs master merge base (Compress-Archive Optimal, 192=192 files); 100: +15.6 KB |
 ### Critical context
 - The Graph sharing link is refused for every SPE file ("not supported on CSP Container site"); 096 removed it from all pane paths. The share-link ROUTE and the shared composer's "Link" option still use it — recommendation in `notes/096-email-tab.md` §4 (owner not yet asked).
 - Archive bug (confirmed, unfixed): `CommunicationService.cs:2328-2343` writes `sprk_document` ids into `sprk_graphitemid` and the archive container into `sprk_graphdriveid`; fix = carry each source document's drive/item ids from the attachment fetch (`:2201-2222`). Conflicts with UAC-r2 task 146 on the same lines — do it after UAC-r2 lands.
@@ -313,7 +315,7 @@ No task is in progress, and nothing is half-applied.
 
 ## 📜 HISTORY — ✅ MERGED TO MASTER — **DONE 2026-09-30**
 
-> **Last Updated**: 2026-10-06. UAT round 6 (101/102/103) merged #1315 `dc469d4a2`; add-in site deployed; next = owner UAT round 7
+> **Last Updated**: 2026-10-06 (by context-handoff, before /compact + new session). Rounds 5-7 + 097 shipped except PR #1323 (in CI)
 
 | Field | Value |
 |---|---|
@@ -548,7 +550,7 @@ neither breaks the build, so the compiler will not catch it.
 
 ## 🔵 NEXT — every remaining task is gated on an OWNER DECISION or on UAC-r2 #1029
 
-> **Last Updated**: 2026-10-06. UAT round 6 (101/102/103) merged #1315 `dc469d4a2`; add-in site deployed; next = owner UAT round 7
+> **Last Updated**: 2026-10-06 (by context-handoff, before /compact + new session). Rounds 5-7 + 097 shipped except PR #1323 (in CI)
 
 | Field | Value |
 |---|---|
@@ -995,7 +997,7 @@ the local figure disagrees with CI (80 vs 74 at the same commit). Pin the CI num
 ---
 
 
-> **Last Updated**: 2026-10-06. UAT round 6 (101/102/103) merged #1315 `dc469d4a2`; add-in site deployed; next = owner UAT round 7
+> **Last Updated**: 2026-10-06 (by context-handoff, before /compact + new session). Rounds 5-7 + 097 shipped except PR #1323 (in CI)
 
 ---
 
