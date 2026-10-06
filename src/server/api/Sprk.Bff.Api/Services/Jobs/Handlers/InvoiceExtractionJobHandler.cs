@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -37,6 +38,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
     private readonly FinanceTelemetry _telemetry;
     private readonly IOptions<FinanceOptions> _financeOptions;
     private readonly ILogger<InvoiceExtractionJobHandler> _logger;
+    private readonly RecordContainerResolver _containerResolver;
 
     // Extraction status choice values
     private const int ExtractionStatusExtracted = 100000001;
@@ -58,7 +60,8 @@ public class InvoiceExtractionJobHandler : IJobHandler
         JobSubmissionService jobSubmissionService,
         FinanceTelemetry telemetry,
         IOptions<FinanceOptions> financeOptions,
-        ILogger<InvoiceExtractionJobHandler> logger)
+        ILogger<InvoiceExtractionJobHandler> logger,
+        RecordContainerResolver containerResolver)
     {
         _invoiceAnalysisService = invoiceAnalysisService ?? throw new ArgumentNullException(nameof(invoiceAnalysisService));
         _speFileOperations = speFileOperations ?? throw new ArgumentNullException(nameof(speFileOperations));
@@ -71,6 +74,7 @@ public class InvoiceExtractionJobHandler : IJobHandler
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _financeOptions = financeOptions ?? throw new ArgumentNullException(nameof(financeOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
     }
 
     public string JobType => JobTypeName;
@@ -139,6 +143,15 @@ public class InvoiceExtractionJobHandler : IJobHandler
                     documentId, driveId, itemId);
                 _telemetry.RecordExtractionFailure(extractionStopwatch, documentIdStr, "missing_file_info");
                 return JobOutcome.Poisoned(job.JobId, JobType, "Document missing SPE file info", job.Attempt, stopwatch.Elapsed);
+            }
+
+            // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the download below follows the row's
+            // pointer as the application, so the pointer's container is verified first (fail closed, permanent).
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct))
+            {
+                _telemetry.RecordExtractionFailure(extractionStopwatch, documentIdStr, RecordContainerResolver.DocumentStorageUnverifiedCode);
+                await UpdateInvoiceExtractionStatusAsync(invoiceId, ExtractionStatusFailed, ct);
+                return JobOutcome.Poisoned(job.JobId, JobType, "Document storage could not be verified", job.Attempt, stopwatch.Elapsed);
             }
 
             // Download document from SPE

@@ -11,7 +11,9 @@ namespace Sprk.Bff.Api.Services.Dataverse.Extensions;
 internal static class RecordServiceExtensions
 {
     /// <summary>
-    /// Registers the <see cref="RecordService"/> used by <c>GET /api/dataverse/record/{entityLogicalName}/{id}</c>.
+    /// Registers the <see cref="RecordService"/> used by the external module seam
+    /// (<c>GET /api/v1/external/api/dataverse/record/{entityLogicalName}/{id}</c>). The internal
+    /// <c>GET /api/dataverse/record/{entityLogicalName}/{id}</c> was deleted by unified-access-control-r2 task 160.
     /// Scoped per <c>IDataverseService</c> lifetime to avoid holding the privileged ServiceClient open across requests.
     /// </summary>
     public static IServiceCollection AddDataverseRecordServices(this IServiceCollection services)

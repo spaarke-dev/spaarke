@@ -28,6 +28,7 @@ public class ThreadResolverSeamTests
 
     private readonly Mock<IGenericEntityService> _entity = new(MockBehavior.Strict);
     private readonly Mock<ICommunicationDataverseService> _comm = new(MockBehavior.Loose);
+    private readonly Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble _ownership = new();
 
     private ThreadResolver CreateResolver() =>
         new(
@@ -37,6 +38,7 @@ public class ThreadResolverSeamTests
                 new MessagingThreadKeyStrategy(_entity.Object),
             },
             _entity.Object,
+            _ownership,
             NullLogger<ThreadResolver>.Instance);
 
     private static DataverseEntity Communication(Guid id, params (string field, object value)[] attrs)
@@ -74,6 +76,8 @@ public class ThreadResolverSeamTests
         // Parent's thread lookup (the ancestry query does NOT project it, so it is read explicitly).
         SetupRetrieve("sprk_communication", parentId,
             Communication(parentId, ("sprk_communicationthread", new EntityReference("sprk_communicationthread", existingThreadId))));
+        // Task 146: a JOIN reads the thread's regarding first (a Direct thread here — no record to file under).
+        SetupRetrieve("sprk_communicationthread", existingThreadId, new DataverseEntity("sprk_communicationthread") { Id = existingThreadId });
         var updates = CaptureUpdates("sprk_communication");
 
         var result = await CreateResolver().ResolveAndAssignThreadAsync(new ThreadResolutionRequest
@@ -90,6 +94,74 @@ public class ThreadResolverSeamTests
             .Which.Id.Should().Be(existingThreadId);
         // JOIN path — no new thread created.
         _entity.Verify(s => s.CreateAsync(It.IsAny<DataverseEntity>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    // Task 146 / owner S6 — joining a RECORD thread files the message under the thread's record.
+    [Fact]
+    public async Task ResolveAndAssign_JoinsRecordThread_RefilesTheMessageUnderTheThreadRecordBeforeAssigning()
+    {
+        var commId = Guid.NewGuid();
+        var parentId = Guid.NewGuid();
+        var recordThreadId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+
+        _comm.Setup(c => c.GetCommunicationByInternetMessageIdAsync("<parent@x.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Communication(parentId));
+        SetupRetrieve("sprk_communication", parentId,
+            Communication(parentId, ("sprk_communicationthread", new EntityReference("sprk_communicationthread", recordThreadId))));
+        SetupRetrieve("sprk_communicationthread", recordThreadId, new DataverseEntity("sprk_communicationthread")
+        {
+            Id = recordThreadId,
+            ["sprk_regardingmatter"] = new EntityReference("sprk_matter", matterId),
+        });
+        var updates = CaptureUpdates("sprk_communication");
+
+        var result = await CreateResolver().ResolveAndAssignThreadAsync(new ThreadResolutionRequest
+        {
+            CommunicationId = commId,
+            ChannelType = CommunicationType.Email,
+            Direction = CommunicationDirection.Incoming,
+            Message = new NormalizedMessage { Direction = CommunicationDirection.Incoming, InReplyTo = "<parent@x.com>" },
+        });
+
+        result.Should().Be(recordThreadId);
+        var reparent = _ownership.Reparents.Should().ContainSingle().Which;
+        reparent.EntityLogicalName.Should().Be("sprk_communication");
+        reparent.RecordId.Should().Be(commId);
+        reparent.InheritedParents.Should().ContainSingle()
+            .Which.Should().Be(new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent("sprk_matter", matterId));
+        updates.Should().ContainSingle("the assignment is the reparent's change");
+    }
+
+    [Fact]
+    public async Task ResolveAndAssign_JoinsRecordThread_OwnerRefused_LeavesTheMessageUnthreaded()
+    {
+        var commId = Guid.NewGuid();
+        var parentId = Guid.NewGuid();
+        var recordThreadId = Guid.NewGuid();
+        _ownership.TeamId = null; // no owner resolves for the thread's record
+
+        _comm.Setup(c => c.GetCommunicationByInternetMessageIdAsync("<parent@x.com>", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Communication(parentId));
+        SetupRetrieve("sprk_communication", parentId,
+            Communication(parentId, ("sprk_communicationthread", new EntityReference("sprk_communicationthread", recordThreadId))));
+        SetupRetrieve("sprk_communicationthread", recordThreadId, new DataverseEntity("sprk_communicationthread")
+        {
+            Id = recordThreadId,
+            ["sprk_regardingproject"] = new EntityReference("sprk_project", Guid.NewGuid()),
+        });
+        var updates = CaptureUpdates("sprk_communication");
+
+        var result = await CreateResolver().ResolveAndAssignThreadAsync(new ThreadResolutionRequest
+        {
+            CommunicationId = commId,
+            ChannelType = CommunicationType.Email,
+            Direction = CommunicationDirection.Incoming,
+            Message = new NormalizedMessage { Direction = CommunicationDirection.Incoming, InReplyTo = "<parent@x.com>" },
+        });
+
+        result.Should().BeNull("a refused re-file leaves the message unthreaded (best-effort), never mis-owned");
+        updates.Should().BeEmpty("nothing is written when the owner is refused");
     }
 
     [Fact]
@@ -149,6 +221,8 @@ public class ThreadResolverSeamTests
             {
                 new("sprk_communicationchannelref") { ["sprk_thread"] = new EntityReference("sprk_communicationthread", threadId) },
             }));
+        // Task 146: a JOIN reads the thread's regarding first (a Direct thread here — no record to file under).
+        SetupRetrieve("sprk_communicationthread", threadId, new DataverseEntity("sprk_communicationthread") { Id = threadId });
         var updates = CaptureUpdates("sprk_communication");
 
         var result = await CreateResolver().ResolveAndAssignThreadAsync(new ThreadResolutionRequest

@@ -47,6 +47,7 @@ public class DataverseObservationMirrorTests
         };
         return new DataverseObservationMirror(
             _entityServiceMock.Object,
+            new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
             Options.Create(options),
             NullLogger<DataverseObservationMirror>.Instance,
             random);
@@ -97,31 +98,9 @@ public class DataverseObservationMirrorTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Constructor + arg validation
+    // Arg validation. (The three constructor null-check tests were deleted by unified-access-control-r2 task 146 when
+    // the constructor gained its owner resolver: ADR-038 bans ctor null-check tests.)
     // ─────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullEntityService_Throws()
-    {
-        var opts = Options.Create(new InsightsMirrorOptions { InsightsObservationActionId = ActionId });
-        Action act = () => _ = new DataverseObservationMirror(null!, opts, NullLogger<DataverseObservationMirror>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("entityService");
-    }
-
-    [Fact]
-    public void Constructor_NullOptions_Throws()
-    {
-        Action act = () => _ = new DataverseObservationMirror(_entityServiceMock.Object, null!, NullLogger<DataverseObservationMirror>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("options");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        var opts = Options.Create(new InsightsMirrorOptions { InsightsObservationActionId = ActionId });
-        Action act = () => _ = new DataverseObservationMirror(_entityServiceMock.Object, opts, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
 
     [Fact]
     public async Task MirrorAsync_NullObservation_Throws()

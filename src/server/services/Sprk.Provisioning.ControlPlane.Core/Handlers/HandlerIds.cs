@@ -59,35 +59,26 @@ public static class HandlerIds
     public const string H4 = "H4";
 
     /// <summary>
-    /// H4-shared (task 200) -- shared-tier KV secrets population via
-    /// Azure.ResourceManager SDK extraction from source services
-    /// (AI Search / Cognitive Services / Service Bus / Storage / Redis).
-    /// Sibling of H4; targets the SHARED KV, not per-tenant. Owns the
-    /// F19 automation gap; runs BEFORE H4b (task 201) + H9 (task 052).
-    /// </summary>
-    public const string H4Shared = "H4-shared";
-
-    /// <summary>
     /// H4b (task 201) -- BulkAppSettings handler. Thin wrapper around task
     /// 084's shipped Configure-AppServiceSettings.generated.ps1 (extended
     /// by task 201 with per_env_settings). Applies ALL required BFF app
     /// settings (KV refs + per-env literals) in ONE batched call → ONE App
     /// Service restart cycle, then polls /healthz + parses container docker
     /// logs on failure. Kills the F20/F20a progressive-fail-fast chain.
-    /// Runs AFTER H4 + H4-shared, BEFORE H9.
+    /// Runs AFTER H4, BEFORE H9.
     /// </summary>
     public const string H4b = "H4b";
 
     /// <summary>H5 -- Dataverse environment creation.</summary>
     public const string H5 = "H5";
 
-    /// <summary>H6 -- Dataverse solution import (8 solutions, dependency-ordered).</summary>
+    /// <summary>H6 -- Dataverse solution import (9 solutions, dependency-ordered).</summary>
     public const string H6 = "H6";
 
     /// <summary>H7 -- Dataverse environment-variable values.</summary>
     public const string H7 = "H7";
 
-    /// <summary>H8 -- SPE container-type creation.</summary>
+    /// <summary>H8 -- SPE container CREATION (H8-B semantics per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md). Wire format literal "H8" is unchanged.</summary>
     public const string H8 = "H8";
 
     /// <summary>H9 -- BFF artifact-based deploy (CI-published blob).</summary>
@@ -143,6 +134,6 @@ public static class HandlerIds
     /// </summary>
     public static readonly IReadOnlyList<string> Dispatchable =
     [
-        H0, H05, H1, H2a, H2b, H3, H4, H4Shared, H4b, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
+        H0, H05, H1, H2a, H2b, H3, H4, H4b, H5, H6, H7, H8, H9, H10, H11, H12a, H12b, H12c, H13, H14,
     ];
 }

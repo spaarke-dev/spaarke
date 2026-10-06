@@ -18,7 +18,7 @@ Load this pattern when:
 2. `docs/guides/PROVISIONING-PREREQUISITES.md` PRQ-S-05 (operator's own AAD identity — never a service principal, per NFR-11) + PRQ-E-10 (L2 UAMI Key Vault Secrets User).
 3. `scripts/provisioning/Grant-ControlPlaneIdentity.ps1` — the Graph + Dataverse + KV bootstrap script (task 203c hardens this per punch list rows A15/A16).
 4. `.claude/adr/ADR-028-spaarke-auth-architecture.md` — the 21 auth MUSTs. Operator AAD identity + UAMI outbound preference.
-5. `infrastructure/bicep/modules/model1-shared-l2-rbac.bicep` — the Bicep module that grants L2 UAMI RBAC on source Azure services (task 203b landed 4 of 6 grants; the L2 UAMI Bicep grants are the durable form of what this pattern's script does interactively).
+5. `infrastructure/bicep/modules/customer-l2-bff-rbac.bicep` — the Bicep module that grants the L2 UAMI RBAC on each customer stamp (the durable form of what this pattern's script does interactively). Its Model 1 shared-tier sibling `model1-shared-l2-rbac.bicep` was retired by T225a (2026-10-01, D-12).
 
 ## Constraints
 
@@ -64,9 +64,9 @@ Load this pattern when:
 
 ## Worked example — SESSION 2 recovery narrative
 
-SESSION 2 (2026-08-22) discovered F15 + F18 while attempting to seed `sprk-prod-kv` for the Model 1 Prod BFF. Verbatim recovery:
+SESSION 2 (2026-08-22) discovered F15 + F18 while attempting to seed `sprk-prod-kv` for the Model 1 Prod BFF (the retired shared tier, `rg-spaarke-shared-prod`). The recovery, with names generalised to a customer stamp (ADR-027: each stamp has its own subscription):
 
-1. **Attempt 1** — `az role assignment create --assignee {ralph-oid} --scope {kv-id} --role "Key Vault Secrets Officer"` returned:
+1. **Attempt 1** — `az role assignment create --assignee {operator-oid} --scope {kv-id} --role "Key Vault Secrets Officer"` returned:
    ```
    ERROR: (MissingSubscription) The request did not have a subscription or a valid tenant level resource provider.
    ```
@@ -74,9 +74,9 @@ SESSION 2 (2026-08-22) discovered F15 + F18 while attempting to seed `sprk-prod-
 
 2. **Fallback** — construct the role assignment via `az rest`:
    ```powershell
-   $sub = "cd95fcec-6b89-49ea-8339-c2b579b12587"
-   $rg = "rg-spaarke-shared-prod"
-   $kv = "sprk-prod-kv"
+   $sub = "{stampSubscriptionId}"
+   $rg = "rg-spaarke-{customerId}-{env}"
+   $kv = "sprk-{customerId}-{env}-kv"   # customer.bicep: take('sprk-{customerId}-{env}-kv', 24)
    $oid = az ad signed-in-user show --query id -o tsv
    $roleDefId = "b86a8fe4-44ce-4948-aee5-eccb2c155cd7"  # Key Vault Secrets Officer
    $assignmentGuid = [guid]::NewGuid().ToString()
@@ -93,7 +93,7 @@ SESSION 2 (2026-08-22) discovered F15 + F18 while attempting to seed `sprk-prod-
      } | ConvertTo-Json -Depth 5 -Compress)
    ```
 
-3. **Poll** — `az keyvault secret list --vault-name sprk-prod-kv --query "[0]"` — returned 403 for ~15 seconds then unblocked.
+3. **Poll** — `az keyvault secret list --vault-name $kv --query "[0]"` — returned 403 for ~15 seconds then unblocked.
 
 4. **F18 discovery** — while at the terminal, discovered the same gap on the SHARED KV (initially thought only per-tenant KVs had it). Same fix, different scope.
 

@@ -16,7 +16,7 @@ Deploy PCF controls, solutions, and web resources to Dataverse using PAC CLI.
 ## What This Command Does
 
 This command executes the `dataverse-deploy` skill to handle Dataverse deployments, including:
-- PCF control quick dev deploy (`pac pcf push`)
+- PCF control quick dev deploy (verified `build:prod`, then pack + import per the `pcf-deploy` skill)
 - PCF control production release (solution workflow)
 - Solution import/export
 - Web resource deployment
@@ -47,11 +47,14 @@ For iterative PCF development (~60 seconds):
 
 ```bash
 cd src/client/pcf/{ControlName}
-npm run build:prod
-mv Directory.Packages.props{,.disabled}
-pac pcf push --publisher-prefix sprk
-mv Directory.Packages.props{.disabled,}
+rm -rf out/
+pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .   # STOP on a non-zero exit
+# Then copy, pack and import per the pcf-deploy skill (Steps 3-5).
 ```
+
+Do NOT use `pac pcf push`: it creates a temporary solution and rebuilds in **development** mode, discarding the
+verified production build (a NEVER rule in the `pcf-deploy` skill). And never trust `npm run build:prod`'s exit
+code on its own: `pcf-scripts` exits 0 when the webpack build fails.
 
 ## Decision Tree
 
@@ -60,7 +63,7 @@ Is this a production release?
 ├── YES → Use "PCF Production Release" (full solution workflow)
 └── NO → Is the PCF embedded in a Custom Page?
     ├── YES → Use "PCF Custom Page Deploy" (complex)
-    └── NO → Use "Quick Dev Deploy" (pac pcf push)
+    └── NO → Use "Quick Dev Deploy" (verified build + pack + import; never `pac pcf push`)
 ```
 
 ## Common Issues

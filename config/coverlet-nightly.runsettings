@@ -5,7 +5,11 @@
   Produces BOTH cobertura (for GitHub artifact reporting) AND opencover (for SonarCloud).
   SonarCloud requires opencover format — see sonar.cs.opencover.reportsPaths in sonar-project.properties.
 
-  Used by: .github/workflows/nightly-quality.yml (test-and-coverage job)
+  Used by: none currently. The original consumer, .github/workflows/nightly-quality.yml
+  (test-and-coverage job), was deleted 2026-06-01 (commit 902bebc49c,
+  github-actions-rationalization-r1 Wave C, D-03). No workflow references this file today
+  (verified via `grep -rn coverlet-nightly .github/`), and no workflow runs SonarCloud
+  analysis anymore. Kept in case SonarCloud integration is reintroduced.
   Standard CI uses: config/coverlet.runsettings (cobertura only)
 -->
 <RunSettings>

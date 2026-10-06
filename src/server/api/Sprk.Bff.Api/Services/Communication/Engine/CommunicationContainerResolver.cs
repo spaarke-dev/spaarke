@@ -32,7 +32,9 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// writes for an email regarding a person, organization or account — the typed party lookup plus the same id in
 /// <c>sprk_regardingrecordid</c>, and no <c>sprk_regardingrecordtype</c> (<c>CommunicationService.MapAssociationFieldsAsync</c>
 /// never writes it): the pair's id is the row's own typed party, so it names a party (task 155 f5). An invoice regarding
-/// is still resolved LIVE through the invoice's own flag, container and links, as since task 155 r0. An empty
+/// is still resolved LIVE through the invoice's links, as since task 155 r0 — but no longer through the invoice's own
+/// flag or container: since task 150 an invoice follows its matter (owner round 10 item 11;
+/// <c>SecurableEntityRegistry.FlagIsNotASecurityInput</c>). An empty
 /// securable-entity set is still refused before anything is read.</para>
 ///
 /// <para><b>What is NOT the archive any more (f4, by design).</b> A pair id naming a record whose type nothing on the row

@@ -66,11 +66,51 @@ public static class QuickCreateSourceAccessFilterExtensions
 ///
 /// <para><b>Residual</b> (notes/030 §9): Read is a RECORD-level check. An app-only read does not apply column-level
 /// (field-level security) masking, so a secured column named in an admin-authored profile would still be copied.</para>
+///
+/// <para><b>The TARGET table's Create privilege (unified-access-control-r2 task 166, sweep finding S-69; owner G5).</b>
+/// Matter, project and invoice are created APP-ONLY and team-owned (the server invariant G5 keeps), so until this
+/// task a caller who could not create a matter in the Dataverse UI could create one here. After the source half
+/// passes, a request for <c>matter</c>, <c>project</c> or <c>invoice</c> now also requires the CALLER to hold that
+/// table's live Create privilege (<see cref="CreatePrivilegeFor"/>), asked through
+/// <see cref="CallerRecordAccessProbe.CallerHoldsPrivilegeAsync"/> (OBO WhoAmI +
+/// <c>RetrieveUserSetOfPrivilegesByNames</c>, uncached, fail closed) — the task 130 pattern. Not held, a throw and
+/// a missing token are one 403 (<c>OFFICE_009</c>, reason <c>insufficient_privilege</c>). <c>account</c>,
+/// <c>contact</c> and an unparseable type are not created by this route (the service returns null / the handler
+/// 400s), so they pass through unchanged with no privilege query. The source half runs FIRST and is unchanged:
+/// an unreadable named source is refused before any privilege is asked.</para>
 /// </remarks>
 public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
 {
     /// <summary>The existing <see cref="OperationAccessPolicy"/> key for reading a record (<see cref="AccessRights.Read"/>).</summary>
     internal const string ReadOperation = "read";
+
+    /// <summary>The route value naming the entity type to create.</summary>
+    internal const string EntityTypeRouteValue = "entityType";
+
+    /// <summary>
+    /// The Dataverse Create privilege for <c>sprk_matter</c>, by its exact live name — read from spaarkedev1
+    /// <c>privileges</c> metadata 2026-10-03 (read-only; task 166 note §live facts). Pinned by a test.
+    /// </summary>
+    internal const string CreateMatterPrivilege = "prvCreatesprk_Matter";
+
+    /// <summary>
+    /// The Dataverse Create privilege for <c>sprk_project</c>, by its exact live name — read from spaarkedev1
+    /// <c>privileges</c> metadata 2026-10-03 (read-only; task 166 note §live facts). Pinned by a test.
+    /// </summary>
+    internal const string CreateProjectPrivilege = "prvCreatesprk_Project";
+
+    /// <summary>
+    /// The Create privilege a quick-create of <paramref name="entityType"/> costs, or <see langword="null"/> when this
+    /// route creates no row of that type (account, contact). Invoice REUSES
+    /// <see cref="FinanceAuthorizationFilter.CreateInvoicePrivilege"/> — one spelling of one privilege.
+    /// </summary>
+    internal static string? CreatePrivilegeFor(QuickCreateEntityType entityType) => entityType switch
+    {
+        QuickCreateEntityType.Matter => CreateMatterPrivilege,
+        QuickCreateEntityType.Project => CreateProjectPrivilege,
+        QuickCreateEntityType.Invoice => FinanceAuthorizationFilter.CreateInvoicePrivilege,
+        _ => null,
+    };
 
     /// <summary>The Office error-code taxonomy's "access denied" code — the same one <see cref="EntityAccessFilter"/> emits.</summary>
     private const string AccessDeniedErrorCode = "OFFICE_009";
@@ -103,20 +143,24 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
     public async ValueTask<object?> InvokeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
         var httpContext = context.HttpContext;
-        var request = context.Arguments.OfType<QuickCreateRequest>().FirstOrDefault();
 
-        // No body → nothing named → nothing will be read or written → nothing to authorize.
-        if (request is null)
-        {
-            return await next(context);
-        }
-
-        if (await AuthorizeSourceAsync(httpContext, request) is { } sourceDenied)
+        // Half 1 — the SOURCE record (task 030), unchanged and FIRST.
+        var sourceDenied = await AuthorizeSourceAsync(context, httpContext);
+        if (sourceDenied is not null)
         {
             return sourceDenied;
         }
 
-        if (await AuthorizeAssigneeAsync(httpContext, request) is { } assigneeDenied)
+        // Half 2 — the TARGET table's Create privilege (task 166).
+        var privilegeDenied = await AuthorizeCreatePrivilegeAsync(httpContext);
+        if (privilegeDenied is not null)
+        {
+            return privilegeDenied;
+        }
+
+        // Half 3 — Read on the Assigned To contact the create writes (master task 100). No body names none.
+        var request = context.Arguments.OfType<QuickCreateRequest>().FirstOrDefault();
+        if (request is not null && await AuthorizeAssigneeAsync(httpContext, request) is { } assigneeDenied)
         {
             return assigneeDenied;
         }
@@ -125,14 +169,68 @@ public sealed class QuickCreateSourceAccessFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// The task-030 gate: Read on the record context the creation service copies fields FROM. Returns the deny result,
-    /// or <see langword="null"/> to continue (also when no complete context is named — nothing is read then).
+    /// Task 166 (S-69): for matter / project / invoice, the CALLER must hold the table's Create privilege. Returns the
+    /// 403 to return, or <see langword="null"/> to proceed. An unparseable type and account / contact pass through
+    /// (the handler answers them exactly as before, and this route creates no such row).
     /// </summary>
-    private async Task<IResult?> AuthorizeSourceAsync(HttpContext httpContext, QuickCreateRequest request)
+    private async Task<IResult?> AuthorizeCreatePrivilegeAsync(HttpContext httpContext)
     {
-        // Nothing named → nothing will be read → nothing to authorize. A half-supplied context passes to the
-        // handler, whose validation returns 400 before the service is reached.
-        if (string.IsNullOrWhiteSpace(request.SourceEntityType)
+        var rawEntityType = httpContext.Request.RouteValues.TryGetValue(EntityTypeRouteValue, out var raw)
+            ? raw?.ToString()
+            : null;
+
+        if (string.IsNullOrWhiteSpace(rawEntityType)
+            || !QuickCreateFieldRequirements.TryParse(rawEntityType, out var entityType)
+            || CreatePrivilegeFor(entityType) is not { } privilege)
+        {
+            return null;
+        }
+
+        bool holds;
+        try
+        {
+            holds = await _probe.CallerHoldsPrivilegeAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext), privilege, httpContext.RequestAborted);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // The DECISION only — never next().
+            _logger?.LogError(ex,
+                "[QUICKCREATE-PRIVILEGE] The privilege check {Privilege} threw; denying. CorrelationId: {CorrelationId}",
+                privilege, httpContext.TraceIdentifier);
+            holds = false;
+        }
+
+        if (holds)
+        {
+            return null;
+        }
+
+        _logger?.LogWarning(
+            "[QUICKCREATE-PRIVILEGE] Denied: caller does not hold {Privilege} for a {EntityType} quick-create. "
+            + "CorrelationId: {CorrelationId}",
+            privilege, entityType, httpContext.TraceIdentifier);
+
+        return Deny(
+            httpContext,
+            "insufficient_privilege",
+            "You do not have permission to create this type of record.");
+    }
+
+    /// <summary>Task 030's source-record Read check — returns the 403 to return, or <see langword="null"/>.</summary>
+    private async Task<IResult?> AuthorizeSourceAsync(EndpointFilterInvocationContext context, HttpContext httpContext)
+    {
+        var request = context.Arguments.OfType<QuickCreateRequest>().FirstOrDefault();
+
+        // Nothing named → nothing will be read → nothing to authorize for the SOURCE half. (A route without a
+        // QuickCreateRequest body has no source context for the creation service to read either.) Since task 166 this
+        // pass-through applies to the source half only: the Create-privilege half still runs.
+        if (request is null
+            || string.IsNullOrWhiteSpace(request.SourceEntityType)
             || request.SourceRecordId is not { } sourceRecordId
             || sourceRecordId == Guid.Empty)
         {

@@ -4,7 +4,7 @@
     <title>Implement H0 Preflight Handler (Quota + Cert-Bootstrap Checks)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler'; modifies .cs files; implements upstream gating handler that blocks the entire pipeline; FR-01/R19 scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

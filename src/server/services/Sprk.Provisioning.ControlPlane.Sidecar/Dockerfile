@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------------
-# Sprk.Provisioning.ControlPlane.Sidecar — Exchange ApplicationAccessPolicy
-# sidecar image (H14a; T4 action-and-verify).
+# Sprk.Provisioning.ControlPlane.Sidecar — Exchange mailbox-access sidecar image
+# (H14a: group-scoped RBAC for Applications since task 251; T4 action-and-verify).
 #
 # Runtime model (design.md §4.2a, DS-1b §3):
 #   ONE sitecontainer on the same App Service as Sprk.Provisioning.ControlPlane
@@ -98,11 +98,13 @@ ENV PSModulePath="/opt/spaarke/psmodules"
 # -----------------------------------------------------------------------------
 # ExchangeOnlineManagement module — PINNED (never `latest`).
 #
-# Pin rationale: the sidecar's H14a script relies on stable Connect-ExchangeOnline
-# parameter surface (specifically -Certificate accepting X509Certificate2).
-# Any pin bump is a coordinated PR, NOT a passive `Update-Module` at build time.
+# Pin rationale: the sidecar relies on a stable Connect-ExchangeOnline parameter
+# surface -- specifically -AccessToken (module 3.1.0+): since task 251 the sidecar
+# holds no credential and connects with the token the Worker sends per request
+# (owner D24). Any pin bump is a coordinated PR, NOT a passive `Update-Module` at
+# build time.
 #
-# Pin: 3.5.1 (2024-05 release, stable -Certificate mode support).
+# Pin: 3.5.1 (2024-05 release; -AccessToken supported).
 # -----------------------------------------------------------------------------
 ARG EXO_MODULE_VERSION=3.5.1
 
@@ -135,24 +137,21 @@ RUN pwsh -NoProfile -NonInteractive -Command \
              throw 'Connect-ExchangeOnline not found after Import-Module'; \
          } \
          \$p = (Get-Command Connect-ExchangeOnline).Parameters; \
-         if (-not \$p.ContainsKey('Certificate')) { \
-             throw '-Certificate parameter absent; the sidecar auth mode depends on it'; \
+         if (-not \$p.ContainsKey('AccessToken')) { \
+             throw '-AccessToken parameter absent; the sidecar sign-in depends on it'; \
          } \
-         Write-Host \"OK: pwsh \$(\$PSVersionTable.PSVersion), EXO module resolved, -Certificate present\""
+         Write-Host \"OK: pwsh \$(\$PSVersionTable.PSVersion), EXO module resolved, -AccessToken present\""
 
 # -----------------------------------------------------------------------------
 # Application layout
 # -----------------------------------------------------------------------------
 WORKDIR /app
 
-# The amended Set-ExchangeApplicationAccessPolicy.ps1 — copied from the sidecar
-# directory (NOT the repo-root scripts/ copy). The sidecar copy has the
-# ~10-line -Certificate amendment (Linux containers have no Windows cert store,
-# so the -CertificateThumbprint mode the original script uses cannot resolve;
-# see the script header for the diff-vs-original commentary).
-COPY Set-ExchangeApplicationAccessPolicy.ps1 /app/Set-ExchangeApplicationAccessPolicy.ps1
+# The sidecar's logic (task 251): settings, the Exchange connection and the
+# RBAC-for-Applications apply/read operations H14a and H13 T4 call.
+COPY SidecarCore.psm1 /app/SidecarCore.psm1
 
-# The ~60-line pwsh HTTP listener — the container's main process.
+# The pwsh HTTP listener — the container's main process.
 # Binds 127.0.0.1:8091 (localhost-only per DS-1b §3 auth leg #1). Sitecontainers
 # share the App Service network namespace, so localhost is reachable from the
 # main .NET app; the port is NOT publicly routed by App Service's front-end
@@ -166,10 +165,10 @@ COPY Listener.ps1 /app/Listener.ps1
 EXPOSE 8091
 
 # -----------------------------------------------------------------------------
-# Health / readiness note: the Listener itself has a GET /healthz endpoint
-# returning 200 once HttpListener has bound the port. Task 162 (live verify)
-# uses this; App Service sitecontainer health-probe config is task 108's
-# concern.
+# Health / readiness note: GET /healthz returns 200 once HttpListener has bound
+# the port -- "ok", or "degraded: <missing settings>". The listener binds even
+# when a setting is missing (task 251 / G30: a sidecar that refuses to start
+# holds the whole Worker site at 503).
 # -----------------------------------------------------------------------------
 
 # ENTRYPOINT runs Listener.ps1 as PID 1. Non-interactive; -NoProfile keeps

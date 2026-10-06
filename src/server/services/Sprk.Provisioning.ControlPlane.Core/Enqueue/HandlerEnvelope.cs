@@ -43,7 +43,7 @@
 //     {
 //       "handlerId":     "H4",
 //       "runId":         "01J7Q3ZP...",
-//       "customerId":    "acme-corp",
+//       "customerId":    "acme",
 //       "parametersJson": "{\"kvUri\":\"@Microsoft.KeyVault(SecretUri=...)\"}",
 //       "enqueuedAt":    "2026-08-17T14:00:00Z",
 //       "attempt":       1

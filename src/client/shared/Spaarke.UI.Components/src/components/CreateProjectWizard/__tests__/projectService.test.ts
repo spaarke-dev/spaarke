@@ -127,8 +127,21 @@ describe('ProjectService.createProject — FR-WIZ-02 BU cascade (G2 fix)', () =>
     expect(result.success).toBe(true);
 
     const payload = createSpy.mock.calls[0][1];
-    expect(payload['sprk_issecure']).toBe(true);
     expect(payload).not.toHaveProperty('sprk_containerid');
+  });
+
+  // Task 150: sprk_issecure is field-secured — only the BFF (provisioning) may write it. A create payload that still
+  // names it is refused for every user, and a client that could write it could mark a record secure without
+  // provisioning it. Secure is REQUESTED by calling provisioning, never by this payload.
+  it.each([true, false])('never writes sprk_issecure on the create payload (secure requested: %s)', async isSecure => {
+    const { service, createSpy } = makeDataService();
+    const projectService = new ProjectService(service);
+
+    const result = await projectService.createProject({ ...EMPTY_FORM, isSecure });
+    expect(result.success).toBe(true);
+
+    const payload = createSpy.mock.calls[0][1];
+    expect(Object.keys(payload).map(k => k.toLowerCase())).not.toContain('sprk_issecure');
   });
 
   it('leaves both fields unset when cascadeDefaults is omitted (legacy behavior — backwards-compat)', async () => {

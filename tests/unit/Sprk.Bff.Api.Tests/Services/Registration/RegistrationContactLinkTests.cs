@@ -54,7 +54,10 @@ public class RegistrationContactLinkTests
             Mock.Of<TokenCredential>(),
             Mock.Of<IHttpClientFactory>(f => f.CreateClient(It.IsAny<string>()) == new HttpClient()),
             logger,
-            factory);
+            factory,
+            // Task 132: the BU-bind eviction hook — inert here; its behaviour is pinned in AccessCacheFaultCachingTests.
+            new Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator(
+                NullLogger<Sprk.Bff.Api.Services.Ai.Membership.NullMembershipCacheInvalidator>.Instance));
 
     [Fact]
     public void TheLinkEnvironment_IsTheTargetEnvironment_WhenOneIsGiven()

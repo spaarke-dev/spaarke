@@ -23,6 +23,12 @@
 .PARAMETER SkipEndpointTests
     Skip workspace endpoint smoke tests after deployment.
 
+.PARAMETER AccessToken
+    Optional bearer token for the BFF API (e.g. az account get-access-token --resource api://<BFF-API-APP-ID>
+    --query accessToken -o tsv). WITH a token the smoke tests prove each workspace endpoint is REGISTERED
+    (anything but 404). WITHOUT one they prove only that authentication is enforced: since unified-access-control-r2
+    task 167 the BFF's authorization FallbackPolicy answers an anonymous request 401 whether or not the route exists.
+
 .PARAMETER Environment
     Target environment. Default: dev
 
@@ -42,7 +48,8 @@
 param(
     [switch]$SkipBuild,
     [switch]$SkipEndpointTests,
-    [string]$Environment = "dev"
+    [string]$Environment = "dev",
+    [string]$AccessToken
 )
 
 $ErrorActionPreference = "Stop"
@@ -212,9 +219,15 @@ if ($SkipEndpointTests) {
 }
 else {
     Write-Host ""
-    Write-Host "[5/5] Testing workspace endpoints (expect 401 without auth token)..." -ForegroundColor Yellow
-    Write-Host "  NOTE: These tests verify the endpoints are reachable." -ForegroundColor Gray
-    Write-Host "  A 401 Unauthorized response confirms the endpoint exists and auth is enforced (ADR-008)." -ForegroundColor Gray
+    $SignedIn = -not [string]::IsNullOrWhiteSpace($AccessToken)
+    if ($SignedIn) {
+        Write-Host "[5/5] Testing workspace endpoints WITH a bearer token (registered = anything but 404)..." -ForegroundColor Yellow
+    }
+    else {
+        Write-Host "[5/5] Testing workspace endpoints WITHOUT a token (expect 401: authentication enforced)..." -ForegroundColor Yellow
+        Write-Host "  NOTE: an anonymous 401 does NOT prove an endpoint is registered — the authorization FallbackPolicy" -ForegroundColor Gray
+        Write-Host "  answers 401 for an unmapped path too (UAC-r2 task 167). Pass -AccessToken to prove registration." -ForegroundColor Gray
+    }
     Write-Host ""
 
     $EndpointResults = @()
@@ -234,25 +247,48 @@ else {
                 $params.ContentType = "application/json"
             }
 
+            if ($SignedIn) {
+                $params.Headers = @{ Authorization = "Bearer $AccessToken" }
+            }
+
             $r = Invoke-RestMethod @params
             $EndpointResults += [PSCustomObject]@{
                 Name   = $ep.Name
                 Method = $ep.Method
-                Status = "200 OK (unexpected — check auth config)"
-                Pass   = $false
+                Status = $(if ($SignedIn) { "200 OK (registered)" } else { "200 OK (unexpected — check auth config)" })
+                Pass   = $SignedIn
             }
         }
         catch {
             $statusCode = $_.Exception.Response?.StatusCode
             $statusInt  = [int]$statusCode
 
-            if ($statusInt -eq 401) {
-                # Expected: endpoint exists and auth is enforced
-                Write-Host "  [PASS] $($ep.Method) $($ep.Name) → 401 Unauthorized (auth enforced)" -ForegroundColor Green
+            if ($statusInt -eq 401 -and -not $SignedIn) {
+                # Expected without a token: authentication is enforced (registration is NOT proven — FallbackPolicy)
+                Write-Host "  [PASS] $($ep.Method) $($ep.Name) → 401 Unauthorized (auth enforced; registration not provable anonymously)" -ForegroundColor Green
                 $EndpointResults += [PSCustomObject]@{
                     Name   = $ep.Name
                     Method = $ep.Method
                     Status = "401 Unauthorized"
+                    Pass   = $true
+                }
+            }
+            elseif ($statusInt -eq 401) {
+                Write-Host "  [FAIL] $($ep.Method) $($ep.Name) → 401 with a bearer token (token rejected — wrong audience or expired?)" -ForegroundColor Red
+                $EndpointResults += [PSCustomObject]@{
+                    Name   = $ep.Name
+                    Method = $ep.Method
+                    Status = "401 Unauthorized (token rejected)"
+                    Pass   = $false
+                }
+            }
+            elseif ($statusInt -eq 403 -and $SignedIn) {
+                # Signed in but not entitled: the route IS registered (a missing route answers 404 to a signed-in caller)
+                Write-Host "  [PASS] $($ep.Method) $($ep.Name) → 403 Forbidden (registered; caller not entitled)" -ForegroundColor Green
+                $EndpointResults += [PSCustomObject]@{
+                    Name   = $ep.Name
+                    Method = $ep.Method
+                    Status = "403 Forbidden"
                     Pass   = $true
                 }
             }
@@ -276,6 +312,7 @@ else {
                 }
             }
             elseif ($statusInt -eq 404) {
+                # Only a SIGNED-IN caller can see this: an anonymous one gets the FallbackPolicy's 401 for a missing route.
                 Write-Host "  [FAIL] $($ep.Method) $($ep.Name) → 404 Not Found" -ForegroundColor Red
                 Write-Host "         Endpoint may not be registered in Program.cs" -ForegroundColor Red
                 $EndpointResults += [PSCustomObject]@{

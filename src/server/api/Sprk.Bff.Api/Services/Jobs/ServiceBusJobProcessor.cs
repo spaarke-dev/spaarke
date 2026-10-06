@@ -152,6 +152,10 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
                 return;
             }
 
+            // The broker's delivery count reaches the handler, so a handler's "last chance" logic (the inbound email HOLD)
+            // sees the same dead-letter condition this processor applies below (task 146 r2).
+            job.DeliveryCount = args.Message.DeliveryCount;
+
             _logger.LogInformation(
                 "Processing job {JobId} of type {JobType}, attempt {Attempt}/{MaxAttempts}, delivery count {DeliveryCount}",
                 job.JobId, job.JobType, job.Attempt, job.MaxAttempts, args.Message.DeliveryCount);
@@ -214,7 +218,7 @@ public class ServiceBusJobProcessor : BackgroundService, IHealthCheck
                     "Job {JobId} completed successfully in {Duration}ms",
                     job.JobId, outcome.Duration.TotalMilliseconds);
             }
-            else if (outcome.Status == JobStatus.Poisoned || job.IsAtMaxAttempts || args.Message.DeliveryCount >= 5)
+            else if (outcome.Status == JobStatus.Poisoned || job.IsFinalDelivery)
             {
                 // Dead-letter: poisoned, max attempts, or delivery count exceeded
                 await args.DeadLetterMessageAsync(args.Message,

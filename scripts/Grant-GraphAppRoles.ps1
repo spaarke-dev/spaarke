@@ -49,6 +49,12 @@
 .PARAMETER UamiPrincipalId
     Object ID (NOT appId) of the UAMI service principal on which to grant the
     14 Graph app roles. MANDATORY. Obtain via:
+      # PREFERRED — deterministic ARM resource ID lookup (no name ambiguity):
+      az identity show --ids /subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<mi-name> --query principalId -o tsv
+
+      # ⚠️ NAME-BASED LOOKUP (fragile — SF-1 decoy trap per remediation plan §5):
+      # the dev subscription has 5 UAMIs; 'spaarke-bff-identity' is NOT the BFF's UAMI.
+      # If you use this shape, confirm --resource-group matches the intended UAMI's RG.
       az identity show --name <mi-name> --resource-group <rg> --query principalId -o tsv
 
 .PARAMETER GraphAppRolesPath

@@ -1,13 +1,15 @@
 # AI Monitoring Dashboard Guide
 
-> **Last Updated**: 2026-04-05
+> **Last Updated**: 2026-10-04 (export row and alert removed with the deleted export route, task 162)
 > **Applies To**: SDAP AI Document Intelligence features
 
 ---
 
 ## Overview
 
-The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature health, performance, and reliability. It is deployed as an Azure Dashboard and integrates with Application Insights metrics collected from the Sprk.Bff.Api.
+The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature health, performance, and reliability. It is defined as an Azure Dashboard (`infrastructure/bicep/modules/dashboard.bicep`, with alert rules in `modules/alerts.bicep`) and integrates with Application Insights metrics collected from the Sprk.Bff.Api.
+
+> ⚠️ **Not deployed for customer stamps today** (task 249, 2026-10-02). The dashboard and its alert rules were composed only by `stacks/model2-full.bicep`, which deployed no live environment and is deleted. `customer.bicep` — the only customer-stamp template (owner decision D19) — does not include them; D19 deferred them. The modules remain in-tree, uncomposed. See [Deployment](#deployment).
 
 ## Dashboard Panels
 
@@ -36,15 +38,7 @@ The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature h
 | Tool Latency | `ai.tool.duration` (avg) | Tool performance |
 | Tool Token Usage | `ai.tool.tokens` | Per-tool cost tracking |
 
-### Row 4: Export Operations
-
-| Panel | Metrics | Purpose |
-|-------|---------|---------|
-| Export Requests | `ai.export.requests` | Export volume by format |
-| Export Latency | `ai.export.duration` (avg) | Export performance |
-| Export File Size | `ai.export.file_size` (avg) | Output size monitoring |
-
-### Row 5: Resilience & Cache
+### Row 4: Resilience & Cache
 
 | Panel | Metrics | Purpose |
 |-------|---------|---------|
@@ -56,7 +50,7 @@ The SDAP AI Monitoring Dashboard provides real-time visibility into AI feature h
 
 ## Alert Rules
 
-The following alerts are configured for critical thresholds:
+The following alerts are defined (in `modules/alerts.bicep`; not deployed for customer stamps today — see [Deployment](#deployment)) for critical thresholds:
 
 | Alert | Condition | Severity | Description |
 |-------|-----------|----------|-------------|
@@ -66,7 +60,10 @@ The following alerts are configured for critical thresholds:
 | Tool Failures | Dynamic threshold | Warning | Tool execution failures |
 | Cache Miss Spike | Dynamic threshold | Warning | Cache effectiveness drop |
 | High Token Usage | Dynamic threshold | Warning | Cost impact alert |
-| Export Failures | Dynamic threshold | Warning | Export operation failures |
+
+> The analysis-export row, the `ai.export.*` metrics and the "Export Failures" alert were removed (2026-10-04) with the
+> analysis export route they measured (`POST /api/ai/analysis/{id}/export`, deleted by unified-access-control-r2
+> task 162: no caller, not published). `infrastructure/bicep/modules/dashboard.bicep` and `alerts.bicep` match.
 
 ---
 
@@ -104,7 +101,6 @@ Metrics include the following dimensions for filtering:
 | `ai.extraction` | `native`, `document_intelligence`, `vision` | Text extraction method |
 | `ai.file_type` | `.pdf`, `.docx`, `.txt`, etc. | File type analysis |
 | `ai.tool_id` | `EntityExtractor`, `ClauseAnalyzer`, `DocumentClassifier` | Tool-specific metrics |
-| `ai.format` | `docx`, `pdf`, `email` | Export format |
 | `ai.error_code` | Various error codes | Error analysis |
 | `ai.cache_hit` | `true`, `false` | Cache effectiveness |
 | `service` | `AzureOpenAI`, `AzureAISearch`, `MicrosoftGraph` | Circuit breaker service |
@@ -131,15 +127,6 @@ customMetrics
 | extend tool = tostring(customDimensions["ai.tool_id"])
 | summarize count() by tool, status
 | render piechart
-```
-
-**Export Volume by Format:**
-```kusto
-customMetrics
-| where name == "ai.export.requests"
-| extend format = tostring(customDimensions["ai.format"])
-| summarize count() by format, bin(timestamp, 1h)
-| render columnchart
 ```
 
 **Circuit Breaker Events:**
@@ -200,24 +187,15 @@ Real-time circuit breaker status is also available via API:
 
 ### Bicep Deployment
 
-The dashboard is deployed via the `model2-full.bicep` stack:
+**There is currently no deployment path for customer stamps.** Customer stamps are deployed only by the L2
+control plane's handler H2a from `infrastructure/bicep/customer.bicep`, which does not compose
+`modules/dashboard.bicep` or `modules/alerts.bicep` — owner decision D19 (2026-10-02) deferred them.
 
-```bash
-az deployment sub create \
-  --location eastus \
-  --template-file infrastructure/bicep/stacks/model2-full.bicep \
-  --parameters customerId=contoso \
-               environment=prod \
-               enableMonitoringDashboard=true \
-               alertNotificationEmail=ops@contoso.com
-```
-
-### Parameters
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `enableMonitoringDashboard` | `true` | Deploy AI monitoring dashboard |
-| `alertNotificationEmail` | `''` | Email for alert notifications |
+*(Retired by task 249, 2026-10-02: the `az deployment sub create --template-file
+infrastructure/bicep/stacks/model2-full.bicep … enableMonitoringDashboard=true alertNotificationEmail=…`
+command and its `enableMonitoringDashboard` / `alertNotificationEmail` parameters belonged to the deleted
+`model2-full.bicep` stack.)* Adding the dashboard to customer stamps means composing both modules into
+`customer.bicep` — a new owner decision, not an operator step.
 
 ---
 

@@ -48,6 +48,9 @@ public class OfficeRecordOwnershipTests
     private static readonly byte[] Docx = MinimalDocx.Create("owned draft");
     private static readonly EntityReference OwnerTeam = new("team", RecordOwnershipResolverDouble.DefaultTeamId);
 
+    /// <summary>Task 146 c1-r1: the signed-in Office user's object id, for the tests that see them recorded as creator.</summary>
+    private static readonly Guid SavingUserOid = Guid.Parse("c1c1c1c1-0000-4000-8000-00000000000d");
+
     // =====================================================================================
     // sprk_document — POST /api/office/save
     // =====================================================================================
@@ -58,8 +61,10 @@ public class OfficeRecordOwnershipTests
         var world = new OfficeVersionSaveWorld();
         using var factory = new OfficeVersionSaveTestWebAppFactory(world);
         var matterId = Guid.NewGuid();
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Oid", SavingUserOid.ToString()); // a real (GUID) object id, as in production
 
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/save", new SaveRequest
+        var response = await client.PostAsJsonAsync("/api/office/save", new SaveRequest
         {
             ContentType = SaveContentType.Document,
             TargetEntity = new SaveEntityReference { EntityType = "matter", EntityId = matterId },
@@ -78,6 +83,13 @@ public class OfficeRecordOwnershipTests
         var payload = world.FinalizationPayloads.Should().ContainSingle().Subject;
         Guid.Parse(OfficeVersionSaveWorld.PayloadValue(payload, "OwningTeamId")!)
             .Should().Be(RecordOwnershipResolverDouble.DefaultTeamId);
+
+        // c1-r1 (owner round 13 item 9): the saving user (asked by object id) is recorded on the app-created document —
+        // and carried to the worker with the team, so the children it creates record them too.
+        asked.RequestedBy!.ObjectId.Should().Be(SavingUserOid);
+        world.CreatedDocumentPersons.Should().Equal(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
+        Guid.Parse(OfficeVersionSaveWorld.PayloadValue(payload, "CreatedByPersonId")!)
+            .Should().Be(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
     }
 
     [Fact]
@@ -146,8 +158,10 @@ public class OfficeRecordOwnershipTests
     {
         using var factory = new TodoRegardingTestWebAppFactory();
         var matterId = Guid.NewGuid();
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Oid", SavingUserOid.ToString()); // a real (GUID) object id, as in production
 
-        var response = await factory.CreateClient().PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
         {
             Name = "Review red-lines",
             RegardingEntityType = "Matter",
@@ -158,12 +172,17 @@ public class OfficeRecordOwnershipTests
         });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        factory.CreatedEntities.Should().ContainSingle()
-            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+        var todo = factory.CreatedEntities.Should().ContainSingle().Subject;
+        todo.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
 
         var asked = factory.Ownership.Requests.Should().ContainSingle().Subject;
         asked.TargetEntityLogicalName.Should().Be("sprk_matter");
         asked.TargetRecordId.Should().Be(matterId);
+
+        // c1-r1 (owner round 13 item 9): the Office user who asked is recorded on the app-created To Do.
+        asked.RequestedBy!.ObjectId.Should().Be(SavingUserOid);
+        todo.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id
+            .Should().Be(RecordOwnershipResolverDouble.DefaultRequesterPersonId);
     }
 
     [Fact]
@@ -330,10 +349,12 @@ public class OfficeRecordOwnershipTests
             "/api/office/quickcreate/invoice", new QuickCreateRequest { Name = "INV-0080" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        created.Should().ContainSingle()
-            .Which.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
+        var invoice = created.Should().ContainSingle().Subject;
+        invoice.GetAttributeValue<EntityReference>("ownerid").Should().BeEquivalentTo(OwnerTeam);
         factory.Ownership.Requests.Should().ContainSingle()
             .Which.CallerSystemUserId.Should().Be(callerSystemUserId);
+        // c1-r1 (owner round 13 item 9): the Office user is recorded on the app-created invoice.
+        invoice.GetAttributeValue<EntityReference>("sprk_createdbyperson").Id.Should().Be(callerSystemUserId);
     }
 
     [Fact]

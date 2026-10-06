@@ -36,3 +36,5 @@ export { AiToolbar } from './AiToolbar';
 export type { AiToolbarProps } from './AiToolbar';
 
 export { InviteUserDialog } from './InviteUserDialog';
+
+export { IssuedGrantsList } from './IssuedGrantsList';

@@ -4,7 +4,7 @@
     <title>IRegistrySetupStatusUpdater real DV-REST PATCH (Ready writer) -- the acceptance-target transition itself</title>
     <phase>C'' Wave G-7 -- Acceptance</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>THE acceptance-target transition itself per DS-4 -- currently a logged no-op, meaning sprk_setupstatus=Ready is NEVER actually written today regardless of every other handler's correctness. Highest-symbolic-priority task in Wave G-7.</rigor-reason>
     <model-tier>sonnet</model-tier>

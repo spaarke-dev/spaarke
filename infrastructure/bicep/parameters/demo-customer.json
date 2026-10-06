@@ -11,9 +11,6 @@
     "location": {
       "value": "westus2"
     },
-    "platformKeyVaultName": {
-      "value": "sprk-platform-prod-kv"
-    },
     "storageSku": {
       "value": "Standard_LRS"
     },

@@ -82,11 +82,46 @@ public sealed class HandlerOutcomeApplier : IHandlerOutcomeApplier
 
         // Success path -- handlers own the CompletedPhases append + Cosmos
         // write. The applier does NOT double-write on Success (parity with
-        // the reconciler's "does NOT write to Cosmos" invariant; the write
-        // below fires ONLY on the Failure path where Status transitions per
-        // §4C).
+        // the reconciler's "does NOT write to Cosmos" invariant; the failure
+        // write below fires ONLY on the Failure path where Status transitions
+        // per §4C).
+        //
+        // Bucket B HIGH#6 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): on Success where
+        // run.Status == RunStatus.Completed (i.e. H13 has terminated the run),
+        // fire the I5 concurrency guard release explicitly. Prior to this
+        // guard the ONLY release path on the happy terminal completion was
+        // H13's own registry-Ready PATCH which piggy-backed
+        // `sprk_currentrunid: null` alongside `sprk_setupstatus: 2` — a
+        // fragile coupling: any future refactor that moves the Ready-writer
+        // out of H13 or skips the ClearCurrentRunId=true PATCH parameter
+        // silently locks the customer forever on every successful terminal
+        // completion. This applier is the correct policy owner for the
+        // release (it already owns the Failure-branch releases at line 185
+        // via ShouldReleaseCustomerGuard). Gate on RunStatus.Completed so
+        // mid-DAG per-handler successes (H0..H12 completing an intermediate
+        // step while run.Status stays Running or WaitingOnGate) do NOT
+        // release the guard prematurely. Best-effort: TransientFailure is
+        // log-only for parity with the Failure-branch policy at line 190-197.
         if (outcome is HandlerResult.Success)
         {
+            if (run.Status is RunStatus.Completed)
+            {
+                var terminalRelease = await _runGuard
+                    .ReleaseAsync(run.CustomerId, run.RunId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (terminalRelease is ReleaseResult.TransientFailure terminalReleaseFailure)
+                {
+                    _logger.LogWarning(
+                        "ReconcilerOutcomeTerminalGuardReleaseFailed (Bucket B HIGH#6): " +
+                        "HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
+                        "Diagnostic={Diagnostic} — terminal-Completed guard release is best-effort; " +
+                        "H13 registry Ready PATCH (route via ICustomerRunGuard.ReleaseAsync per Bucket B HIGH#7) " +
+                        "remains the backstop.",
+                        handlerId, run.RunId, run.CustomerId, terminalReleaseFailure.Diagnostic);
+                }
+            }
+
             return new HandlerOutcomeApplied(
                 TargetStatus: run.Status,
                 Reenqueued: false,
@@ -154,16 +189,57 @@ public sealed class HandlerOutcomeApplier : IHandlerOutcomeApplier
             handlerId, run.RunId, run.CustomerId,
             failureClass, targetStatus, failure.RejectionCode);
 
-        if (replace is ReplaceRunResult.Conflict)
+        if (replace is ReplaceRunResult.Conflict conflict)
         {
             // Concurrent writer landed the same/similar transition -- the
             // reconciler is idempotent by design; a next tick picks up the
             // freshly-written state. Do NOT re-enqueue on Conflict -- the
-            // sibling writer may already have. Do NOT release the guard here
-            // either -- OUR write did not land, so the concurrent winner (or
-            // its own ApplyHandlerOutcomeAsync call) owns the release
-            // decision for its own committed transition. Releasing here too
-            // would be a double-release attempt.
+            // sibling writer may already have.
+            //
+            // Bucket B MED#11 SESSION 18 (customer-provisioning-orchestration-r1
+            // adversarial e2e verify workflow wepdcb8we): PRIOR behavior also
+            // skipped ReleaseAsync on Conflict, relying on "the concurrent
+            // winner owns the release decision." That's true for the common
+            // case (both writers were racing to write the same terminal state),
+            // but leaves a rare hole: if the winning writer is a partial replay
+            // that wrote MarkFailedAsync-first and NEVER reaches its own
+            // applier release call (host crash mid-flow, ServiceBus lock loss),
+            // no code path releases the guard.
+            //
+            // Fix: when Conflict.Current.Run.Status matches what THIS invocation
+            // would have written (per RollbackTransitions.MapToRunStatus) AND
+            // ShouldReleaseCustomerGuard(failureClass) is true, still fire
+            // ReleaseAsync. It's stale-value-safe by contract (Mismatched =
+            // no-op; the winning writer's own release will find the guard
+            // already released and get Released or Mismatched depending on
+            // ordering). Belt-and-suspenders costs at most one extra Dataverse
+            // PATCH per Conflict — the alternative is silently-held guards on
+            // rare race windows.
+            var winningStatus = conflict.Current.Run.Status;
+            if (winningStatus == targetStatus && RollbackTransitions.ShouldReleaseCustomerGuard(failureClass))
+            {
+                var conflictRelease = await _runGuard
+                    .ReleaseAsync(run.CustomerId, run.RunId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (conflictRelease is ReleaseResult.TransientFailure conflictReleaseFailure)
+                {
+                    _logger.LogWarning(
+                        "ReconcilerOutcomeConflictGuardReleaseFailed (Bucket B MED#11): " +
+                        "HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
+                        "WinningStatus={WinningStatus} Diagnostic={Diagnostic} — Conflict-path release " +
+                        "is stale-value-safe belt-and-suspenders; the concurrent winner's applier will " +
+                        "make its own release attempt.",
+                        handlerId, run.RunId, run.CustomerId, winningStatus, conflictReleaseFailure.Diagnostic);
+                }
+                else
+                {
+                    _logger.LogInformation(
+                        "ReconcilerOutcomeConflictGuardRelease (Bucket B MED#11): stale-value-safe release " +
+                        "fired on Conflict where winningStatus={WinningStatus} matches targetStatus. " +
+                        "Result={Result} HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId}",
+                        winningStatus, conflictRelease.GetType().Name, handlerId, run.RunId, run.CustomerId);
+                }
+            }
             return new HandlerOutcomeApplied(targetStatus, Reenqueued: false, FailureClass: failureClass);
         }
 

@@ -21,32 +21,9 @@ public interface IAnalysisOrchestrationService
     // ChatEndpoints Redis→Cosmos model per task 020) were DELETED here. AnalysisResumeRequest /
     // AnalysisResumeResult / AnalysisContinueRequest removed with them (no other consumers).
 
-    /// <summary>
-    /// Save working document to SPE and create Document record.
-    /// </summary>
-    /// <param name="analysisId">The analysis record ID.</param>
-    /// <param name="request">Save request with filename and format.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Saved document result with IDs and URLs.</returns>
-    /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
-    /// <exception cref="InvalidOperationException">When analysis has no working document.</exception>
-    Task<SavedDocumentResult> SaveWorkingDocumentAsync(
-        Guid analysisId,
-        AnalysisSaveRequest request,
-        CancellationToken cancellationToken);
-
-    /// <summary>
-    /// Export analysis output to various destinations.
-    /// </summary>
-    /// <param name="analysisId">The analysis record ID.</param>
-    /// <param name="request">Export request with format and options.</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>Export result with status and details.</returns>
-    /// <exception cref="KeyNotFoundException">When analysis not found.</exception>
-    Task<ExportResult> ExportAnalysisAsync(
-        Guid analysisId,
-        AnalysisExportRequest request,
-        CancellationToken cancellationToken);
+    // unified-access-control-r2 task 162 (owner round 10 item 1, 2026-10-03) — SaveWorkingDocumentAsync and
+    // ExportAnalysisAsync were DELETED with their only callers, POST /api/ai/analysis/{analysisId}/save and
+    // /export (no caller in the repo, not in any published API description).
 
     /// <summary>
     /// Get analysis record with full details including chat history.

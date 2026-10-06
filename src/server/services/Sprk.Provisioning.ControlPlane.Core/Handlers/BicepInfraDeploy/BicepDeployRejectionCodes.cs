@@ -15,8 +15,8 @@
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-34 (upgrade
 //     mode): defaults to REJECT + escalate on drift with report at
 //     runNotes/drift-{customerId}-{timestamp}.md.
-//   - projects/customer-provisioning-orchestration-r1/spec.md § MUST rules:
-//     Redis MUST NOT be provisioned per-customer (Q-E FR-12).
+//   - (Retired: the Q-E FR-12 "no per-customer Redis" rule — D-12 made Redis
+//     per-customer; see ArmTemplateInspector's RETIRED RULE note.)
 //   - projects/customer-provisioning-orchestration-r1/design.md §4B T1 —
 //     ARM-verify keyVaultReferenceIdentity on both prod + staging slots.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback
@@ -44,18 +44,26 @@ public static class BicepDeployRejectionCodes
     /// <summary>Run parameter <c>subscriptionId</c> missing — H2a MUST know the target subscription (ADR-027 D4).</summary>
     public const string MissingSubscriptionId = "missing-subscription-id";
 
-    /// <summary>Run parameter <c>bicepVer</c> missing — idempotency key requires the bicep-repo git SHA.</summary>
-    public const string MissingBicepVersion = "missing-bicep-version";
+    /// <summary>
+    /// Task 245b: the ARM template could not be resolved (manifest or template blob unreadable, the
+    /// manifest names no template for the tenancy model, or the downloaded bytes do not match the
+    /// manifest's <c>sha256</c>). Its content version is the idempotency key's <c>bicepVer</c>, so H2a
+    /// cannot proceed without it. Nothing has been deployed — Resumable.
+    /// </summary>
+    public const string ArmTemplateUnavailable = "arm-template-unavailable";
+
+    /// <summary>
+    /// EXEC-04 (pre-dispatch audit 2026-08-27): the run's
+    /// <see cref="Models.ProvisioningRun.TenancyModel"/> is blank / whitespace.
+    /// H2a MUST fail fast (spec.md §4D I1 no-silent-default): a blank value
+    /// silently deploying a per-customer Model 2 stack for a Model 1 shared
+    /// trial would be a ~$400/mo/customer cost blow-up + tenancy invariant
+    /// violation only detectable at H13. Wave 2 remediation.
+    /// </summary>
+    public const string MissingTenancyModel = "missing-tenancy-model";
 
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "run-not-found";
-
-    /// <summary>
-    /// The active Bicep template contains a Redis resource (violates spec MUST
-    /// rule + Q-E FR-12 v3.2 — Redis is per-environment via
-    /// <c>scripts/Deploy-RedisCache.ps1</c>, NOT per-customer).
-    /// </summary>
-    public const string RedisProvisioningForbidden = "redis-provisioning-forbidden";
 
     /// <summary>
     /// The active Bicep template contains an Azure OpenAI model deployment
@@ -89,6 +97,39 @@ public static class BicepDeployRejectionCodes
     /// endpoint URIs). Configuration/template drift — operator must resolve.
     /// </summary>
     public const string BicepDeployOutputsIncomplete = "bicep-deploy-outputs-incomplete";
+
+    /// <summary>
+    /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10 verbatim.
+    /// One of H2a's globally-namespaced resource names (Storage account /
+    /// Service Bus namespace / Key Vault when covered) is already taken by
+    /// another tenant / subscription. Deploy would fail 90-180s into
+    /// H2a's Bicep run; H2a fails fast (Resumable) with the specific
+    /// (kind, name, reason) so the operator can rename before re-running.
+    /// </summary>
+    public const string ResourceNameTaken = "resource-name-taken";
+
+    /// <summary>
+    /// HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11 verbatim.
+    /// The Cognitive Services scope of the Bicep deploy returned HTTP 409
+    /// RequestConflict after the ArmDeploymentRunner exhausted its retry
+    /// budget (default: 3 retries with [30s, 90s, 180s] backoffs). SESSION 2
+    /// observed this every time a recent CogSvc operation had held the
+    /// soft-lock; the retries usually clear it but persistent conflict means
+    /// operator escalation.
+    /// </summary>
+    public const string CogSvcSoftLockPersistent = "cogsvc-soft-lock-persistent";
+
+    /// <summary>
+    /// HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+    /// The active Bicep template contains a literal
+    /// <c>keyVaultReferenceIdentity: 'SystemAssigned'</c> assignment.
+    /// Spaarke's convention (ADR-028 + spec.md FR-33 T1) is UAMI-scoped
+    /// kvRefIdentity; SystemAssigned combined with UAMI-only identity
+    /// attached silently breaks every <c>@Microsoft.KeyVault(...)</c>
+    /// runtime resolution. Fail QuarantineRequired — deploying would leave
+    /// the App Service in a broken-but-Green state.
+    /// </summary>
+    public const string KvRefIdentityInvalid = "kv-ref-identity-invalid";
 
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "concurrent-write-conflict";

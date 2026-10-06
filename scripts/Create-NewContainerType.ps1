@@ -1,6 +1,76 @@
+# ============================================================================
+# ⚠️  DEPRECATED 2026-08-30 (customer-provisioning-orchestration-r1 task 213.3)
+# ============================================================================
+#
+# This script is DOCUMENTED BROKEN per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §7:
+#
+#   "The script acquires an APP-ONLY token (`grant_type = client_credentials`,
+#   `scope = https://graph.microsoft.com/.default`, line 46) and calls
+#   `POST https://graph.microsoft.com/beta/storage/fileStorage/containerTypes`
+#   (line 76). That combination is refused by design (§R5). Probed twice on
+#   2026-08-28: `403 accessDenied — Caller does not have required permissions
+#   for this API`, with the permission granted and admin-consented."
+#
+# ROOT CAUSE (per topology doc §R5): Container-type CREATE is delegated-only.
+# Application permission is "Not supported". App-only tokens receive 403 no
+# matter what roles/consent they carry. The old SPAARKE-CUSTOMER-DEPLOYMENT-
+# GUIDE.md §13.3 fix ("confidential-client (app-only) token") conflated
+# "confidential client" with "app-only" — they are NOT the same.
+#
+# CORRECT PATH (per topology doc §4 + §R5): Container-type creation MUST use a
+# delegated token flow. Options:
+#   1. SPE Admin app (SPAARKE-SPE-Admin-CLI = 68cf5a14-1efb-4254-80bf-2761ffc89373)
+#      — performs the delegated exchange under a user identity.
+#   2. SharePoint Embedded VS Code extension.
+#   3. SharePoint admin center (Containers → Advanced).
+#
+# For the CANONICAL one-time-per-topology operator runbook, see:
+#   docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
+#
+# THIS SCRIPT IS RETAINED (not deleted) because:
+#   (a) `spaarke-auth-v4` task 033 marker comment about BFF-API-ClientSecret is
+#       preserved for auth-v4 historical audit trail;
+#   (b) L2 handler H8's retired `CreateNewContainerTypeScriptProvisioner.cs`
+#       shell-out shape (task 051 baseline before task 131 Graph SDK port) is
+#       preserved-on-disk-unregistered per this project's established
+#       retirement pattern;
+#   (c) any downstream doc/runbook still pointing at this script name will get
+#       the DEPRECATED banner instead of an unhelpful runtime 403.
+#
+# DO NOT INVOKE THIS SCRIPT. If invoked, it will throw immediately (see below).
+# ============================================================================
+
+throw @"
+
+DEPRECATED (2026-08-30 task 213.3): This script cannot succeed. Container-type
+CREATE via Microsoft Graph is delegated-only per SPE topology doc §R5. The
+app-only client_credentials flow implemented below returns HTTP 403 accessDenied
+regardless of roles/consent (verified 2026-08-21 + 2026-08-28).
+
+Use the canonical operator runbook instead:
+    docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md
+
+Or invoke container-type creation directly via:
+    - SPE Admin app (SPAARKE-SPE-Admin-CLI)
+    - SharePoint Embedded VS Code extension
+    - SharePoint admin center
+
+The BROKEN script body below is preserved for audit-trail continuity only.
+"@
+
+# ============================================================================
+# BROKEN SCRIPT BELOW — DO NOT EDIT — DO NOT INVOKE
+# Body preserved verbatim only for provenance. Every code path below returns
+# HTTP 403 accessDenied at runtime per topology doc §7 empirical verification.
+# ============================================================================
+
 # Create New Container Type for SPE Document Storage
 # Owner: BFF API app (performs all server-side Graph operations)
 # Creates container type, registers owning app, and optionally creates a test container
+#
+# BUSINESS-UNIT STAMP (unified-access-control-r2 task 165, owner round 35 item 1): a test container is a container
+# like any other — it is stamped with -TestContainerBusinessUnitId (required with -CreateTestContainer), read back, and
+# REMOVED if the stamp did not land. The BFF's SPE admin plane reaches no unbound container.
 
 param(
     [string]$OwningAppId = $env:API_APP_ID,
@@ -18,13 +88,20 @@ param(
     [string]$SharePointDomain = $env:SHAREPOINT_DOMAIN,  # e.g., "spaarke.sharepoint.com"
     [string]$DisplayName = "Spaarke Document Storage",
     [string]$Description = "Container type for document storage - owned by BFF API app",
-    [switch]$CreateTestContainer = $false
+    [switch]$CreateTestContainer = $false,
+    # The business unit that owns the test container (task 165, round 35 item 1). Required with -CreateTestContainer.
+    [string]$TestContainerBusinessUnitId
 )
+
+. (Join-Path $PSScriptRoot 'common/SpeContainerBinding.ps1')
 
 if (-not $OwningAppId) { throw "OwningAppId required. Pass -OwningAppId or set API_APP_ID env var." }
 if (-not $OwningAppSecret) { throw "OwningAppSecret required. Pass -OwningAppSecret or set API_CLIENT_SECRET env var." }
 if (-not $TenantId) { throw "TenantId required. Pass -TenantId or set TENANT_ID env var." }
 if (-not $SharePointDomain) { throw "SharePointDomain required. Pass -SharePointDomain or set SHAREPOINT_DOMAIN env var." }
+if ($CreateTestContainer -and -not (ConvertTo-SpeBindingGuid $TestContainerBusinessUnitId)) {
+    throw "-CreateTestContainer requires -TestContainerBusinessUnitId <business-unit GUID>: every container is stamped with its owning business unit (task 165, round 35 item 1); nothing has been created."
+}
 
 Write-Host "═══════════════════════════════════════════════" -ForegroundColor Cyan
 Write-Host "CREATE NEW CONTAINER TYPE" -ForegroundColor Cyan
@@ -174,6 +251,10 @@ try {
             -Headers $headers `
             -Body $testContainerBody `
             -ErrorAction Stop
+
+        # Bind it (task 165, round 35 item 1): stamp, read back, or remove — throws (caught below) on failure.
+        Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $testContainer.id `
+            -BusinessUnitId $TestContainerBusinessUnitId -GraphBase 'https://graph.microsoft.com/beta'
 
         Write-Host "TEST CONTAINER CREATED!" -ForegroundColor Green
         Write-Host ""

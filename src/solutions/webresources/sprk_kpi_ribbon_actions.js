@@ -60,6 +60,52 @@ Spaarke.KpiRibbon._openQuickCreateForEntity = function (primaryControl, parentEn
         var recordId = formContext.data.entity.getId().replace(/[{}]/g, "");
         var recordName = formContext.data.entity.getPrimaryAttributeValue();
 
+        // unified-access-control-r2 task 147 r1c (owner round 28 item 2, "E2"): the Quick Create saves AS THE USER, so the
+        // KPI assessment would be owned by the user, in the user's business unit - under a SECURE record, readable by that
+        // whole unit. It opens only when the record is read (through Xrm.WebApi) as NOT secure. Secure, or unreadable:
+        // the BFF-backed "New KPI Assessment" (Spaarke.SecureChild.Ribbon) creates it instead (the ribbon's enable rule
+        // already hides this button then; this is the script's own fail-closed check).
+        return Spaarke.KpiRibbon._isNotSecure(parentEntityName, recordId).then(function (notSecure) {
+            if (!notSecure) {
+                var subgrid = formContext.getControl ? formContext.getControl(subgridName) : null;
+                if (Spaarke.SecureChild && Spaarke.SecureChild.Ribbon && Spaarke.SecureChild.Ribbon.newChild) {
+                    Spaarke.SecureChild.Ribbon.newChild(formContext, subgrid, "sprk_kpiassessment");
+                } else {
+                    Xrm.Navigation.openAlertDialog({
+                        title: "Add KPI",
+                        text: "This record is secure (or its security could not be checked). Use \"New KPI Assessment\" on " +
+                            "the KPI Assessments list instead. Nothing was created."
+                    });
+                }
+                return;
+            }
+            Spaarke.KpiRibbon._openQuickCreateForm(formContext, parentEntityName, subgridName, recordId, recordName);
+        });
+    } catch (error) {
+        console.error("[KPI Ribbon] Error in openQuickCreate:", error);
+    }
+};
+
+/**
+ * Task 147 r1c: resolves true only when the record's sprk_issecure was read and is false; a read failure, an empty flag
+ * or true resolve false (fail closed). Never rejects.
+ */
+Spaarke.KpiRibbon._isNotSecure = function (entityName, recordId) {
+    try {
+        return Xrm.WebApi.retrieveRecord(entityName, recordId, "?$select=sprk_issecure").then(function (row) {
+            return !!row && row.sprk_issecure === false;
+        }, function () {
+            return false;
+        });
+    } catch (error) {
+        return Promise.resolve(false);
+    }
+};
+
+/** The original Quick Create launch (a record read as NOT secure only - see _openQuickCreateForEntity). */
+Spaarke.KpiRibbon._openQuickCreateForm = function (formContext, parentEntityName, subgridName, recordId, recordName) {
+    try {
+
         // Build the entity form options for Quick Create
         var entityFormOptions = {
             entityName: "sprk_kpiassessment",

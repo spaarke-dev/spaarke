@@ -371,7 +371,10 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
       http20Enabled: true
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
-      healthCheckPath: '/health'
+      // The BFF's liveness probe is GET /healthz (anonymous, "health-probe" rate limit — UAC-r2 task 167 f1).
+      // '/health' was never mapped: it answered 404 (and, with the authorization FallbackPolicy, 401), so the
+      // App Service health check could never pass on a BYOK deployment.
+      healthCheckPath: '/healthz'
       appSettings: [
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'

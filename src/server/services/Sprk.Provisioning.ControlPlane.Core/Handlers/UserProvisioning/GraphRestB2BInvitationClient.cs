@@ -80,10 +80,16 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
         var payload = new Dictionary<string, object?>
         {
             ["invitedUserEmailAddress"] = entry.Email,
-            ["invitedUserDisplayName"] = $"{entry.FirstName} {entry.LastName}",
             ["inviteRedirectUrl"] = _options.InvitationRedirectUrl,
             ["sendInvitationMessage"] = true,
         };
+        // The display name is optional for a guest (task 245c: names are not required for B2BGuest) — send it only
+        // when there is one, rather than a blank " ".
+        var displayName = $"{entry.FirstName} {entry.LastName}".Trim();
+        if (displayName.Length > 0)
+        {
+            payload["invitedUserDisplayName"] = displayName;
+        }
 
         try
         {
@@ -97,7 +103,7 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
             if (!response.IsSuccessStatusCode)
             {
                 return new B2BInvitationOutcome.Failure(
-                    $"POST /invitations failed for '{entry.Email}': {(int)response.StatusCode} {response.StatusCode}. " +
+                    $"POST /invitations failed: {(int)response.StatusCode} {response.StatusCode}. " +
                     $"Body: {Truncate(body, 300)}");
             }
 
@@ -111,17 +117,17 @@ public sealed class GraphRestB2BInvitationClient : IB2BInvitationClient
             if (string.IsNullOrWhiteSpace(invitedUserId) || string.IsNullOrWhiteSpace(invitationId))
             {
                 return new B2BInvitationOutcome.Failure(
-                    $"Graph invitation response for '{entry.Email}' was missing 'id' or 'invitedUser.id'.");
+                    "Graph invitation response was missing 'id' or 'invitedUser.id'.");
             }
 
             _logger.LogInformation(
-                "H11 B2B invitation sent for {Email} — invitedUserId={InvitedUserId}", entry.Email, invitedUserId);
+                "H11 B2B invitation sent — invitedUserId={InvitedUserId}", invitedUserId);   // D15: no email in logs
             return new B2BInvitationOutcome.Success(invitedUserId, invitationId);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             return new B2BInvitationOutcome.Failure(
-                $"POST /invitations infrastructure error for '{entry.Email}': {ex.GetType().Name}: {ex.Message}");
+                $"POST /invitations infrastructure error: {ex.GetType().Name}: {ex.Message}");
         }
     }
 

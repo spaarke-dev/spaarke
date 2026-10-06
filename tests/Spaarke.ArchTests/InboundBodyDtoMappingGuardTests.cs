@@ -56,6 +56,39 @@ public sealed class InboundBodyDtoMappingGuardTests
             "LEGACY detection-only. A payload still carrying the retired paragraph-diff shape is REJECTED " +
             "with a ProblemDetails (client too old) rather than forwarded. Reading it into the request " +
             "would defeat the rejection. Also covered by ComposeSaveBodyMappingGuardTests.",
+
+        // unified-access-control-r2 task 166 (route-authorization sweep, amendment d and finding S-80). The four
+        // Compose bodies below still DECLARE tenantId so the shipped client's payload binds unchanged, but every
+        // handler takes the tenant from the caller's tid CLAIM (TenantResolution.ResolveTenantId). Reading the body
+        // value is the defect these entries exist to keep closed: it let a caller aim a session rebind (save) or a
+        // session write (annotations) at a (tenant, session) pair other than the one that was authorized.
+        ["SaveComposeDocumentBody.TenantId"] =
+            "SECURITY — deliberately NOT read (task 166, amendment d). Both save routes scope by the CLAIM tenant; the " +
+            "body tenant once fed the first-save session rebind. Kept on the DTO only so the client payload binds.",
+        ["PullAnnotationsBody.TenantId"] =
+            "SECURITY — deliberately NOT read (task 166). The tenant is the CLAIM tid; the body value reached only a " +
+            "log line and is obsolete. Kept on the DTO only so the client payload binds.",
+        ["ReanchorAnnotationsBody.TenantId"] =
+            "SECURITY — deliberately NOT read (task 166). The tenant is the CLAIM tid; the body value reached only a " +
+            "log line and is obsolete. Kept on the DTO only so the client payload binds.",
+        ["SaveComposeAnnotationsBody.TenantId"] =
+            "SECURITY — deliberately NOT read (task 166, S-80). AddSessionOwnershipFilter authorizes (CLAIM tid, " +
+            "sessionId); writing to the BODY tenant wrote a record other than the authorized one. Kept on the DTO " +
+            "only so the client payload binds.",
+
+        // unified-access-control-r2 task 166 r1 (verifier items 10/21 — amendment d, "any other Compose session route
+        // with the same flaw").
+        ["RefreshProfileBody.TenantId"] =
+            "SECURITY — deliberately NOT read (task 166 r1). refresh-profile scopes by the CLAIM tid and is gated by " +
+            "DocumentAuthorizationFilter(\"write\") on the route's documentId; the body tenant once chose where the " +
+            "profile was stamped. Kept on the DTO only so the client payload binds.",
+        ["ComposeActiveDocumentRequest.SpeDriveItemId"] =
+            "SECURITY — deliberately NOT read (task 166 r1). A stored active document is recorded only after the row " +
+            "is read AS THE CALLER, and the SPE pointer recorded is THAT row's; a body pointer could name any item. " +
+            "Kept on the DTO only so the client payload binds.",
+        ["ComposeActiveDocumentRequest.SpeDriveId"] =
+            "SECURITY — deliberately NOT read (task 166 r1). Same as SpeDriveItemId: the recorded drive is the " +
+            "caller-readable row's. Kept on the DTO only so the client payload binds.",
     };
 
     private static string ApiRoot => Path.Combine(

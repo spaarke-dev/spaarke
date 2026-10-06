@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Finance;
@@ -29,6 +30,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
     private readonly IRecordMatchService _recordMatchService;
     private readonly FinanceTelemetry _telemetry;
     private readonly ILogger<AttachmentClassificationJobHandler> _logger;
+    private readonly RecordContainerResolver _containerResolver;
 
     /// <summary>
     /// Job type constant - must match the JobType used when enqueuing classification jobs.
@@ -46,7 +48,8 @@ public class AttachmentClassificationJobHandler : IJobHandler
         IIdempotencyService idempotencyService,
         IRecordMatchService recordMatchService,
         FinanceTelemetry telemetry,
-        ILogger<AttachmentClassificationJobHandler> logger)
+        ILogger<AttachmentClassificationJobHandler> logger,
+        RecordContainerResolver containerResolver)
     {
         _invoiceAnalysisService = invoiceAnalysisService ?? throw new ArgumentNullException(nameof(invoiceAnalysisService));
         _speFileOperations = speFileOperations ?? throw new ArgumentNullException(nameof(speFileOperations));
@@ -56,6 +59,7 @@ public class AttachmentClassificationJobHandler : IJobHandler
         _recordMatchService = recordMatchService ?? throw new ArgumentNullException(nameof(recordMatchService));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
     }
 
     public string JobType => JobTypeName;
@@ -95,6 +99,14 @@ public class AttachmentClassificationJobHandler : IJobHandler
                     job.JobId, !string.IsNullOrEmpty(documentId), !string.IsNullOrEmpty(driveId), !string.IsNullOrEmpty(itemId));
                 _telemetry.RecordClassificationFailure(stopwatch, documentId ?? "unknown", "missing_payload_fields");
                 return JobOutcome.Poisoned(job.JobId, JobType, "Missing required payload fields", job.Attempt, stopwatch.Elapsed);
+            }
+
+            // unified-access-control-r2 task 166 r1 (owner round 21 item 1b): the reads below follow the document's
+            // pointer as the application, so its container is verified first (fail closed, permanent).
+            if (!await _containerResolver.IsDocumentPointerContainerAllowedAsync(documentId, driveId, itemId, ct))
+            {
+                _telemetry.RecordClassificationFailure(stopwatch, documentId, RecordContainerResolver.DocumentStorageUnverifiedCode);
+                return JobOutcome.Poisoned(job.JobId, JobType, "Document storage could not be verified", job.Attempt, stopwatch.Elapsed);
             }
 
             // Step 2: Check idempotency - prevent duplicate classification

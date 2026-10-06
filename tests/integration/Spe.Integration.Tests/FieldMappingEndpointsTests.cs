@@ -96,7 +96,8 @@ public class FieldMappingEndpointsTests : IClassFixture<IntegrationTestFixture>
         // Arrange & Act
         var response = await _httpClient!.GetAsync("/api/v1/field-mappings/profiles");
 
-        // Assert - Should return Unauthorized (401) but NOT NotFound (404)
+        // Assert - the client is SIGNED IN, so anything but 404 means the route is registered (an anonymous 401
+        // would not: the authorization FallbackPolicy answers 401 for a missing route too, UAC-r2 task 167)
         // This verifies the endpoint is registered
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
             "GET /api/v1/field-mappings/profiles endpoint should be registered");
@@ -231,7 +232,7 @@ public class FieldMappingEndpointsTests : IClassFixture<IntegrationTestFixture>
         // Act
         var response = await _httpClient!.PostAsJsonAsync("/api/v1/field-mappings/validate", request);
 
-        // Assert - Returns 401 not 404
+        // Assert - signed in: anything but 404 means the route is registered (not an anonymous 401, UAC-r2 task 167)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound,
             "POST /api/v1/field-mappings/validate endpoint should be registered");
     }

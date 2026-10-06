@@ -131,10 +131,12 @@ public static class OBOEndpoints
                 // container, or refuses — secure_record_container_missing (409, the root has none),
                 // container_ancestor_ambiguous (409, two secure roots, or typed and polymorphic regarding disagree),
                 // container_ancestor_unresolved (409, or 503 when the child's own row, its regarding type or its
-                // root could not be read), container_ancestor_unverifiable (409, filed under another record that
-                // belongs to a root — another child, whose root link is a stamp that can be stale, or an agreement /
-                // budget / report card / service request, which leave no root link on the row at all),
-                // securable_entities_unknown (409, the registry answered outside its contract). Otherwise the
+                // root could not be read), container_ancestor_stale (409, task 156: filed under another record — a
+                // communication, event, document, invoice, analysis, agreement, budget or report card — whose LIVE
+                // root no longer equals the copy on this row; the row is enqueued for re-stamping and a retry
+                // succeeds), container_ancestor_unverifiable (409, filed under a service request, or a record that
+                // carries no copy to compare), securable_entities_unknown (409, the registry answered outside its
+                // contract). A copy that equals its source's live root resolves like a direct root link. Otherwise the
                 // record's own business-unit container. Before task 155 every to-do / event / contact upload landed
                 // in the Unresolved branch below.
                 var decision = await containerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct);

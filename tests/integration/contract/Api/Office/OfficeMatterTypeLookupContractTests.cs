@@ -170,7 +170,11 @@ public class OfficeMatterTypeLookupContractTests : IClassFixture<OfficeTestWebAp
     {
         // Route precedence: the literal /search/entities wins over /search/{list}. Without a query it is the
         // search's own 400, not the reference route's 404.
-        var response = await _factory.CreateClient().GetAsync("/api/office/search/entities");
+        // Signed in (the host's TestAuthHandler authenticates every request; the bearer states it for the reader and for
+        // the route guard): since task 167's FallbackPolicy an ANONYMOUS request is 401 whether or not a route exists.
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
+        var response = await client.GetAsync("/api/office/search/entities");
 
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
     }

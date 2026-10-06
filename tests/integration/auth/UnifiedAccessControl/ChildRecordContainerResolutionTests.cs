@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Dataverse;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
@@ -30,7 +31,7 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// <see cref="TestEntityCatalog"/>, the shared model of the production rule. The world mirrors live dev
 /// (2026-10-01): project / matter / work assignment / invoice carry <c>sprk_issecure</c>; service request does not.</para>
 /// </summary>
-public class ChildRecordContainerResolutionTests
+public partial class ChildRecordContainerResolutionTests
 {
     private const string RootContainer = "b!secure-root-container-0000000000";
     private const string OtherRootContainer = "b!other-secure-root-container-0000";
@@ -106,6 +107,59 @@ public class ChildRecordContainerResolutionTests
         var decision = await world.Resolver().ResolveForRecordAsync(alias, ChildId);
 
         decision.ContainerId.Should().Be(RootContainer);
+    }
+
+    /// <summary>
+    /// Task 150 — the owner's ABSENT-branch decision on the ANCESTOR path. Before it, a root above the record whose flag
+    /// came back absent was read as not secure and the walk fell through to the business-unit container: exactly where
+    /// a secure project's to-do would land if this service lost its field-level Read on <c>sprk_issecure</c>.
+    /// </summary>
+    [Fact(DisplayName = "Task 150: a to-do under a project whose sprk_issecure comes back ABSENT is refused — the business unit is never read")]
+    public async Task Todo_UnderAProjectWhoseFlagIsAbsent_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_todo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: null, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var refusal = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        refusal.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        refusal.StatusCode.Should().Be(503);
+        refusal.Detail.Should().NotContain(ProjectId.ToString(), "another record's id is never returned to the caller");
+        world.Reads("businessunit").Should().Be(0, "no shared container may be in scope on an unknown answer");
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a MEMO (a CHILD since task 147) under a SECURE project resolves the PROJECT's own container — it is read, never refused for unknown links")]
+    public async Task Memo_UnderASecureProject_ResolvesTheProjectsOwnContainer()
+    {
+        // Verifier item 2: with sprk_memo in the CHILD taxonomy and no ChildAncestorLinks entry, every memo resolution
+        // refused 409 ("a child record type whose link ... is not known"). With its swept links it is read like a to-do.
+        var world = new World()
+            .WithChild("sprk_memo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_memo", ChildId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedSecure);
+        decision.ContainerId.Should().Be(RootContainer);
+        world.Reads("businessunit").Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a MEMO under a NON-secure project resolves its own business-unit container")]
+    public async Task Memo_UnderANonSecureProject_ResolvesItsBusinessUnitContainer()
+    {
+        var world = new World()
+            .WithChild("sprk_memo", regardingProject: ProjectId)
+            .WithRoot("sprk_project", ProjectId, isSecure: false, "b!a-stale-project-stamp-00000000000")
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var decision = await world.Resolver().ResolveForRecordAsync("sprk_memo", ChildId);
+
+        decision.Outcome.Should().Be(ContainerDecisionOutcome.ResolvedFallback);
+        decision.ContainerId.Should().Be(BusinessUnitContainer);
     }
 
     [Fact(DisplayName = "Task 155: a to-do under a NON-secure project resolves its OWN business-unit container — no 409")]
@@ -185,11 +239,12 @@ public class ChildRecordContainerResolutionTests
         world.Reads("sprk_matter").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155: an invoice (securable, own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
+    [Fact(DisplayName = "Task 155: an invoice (own flag FALSE) under a secure matter takes the matter's container through its TYPED lookup")]
     public async Task SecurableChild_NotItselfSecure_UnderASecureMatter_ResolvesTheMattersContainer()
     {
         // Live dev: sprk_invoice carries sprk_issecure, and links to its root through typed sprk_matter /
-        // sprk_project lookups, not sprk_regarding{core}.
+        // sprk_project lookups, not sprk_regarding{core}. This world declares the column on the invoice as live does;
+        // since task 150 the registry (and TestEntityCatalog) does not treat it as securable, and the links decide.
         var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
@@ -201,17 +256,28 @@ public class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155: an invoice that is ITSELF secure keeps its own container and never consults its root")]
-    public async Task SecurableChild_ItselfSecure_KeepsItsOwnContainer()
+    /// <summary>
+    /// Task 150 (owner round 10 item 11: "invoices follow their matter"). Until task 150 an invoice flagged secure was a
+    /// secure record in its own right — it kept a container of its own and never consulted its root, and with no
+    /// container it refused every upload even under an ordinary matter. Its flag is no longer a security input: the
+    /// matter decides, both ways. (The real registry's half — the invoice classified NotSecurable although its table
+    /// carries the column — is pinned in <c>SecurableEntityRegistryTests</c>.)
+    /// </summary>
+    [Theory(DisplayName = "Task 150: an invoice FLAGGED secure follows its matter — secure under a secure matter, ordinary under an ordinary one")]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AnInvoiceFlaggedSecure_FollowsItsMatter(bool matterIsSecure)
     {
         var world = new World(securable: ["sprk_project", "sprk_matter", "sprk_workassignment", "sprk_invoice"])
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: true, ownContainer: OtherRootContainer)
-            .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
+            .WithRoot("sprk_matter", MatterId, isSecure: matterIsSecure, matterIsSecure ? RootContainer : null)
+            .WithBusinessUnit(BusinessUnitContainer);
 
         var decision = await world.Resolver().ResolveForRecordAsync("sprk_invoice", ChildId);
 
-        decision.ContainerId.Should().Be(OtherRootContainer);
-        world.RootReads().Should().Be(0);
+        decision.ContainerId.Should().Be(matterIsSecure ? RootContainer : BusinessUnitContainer,
+            "the invoice's own flag and container decide nothing; its matter does");
+        world.Reads("sprk_matter").Should().Be(1, "the invoice's root is always consulted now");
     }
 
     [Fact(DisplayName = "Task 155: a contact (no ancestor concept) resolves its own business-unit container by the two-argument overload")]
@@ -466,24 +532,10 @@ public class ChildRecordContainerResolutionTests
         world.Reads("businessunit").Should().Be(0);
     }
 
-    [Theory(DisplayName = "Task 155 (escalation trigger 2): a child filed under ANOTHER child is refused as unverifiable — its root link is a stamp that can be stale")]
-    [InlineData("sprk_todo", "sprk_regardingcommunication")]
-    [InlineData("sprk_todo", "sprk_regardingevent")]
-    [InlineData("sprk_todo", "sprk_regardinginvoice")]
-    [InlineData("sprk_todo", "sprk_regardingdocument")]
-    [InlineData("sprk_todo", "sprk_regardinganalysis")]
-    [InlineData("sprk_event", "sprk_regardingcommunication")]
-    [InlineData("sprk_event", "sprk_regardingevent")]
-    [InlineData("sprk_event", "sprk_regardinginvoice")]
-    [InlineData("sprk_event", "sprk_regardinganalysis")]
-    // Task 155 f2: root-owned NON-core regardings (agreement / report card → sprk_regarding{matter,project};
-    // budget → typed sprk_matter / sprk_project; live spaarkedev1 2026-10-01).
-    [InlineData("sprk_todo", "sprk_regardingagreement")]
-    [InlineData("sprk_todo", "sprk_regardingbudget")]
-    [InlineData("sprk_todo", "sprk_regardingreportcard")]
-    [InlineData("sprk_event", "sprk_regardingagreement")]
-    [InlineData("sprk_event", "sprk_regardingbudget")]
-    [InlineData("sprk_event", "sprk_regardingreportcard")]
+    // Task 156 (owner round 4 item 5, option b) REPLACED this theory's to-do / event rows: a child filed under a
+    // communication, event, invoice, document, analysis, agreement, budget or report card is now read live and its copy
+    // compared (ChildRecordContainerResolutionTests.StampFreshness.cs). What stays HELD is below.
+    [Theory(DisplayName = "Task 155 / 156: a child filed under a SERVICE REQUEST, and a WORK ASSIGNMENT filed under a communication / event / invoice, stay refused as unverifiable — nothing on those rows is a copy to compare")]
     // Task 155 f3: a service request hangs off a matter / project / work assignment (live: its own
     // sprk_regarding{matter,project,workassignment}) and cannot carry sprk_issecure — an intermediate, not a root.
     [InlineData("sprk_todo", "sprk_regardingservicerequest")]
@@ -495,10 +547,12 @@ public class ChildRecordContainerResolutionTests
     [InlineData("sprk_workassignment", "sprk_regardinginvoice")]
     public async Task Child_FiledUnderAnotherChild_IsRefusedAsUnverifiable(string entity, string intermediateColumn)
     {
-        // The stamp says "non-secure project". Nothing re-stamps this record when its communication is re-filed
-        // under a SECURE matter, so trusting the stamp would put a secure root's content in a shared container.
+        // A service request is CORE (nothing is copied from it) and cannot carry sprk_issecure; a work assignment carries
+        // no copy (its matter / project are its own links). Neither row has anything the resolver can compare.
+        // A work assignment is itself a securable root: post-backfill it reads No (task 150), never absent.
         var world = new World()
-            .WithChild(entity, regardingProject: ProjectId, intermediate: (intermediateColumn, CommunicationId))
+            .WithChild(entity, regardingProject: ProjectId, intermediate: (intermediateColumn, CommunicationId),
+                isSecure: entity == "sprk_workassignment" ? false : null)
             .WithRoot("sprk_project", ProjectId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
 
@@ -515,13 +569,10 @@ public class ChildRecordContainerResolutionTests
         world.RootReads().Should().Be(0, "the stamp is not consulted at all — consulting it is the papering-over");
     }
 
-    [Theory(DisplayName = "Task 155 f2: a child whose ONLY regarding is an agreement / budget / report card (no root stamp at all) is refused — never the BU container")]
-    [InlineData("sprk_todo", "sprk_regardingreportcard")]
-    [InlineData("sprk_todo", "sprk_regardingagreement")]
-    [InlineData("sprk_todo", "sprk_regardingbudget")]
-    [InlineData("sprk_event", "sprk_regardingreportcard")]
-    [InlineData("sprk_event", "sprk_regardingagreement")]
-    [InlineData("sprk_event", "sprk_regardingbudget")]
+    // Task 156 moved this theory's to-do / event × agreement / budget / report card rows to the stamp-freshness
+    // theories: those intermediates are now derived (CoreAncestorResolver.IntermediateRootColumns), read live and their
+    // copies compared. A missing copy under one of them is STALE there (MissingOrOrphanedCopy_IsStale).
+    [Theory(DisplayName = "Task 155 f2/f3: a record whose ONLY regarding is a service request, an invoice's agreement or a contact's invoice is refused — never the BU container")]
     // Task 155 f3: the same shape through a service request (core, so CoreAncestorResolver stamps nothing above it),
     // and the f3 BLOCKING fail-open — an INVOICE regarding an agreement (live lookup sprk_regardingagreement), which
     // the f2 table gave no intermediate column at all.
@@ -568,10 +619,13 @@ public class ChildRecordContainerResolutionTests
         // message gets one by the 3-tier ladder — so holding on it would refuse every threaded message. Owner-
         // reversible interpretation (vii) in the task note.
         "sprk_triagecategory", "sprk_communicationthread",
+        // Task 156 (sweep of sprk_analysis / sprk_document / sprk_agreement, 2026-10-02): configuration and storage
+        // references, none with a lookup to a root or an intermediate.
+        "sprk_analysisaction", "sprk_agreementtype", "sprk_analysisplaybook", "sprk_container", "sprk_fileversion",
     };
 
     [Theory(DisplayName = "Task 155 f3: the ONE record read requests EXACTLY every column whose target is or can hang off a root, plus the polymorphic pair — pinned against the live lookup sweep")]
-    [InlineData("sprk_todo", true,
+    [InlineData("sprk_todo", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_assignedto>contact;sprk_regardingagreement>sprk_agreement;sprk_regardinganalysis>sprk_analysis;"
@@ -582,7 +636,7 @@ public class ChildRecordContainerResolutionTests
         + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
         + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_relatedrecordtype>sprk_recordtype_ref")]
-    [InlineData("sprk_event", true,
+    [InlineData("sprk_event", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_ai_search_index>sprk_aisearchindex;sprk_approvedby>contact;sprk_assignedattorney1>contact;"
@@ -599,7 +653,7 @@ public class ChildRecordContainerResolutionTests
         + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingreportcard>sprk_reportcard;"
         + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
         + "sprk_rescheduledby>contact;sprk_todoassigned>contact")]
-    [InlineData("sprk_invoice", true,
+    [InlineData("sprk_invoice", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedto1>contact;sprk_assignedto2>contact;"
@@ -607,7 +661,7 @@ public class ChildRecordContainerResolutionTests
         + "sprk_assignedtoparalegal2>contact;sprk_matter>sprk_matter;sprk_project>sprk_project;"
         + "sprk_regardingagreement>sprk_agreement;sprk_regardingrecordtype>sprk_recordtype_ref;"
         + "sprk_securitybu>businessunit;sprk_vendororg>sprk_organization;transactioncurrencyid>transactioncurrency")]
-    [InlineData("sprk_workassignment", true,
+    [InlineData("sprk_workassignment", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;"
@@ -618,7 +672,7 @@ public class ChildRecordContainerResolutionTests
         + "sprk_regardingcommunication>sprk_communication;sprk_regardingevent>sprk_event;"
         + "sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;sprk_regardingproject>sprk_project;"
         + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_securitybu>businessunit")]
-    [InlineData("sprk_project", true,
+    [InlineData("sprk_project", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;"
@@ -630,7 +684,7 @@ public class ChildRecordContainerResolutionTests
         + "transactioncurrencyid>transactioncurrency")]
     // sprk_matter: a sprk_regardingrecordtype lookup but NO sprk_regardingrecordid column (live), so its row can name
     // no record — no pair, no links.
-    [InlineData("sprk_matter", false,
+    [InlineData("sprk_matter", "none",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_ai_search_index>sprk_aisearchindex;sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;"
@@ -640,7 +694,7 @@ public class ChildRecordContainerResolutionTests
         + "sprk_externalaccount>account;sprk_mattertype>sprk_mattertype_ref;"
         + "sprk_practicearea>sprk_practicearea_ref;sprk_regardingrecordtype>sprk_recordtype_ref;"
         + "sprk_securitybu>businessunit;transactioncurrencyid>transactioncurrency")]
-    [InlineData("contact", false,
+    [InlineData("contact", "none",
         "accountid>account;createdby>systemuser;createdbyexternalparty>externalparty;createdonbehalfby>systemuser;"
         + "masterid>contact;modifiedby>systemuser;modifiedbyexternalparty>externalparty;"
         + "modifiedonbehalfby>systemuser;msa_managingpartnerid>account;ownerid>systemuser|team;"
@@ -649,7 +703,7 @@ public class ChildRecordContainerResolutionTests
         + "sprk_contacttype>sprk_contacttype_ref;sprk_invoice>sprk_invoice;sprk_organization>sprk_organization;"
         + "sprk_systemuser>systemuser;transactioncurrencyid>transactioncurrency")]
     // f4: sprk_communication (24 lookups, live 2026-10-02) — the communication pipeline's record since f4.
-    [InlineData("sprk_communication", true,
+    [InlineData("sprk_communication", "both",
         "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
         + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
         + "sprk_communicationthread>sprk_communicationthread;sprk_regardingaccount>account;"
@@ -660,9 +714,69 @@ public class ChildRecordContainerResolutionTests
         + "sprk_regardingreportcard>sprk_reportcard;sprk_regardingservicerequest>sprk_servicerequest;"
         + "sprk_regardingworkassignment>sprk_workassignment;sprk_sentby>systemuser;"
         + "sprk_triagecategory>sprk_triagecategory")]
+    // Task 156: the five intermediates a child can be filed under that f3 classified but did not describe — each is READ
+    // when a child is filed under it (live sweep, Dataverse MCP describe, read-only, 2026-10-02).
+    [InlineData("sprk_analysis", "both",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_actionid>sprk_analysisaction;sprk_agreementtype>sprk_agreementtype;sprk_assignedattorney1>contact;"
+        + "sprk_assignedattorney2>contact;sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;"
+        + "sprk_documentid>sprk_document;sprk_outputfileid>sprk_document;sprk_playbook>sprk_analysisplaybook;"
+        + "sprk_regardingbudget>sprk_budget;sprk_regardingcommunication>sprk_communication;"
+        + "sprk_regardingdocument>sprk_document;sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;"
+        + "sprk_regardingproject>sprk_project;sprk_regardingrecordtype>sprk_recordtype_ref;"
+        + "sprk_regardingservicerequest>sprk_servicerequest;sprk_regardingworkassignment>sprk_workassignment;"
+        + "sprk_reviewerby>systemuser")]
+    // sprk_document: a sprk_regardingrecordid STRING but NO sprk_regardingrecordtype column (live) — the pair is id-only.
+    [InlineData("sprk_document", "id",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_ai_search_index>sprk_aisearchindex;sprk_canonicaldocument>sprk_document;sprk_checkedinby>systemuser;"
+        + "sprk_checkedoutby>systemuser;sprk_containername>sprk_container;sprk_currentversionid>sprk_fileversion;"
+        + "sprk_email>email;sprk_invoice>sprk_invoice;sprk_invoicereviewedby>systemuser;sprk_matter>sprk_matter;"
+        + "sprk_parentdocument>sprk_document;sprk_project>sprk_project;sprk_relatedagreement>sprk_agreement;"
+        + "sprk_relatedcommunication>sprk_communication;sprk_relatedcontact>contact;sprk_relatedevent>sprk_event;"
+        + "sprk_relatedinvoice>sprk_invoice;sprk_relatedmatter>sprk_matter;sprk_relatedorganization>sprk_organization;"
+        + "sprk_relatedproject>sprk_project;sprk_relatedservicerequest>sprk_servicerequest;sprk_relatedtodo>sprk_todo;"
+        + "sprk_relatedvendororg>sprk_organization;sprk_relatedworkassignment>sprk_workassignment;"
+        + "sprk_workassignment>sprk_workassignment;transactioncurrencyid>transactioncurrency")]
+    [InlineData("sprk_agreement", "none",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_agreementtype>sprk_agreementtype;sprk_aisearchindex>sprk_aisearchindex;sprk_assignedattorney1>contact;"
+        + "sprk_assignedattorney2>contact;sprk_assignedlawfirm1>sprk_organization;"
+        + "sprk_assignedlawfirm2>sprk_organization;sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;"
+        + "sprk_assignedtoexternal>contact;sprk_assignedtointernal>contact;sprk_regardingdocument>sprk_document;"
+        + "sprk_regardingmatter>sprk_matter;sprk_regardingproject>sprk_project")]
+    [InlineData("sprk_budget", "none",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_matter>sprk_matter;sprk_project>sprk_project;transactioncurrencyid>transactioncurrency")]
+    // Task 147 r1: sprk_memo joined the CHILD taxonomy (owner round 2 item 6) — live sweep, Dataverse MCP describe,
+    // read-only, 2026-10-04 (every lookup / owner column of sprk_memo with its target).
+    [InlineData("sprk_memo", "both",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_regardingagreement>sprk_agreement;sprk_regardinganalysis>sprk_analysis;"
+        + "sprk_regardingbudget>sprk_budget;sprk_regardingcommunication>sprk_communication;"
+        + "sprk_regardingcontact>contact;sprk_regardingdocument>sprk_document;sprk_regardingevent>sprk_event;"
+        + "sprk_regardinginvoice>sprk_invoice;sprk_regardingmatter>sprk_matter;"
+        + "sprk_regardingorganization>sprk_organization;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref;sprk_regardingservicerequest>sprk_servicerequest;"
+        + "sprk_regardingtimekeeper>sprk_timekeeper;sprk_regardingworkassignment>sprk_workassignment;"
+        + "sprk_reportcard>sprk_reportcard")]
+    [InlineData("sprk_reportcard", "both",
+        "createdby>systemuser;createdonbehalfby>systemuser;modifiedby>systemuser;modifiedonbehalfby>systemuser;"
+        + "ownerid>systemuser|team;owningbusinessunit>businessunit;owningteam>team;owninguser>systemuser;"
+        + "sprk_assignedattorney1>contact;sprk_assignedattorney2>contact;sprk_assignedlawfirm2>sprk_organization;"
+        + "sprk_assignedparalegal1>contact;sprk_assignedparalegal2>contact;sprk_assignedtoexternal>contact;"
+        + "sprk_assignedtointernal>contact;sprk_assignedtolawfirm1>sprk_organization;"
+        + "sprk_regardingmatter>sprk_matter;sprk_regardingproject>sprk_project;"
+        + "sprk_regardingrecordtype>sprk_recordtype_ref")]
     public async Task ChildRecordRead_RequestsEveryLinkAndIntermediateColumn(
-        string entity, bool hasPolymorphicPair, string sweptLookups)
+        string entity, string pairShape, string sweptLookups)
     {
+        var hasPolymorphicPair = pairShape != "none";
         // The data is a LITERAL snapshot of the f3 live sweep — spaarkedev1, read-only, 2026-10-01: EVERY
         // Lookup / Customer / Owner column of the entity with its targets, from
         // EntityDefinitions(LogicalName='x')/Attributes/Microsoft.Dynamics.CRM.LookupAttributeMetadata — and the pair
@@ -698,9 +812,17 @@ public class ChildRecordContainerResolutionTests
                             RecordContainerResolver.ChildAncestorLinks.RecordKind.Party))
             .Select(c => c.Column);
 
-        var securable = SecurableWithInvoice.Contains(entity);
+        // Task 150 (owner round 10 item 11): the invoice's table carries sprk_issecure (this world declares it, as live
+        // metadata does), but its flag is not a security input — so its row is read for its links only, never for a flag
+        // or a container of its own.
+        var securable = SecurableWithInvoice.Contains(entity) && entity != "sprk_invoice";
         var expected = ownershipColumns
-            .Concat(hasPolymorphicPair ? ["sprk_regardingrecordid", "sprk_regardingrecordtype"] : Array.Empty<string>())
+            .Concat(pairShape switch
+            {
+                "both" => ["sprk_regardingrecordid", "sprk_regardingrecordtype"],
+                "id" => ["sprk_regardingrecordid"],
+                _ => Array.Empty<string>(),
+            })
             .Concat(hasPolymorphicPair ? partyRegardingColumns : Array.Empty<string>())
             .Concat(securable ? ["sprk_issecure", "sprk_containerid"] : Array.Empty<string>())
             .Append("owningbusinessunit")
@@ -716,16 +838,15 @@ public class ChildRecordContainerResolutionTests
         world.ColumnsRead(entity).Should().BeEquivalentTo(expected);
     }
 
-    [Fact(DisplayName = "Task 155 (escalation trigger 1): a CHILD type whose root link is not known is refused without a read")]
-    public async Task ChildTypeWithoutKnownLinks_IsRefused()
+    [Fact(DisplayName = "Task 155 (escalation trigger 1) / 156: sprk_document now has swept links — it is READ, never refused for unknown links (the guard that would refuse an unswept child is pinned by CoreAncestorStampTopologyLockstepTests)")]
+    public async Task Document_HasKnownLinks_AndIsRead()
     {
-        var world = new World();
+        // Until task 156 sprk_document had no entry and this refused with no read (trigger 1). A child can now be filed
+        // under a document, so the document is swept and read — and a document filed under nothing resolves its BU.
+        var world = new World().WithRecord("sprk_document", owningBusinessUnit: true).WithBusinessUnit(BusinessUnitContainer);
 
-        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_document", ChildId, ArchiveContainer);
-
-        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
-        ex.Code.Should().Be(RecordContainerResolver.AncestorUnresolvedCode);
-        world.TotalReads().Should().Be(0);
+        (await world.Resolver().ResolveForRecordAsync("sprk_document", ChildId)).ContainerId.Should().Be(BusinessUnitContainer);
+        world.Reads("sprk_document").Should().Be(1);
     }
 
     // ============================================================================================
@@ -778,10 +899,11 @@ public class ChildRecordContainerResolutionTests
     [Fact(DisplayName = "Task 155: an email regarding an invoice under a SECURE matter routes to the MATTER's own container, not the archive")]
     public async Task Communication_RegardingAnInvoiceUnderASecureMatter_RoutesToTheMattersContainer()
     {
-        // The deliberate behaviour change: CommunicationContainerResolver asks about securable regardings only, and
-        // sprk_invoice is securable live — so the invoice, now a CHILD, resolves through its secure root.
+        // The deliberate behaviour change: the invoice, a CHILD, resolves through its secure root. (This world declares
+        // sprk_issecure on the invoice as live metadata does; since task 150 the invoice's own flag is not a security
+        // input, so its matter alone decides.)
         var world = new World(securable: SecurableWithInvoice)
-            .WithCommunicationRegardingInvoice()
+            .WithCommunicationRegardingInvoice(copyMatter: MatterId)
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
             .WithBusinessUnit(BusinessUnitContainer);
@@ -796,7 +918,7 @@ public class ChildRecordContainerResolutionTests
     public async Task Communication_RegardingAnInvoiceUnderANonSecureMatter_RoutesToTheArchiveAsBefore()
     {
         var world = new World(securable: SecurableWithInvoice)
-            .WithCommunicationRegardingInvoice()
+            .WithCommunicationRegardingInvoice(copyMatter: MatterId)
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
@@ -810,7 +932,7 @@ public class ChildRecordContainerResolutionTests
     public async Task Communication_RegardingAnInvoiceUnderTwoSecureRoots_IsAPermanentRefusal()
     {
         var world = new World(securable: SecurableWithInvoice)
-            .WithCommunicationRegardingInvoice()
+            .WithCommunicationRegardingInvoice(copyMatter: MatterId, copyProject: ProjectId)
             .WithChild("sprk_invoice", typedMatter: MatterId, typedProject: ProjectId, isSecure: false)
             .WithRoot("sprk_project", ProjectId, isSecure: true, RootContainer)
             .WithRoot("sprk_matter", MatterId, isSecure: true, OtherRootContainer);
@@ -827,7 +949,7 @@ public class ChildRecordContainerResolutionTests
     public async Task Communication_RegardingAnInvoiceWithAMissingOrUnreadableRoot_IsClassifiedByStatus()
     {
         var missing = new World(securable: SecurableWithInvoice)
-            .WithCommunicationRegardingInvoice()
+            .WithCommunicationRegardingInvoice(copyMatter: MatterId)
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRootFault("sprk_matter", MatterId, new FaultException<OrganizationServiceFault>(
                 new OrganizationServiceFault { ErrorCode = -2147220969 }, new FaultReason("does not exist")));
@@ -840,7 +962,7 @@ public class ChildRecordContainerResolutionTests
         IncomingCommunicationProcessor.IsPermanentContainerRefusal(missingEx).Should().BeTrue();
 
         var unreadable = new World(securable: SecurableWithInvoice)
-            .WithCommunicationRegardingInvoice()
+            .WithCommunicationRegardingInvoice(copyMatter: MatterId)
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRootFault("sprk_matter", MatterId, new TimeoutException("Dataverse timed out"));
 
@@ -1073,7 +1195,9 @@ public class ChildRecordContainerResolutionTests
     }
 
     [Theory(DisplayName = "Task 155 f3: a pair whose TYPE is unclassified, blank or missing is refused (409); an unreadable type row is 503 — never 'no root'")]
-    [InlineData("sprk_memo", 409)]
+    // Task 147 r1: this row used sprk_memo as its unclassified type; the memo is an intermediate now (CHILD taxonomy), so
+    // an unclassified table that names nothing above itself takes its place. The memo case is pinned below.
+    [InlineData("sprk_spendsnapshot", 409)]
     [InlineData(null, 409)]
     [InlineData("<not-found>", 409)]
     [InlineData("<timeout>", 503)]
@@ -1102,6 +1226,23 @@ public class ChildRecordContainerResolutionTests
 
         world.Reads("businessunit").Should().Be(0);
         world.RootReads().Should().Be(0);
+    }
+
+    [Fact(DisplayName = "Task 147 r1: a to-do whose pair names a MEMO (an intermediate since task 147, never a to-do stamp source) is refused as unverifiable — never 'no root', never the BU")]
+    public async Task Pair_NamingAMemo_OnAToDo_IsRefusedAsUnverifiable()
+    {
+        var memoTypeRef = Guid.Parse("14714714-0000-0000-0000-00000000000e");
+        var world = new World()
+            .WithChild("sprk_todo", pairId: MatterId.ToString(), pairType: memoTypeRef)
+            .WithBusinessUnit(BusinessUnitContainer);
+        world.WithRecordType(memoTypeRef, "sprk_memo");
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_todo", ChildId);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        ex.StatusCode.Should().Be(409);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 155 f3: a pair naming the SAME record as the typed root agrees by identity — no type read, and the secure root decides")]
@@ -1179,11 +1320,17 @@ public class ChildRecordContainerResolutionTests
         world.RootReads().Should().Be(0);
     }
 
-    [Fact(DisplayName = "Task 155 f3: a work assignment with a NULL flag under a NON-secure matter resolves its BU container (live: most rows)")]
-    public async Task WorkAssignment_NullFlag_UnderANonSecureMatter_ResolvesItsBusinessUnit()
+    /// <remarks>
+    /// CONVERTED by task 150. This was "a work assignment with a NULL flag … resolves its BU container (live: most
+    /// rows)". The owner's ABSENT-branch decision backfills every NULL <c>sprk_issecure</c> to No
+    /// (<c>scripts/Repair-SecureFlagNulls.ps1</c>; the column already defaults to No, and every live NULL row predates
+    /// the column), so the live shape is now an explicit FALSE — pinned here — and a NULL refuses (next test).
+    /// </remarks>
+    [Fact(DisplayName = "Task 155 f3 / 150: a work assignment flagged No under a NON-secure matter resolves its BU container")]
+    public async Task WorkAssignment_FlaggedNo_UnderANonSecureMatter_ResolvesItsBusinessUnit()
     {
         var world = new World()
-            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithChild("sprk_workassignment", regardingMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
             .WithBusinessUnit(BusinessUnitContainer);
 
@@ -1191,6 +1338,21 @@ public class ChildRecordContainerResolutionTests
 
         decision.ContainerId.Should().Be(BusinessUnitContainer);
         world.Reads("sprk_matter").Should().Be(1);
+    }
+
+    [Fact(DisplayName = "Task 150: a work assignment whose OWN sprk_issecure is ABSENT is refused before its matter is read")]
+    public async Task WorkAssignment_AbsentFlag_IsRefused()
+    {
+        var world = new World()
+            .WithChild("sprk_workassignment", regardingMatter: MatterId)
+            .WithRoot("sprk_matter", MatterId, isSecure: false, containerId: null)
+            .WithBusinessUnit(BusinessUnitContainer);
+
+        var act = async () => await world.Resolver().ResolveForRecordAsync("sprk_workassignment", ChildId);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be(RecordContainerResolver.SecureFlagUnreadableCode);
+        world.Reads("businessunit").Should().Be(0);
     }
 
     [Fact(DisplayName = "Task 155 f3: a NON-secure project whose polymorphic pair names a SECURE matter resolves the matter's container (live: 0 projects carry the pair)")]
@@ -1624,12 +1786,10 @@ public class ChildRecordContainerResolutionTests
         }
     }
 
-    [Theory(DisplayName = "Task 155 f4: an email filed under a service request / event / analysis / budget / report card takes the held path — a PERMANENT refusal, never the archive")]
+    // Task 156: an email filed under an event / analysis / budget / report card is now compared live (StampFreshness
+    // EveryStampSource rows for sprk_communication); only the service request stays held.
+    [Theory(DisplayName = "Task 155 f4 / 156: an email filed under a SERVICE REQUEST takes the held path — a PERMANENT refusal, never the archive")]
     [InlineData("sprk_regardingservicerequest")]
-    [InlineData("sprk_regardingevent")]
-    [InlineData("sprk_regardinganalysis")]
-    [InlineData("sprk_regardingbudget")]
-    [InlineData("sprk_regardingreportcard")]
     public async Task Communication_FiledUnderANonSecurableIntermediate_IsAPermanentRefusal(string column)
     {
         // None of the five is securable, so the f3 adapter never asked about them and sent the content to the archive —
@@ -1695,8 +1855,10 @@ public class ChildRecordContainerResolutionTests
     [Fact(DisplayName = "Task 155 f4: an email regarding TWO DIFFERENT secure records (a secure matter, and an invoice under a different secure project) is a PERMANENT ambiguity refusal")]
     public async Task Communication_RegardingTwoDifferentSecureRecords_IsAPermanentRefusal()
     {
+        // The row IncomingAssociationResolver writes for a matter AND an invoice: the pair names the primary — the matter
+        // (RegardingFieldMap priority) — so the matter is a direct link and the invoice a carrier (task 156).
         var world = new World(securable: SecurableWithInvoice)
-            .WithCommunication(regardingMatter: MatterId, regardingInvoice: ChildId)
+            .WithCommunication(regardingMatter: MatterId, regardingInvoice: ChildId, pairId: MatterId.ToString())
             .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer)
             .WithChild("sprk_invoice", typedProject: ProjectId, isSecure: false)
             .WithRoot("sprk_project", ProjectId, isSecure: true, OtherRootContainer);
@@ -1845,12 +2007,15 @@ public class ChildRecordContainerResolutionTests
         world.Reads("sprk_recordtype_ref").Should().Be(0, "identity decides; the type label is not read (interpretation ii)");
     }
 
-    [Fact(DisplayName = "Task 155 f5: an email regarding an invoice under a SECURE matter, whose pair names its own typed person with NO type, routes to the MATTER's container (live 83349fe9)")]
+    [Fact(DisplayName = "Task 155 f5 / 156: an email regarding an invoice under a SECURE matter, whose pair names its own typed person with NO type, carrying the invoice's matter as its copy, routes to the MATTER's container (live 83349fe9)")]
     public async Task Communication_RegardingAnInvoice_WithAPairNamingItsOwnTypedPerson_FollowsTheInvoice()
     {
+        // The pair names the row's own person, which rule 3 reads as "no pair": the one intermediate (the invoice) is the
+        // source of the copy, and the copy equals the invoice's live root.
         var world = new World(securable: SecurableWithInvoice)
             .WithCommunication(
                 regardingInvoice: ChildId,
+                regardingMatter: MatterId,
                 regardingParty: ("sprk_regardingperson", "contact", ContactId),
                 pairId: ContactId.ToString())
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
@@ -1921,17 +2086,23 @@ public class ChildRecordContainerResolutionTests
         IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue();
     }
 
-    [Fact(DisplayName = "Task 155 f5: an email whose pair ALONE names an invoice FOLLOWS the invoice (the communication entry follows invoices) — routed to the secure matter above it, never held")]
-    public async Task Communication_WhosePairAloneNamesAnInvoice_FollowsTheInvoice()
+    [Fact(DisplayName = "Task 156: an email whose pair ALONE names an invoice (no typed column) is HELD like any pair-only intermediate — task 155 f5 followed it, but the communication no longer follows invoices and nothing on the row carries a copy to compare")]
+    public async Task Communication_WhosePairAloneNamesAnInvoice_IsHeld()
     {
+        // Task 156 made the communication's invoice an intermediate whose copy is compared (f4 interpretation viii
+        // superseded). A PAIR-ONLY intermediate has no typed source column, so the restamper would never write a copy for
+        // it: comparing would refuse it stale forever. It is held instead — permanent, fail closed.
         var world = new World(securable: SecurableWithInvoice)
             .WithCommunication(pairId: ChildId.ToString(), pairType: InvoiceTypeRef)
             .WithRecordType(InvoiceTypeRef, "sprk_invoice")
             .WithChild("sprk_invoice", typedMatter: MatterId, isSecure: false)
             .WithRoot("sprk_matter", MatterId, isSecure: true, RootContainer);
 
-        (await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer))
-            .Should().Be(RootContainer);
+        var act = async () => await world.CommunicationResolver().ResolveContainerAsync(CommunicationId, ArchiveContainer);
+
+        var ex = (await act.Should().ThrowAsync<SdapProblemException>()).Which;
+        ex.Code.Should().Be(RecordContainerResolver.AncestorUnverifiableCode);
+        IncomingCommunicationProcessor.IsPermanentContainerRefusal(ex).Should().BeTrue();
     }
 
     // ============================================================================================
@@ -1949,7 +2120,7 @@ public class ChildRecordContainerResolutionTests
             "sprk_project", "sprk_matter", "sprk_workassignment", "sprk_servicerequest", "sprk_invoice",
             "sprk_event", "sprk_todo", "sprk_document", "sprk_communication", "contact", "businessunit",
             "account", "sprk_organization", "sprk_agreement", "sprk_budget", "sprk_reportcard", "sprk_analysis",
-            "sprk_recordtype_ref",
+            "sprk_recordtype_ref", "sprk_memo", "sprk_timekeeper",
         };
 
         private readonly Dictionary<string, EntitySecurability> _classificationOverrides = new(StringComparer.Ordinal);
@@ -2090,7 +2261,7 @@ public class ChildRecordContainerResolutionTests
         public World WithRoot(
             string entity,
             Guid id,
-            bool isSecure,
+            bool? isSecure,
             string? containerId,
             Guid? regardingProject = null,
             Guid? regardingMatter = null,
@@ -2098,7 +2269,9 @@ public class ChildRecordContainerResolutionTests
             Guid? pairType = null,
             (string Column, Guid Id)? intermediate = null)
         {
-            var row = new Entity(entity, id) { ["sprk_issecure"] = isSecure };
+            // isSecure null = the attribute ABSENT on the row (task 150: a field-secured value masked from the reader).
+            var row = new Entity(entity, id);
+            if (isSecure is { } flag) row["sprk_issecure"] = flag;
             if (containerId is not null) row["sprk_containerid"] = containerId;
             if (regardingProject is { } p) row["sprk_regardingproject"] = new EntityReference("sprk_project", p);
             if (regardingMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
@@ -2185,13 +2358,21 @@ public class ChildRecordContainerResolutionTests
             return this;
         }
 
-        /// <summary>A communication whose regarding INVOICE is <see cref="ChildId"/>.</summary>
-        public World WithCommunicationRegardingInvoice()
+        /// <summary>
+        /// A communication whose regarding INVOICE is <see cref="ChildId"/> (the pair names it) and — task 156 — which
+        /// carries the COPY of the invoice's root that IncomingAssociationResolver stamps (<paramref name="copyMatter"/> /
+        /// <paramref name="copyProject"/>). Task 155 FOLLOWED the invoice live and ignored the copy (f4 interpretation
+        /// viii); task 156 compares the copy with the invoice's live root like every other intermediate.
+        /// </summary>
+        public World WithCommunicationRegardingInvoice(Guid? copyMatter = null, Guid? copyProject = null)
         {
             var row = new Entity("sprk_communication", CommunicationId)
             {
-                ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", ChildId)
+                ["sprk_regardinginvoice"] = new EntityReference("sprk_invoice", ChildId),
+                ["sprk_regardingrecordid"] = ChildId.ToString(),
             };
+            if (copyMatter is { } m) row["sprk_regardingmatter"] = new EntityReference("sprk_matter", m);
+            if (copyProject is { } p) row["sprk_regardingproject"] = new EntityReference("sprk_project", p);
 
             _rows[("sprk_communication", CommunicationId)] = () => row;
             return this;
@@ -2206,8 +2387,43 @@ public class ChildRecordContainerResolutionTests
             return this;
         }
 
+        /// <summary>
+        /// Task 156: any row, by its lookups — an intermediate a child is filed under (a communication, event, document,
+        /// invoice, analysis, agreement, budget or report card) with its own root columns, pair and, when its type can be
+        /// secure, its flag and container.
+        /// </summary>
+        public World WithRow(
+            string entity,
+            Guid id,
+            (string Column, string Target, Guid Id)[]? lookups = null,
+            string? pairId = null,
+            Guid? pairType = null,
+            bool? isSecure = null,
+            string? container = null)
+        {
+            var row = new Entity(entity, id)
+            {
+                ["owningbusinessunit"] = new EntityReference("businessunit", BusinessUnitId)
+            };
+            foreach (var (column, target, targetId) in lookups ?? [])
+            {
+                row[column] = new EntityReference(target, targetId);
+            }
+
+            if (pairId is not null) row["sprk_regardingrecordid"] = pairId;
+            if (pairType is { } t) row["sprk_regardingrecordtype"] = new EntityReference("sprk_recordtype_ref", t);
+            if (isSecure is { } secure) row["sprk_issecure"] = secure;
+            if (container is not null) row["sprk_containerid"] = container;
+
+            _rows[(entity, id)] = () => row;
+            return this;
+        }
+
+        /// <summary>Task 156: where a <c>container_ancestor_stale</c> refusal enqueues the stale row.</summary>
+        public RecordingRestampQueue Queue { get; } = new();
+
         public RecordContainerResolver Resolver() =>
-            new(Registry(), _service, NullLogger<RecordContainerResolver>.Instance);
+            new(Registry(), _service, NullLogger<RecordContainerResolver>.Instance, Queue);
 
         /// <summary>The REAL communication adapter over the REAL record resolver — only Dataverse rows are doubled.</summary>
         public CommunicationContainerResolver CommunicationResolver() =>

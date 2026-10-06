@@ -132,7 +132,13 @@ $script:RequiredSecretFields = @(
     'canonical_name', 'category', 'purpose', 'consumers', 'rotation_cadence',
     'never_delete', 'exception_note', 'aliases', 'value_source', 'app_settings', 'tags'
 )
-$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-shared-service', 'generated')
+# 'from-shared-service' (task 200 H4-shared) retired T226 (2026-09-30); 'from-topology-constants'
+# (task 214, SPE-ContainerTypeId) accepted from T226 — H4 writes it from the run's non-secret parameter.
+# Task 245a (G25): 'from-intake-parameter' (H4 writes a non-secret intake value, e.g. TenantId) and
+# 'written-by-h3' (H3 commits it to the vault itself, after H4 — H4 skips it). Task 225b (owner D18,
+# 2026-10-02) removed task 245b's platform-vault copy source with the vendor keys that used it.
+# The C# reader (FileKvSecretManifest.TryMapValueSource) accepts exactly this set.
+$script:AllowedValueSources = @('from-existing-kv', 'from-bicep-output', 'from-run-parameter', 'from-topology-constants', 'from-intake-parameter', 'written-by-h3', 'generated')
 
 # Task 201 — per_env_settings schema (H4b BulkAppSettings handler).
 # Optional top-level list; when present, each entry MUST carry these fields.
@@ -142,6 +148,22 @@ $script:RequiredPerEnvSettingFields = @('key', 'per_env_source', 'iOptionsModule
 # Handler segment: lowercase-alphanumeric (H0.5 handler-id "h0.5" allowed by
 # escaping the dot). Key segment: identifier-shaped (letters/digits/underscore).
 $script:PerEnvSourcePattern = '^(literal|from-[a-z0-9\.]+-(output|parameter):[a-zA-Z_][a-zA-Z0-9_]*)$'
+# Task 245a (G25): the CLOSED set of non-literal per_env_source values — each names where H4b finds the
+# value on the run (an InterStepState output of a named handler, or an intake parameter). MUST equal
+# PerEnvSourceCatalog.cs (Sprk.Provisioning.ControlPlane.Core/Handlers/BulkAppSettings); the C# reader
+# rejects anything else at H4b, and RunContextContractTests checks the two lists match.
+$script:AllowedPerEnvSources = @(
+    'from-h2a-output:kv_vault_uri',
+    'from-h2a-output:cosmos_endpoint',
+    'from-h2a-output:uami_client_id',
+    'from-h2a-output:service_bus_fqns',
+    'from-h2a-output:redis_endpoint',
+    'from-h3-output:bff_app_client_id',
+    'from-h5-output:dataverse_env_url',
+    'from-intake-parameter:tenant_id',
+    'from-intake-parameter:container_type_id',
+    'from-intake-parameter:customer_id'
+)
 
 # ---------------------------------------------------------------------------
 # Path defaults
@@ -252,24 +274,6 @@ function Test-ManifestShape {
             throw "Secret '$canon' has invalid value_source '$($secret.value_source)'. Allowed: $($script:AllowedValueSources -join ', ')"
         }
 
-        # Conditional field: `service_ref` is REQUIRED when value_source == 'from-shared-service'.
-        # Format: '<type>:<az-resource-name>' (e.g. 'search:sprksharedprod-search',
-        # 'cognitiveservices:sprksharedprod-openai'). Consumed at run time by H4-shared
-        # (SdkSourceServiceKeyExtractor) to dispatch to the right Azure.ResourceManager SDK
-        # extractor. Absent for all other value_source values (kept as optional field).
-        if ($secret.value_source -eq 'from-shared-service') {
-            if (-not $secret.ContainsKey('service_ref')) {
-                throw "Secret '$canon' has value_source='from-shared-service' but is missing required conditional field 'service_ref'. Format: '<type>:<az-resource-name>' (e.g. 'search:sprksharedprod-search')."
-            }
-            $svcRef = [string]$secret.service_ref
-            if ([string]::IsNullOrWhiteSpace($svcRef)) {
-                throw "Secret '$canon' has value_source='from-shared-service' but 'service_ref' is empty. Format: '<type>:<az-resource-name>'."
-            }
-            if ($svcRef -notmatch '^[a-z][a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9-]*$') {
-                throw "Secret '$canon' has malformed service_ref '$svcRef'. Expected '<type>:<az-resource-name>' where type is lowercase (e.g. 'search:sprksharedprod-search')."
-            }
-        }
-
         # never_delete must be an actual bool — powershell-yaml maps `true`/`false` to [bool].
         $nd = $secret.never_delete
         if ($null -eq $nd -or ($nd -isnot [bool])) {
@@ -341,6 +345,9 @@ function Test-PerEnvSettingsShape {
         $srcRaw = [string]$entry.per_env_source
         if ($srcRaw -notmatch $script:PerEnvSourcePattern) {
             throw "per_env_settings entry '$key' has malformed per_env_source '$srcRaw'. Expected: 'literal' OR 'from-{handler}-{output|parameter}:{key}' where handler is lowercase-alphanumeric and key is identifier-shaped."
+        }
+        if ($srcRaw -ne 'literal' -and $script:AllowedPerEnvSources -cnotcontains $srcRaw) {
+            throw "per_env_settings entry '$key' has per_env_source '$srcRaw', which is not in the closed set H4b can resolve: $($script:AllowedPerEnvSources -join ', '). A new source needs a PerEnvSourceCatalog.cs entry (and its producer) first — task 245a."
         }
 
         # Conditional field: literal_value REQUIRED when per_env_source == literal.
@@ -478,6 +485,51 @@ function Test-BindingNeverDeleteInvariant {
     }
 }
 
+function Test-E3ClosedNoAppSettingsInvariant {
+    <#
+        Bucket B HIGH#5 + MED#14 invariant (customer-provisioning-orchestration-r1
+        SESSION 18, adversarial verify workflow wepdcb8we +
+        .claude/constraints/provisioning.md § KV credential lifecycle rule 1):
+
+        Any secret whose exception_note contains 'E-3 CLOSED' MUST have empty
+        app_settings. Rationale: these entries are ROLLBACK SLOTS ONLY. The KV
+        secret is retained during the auth-v4 soak window (through 2026-11-23)
+        but NO live BFF app-setting may reference it — the setting was removed
+        by E-3 closure on 2026-08-24. A future edit that puts an app_settings
+        entry back on such a secret would regenerate the Configure-AppServiceSettings
+        script pointing App Service KV-refs at a soft-deleted secret → silent 404
+        → App Service hydrates the literal @KV(...) string → confidential-client
+        init throws AADSTS7000215 per §9.1 opaque failure.
+
+        Enforcement: this function throws BEFORE any artifact is written, so a
+        regression is caught at generator time (author writes the manifest edit,
+        runs the generator, generator refuses; author must fix manifest).
+        Same shape as Test-BindingNeverDeleteInvariant + Test-DevExceptionInvariant.
+    #>
+    param([hashtable]$Data)
+
+    $violations = @()
+    foreach ($s in $Data.secrets) {
+        $canonical = [string]$s.canonical_name
+        $exceptionNote = if ($s.ContainsKey('exception_note')) { [string]$s.exception_note } else { '' }
+        $appSettings = @()
+        if ($s.ContainsKey('app_settings') -and $null -ne $s.app_settings) {
+            $appSettings = @($s.app_settings)
+        }
+
+        $isE3Closed = $exceptionNote -match 'E-3 CLOSED' -or $exceptionNote -match 'DELETED from KV 2026-08-24'
+        if ($isE3Closed -and $appSettings.Count -gt 0) {
+            $violations += "'$canonical' has exception_note marking it E-3 CLOSED (auth-v4 task 033 removed the app setting 2026-08-24) BUT app_settings=[$(($appSettings) -join ', ')] is non-empty. Re-populating app_settings on an E-3-closed secret would regenerate Configure-AppServiceSettings to hydrate App Service KV-refs pointing at a soft-deleted secret — silent 404 at boot, AADSTS7000215 at first token request. Set app_settings: [] (rollback-slot-only) and document in exception_note."
+        }
+    }
+
+    if ($violations.Count -gt 0) {
+        $header = "E-3-closed app_settings invariant violated. Generator refuses to write outputs. Bucket B HIGH#5/MED#14 SESSION 18."
+        $body   = ($violations -join "`n  - ")
+        throw "$header`n  - $body`n`nSee: .claude/constraints/provisioning.md § KV credential lifecycle rule 1 · customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we"
+    }
+}
+
 function Test-DevExceptionInvariant {
     <#
         The `spaarke-spekvcert` DO-NOT-RENAME exception per §7.9 R3 lives in
@@ -604,6 +656,35 @@ function Set-VaultSecret {
         [string]`$Description,
         [string]`$Category
     )
+    # ---------------------------------------------------------------------
+    # Bucket B HIGH#11 guard (customer-provisioning-orchestration-r1 SESSION 18,
+    # adversarial e2e verify workflow wepdcb8we) + .claude/constraints/provisioning.md
+    # § KV credential lifecycle rule 1:
+    #
+    # BindingNeverDelete secrets (BFF-API-ClientSecret, Dataverse-ClientSecret) are
+    # retained as ROLLBACK SLOTS ONLY on their canonical platform vault. This seeder
+    # MUST NEVER CREATE them anywhere. Prior to this guard, if the target vault did
+    # NOT already contain the secret, the `-SkipExisting` early-out at line 66 fell
+    # through and the placeholder Set-VaultSecret call at line 703 (from the
+    # from-existing-kv emission branch) would seed placeholder-value-source-is-existing-kv
+    # into a secret-free customer vault — a silent contract violation.
+    #
+    # The guard is written as fail-loud REFUSAL (not silent skip) so an operator
+    # running the seeder against the wrong vault gets a diagnostic pointing them
+    # at the rollback runbook, not a phantom success. Enforcement is defense-in-depth
+    # — the emission branches also skip these secrets in most modes — but a single
+    # code path centralizes the invariant.
+    # ---------------------------------------------------------------------
+    if (`$script:BindingNeverDelete -contains `$Name) {
+        `$existing = az keyvault secret show --vault-name `$VaultName --name `$Name --query 'name' --output tsv 2>`$null
+        if (-not `$existing) {
+            Write-Host "  REFUSED: `$Name (BINDING never-delete; not present in target vault '`$VaultName' — this seeder MUST NOT create it. Auth-v4 task 033 (2026-08-24) deleted both KV copies of BFF-API-ClientSecret; Dataverse-ClientSecret is retained ONLY on its canonical platform vault as rollback per auth-v4 §10. If a rollback genuinely requires re-seeding, use the auth-v4 rollback runbook — NOT this generator-emitted seeder.)" -ForegroundColor Yellow
+            return
+        }
+        Write-Host "  SKIP: `$Name (BINDING never-delete; already present in vault, live value preserved)" -ForegroundColor Gray
+        return
+    }
+
     if (`$SkipExisting) {
         `$existing = az keyvault secret show --vault-name `$VaultName --name `$Name --query 'name' --output tsv 2>`$null
         if (`$existing) {
@@ -648,8 +729,8 @@ Write-Host ''
 
         # Emit either an unconditional seed (for from-existing-kv - never
         # overwrite live value; require -SeedPlaceholders explicitly for
-        # placeholder creation), a from-shared-service handler-populated
-        # marker (NO placeholder — H4-shared owns the write), or a conditional
+        # placeholder creation), a from-topology-constants marker (NO
+        # placeholder — H4 writes it from the run parameter), or a conditional
         # placeholder seed for the other value_sources.
         if ($source -eq 'from-existing-kv') {
             [void]$sb.Append("if (`$SeedPlaceholders -and -not `$SkipExisting) {`n")
@@ -657,15 +738,19 @@ Write-Host ''
             [void]$sb.Append("} else {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-value-source-is-existing-kv' -Description '$($purpose -replace "'","''") [BINDING never-delete: skip in seed]' -Category '$category'`n")
             [void]$sb.Append("}`n")
-        } elseif ($source -eq 'from-shared-service') {
-            # Handler-populated (H4-shared): value extracted from source service at run time.
-            # The seeder deliberately does NOT write a placeholder — the value is owned by
-            # H4SharedKvSecretsPopulationHandler which extracts fresh from the source Azure
-            # service via Azure.ResourceManager SDK and writes idempotently to shared KV.
-            # A placeholder here would be overwritten anyway and would trigger BFF fail-fast
-            # if the handler run were delayed.
-            $serviceRef = if ($secret.ContainsKey('service_ref')) { [string]$secret.service_ref } else { '<unspecified>' }
-            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-shared-service; handler-populated by H4-shared at run time from source $serviceRef)' -ForegroundColor Gray`n")
+        } elseif ($source -eq 'from-topology-constants') {
+            # Topology constant (e.g. SPE-ContainerTypeId from spaarke-constants.yaml per_env_constants):
+            # written by H4 at run time from the run's non-secret parameter. No placeholder — a placeholder
+            # would be served to the BFF as a real container-type id.
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-topology-constants; written by H4 from the run parameter)' -ForegroundColor Gray`n")
+        } elseif ($source -eq 'from-intake-parameter') {
+            # Task 245a: a non-secret intake value (e.g. TenantId) written by H4 at run time. No
+            # placeholder — it would be served to the BFF as a real value.
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=from-intake-parameter; written by H4 from the intake value)' -ForegroundColor Gray`n")
+        } elseif ($source -eq 'written-by-h3') {
+            # Task 245a: committed to the vault by H3 (EntraAppReg) when it creates the BFF app
+            # registration. No placeholder — a placeholder app id would break token validation.
+            [void]$sb.Append("Write-Host '  SKIP: $canon (value_source=written-by-h3; written by H3 with the app registration)' -ForegroundColor Gray`n")
         } else {
             [void]$sb.Append("if (`$SeedPlaceholders) {`n")
             [void]$sb.Append("    Set-VaultSecret -Name '$canon' -Value 'placeholder-$($source)' -Description '$($purpose -replace "'","''")' -Category '$category'`n")
@@ -738,6 +823,14 @@ function New-ConfigureArtifact {
     # BOTH classes emit `"<key>=<value-expression>"` strings that go into the
     # SAME array so ONE batched write is preserved. Sort by app-setting key
     # ordinal for determinism.
+    #
+    # Duplicate keys (e.g. AzureAd__TenantId is both a secret's app_setting and a
+    # per_env_settings literal): `az webapp config appsettings set` keeps the LAST
+    # value, so emission order decides the winner. Sort-Object is not stable, so
+    # without a tie-break the winner flipped whenever unrelated lines were added or
+    # removed (T226 flipped TenantId to the KV reference). Seq is the insertion
+    # order — secrets' KV refs first, then per_env_settings — so the per-env value
+    # always wins, as the per_env_settings header intends.
     $settingLines = [System.Collections.Generic.List[pscustomobject]]::new()
     foreach ($secret in $Sorted) {
         $canon = [string]$secret.canonical_name
@@ -748,6 +841,7 @@ function New-ConfigureArtifact {
         foreach ($k in $appSettings) {
             [void]$settingLines.Add([pscustomobject]@{
                 Key   = $k
+                Seq   = $settingLines.Count
                 Line  = "`"$k=`$(Format-KvRef '$canon')`""
             })
         }
@@ -761,6 +855,7 @@ function New-ConfigureArtifact {
             $litEscaped = $lit -replace "'", "''"
             [void]$settingLines.Add([pscustomobject]@{
                 Key  = $key
+                Seq  = $settingLines.Count
                 Line = "`"$key=$litEscaped`""
             })
         } else {
@@ -772,11 +867,12 @@ function New-ConfigureArtifact {
             $var = $sourceToVar[$sourceKey]
             [void]$settingLines.Add([pscustomobject]@{
                 Key  = $key
+                Seq  = $settingLines.Count
                 Line = "`"$key=`$$var`""
             })
         }
     }
-    $settingLines = @($settingLines | Sort-Object -Property Key -Culture 'en-US')
+    $settingLines = @($settingLines | Sort-Object -Property Key, Seq -Culture 'en-US')
 
     $sb = [System.Text.StringBuilder]::new()
     [void]$sb.Append(@"
@@ -1062,7 +1158,7 @@ function New-BicepArtifact {
 // upstream resource modules, or existing KV resource references).
 //
 // Consumers (task 086 — IaC alignment): reference this module from
-// customer.bicep / model2-full.bicep / model1-shared.bicep instead of
+// customer.bicep (the only customer-stamp template since task 249) instead of
 // declaring KV secrets inline. This is the single canonical source.
 //
 // SKIP-IF-ABSENT semantics (G-8 Batch 1 defect #15): a secret resource is
@@ -1273,12 +1369,14 @@ try {
     $data = Read-Manifest -Path $Manifest
     Test-ManifestShape -Data $data
     Test-BindingNeverDeleteInvariant -Data $data
+    Test-E3ClosedNoAppSettingsInvariant -Data $data
     Test-DevExceptionInvariant -Data $data
     Test-PerEnvSettingsShape -Data $data
 
     $perEnvCount = if ($data.ContainsKey('per_env_settings') -and $null -ne $data.per_env_settings) { $data.per_env_settings.Count } else { 0 }
     Write-Info "  Manifest shape:    OK ($($data.secrets.Count) secrets, $perEnvCount per_env_settings)"
     Write-Info "  BINDING never-delete guard: OK ($($script:BindingNeverDelete -join ', '))"
+    Write-Info "  E-3-closed no-app-settings guard: OK"
     Write-Info "  Dev exception guard:        OK (spaarke-spekvcert)"
     Write-Info ''
 

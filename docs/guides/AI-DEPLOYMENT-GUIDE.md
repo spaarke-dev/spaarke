@@ -738,8 +738,7 @@ File → Download → Extract Text → Chunk → Generate Embeddings → Index t
 |----------|--------|---------|
 | `/api/ai/rag/index-file` | POST | Index a file (OBO) |
 | `/api/ai/rag/search` | POST | Hybrid search |
-| `/api/ai/rag/index` | POST | Index document chunks |
-| `/api/ai/rag/index/batch` | POST | Batch index chunks |
+| `/api/ai/rag/index` | POST | Index document chunks (SystemAdmin; caller's own tenant partition) |
 
 ### 8.5 Required Configuration
 
@@ -1177,11 +1176,11 @@ See [SDAP Auth Patterns - Pattern 4](../architecture/sdap-auth-patterns.md#patte
 
 #### Error: Bicep ai-search Module BCP075
 
-**Symptom**: `model2-full.bicep` (or any stack that consumes the `ai-search` module) fails to compile
+**Symptom**: `customer.bicep` (or any template that consumes the `ai-search` module) fails to compile
 
-> The original symptom also named `model1-shared.bicep`. That stack is a **retired artifact** (D-12 — the
-> "Model 1 = shared trial/SMB tier" no longer exists) and has not compiled since 2026-08-17. Do not treat a
-> failure there as this error.
+> The original symptom named `model1-shared.bicep` and `stacks/model2-full.bicep`. Both are deleted —
+> `model1-shared.bicep` by task 225a (2026-10-01, D-12 retired the shared trial/SMB tier) and
+> `model2-full.bicep` by task 249 (2026-10-02, D19: `customer.bicep` is the only customer-stamp template).
 
 **Resolution**: Change `listQueryKeys()[0].key` to `listQueryKeys().value[0].key`
 

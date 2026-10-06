@@ -4,7 +4,7 @@
     <title>Reconcile 33 PCF folders in src/client/pcf/ against 7 in-use PCFs; publish mapping note</title>
     <phase>A Doc Consolidation + Audits</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Read-only inventory/mapping audit; no code changes. Per root CLAUDE.md §8 rigor table, inventory creation is MINIMAL.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -120,7 +120,7 @@ if (-not $inventory) { $inventory = $envConfig.keyvault_inventory }
 $accountedNames = @()
 $accountedNames += $refSecretNames
 if ($inventory) {
-    foreach ($category in @('referenced', 'not_secret_but_stored_as_secret')) {
+    foreach ($category in @('referenced', 'retained_unreferenced', 'not_secret_but_stored_as_secret')) {
         if ($inventory[$category]) { $accountedNames += $inventory[$category] }
     }
     if ($inventory['duplicates']) {

@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -42,9 +43,21 @@ internal sealed record SecureRecordRoot(
     /// The columns provisioning reads in Step 1. Every name here exists on all three tables (live metadata). Pinned
     /// for the project table by <c>ProjectProvisioningSelect_NamesOnlyColumnsThatExistOnTheTable</c>.
     /// </summary>
+    /// <remarks>
+    /// Task 133 added <c>_owninguser_value</c> (with <c>_owningteam_value</c>, the owner a failed provisioning moves the
+    /// record back to) and <c>_createdby_value</c> (the person a resumed provisioning shares to when it is a usable person;
+    /// otherwise <see cref="CreatorPersonSelect"/>'s column).
+    /// </remarks>
     public string ProvisioningSelect =>
         $"{IdColumn},{NameColumn},sprk_issecure,sprk_containerid," +
-        "_sprk_securitybu_value,_owningteam_value,_owningbusinessunit_value";
+        "_sprk_securitybu_value,_owningteam_value,_owninguser_value,_owningbusinessunit_value,_createdby_value";
+
+    /// <summary>
+    /// The resume's read of the server-stamped creator person (task 133, owner round 7 item 2) — deliberately NOT part of
+    /// <see cref="ProvisioningSelect"/>: the column is created by <c>scripts/Set-RecordCreatorPersonSchema.ps1</c>, and a
+    /// Step-1 select naming it would 400 every provisioning in an environment where that script has not run yet.
+    /// </summary>
+    public string CreatorPersonSelect => $"{IdColumn},{RecordCreatorPerson.ValueColumn}";
 
     /// <summary>The SPE container display name for a record of this type.</summary>
     public string ContainerDisplayName(string recordName) => $"Secure {DisplayLabel} — {recordName}";
@@ -57,6 +70,12 @@ internal sealed record SecureRecordRoot(
     public static readonly SecureRecordRoot Matter = new(ExternalGrantRootType.Matter, "sprk_mattername", "Matter");
     public static readonly SecureRecordRoot WorkAssignment =
         new(ExternalGrantRootType.WorkAssignment, "sprk_name", "Work Assignment");
+
+    /// <summary>
+    /// The three roots, in a fixed order (task 133: a container already recorded on one is checked against all three
+    /// before provisioning keeps it).
+    /// </summary>
+    public static readonly IReadOnlyList<SecureRecordRoot> All = new[] { Project, Matter, WorkAssignment };
 
     /// <summary>The descriptor for a root type. Exhaustive; an unknown type throws rather than guessing.</summary>
     public static SecureRecordRoot For(ExternalGrantRootType type) => type switch
@@ -85,3 +104,4 @@ internal sealed record SecureRecordRoot(
             RecordType: recordType,
             RecordId: recordId));
 }
+

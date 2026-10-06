@@ -455,6 +455,79 @@ public class CommunicationThreadReadServiceTests
         (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(403);
     }
 
+    // ─────────────── task 161: communication visibility for the per-record route gate ───────────────
+
+    [Fact]
+    public async Task ReadVisibleCommunicationAsync_RowTheCallerCanRead_IsReturnedWithTheRequestedColumns()
+    {
+        var communicationId = Guid.NewGuid();
+        var matterId = Guid.NewGuid();
+        string? capturedQuery = null;
+        var row = MessageRow(communicationId);
+        row["_sprk_regardingmatter_value"] = El(matterId.ToString());
+        _query.Setup(q => q.QueryAsync(CommunicationSet, It.IsAny<string>(), CallerSystemUserId, It.IsAny<CancellationToken>()))
+              .Callback<string, string?, Guid, CancellationToken>((_, odata, _, _) => capturedQuery = odata)
+              .ReturnsAsync(new[] { row });
+
+        var visible = await Sut().ReadVisibleCommunicationAsync(
+            communicationId, Caller(), new[] { "_sprk_regardingmatter_value" }, CancellationToken.None);
+
+        visible.Should().NotBeNull();
+        visible!["_sprk_regardingmatter_value"].GetString().Should().Be(matterId.ToString());
+        // ONE impersonated top-1 read by id, selecting the columns the access filter reads plus the requested ones.
+        capturedQuery.Should().Be(
+            "$select=sprk_communicationid,sprk_isinternalonly,sprk_privilegeclassification,_sprk_regardingmatter_value"
+            + $"&$filter=sprk_communicationid eq {communicationId}&$top=1");
+    }
+
+    [Fact]
+    public async Task ReadVisibleCommunicationAsync_NoImpersonatedRow_IsNotVisible()
+    {
+        // Absent and unreadable are the same answer: the impersonated read returns nothing for both.
+        SetupMessages();
+
+        var visible = await Sut().ReadVisibleCommunicationAsync(Guid.NewGuid(), Caller(), null, CancellationToken.None);
+
+        visible.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadVisibleCommunicationAsync_InternalOnlyRowForAnExternalCaller_IsNotVisible()
+    {
+        // The impersonated read alone would return it; the shared access filter hides it — the rule
+        // CanCallerSeeMessageAsync does not apply and this method exists to apply.
+        var communicationId = Guid.NewGuid();
+        SetupMessages(MessageRow(communicationId, internalOnly: true));
+        var sut = Sut();
+        _identity
+            .Setup(i => i.IsExternalAsync(CallerSystemUserId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        var visible = await sut.ReadVisibleCommunicationAsync(communicationId, Caller(), null, CancellationToken.None);
+
+        visible.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReadVisibleCommunicationAsync_UnresolvedCaller_ThrowsForbiddenWithoutQuerying()
+    {
+        _resolver
+            .Setup(r => r.ResolveAsync(It.IsAny<ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CallerSystemUserResolution.Unresolved("no-oid-claim"));
+
+        var sut = new CommunicationThreadReadService(
+            _query.Object,
+            new CommunicationAccessFilter(Mock.Of<ILogger<CommunicationAccessFilter>>()),
+            _resolver.Object,
+            _identity.Object,
+            Mock.Of<ILogger<CommunicationThreadReadService>>());
+
+        var act = () => sut.ReadVisibleCommunicationAsync(Guid.NewGuid(), Caller(), null, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<SdapProblemException>()).Which.StatusCode.Should().Be(403);
+        _query.VerifyNoOtherCalls();
+    }
+
     // ─────────────────────────── row builders (OData JSON shape) ───────────────────────────
 
     private static Dictionary<string, JsonElement> MessageRow(

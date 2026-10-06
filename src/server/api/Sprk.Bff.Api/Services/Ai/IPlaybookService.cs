@@ -70,7 +70,12 @@ public interface IPlaybookService
     /// <summary>
     /// List playbooks for a user (owned playbooks).
     /// </summary>
-    /// <param name="userId">User ID to filter by owner.</param>
+    /// <param name="userId">
+    /// The owner to filter by: the caller's Dataverse <c>systemuserid</c>, compared with <c>_ownerid_value</c>.
+    /// NOT the Entra <c>oid</c> — the two are different GUID spaces, and passing the oid matched nothing
+    /// (owner round 12 item 6, unified-access-control-r2 task 164). Callers resolve it with
+    /// <c>PlaybookAuthorizationFilter.ResolveCallerSystemUserIdAsync</c>.
+    /// </param>
     /// <param name="query">Query parameters for filtering and pagination.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Paginated list of playbook summaries.</returns>

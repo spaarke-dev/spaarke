@@ -151,6 +151,7 @@ public sealed class ComposeAuthoredWarningSuppressionTests : IClassFixture<Compo
             {
                 var entity = new Entity("sprk_document", documentRecordId);
                 entity["sprk_composeorigin"] = new OptionSetValue((int)persistedOrigin);
+                entity["sprk_graphitemid"] = speId; // task 166 r1: the document's OWN row
                 return entity;
             });
 

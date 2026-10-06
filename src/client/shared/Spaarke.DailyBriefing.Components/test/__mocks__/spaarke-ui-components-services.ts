@@ -38,3 +38,6 @@ export function extractEmailKey(name: string): string | null {
   const candidate = match[1].trim().toLowerCase();
   return candidate.includes('@') ? candidate : null;
 }
+
+// UAC-r2 task 147 r1: useInlineTodoCreate's DEFAULT creator posts the To Do to the BFF through this function.
+export const createChildRecordViaBff: jest.Mock = jest.fn(() => Promise.resolve('bff-todo-1'));

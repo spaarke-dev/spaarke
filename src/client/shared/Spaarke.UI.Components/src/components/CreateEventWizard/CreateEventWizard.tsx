@@ -45,6 +45,7 @@ import { EMPTY_EVENT_FORM } from './formTypes';
 import type { ICreateEventFormState } from './formTypes';
 
 import { EntityCreationService } from '../../services/EntityCreationService';
+import type { IDocumentLinkResult, ISpeFileMetadata } from '../../services/EntityCreationService';
 import type { IDataService, INavigationService } from '../../types/serviceInterfaces';
 import {
   searchContactsAsLookup,
@@ -58,6 +59,31 @@ import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for unit testing — see __tests__/CreateEventWizard.associateToStep.test.ts)
 // ---------------------------------------------------------------------------
+
+/**
+ * The navigation property of `sprk_document`'s lookup to the event a file was uploaded for: column `sprk_relatedevent`,
+ * navigation property `sprk_RelatedEvent` (live metadata; `Spaarke.Dataverse.DocumentLinkFields`). There is NO
+ * `sprk_event` column on `sprk_document` — the old `sprk_Event@odata.bind` failed every event-filed document save
+ * (unified-access-control-r2 round 34 item 6; fixed by task 147 r1c, which moved this writer onto the BFF).
+ */
+export const EVENT_DOCUMENT_NAV_PROP = 'sprk_RelatedEvent';
+
+/**
+ * Creates the `sprk_document` row of each file uploaded for a new event, filed under the event through
+ * {@link EVENT_DOCUMENT_NAV_PROP}. The rows are created through the BFF (`POST /api/v1/child-records/sprk_document`,
+ * task 147) by {@link EntityCreationService.createDocumentRecords}; a refusal is a per-file warning.
+ */
+export function createEventDocumentRecords(
+  entityService: Pick<EntityCreationService, 'createDocumentRecords'>,
+  eventId: string,
+  eventName: string,
+  uploadedFiles: ISpeFileMetadata[]
+): Promise<IDocumentLinkResult> {
+  return entityService.createDocumentRecords('sprk_events', eventId, EVENT_DOCUMENT_NAV_PROP, uploadedFiles, {
+    // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
+    parentRecordName: eventName,
+  });
+}
 
 /**
  * Determines the `associateToStep` config for CreateEventWizard.
@@ -411,15 +437,13 @@ const CreateEventWizard: React.FC<ICreateEventWizardProps> = ({
             }
 
             if (uploadResult.uploadedFiles.length > 0) {
-              const docResult = await entityService.createDocumentRecords(
-                'sprk_events',
+              // UAC-r2 task 147 r1c (round 34 item 6): filed through `sprk_RelatedEvent` — `sprk_document` has NO
+              // `sprk_event` column; the old `sprk_Event` bind failed every event-filed document save.
+              const docResult = await createEventDocumentRecords(
+                entityService,
                 eventId,
-                'sprk_Event',
-                uploadResult.uploadedFiles,
-                {
-                  // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
-                  parentRecordName: eventName,
-                }
+                eventName,
+                uploadResult.uploadedFiles
               );
 
               if (docResult.warnings.length > 0) {

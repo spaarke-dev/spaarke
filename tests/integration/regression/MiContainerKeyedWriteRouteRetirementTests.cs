@@ -66,9 +66,13 @@ namespace Sprk.Bff.Api.Tests;
 /// assertion here is <see cref="RetiredMiWriteRoutes_AreAbsentFromTheEndpointTable"/>, which
 /// enumerates <c>EndpointDataSource</c> and proves no handler exists to reach the write at all —
 /// unfakeable by any fixture or status-code mapping. The HTTP assertions add the behavioural half:
-/// 404 without a bearer proves absence rather than rejection (ASP.NET Core routes BEFORE it
-/// authorizes, so a route that EXISTS and carries RequireAuthorization answers 401, not 404), and 404
-/// WITH a bearer proves the 404 is not itself an authentication artifact.</para>
+/// 404 WITH a bearer proves there is no handler for a signed-in caller to reach. (Until unified-access-control-r2
+/// task 167 f1 they also asserted 404 WITHOUT a bearer — ASP.NET Core routes before it authorizes, so an
+/// absent route answered an anonymous caller 404 and a present one 401. Owner round 14 item 2 gave the BFF an
+/// authorization FallbackPolicy (an authenticated user), which also challenges a request that matches NO
+/// endpoint, so an anonymous caller now gets 401 from an absent route too. Those assertions were removed rather
+/// than flipped: a 401 no longer distinguishes absent from present. The fallback itself is proven by
+/// <c>tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs</c>.)</para>
 /// </summary>
 [Trait("status", "repaired")]
 public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWebAppFactory>
@@ -90,10 +94,6 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
     {
         _factory = factory;
     }
-
-    // Deliberately NO Authorization header: routing precedes authorization, so an absent route
-    // answers 404 while a present one answers 401. See the class summary.
-    private HttpClient CreateAnonymousClient() => _factory.CreateClient();
 
     private HttpClient CreateAuthenticatedClient()
     {
@@ -160,23 +160,9 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
     }
 
     // =============================================================================================
-    // BEHAVIOURAL HALF — absence over HTTP, unauthenticated and authenticated
+    // BEHAVIOURAL HALF — absence over HTTP, for a signed-in caller (an anonymous caller now meets the
+    // authorization FallbackPolicy's 401 on an absent route too — see the class summary)
     // =============================================================================================
-
-    [Fact]
-    public async Task RetiredMiSmallFileUploadRoute_WithoutBearer_Returns404NotRouted()
-    {
-        using var content = new ByteArrayContent(new byte[] { 1, 2, 3 });
-
-        var response = await CreateAnonymousClient()
-            .PutAsync("/api/containers/test-container/files/f.txt", content);
-
-        response.StatusCode.Should().Be(
-            HttpStatusCode.NotFound,
-            "PUT /api/containers/{containerId}/files/{*path} was retired by task 073 — it wrote the "
-            + "request body into a caller-named drive as the managed identity. A 401 here means the "
-            + "route was re-added.");
-    }
 
     [Fact]
     public async Task RetiredMiSmallFileUploadRoute_WithValidBearer_Returns404AndNeverReachesTheWrite()
@@ -240,29 +226,16 @@ public class MiContainerKeyedWriteRouteRetirementTests : IClassFixture<CustomWeb
     /// Without these controls, a fixture change that made every request 404 would silently turn every
     /// absence assertion above into a vacuous pass.
     ///
-    /// RE-POINTED 2026-09-03 (task 076). Both controls in this section used to name
+    /// RE-POINTED 2026-09-03 (task 076). The controls in this section used to name
     /// <c>PUT /api/obo/containers/{id}/files/{*path}</c> — described here as "the OBO twin the live
     /// upload flows actually call (11 wizard call sites)". That route is now DELETED: every one of
     /// those call sites moved onto contracts that name no container, and the route went with the last
-    /// of them. A positive control MUST name a route that survives, so both now name
+    /// of them. A positive control MUST name a route that survives, so it now names
     /// <c>PUT /api/obo/me/files/{*path}</c> — the record-LESS replacement, which is mapped, carries
-    /// <c>RequireAuthorization()</c>, and accepts no container parameter.
+    /// <c>RequireAuthorization()</c>, and accepts no container parameter. (Its anonymous twin, which asserted
+    /// 401, was removed in task 167 f1: since the FallbackPolicy an absent route answers an anonymous caller 401
+    /// as well, so a 401 no longer proves the route is present.)
     /// </summary>
-    [Fact]
-    public async Task SurvivingOboUploadRoute_WithoutBearer_Returns401NotFound()
-    {
-        using var content = new ByteArrayContent(new byte[] { 1, 2, 3 });
-
-        var response = await CreateAnonymousClient()
-            .PutAsync("/api/obo/me/files/f.txt", content);
-
-        response.StatusCode.Should().Be(
-            HttpStatusCode.Unauthorized,
-            "PUT /api/obo/me/files/{*path} is mapped and requires authorization. If this returns 404 "
-            + "the route was removed — AND every absence assertion in this file has become vacuous, "
-            + "because a fixture that 404s everything would look identical.");
-    }
-
     [Fact]
     public async Task SurvivingOboUploadRoute_WithValidBearer_IsRoutedAndNot404()
     {

@@ -87,7 +87,7 @@ var fileStream = await _speFileStore.DownloadFileAsUserAsync(
 | `MaxOutputTokens` | int | `1000` | Max tokens in summary (100-4000) |
 | `Temperature` | float | `0.3` | Generation temperature (0.0-1.0) |
 | `DocIntelEndpoint` | string? | null | Document Intelligence endpoint |
-| `DocIntelKey` | string? | null | Document Intelligence key |
+| `DocIntelKey` | string? | null | Document Intelligence key — optional; when null the BFF authenticates with its managed identity (needs a custom subdomain on the account) |
 | `MaxFileSizeBytes` | int | `10MB` | Max file size |
 | `MaxInputTokens` | int | `100000` | Max input tokens |
 | `MaxConcurrentStreams` | int | `3` | Max concurrent SSE per user |
@@ -98,9 +98,6 @@ var fileStream = await _speFileStore.DownloadFileAsUserAsync(
 |----------|------|---------|-------------|
 | `MaxChatHistoryMessages` | int | `20` | Max chat messages to include in continuation context |
 | `MaxDocumentContextLength` | int | `100000` | Max characters of document text in continuation prompts (1000-200000) |
-| `EnableDocxExport` | bool | `true` | Enable DOCX export format |
-| `EnablePdfExport` | bool | `true` | Enable PDF export format |
-| `EnableEmailExport` | bool | `true` | Enable email export via Graph |
 | `ExportBranding.CompanyName` | string | `"Spaarke AI"` | Branding in export footers |
 | `ExportBranding.LogoUrl` | string? | null | Logo URL for PDF exports |
 
@@ -337,68 +334,13 @@ Enqueue multiple documents (max 10) for background summarization.
 
 ---
 
-### POST /api/ai/analysis/{analysisId}/export
+### POST /api/ai/analysis/{analysisId}/export — DELETED
 
-Export analysis results to various formats.
-
-**Authentication:** Bearer token (Azure AD)
-
-**Rate Limit:** 10 requests/minute per user
-
-**Request Headers:**
-```
-Content-Type: application/json
-Authorization: Bearer {token}
-```
-
-**Request Body:**
-```json
-{
-  "format": "docx",
-  "emailTo": ["user@example.com"],
-  "includeEntities": true,
-  "includeClauses": true,
-  "includeSummary": true
-}
-```
-
-**Supported Formats:**
-
-| Format | Description | Response |
-|--------|-------------|----------|
-| `docx` | Microsoft Word document | File download (binary) |
-| `pdf` | PDF document | File download (binary) |
-| `email` | Send via Microsoft Graph | Action confirmation (JSON) |
-| `teams` | Post adaptive card to Teams channel | Action confirmation (JSON) |
-
-**DOCX/PDF Response:** `200 OK`
-```
-Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document
-Content-Disposition: attachment; filename="Analysis_Report_2025-12-30.docx"
-[Binary file content]
-```
-
-**Email Response:** `200 OK`
-```json
-{
-  "success": true,
-  "format": "email",
-  "metadata": {
-    "Recipients": ["user@example.com"],
-    "Subject": "Analysis: Contract Review",
-    "SentAt": "2025-12-30T10:15:00Z"
-  }
-}
-```
-
-**Error Responses:**
-
-| Code | Cause | Resolution |
-|------|-------|------------|
-| `400` | Invalid format or missing required fields | Check request body |
-| `403` | Export format disabled | Enable in configuration |
-| `404` | Analysis not found | Verify analysisId |
-| `422` | Validation failed (e.g., invalid email) | Fix validation errors |
+Deleted 2026-10-03 by unified-access-control-r2 task 162 (owner round 10 item 1): the route had no caller in the
+repo and was not in any published API description, and it authorized nothing about the analysis it exported
+(route authorization sweep 2026-10-02, finding #1). `POST /api/ai/analysis/{analysisId}/save` and
+`POST /api/ai/analysis/fork` were deleted with it, together with the PDF and Email export services and the
+`Analysis:Enable*Export` options only it used. Word export of a chat remains `POST /api/ai/chat/export/word`.
 
 ---
 

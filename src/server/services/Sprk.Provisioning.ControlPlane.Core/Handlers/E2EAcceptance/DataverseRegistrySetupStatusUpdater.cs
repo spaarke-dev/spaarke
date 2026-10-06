@@ -44,14 +44,24 @@
 //                                             non-GUID at UpdateSetupStatusAsync.
 //
 // CALLER CONTRACT (H13):
-//   - The updater is invoked from H13's step (10) after every trap / invariant
-//     / naming / cost / validation check has reported Passed. This impl trusts
-//     that aggregation — it does NOT independently re-verify probes (would
-//     duplicate H13 logic + create dual-source-of-truth risk).
-//   - H13's step (10) catches any exception this method throws and classifies
-//     as Resumable (H13Rejections.RegistryUpdateFailed); this impl therefore
-//     surfaces infra faults by mapping the wire client's typed outcomes to
-//     the domain-level IRegistrySetupStatusUpdater outcomes (no exception
+//   - The updater is invoked from H13's step (11) AFTER Cosmos-Completed has
+//     already landed (MED#10 SESSION-19 Cosmos-first ordering, customer-
+//     provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we).
+//     Prior to MED#10 this ran at step (10) BEFORE the Cosmos write, which
+//     produced a documented split-brain window on ReplaceRunAsync Conflict.
+//     Post-MED#10, this write is BEST-EFFORT — a failure here is caught by
+//     H13 and logged as a REGISTRY-STALE warning; the run IS complete (Cosmos
+//     is authoritative) and the operator SKILL Step 6a
+//     (.claude/skills/provision-environment/SKILL.md) picks up the residual
+//     PATCH via re-verify + apply-drift-fix.
+//   - The updater STILL performs full aggregation trust — every trap /
+//     invariant / naming / cost / validation check has reported Passed BEFORE
+//     H13 reaches this call. This impl does NOT independently re-verify probes
+//     (would duplicate H13 logic + create dual-source-of-truth risk).
+//   - H13 catches any exception this method throws and logs a REGISTRY-STALE
+//     warning instead of failing the run (MED#10 Cosmos-first). This impl
+//     still surfaces infra faults by mapping the wire client's typed outcomes
+//     to the domain-level IRegistrySetupStatusUpdater outcomes (no exception
 //     bubbling for Web API domain errors — those are Failure).
 //
 // COMPANION UPDATE (spec.md FR-23):
@@ -137,19 +147,45 @@ public sealed class DataverseRegistrySetupStatusUpdater : IRegistrySetupStatusUp
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RunId);
 
-        // Companion update (spec.md FR-23): clear sprk_currentrunid in the
-        // SAME transaction as the Ready write. Prevents a partial-success
-        // window where status is Ready but the guard still points at a
-        // completed run (which would block the customer's next run per I5).
+        // Bucket B HIGH#7 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): PRIOR behavior set
+        // ClearCurrentRunId=true so the same PATCH that flipped setupstatus=Ready
+        // also nulled sprk_currentrunid. That was structurally unsafe — the
+        // PATCH runs without an If-Match / compare-and-swap guard, while every
+        // OTHER writer of sprk_currentrunid (CustomerRunGuard.ReleaseAsync,
+        // QuarantineClearService.ClearAsync via COMP-06) uses the stale-value-
+        // safe LookupAsync → runId-equality → TryClearAsync-with-ETag primitive.
+        // Two writers with different safety models on the same column is exactly
+        // the concurrency skew that produces silent-fail bugs in production
+        // (e.g. an operator manual PATCH between H13's read and write would be
+        // clobbered).
+        //
+        // Fix: HIGH#7 flips ClearCurrentRunId=false here. The guard release now
+        // fires from ONE authoritative path — Bucket B HIGH#6's explicit
+        // ICustomerRunGuard.ReleaseAsync call in HandlerOutcomeApplier's
+        // Success-with-RunStatus.Completed branch. That call is ETag-safe and
+        // stale-value-safe (Mismatched = no-op). This PATCH now touches ONLY
+        // sprk_setupstatus, restoring the single-writer invariant on
+        // sprk_currentrunid.
+        //
+        // Concurrency: yes, briefly the row is Ready but sprk_currentrunid still
+        // holds this runId — a millisecond-scale window between this PATCH and
+        // HandlerOutcomeApplier's Release. A concurrent /api/runs POST during
+        // that window sees the guard held and gets a 409 (correct: the release
+        // has not yet fired, so the run is technically still "in flight" from
+        // the guard's perspective). This is preferable to the prior unconditional
+        // clobber which could silently release a guard a different run legitimately
+        // holds.
         var update = new RegistrySetupStatusUpdate(
             EnvironmentId: request.EnvironmentId,
             SetupStatus: ReadyDisplayName,
-            ClearCurrentRunId: true,
+            ClearCurrentRunId: false,
             CustomerIdForLog: request.CustomerId,
             RunIdForLog: request.RunId);
 
         _logger.LogInformation(
-            "DataverseRegistrySetupStatusUpdater PATCHing sprk_setupstatus=Ready + clearing sprk_currentrunid. " +
+            "DataverseRegistrySetupStatusUpdater PATCHing sprk_setupstatus=Ready (sprk_currentrunid release " +
+            "routed via ICustomerRunGuard.ReleaseAsync per Bucket B HIGH#6/#7 SESSION 18). " +
             "customerId={CustomerId} runId={RunId} environmentId={EnvironmentId}.",
             request.CustomerId, request.RunId, request.EnvironmentId);
 

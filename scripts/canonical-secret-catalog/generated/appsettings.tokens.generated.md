@@ -21,16 +21,13 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 
 | Canonical Name | Category | Rotation | Never-Delete | Value Source |
 |---|---|---|:---:|---|
-| `AiSearch--AdminKey` | ai | 90-days | - | from-shared-service |
 | `AiSearch-Endpoint` | ai | N/A | - | from-bicep-output |
 | `AppInsights-ConnectionString` | monitoring | on-instrumentation-key-rotation | - | from-bicep-output |
-| `AzureOpenAI-ApiKey` | ai | 90-days | - | from-shared-service |
 | `AzureOpenAI-Endpoint` | ai | N/A | - | from-bicep-output |
-| `BFF-API-Audience` | identity | N/A | - | from-run-parameter |
-| `BFF-API-ClientId` | identity | N/A | - | from-run-parameter |
+| `BFF-API-Audience` | identity | N/A | - | written-by-h3 |
+| `BFF-API-ClientId` | identity | N/A | - | written-by-h3 |
 | `BFF-API-ClientSecret` | auth | 90-days | YES | from-existing-kv |
-| `BingSearch-ApiKey` | ai | 90-days | - | from-run-parameter |
-| `Communication-DefaultMailbox` | communication | N/A | - | from-run-parameter |
+| `Communication-DefaultMailbox` | communication | N/A | - | from-intake-parameter |
 | `Communication-Webhook-SigningKey` | communication | 90-days-or-on-incident | - | generated |
 | `Communication-WebhookClientState` | communication | 90-days | - | generated |
 | `Communication-WebhookUrl` | communication | N/A | - | from-bicep-output |
@@ -38,43 +35,15 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 | `Compose-Webhook-SigningKey` | compose | 90-days-or-on-incident | - | generated |
 | `ContentSafety-ApiKey` | ai | 90-days | - | from-run-parameter |
 | `Dataverse-ClientSecret` | auth | manual-on-incident | YES | from-existing-kv |
-| `Dataverse-ServiceUrl` | dataverse | N/A | - | from-run-parameter |
-| `DocumentIntelligence-ApiKey` | ai | 90-days | - | from-shared-service |
 | `DocumentIntelligence-Endpoint` | ai | N/A | - | from-bicep-output |
 | `Email-WebhookSecret` | email | manual-on-incident | - | generated |
 | `Email-WebhookSigningKey` | email | 90-days-or-on-incident | - | generated |
-| `LlamaParse-ApiKey` | ai | 90-days | - | from-run-parameter |
-| `PromptFlow-Endpoint` | ai | N/A | - | from-run-parameter |
-| `PromptFlow-Key` | ai | 90-days | - | from-run-parameter |
-| `Redis-ConnectionString` | data-services | 90-days | - | from-shared-service |
-| `ServiceBus-ConnectionString` | data-services | 90-days | - | from-shared-service |
 | `SPE-CommunicationArchiveContainerId` | spe | N/A | - | from-bicep-output |
-| `SPE-ContainerTypeId` | spe | N/A | - | from-bicep-output |
+| `SPE-ContainerTypeId` | spe | N/A | - | from-topology-constants |
 | `SPE-DefaultContainerId` | spe | N/A | - | from-bicep-output |
-| `Storage-ConnectionString` | data-services | 90-days | - | from-shared-service |
-| `TenantId` | identity | N/A | - | from-run-parameter |
+| `TenantId` | identity | N/A | - | from-intake-parameter |
 
 ## Per-secret detail
-
-### `AiSearch--AdminKey`
-
-- **Category**: ai
-- **Purpose**: Azure AI Search admin API key. Canonical per spec FR-21 (double-hyphen mirrors AiSearch:AdminKey config nesting; §7.9 R2 replacement for the three drift casings).
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-shared-service
-- **Tags**: ai, alias-collapse-target, key
-- **Exception note**: Alias-collapse target (task 085): three legacy aliases across three casings coexist in live dev today. BINDING pre-check per §7.9 R4: before deleting either alias, pre-check LIVE App Service settings + KV secrets list + Dataverse-persisted `sprk_aiknowledgedeployment` config for runtime references (see workstreams/config-deployment §4).
-- **Consumers**:
-  - BFF: AiSearch:ApiKeySecretName / DocumentIntelligence:AiSearchKey
-  - scripts/ai-search/Deploy-AllIndexes.ps1
-- **App-setting keys**:
-  - `AiSearch__ApiKeySecretName`
-  - `DocumentIntelligence__AiSearchKey`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `ai-search-key`
-  - `aisearch-admin-key`
-  - `AzureAISearchApiKey`
 
 ### `AiSearch-Endpoint`
 
@@ -107,24 +76,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
   - `ApplicationInsights__ConnectionString`
   - `APPLICATIONINSIGHTS_CONNECTION_STRING`
 
-### `AzureOpenAI-ApiKey`
-
-- **Category**: ai
-- **Purpose**: Azure OpenAI API key. E-2 fallback per ADR-028: BFF authenticates via ApiKeyCredential when this KV ref is present, otherwise falls back to DefaultAzureCredential (MI). Kept structurally so H4 covers upgrade paths where MI OpenAI auth on kind=AIServices is unavailable.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-shared-service
-- **Tags**: adr-028-exception, ai, key
-- **Exception note**: Per ADR-028 E-2: this KV ref MAY be absent in environments where MI auth on kind=AIServices is reliable. Restore to MI by clearing the AzureOpenAI__ApiKey app setting.
-- **Consumers**:
-  - BFF: AzureOpenAI:ApiKey / DocumentIntelligence:OpenAiKey
-- **App-setting keys**:
-  - `AzureOpenAI__ApiKey`
-  - `DocumentIntelligence__OpenAiKey`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `ai-openai-key`
-  - `openai-api-key`
-
 ### `AzureOpenAI-Endpoint`
 
 - **Category**: ai
@@ -147,9 +98,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: BFF API audience URI (api://{clientId}).
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: written-by-h3
 - **Tags**: bff, identity, public
-- **Exception note**: Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129, owner E3 confirmation) from from-bicep-output to from-run-parameter. H3 (task 130) is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and writes Audience to RunParameters.Secrets. The DAG runs H3 before H4, so H4 resolves this value from RunParameters, not from a Bicep deployment output.
+- **Exception note**: H3 is the value producer -- it commits Audience (api://{appId}) to the customer vault itself. value_source written-by-h3 since task 245a (2026-10-01): H4 skips it (see BFF-API-ClientId for why the previous from-run-parameter classification deadlocked).
 - **Consumers**:
   - BFF: AzureAd:Audience
 - **App-setting keys**:
@@ -161,9 +112,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: BFF API Entra ID app-registration client ID. Non-secret but stored in KV for reference-parity with ClientSecret.
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: written-by-h3
 - **Tags**: bff, identity, public
-- **Exception note**: Reclassified 2026-08-19 (customer-provisioning-orchestration-r1 task 129, owner E3 confirmation) from from-bicep-output to from-run-parameter. H3 (task 130) is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME (a C# handler, not a Bicep ARM resource) and writes ClientId to RunParameters.Secrets. The DAG runs H3 before H4, so H4 resolves this value from RunParameters, not from a Bicep deployment output.
+- **Exception note**: H3 is the value producer -- it creates the per-customer BFF Entra app-registration at RUNTIME and commits ClientId to the customer vault itself. value_source written-by-h3 since task 245a (2026-10-01): H4 skips it. Task 129 had made it from-run-parameter on the belief that the DAG runs H3 before H4; it runs H4 first (H3 needs H4's vault RBAC bootstrap), so H4 waited for a reference only H3 could supply -- a deadlock.
 - **Consumers**:
   - BFF: API_APP_ID / AzureAd:ClientId / Graph:ClientId / Dataverse:ClientId / AgentToken:ClientId
 - **App-setting keys**:
@@ -181,27 +132,11 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Never-delete (BINDING)**: YES (BINDING)
 - **Value source**: from-existing-kv
 - **Tags**: auth, bff, binding-never-delete
-- **Exception note**: Grandfathered PascalCase per §7.9 R2. Never gain a second casing (e.g. bff-api-client-secret would be drift — rotation would break one of the two paths).
+- **Exception note**: DELETED from KV 2026-08-24 (auth-v4 task 033, ADR-028 E-3 CLOSED). Entry retained to BLOCK re-creation — H4 omits in secret-free envs; never seed a sentinel value (§9.1 opaque AADSTS7000215 — the ordered selector cannot distinguish a sentinel from a real secret). Soft-deleted copies (BFF-API-ClientSecret + bff-api-client-secret) recoverable to 2026-11-22 — DO-NOT-PURGE before then. Grandfathered PascalCase per §7.9 R2 (never gain a second casing). Bucket B HIGH#5 SESSION 18 (customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we): app_settings EMPTIED — this KV secret is a HARD BLOCK entry only; no live BFF app-setting may reference it. Prior list [AzureAd__ClientSecret, Graph__ClientSecret] caused the generated Configure-AppServiceSettings script to re-introduce E-3-removed settings pointing at a soft-deleted KV secret (silent 404 → App Service hydrates literal @KV(...) string → confidential-client init throws AADSTS7000215 per §9.1). Enforced by Test-CatalogInvariants.ps1 (§rule: any secret whose exception_note contains 'E-3 CLOSED' MUST have app_settings: []).
 - **Consumers**:
   - BFF: AzureAd:ClientSecret (backing)
   - BFF: Graph:ClientSecret (local-dev fallback per ADR-028)
   - BFF: OBO ConfidentialClientApplication
-- **App-setting keys**:
-  - `AzureAd__ClientSecret`
-  - `Graph__ClientSecret`
-
-### `BingSearch-ApiKey`
-
-- **Category**: ai
-- **Purpose**: Bing Search v7 API key.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: ai, key
-- **Consumers**:
-  - BFF: BingSearch:ApiKey
-- **App-setting keys**:
-  - `BingSearch__ApiKey`
 
 ### `Communication-DefaultMailbox`
 
@@ -209,8 +144,9 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Purpose**: Default mailbox address for Communication module (outbound + Approved-Senders default).
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-intake-parameter
 - **Tags**: communication, public
+- **Exception note**: value_source from-intake-parameter since task 245c (2026-10-01): H4 writes the intake communicationDefaultMailbox (POST /api/runs, required). It was from-run-parameter — a KV reference in RunParameters.Secrets that nothing ever supplied.
 - **Consumers**:
   - BFF: Communication:DefaultMailbox / Communication:ApprovedSenders[0]:Email
 - **App-setting keys**:
@@ -310,49 +246,12 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Never-delete (BINDING)**: YES (BINDING)
 - **Value source**: from-existing-kv
 - **Tags**: auth, binding-never-delete, dataverse
-- **Exception note**: Grandfathered PascalCase per §7.9 R2 (never gain a second casing). DO-NOT-RENAME + DO-NOT-DELETE until #3b credential migration retires it.
+- **Exception note**: Rollback-window hold per §6.5 resolution 2026-08-25 (sunset 2026-11-23); retirement owned by auth-v4 runbook (obligation 051-E). E-3 closure removed the Dataverse__ClientSecret app setting 2026-08-24; the KV secret is retained solely as auth-v4's rollback copy through the soak window. Grandfathered PascalCase per §7.9 R2 (never gain a second casing). DO-NOT-DELETE before sunset; retirement follows auth-v4 runbook. Bucket B HIGH#5 + MED#14 SESSION 18 (customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we): app_settings EMPTIED — the KV secret is a rollback slot ONLY, no live BFF app-setting may reference it. Prior list [Dataverse__ClientSecret, AzureAd__ClientSecret, AgentToken__ClientSecret] was the source of the E-3-removed settings resurrection in the generated Configure-AppServiceSettings script. Enforced by Test-CatalogInvariants.ps1 (§rule: any secret whose exception_note contains 'E-3 CLOSED' or '§10 rollback' MUST have app_settings: []).
 - **Consumers**:
   - BFF: AgentToken:ClientSecret
   - BFF: AzureAd:ClientSecret
   - BFF: Dataverse:ClientSecret
   - L2 control-plane: dataverseClientSecretName (controlplane-app-service.bicep)
-- **App-setting keys**:
-  - `AgentToken__ClientSecret`
-  - `AzureAd__ClientSecret`
-  - `Dataverse__ClientSecret`
-
-### `Dataverse-ServiceUrl`
-
-- **Category**: dataverse
-- **Purpose**: Dataverse environment URL (https://{org}.crm.dynamics.com).
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: dataverse, endpoint
-- **Exception note**: Grandfathered PascalCase per §7.9 R2.
-- **Consumers**:
-  - BFF: Dataverse:ServiceUrl / Dataverse:EnvironmentUrl
-- **App-setting keys**:
-  - `Dataverse__EnvironmentUrl`
-  - `Dataverse__ServiceUrl`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `SPRK-DEV-DATAVERSE-URL`
-
-### `DocumentIntelligence-ApiKey`
-
-- **Category**: ai
-- **Purpose**: Azure Document Intelligence API key.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-shared-service
-- **Tags**: ai, key
-- **Consumers**:
-  - BFF: DocumentIntelligence:DocIntelKey
-- **App-setting keys**:
-  - `DocumentIntelligence__DocIntelKey`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `ai-docintel-key`
-  - `docintel-key`
 
 ### `DocumentIntelligence-Endpoint`
 
@@ -397,82 +296,6 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **App-setting keys**:
   - `Email__WebhookSigningKey`
 
-### `LlamaParse-ApiKey`
-
-- **Category**: ai
-- **Purpose**: LlamaParse (LlamaIndex) API key. Feature-gated via LlamaParse:Enabled=false by default.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: ai, key
-- **Consumers**:
-  - BFF: LlamaParse:ApiKeySecretName -> LlamaParseApiKey (grandfathered spelling — see aliases)
-- **App-setting keys**:
-  - `LlamaParse__ApiKeySecretName`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `LlamaParseApiKey`
-
-### `PromptFlow-Endpoint`
-
-- **Category**: ai
-- **Purpose**: AI Foundry Prompt Flow endpoint.
-- **Rotation cadence**: N/A
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: ai, endpoint
-- **Consumers**:
-  - BFF: Analysis:PromptFlowEndpoint
-- **App-setting keys**:
-  - `Analysis__PromptFlowEndpoint`
-
-### `PromptFlow-Key`
-
-- **Category**: ai
-- **Purpose**: AI Foundry Prompt Flow API key.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
-- **Tags**: ai, key
-- **Consumers**:
-  - BFF: Analysis:PromptFlowKey
-- **App-setting keys**:
-  - `Analysis__PromptFlowKey`
-
-### `Redis-ConnectionString`
-
-- **Category**: data-services
-- **Purpose**: Azure Cache for Redis connection string.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-shared-service
-- **Tags**: connection-string, data-services
-- **Exception note**: Grandfathered PascalCase per §7.9 R2.
-- **Consumers**:
-  - BFF: ConnectionStrings:Redis / Redis:ConnectionString
-- **App-setting keys**:
-  - `ConnectionStrings__Redis`
-  - `Redis__ConnectionString`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `redis-connection-string`
-
-### `ServiceBus-ConnectionString`
-
-- **Category**: data-services
-- **Purpose**: Azure Service Bus connection string (job queue: sdap-jobs / document-processing).
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-shared-service
-- **Tags**: connection-string, data-services
-- **Exception note**: Grandfathered PascalCase per §7.9 R2.
-- **Consumers**:
-  - BFF: ConnectionStrings:ServiceBus / ServiceBus:ConnectionString
-  - L2 control-plane: serviceBusKeyVaultSecretName (controlplane-app-service.bicep)
-- **App-setting keys**:
-  - `ConnectionStrings__ServiceBus`
-  - `ServiceBus__ConnectionString`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `servicebus-connection-string`
-
 ### `SPE-CommunicationArchiveContainerId`
 
 - **Category**: spe
@@ -489,11 +312,12 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 ### `SPE-ContainerTypeId`
 
 - **Category**: spe
-- **Purpose**: SPE Container Type ID. H4 pre-creates the slot; H8 populates the actual GUID after 24-hour SPE container-type replication completes.
+- **Purpose**: SPE Container Type ID for the customer's tier (Model 1 / Model 2 / Trial 1). Value is TOPOLOGY-SCOPED — one container-type per tier, created ONCE per Spaarke tier by the operator via the one-time SPE topology setup runbook (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3), NOT per-customer. H8 (H8-B semantics as of task 214, 2026-08-30) READS this value from spaarke-constants.yaml per_env_constants.<env>.containerTypeId at run dispatch and passes it to Microsoft Graph as the containerTypeId when creating the per-customer container. H8 no longer writes this slot (H8-A pre-2026-08-30 wrote here after 24-hour SPE container-type replication — that scope is RETIRED per topology doc §R5 empirical verification: `client_credentials` grant returns HTTP 403 accessDenied on container-TYPE creation regardless of credential shape, so container-TYPE creation is now delegated-only operator work, not a handler responsibility). H4 continues to pre-create the KV slot at customer-provisioning time so App Service KV-reference resolution has a target; the value comes from the topology constants, populated when task 213.7 lands.
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-bicep-output
-- **Tags**: public, spe
+- **Value source**: from-topology-constants
+- **Tags**: public, spe, topology-scoped
+- **Exception note**: SEMANTICS CHANGED 2026-08-30 (task 214, H8-B rewrite): value is topology-scoped (once per tier from spaarke-constants.yaml), not per-customer + populated by H8. Retirement of prior H8 write-here behavior driven by topology doc §R5 empirical verification. See task 214 POML + docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md.
 - **Consumers**:
   - BFF: DEFAULT_CT_ID / SharePointEmbedded:ContainerTypeId
 - **App-setting keys**:
@@ -512,30 +336,15 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **App-setting keys**:
   - `Email__DefaultContainerId`
 
-### `Storage-ConnectionString`
-
-- **Category**: data-services
-- **Purpose**: Azure Storage connection string (Model2 dedicated-stamp: temp-blob-lifecycle + test-documents lifecycle). Not populated on Model1 shared trial.
-- **Rotation cadence**: 90-days
-- **Never-delete (BINDING)**: no
-- **Value source**: from-shared-service
-- **Tags**: connection-string, data-services, model2-only
-- **Exception note**: Grandfathered PascalCase per §7.9 R2.
-- **Consumers**:
-  - BFF: ConnectionStrings:Storage
-- **App-setting keys**:
-  - `ConnectionStrings__Storage`
-- **Aliases / drift spellings (alias-collapse targets — do NOT reintroduce)**:
-  - `storage-connection-string`
-
 ### `TenantId`
 
 - **Category**: identity
 - **Purpose**: Azure AD tenant ID. Non-secret but stored in KV for uniform reference-resolution semantics.
 - **Rotation cadence**: N/A
 - **Never-delete (BINDING)**: no
-- **Value source**: from-run-parameter
+- **Value source**: from-intake-parameter
 - **Tags**: bff, identity, public
+- **Exception note**: value_source from-intake-parameter since task 245a (2026-10-01): H4 writes the intake tenantId (POST /api/runs, required). It was from-run-parameter — a KV reference in RunParameters.Secrets that nothing ever supplied.
 - **Consumers**:
   - BFF: TENANT_ID / AzureAd:TenantId / Graph:TenantId / Dataverse:TenantId
   - L2 control-plane
@@ -554,20 +363,8 @@ The following drift spellings are documented as aliases on canonical entries. Ta
 | Alias (drift) | Canonical | Notes |
 |---|---|---|
 | `ai-docintel-endpoint` | `DocumentIntelligence-Endpoint` | ai |
-| `ai-docintel-key` | `DocumentIntelligence-ApiKey` | ai |
 | `ai-openai-endpoint` | `AzureOpenAI-Endpoint` | ai |
-| `ai-openai-key` | `AzureOpenAI-ApiKey` | ai |
 | `ai-search-endpoint` | `AiSearch-Endpoint` | ai |
-| `ai-search-key` | `AiSearch--AdminKey` | ai |
-| `aisearch-admin-key` | `AiSearch--AdminKey` | ai |
-| `AzureAISearchApiKey` | `AiSearch--AdminKey` | ai |
 | `communication-webhook-secret` | `Communication-WebhookClientState` | communication |
 | `compose-webhook-clientstate` | `Compose-Webhook-ClientState` | compose |
 | `compose-webhook-signingkey` | `Compose-Webhook-SigningKey` | compose |
-| `docintel-key` | `DocumentIntelligence-ApiKey` | ai |
-| `LlamaParseApiKey` | `LlamaParse-ApiKey` | ai |
-| `openai-api-key` | `AzureOpenAI-ApiKey` | ai |
-| `redis-connection-string` | `Redis-ConnectionString` | data-services |
-| `servicebus-connection-string` | `ServiceBus-ConnectionString` | data-services |
-| `SPRK-DEV-DATAVERSE-URL` | `Dataverse-ServiceUrl` | dataverse |
-| `storage-connection-string` | `Storage-ConnectionString` | data-services |

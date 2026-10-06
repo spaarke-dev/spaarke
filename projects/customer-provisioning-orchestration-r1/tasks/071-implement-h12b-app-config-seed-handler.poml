@@ -4,7 +4,7 @@
     <title>Implement H12b app-config seed handler (DataGrid, field-mapping, workspace-layout, chart-def — DAG-parallel with H12a)</title>
     <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; handler in the DAG whose failure blocks Setup Status = Ready. FR-16 acceptance scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

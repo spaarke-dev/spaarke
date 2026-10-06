@@ -3,16 +3,13 @@
   "contentVersion": "1.0.0.0",
   "parameters": {
     "customerId": {
-      "value": "replaceme"
+      "value": "replace"
     },
     "environmentName": {
       "value": "prod"
     },
     "location": {
       "value": "westus2"
-    },
-    "platformKeyVaultName": {
-      "value": "sprk-platform-prod-kv"
     },
     "storageSku": {
       "value": "Standard_LRS"

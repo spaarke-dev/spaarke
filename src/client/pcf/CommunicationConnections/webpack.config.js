@@ -51,7 +51,9 @@ module.exports = {
       'react/jsx-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-runtime.js'),
       'react/jsx-dev-runtime$': path.resolve(__dirname, 'node_modules/react/jsx-dev-runtime.js'),
       '@spaarke/sdap-client$': false,
-      // Loud stubs, not `false` — see pdfjsDistUnreachable.js for why.
+      // v1.7.0 (UAC-r2 task 147 r1): the shared lib's root barrel reaches SprkChat's lazy `import('pdfjs-dist')`, whose
+      // ESM build the PCF toolchain's babel cannot parse. This control never previews a PDF. Master's build repair
+      // (#1123) replaced the silent `false` stub with loud ones — see pdfjsDistUnreachable.js for why.
       'pdfjs-dist$': path.resolve(__dirname, '../shared/stubs/pdfjsDistUnreachable.js'),
       'mammoth$': path.resolve(__dirname, '../shared/stubs/mammothUnreachable.js'),
     },

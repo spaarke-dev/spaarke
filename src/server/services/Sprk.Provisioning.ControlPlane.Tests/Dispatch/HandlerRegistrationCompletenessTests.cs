@@ -83,13 +83,15 @@ public sealed class HandlerRegistrationCompletenessTests : IClassFixture<WorkerT
     }
 
     [Fact]
-    public void Dispatchable_ContainsExactlyTwentyOneIds()
+    public void Dispatchable_ContainsExactlyTwentyIds()
     {
         // Task 200 bumped 19 → 20 (added H4Shared for F19 automation —
         // shared-tier KV secrets population via source-service SDK extraction).
         // Task 201 bumped 20 → 21 (added H4b for F20/F20a automation —
         // BulkAppSettings thin wrapper around task 084's Configure script).
-        HandlerIds.Dispatchable.Should().HaveCount(21);
+        // T226 (2026-09-30) dropped 21 → 20 (retired H4Shared — every customer
+        // secret now comes from the customer's own resources).
+        HandlerIds.Dispatchable.Should().HaveCount(20);
     }
 
     [Theory]
@@ -206,6 +208,11 @@ public sealed class WorkerTestFactory : WebApplicationFactory<WorkerProgram>
         // self-contained-per-handler convention); syntactically-valid-but-
         // unreachable value, the blob client itself is never invoked here.
         builder.UseSetting("BffDeployOptions:ProvisioningArtifactsContainerUri", "https://l2-test.blob.core.windows.net/provisioning-artifacts");
+
+        // Task 245b / 249 — ControlPlaneIdentityOptions.Validate() fails fast at boot on a missing L2
+        // principal (the identity H4 grants Secrets Officer on customer vaults and H2a sends to
+        // customer.bicep); syntactically-valid placeholder, nothing is invoked here.
+        builder.UseSetting("ControlPlaneIdentity:PrincipalObjectId", "7d1f0c3e-2b6a-4c55-9e1d-3a8b5c6d7e8f");
 
         // Task 142 — EnvVarValuesOptions.Validate() (H7) fails fast at boot on
         // a missing ClientSecret (NFR-05), same convention as the other

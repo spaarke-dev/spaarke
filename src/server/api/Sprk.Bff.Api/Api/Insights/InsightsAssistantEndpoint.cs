@@ -3,7 +3,11 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Net.Http.Headers;
+using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -86,7 +90,17 @@ public static class InsightsAssistantEndpoint
             .RequireRateLimiting("ai-context")
             .WithTags("Insights");
 
+        // Authorization (unified-access-control-r2 task 163, sweep finding #40; owner round 16 item 1 applied to
+        // the Assistant tool path per the task-163 amendment): the subject (matter, project or invoice) is
+        // authorized for Read, AS THE CALLER, by the route filter — before the handler, so a denial is a plain
+        // ProblemDetails and no SSE frame is ever written. Both the playbook path and the RAG path sit behind it,
+        // whatever forceMode says. When a playbook may run (forceMode is not "rag"), the filter also asks, as the
+        // caller, whether Write on the subject is held, and the run carries the answer: the playbook the router or
+        // the classifier picks runs only if it cannot write or that Write was established — the SAME subject rule
+        // as POST /api/insights/ask ("Read suffices only for non-persisting playbooks"). This is the only way into
+        // AssistantToolCallHandler (IInsightsAi.AssistantQuery*).
         group.MapPost("/query", AssistantQuery)
+            .AddInsightsAssistantAuthorizationFilter()
             .WithName("InsightsAssistantQuery")
             .WithSummary("Unified Spaarke Assistant tool-call entry point (Wave E3 / FR-05)")
             .WithDescription(
@@ -100,12 +114,126 @@ public static class InsightsAssistantEndpoint
             .Produces<InsightsAssistantQueryResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status429TooManyRequests)
             .ProducesProblem(StatusCodes.Status503ServiceUnavailable)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
         return app;
     }
+
+    /// <summary>
+    /// Authorization declaration for <c>POST /api/insights/assistant/query</c> (task 163): Read on the
+    /// subject's record, the entity set resolved from the parsed scheme through the shared
+    /// <c>EntityAccessFilter</c> map. A missing body or subject, or a subject the parser rejects, is the
+    /// handler's own 400 (same body and errorCode), returned BEFORE any rights query. A registered scheme
+    /// with no entity-set mapping declares no check and is denied (uniform 404).
+    /// </summary>
+    internal static FinanceAuthorizationTargets ResolveSubjectTargets(EndpointFilterInvocationContext context)
+    {
+        var request = context.Arguments.OfType<InsightsAssistantQueryRequest>().FirstOrDefault();
+        if (request is null)
+        {
+            return FinanceAuthorizationTargets.Reject(BadRequest("Request body is required.", "query.required"));
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Subject))
+        {
+            return FinanceAuthorizationTargets.Reject(
+                BadRequest("'subject' is required and cannot be empty.", "subject.required"));
+        }
+
+        var subjectParser = context.HttpContext.RequestServices.GetRequiredService<ISubjectParser>();
+        if (!subjectParser.TryParse(request.Subject, out var parsedSubject, out var subjectError))
+        {
+            return FinanceAuthorizationTargets.Reject(
+                BadRequest($"'subject' is invalid: {subjectError}", "subject.invalid"));
+        }
+
+        if (!EntityAccessFilter.TryResolveEntitySet(parsedSubject.EntityType, out var entitySet))
+        {
+            return FinanceAuthorizationTargets.Authorize();
+        }
+
+        return FinanceAuthorizationTargets.Authorize(new FinanceAuthorizationCheck
+        {
+            Path = FinanceCheckPath.Record,
+            EntitySetName = entitySet,
+            RecordId = parsedSubject.EntityId,
+            Operation = "read",
+            Source = "body.subject",
+        });
+    }
+
+    /// <summary>The <see cref="HttpContext.Items"/> key under which the route filter publishes the subject-Write answer.</summary>
+    private const string SubjectWriteAuthorizedItemKey = "Sprk.InsightsAssistantEndpoint.SubjectWriteAuthorized";
+
+    /// <summary>
+    /// The route filter of <c>POST /api/insights/assistant/query</c> (task 163). (1) Read on the subject, as the caller,
+    /// through the ONE per-route evaluator (<see cref="FinanceAuthorizationFilter"/> over
+    /// <see cref="ResolveSubjectTargets"/>): a denial, an absent subject or a fault is the uniform 404, before any SSE
+    /// frame. (2) Only once Read is established, and only when a playbook may run (<c>forceMode</c> is not
+    /// <c>"rag"</c>): the SAME evaluator asked for Write on the subject — an answer, not a deny. It is published for the
+    /// handler, which puts it on <see cref="AssistantQueryFacadeRequest.SubjectWriteAuthorized"/>; the facade then runs a
+    /// playbook that can write only when it is true (owner round 16 item 1, the same subject rule as
+    /// <c>/api/insights/ask</c>). The playbook is chosen inside the facade (forceMode "playbook" → the default
+    /// insights-ask Binding; no forceMode → the intent classifier, which the query text can steer), so the rule is
+    /// enforced where the playbook is known, on the right decided here.
+    /// </summary>
+    internal static RouteHandlerBuilder AddInsightsAssistantAuthorizationFilter(this RouteHandlerBuilder builder) =>
+        builder.AddEndpointFilter(async (context, next) =>
+        {
+            var services = context.HttpContext.RequestServices;
+            var authorizationService = services.GetRequiredService<AuthorizationService>();
+            var probe = services.GetService<CallerRecordAccessProbe>();
+
+            var readGate = new FinanceAuthorizationFilter(
+                authorizationService, ResolveSubjectTargets, FinanceDenial.UniformNotFound, probe);
+
+            return await readGate.InvokeAsync(context, async readAllowedContext =>
+            {
+                readAllowedContext.HttpContext.Items[SubjectWriteAuthorizedItemKey] =
+                    await IsSubjectWriteEstablishedAsync(readAllowedContext, authorizationService, probe);
+                return await next(readAllowedContext);
+            });
+        });
+
+    /// <summary>
+    /// Whether the caller holds Write on the request's subject, asked AS THE CALLER through the same evaluator (so a
+    /// missing token, a fault or a denial all answer <c>false</c> — fail closed). <c>false</c> without a query when
+    /// <c>forceMode</c> is <c>"rag"</c>: no playbook can run.
+    /// </summary>
+    private static async Task<bool> IsSubjectWriteEstablishedAsync(
+        EndpointFilterInvocationContext context, AuthorizationService authorizationService, CallerRecordAccessProbe? probe)
+    {
+        var request = context.Arguments.OfType<InsightsAssistantQueryRequest>().FirstOrDefault();
+        if (request is null || string.Equals(request.ForceMode, "rag", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var readTargets = ResolveSubjectTargets(context);
+        if (readTargets.Rejection is not null || readTargets.Checks.Count != 1)
+        {
+            return false;
+        }
+
+        var writeCheck = readTargets.Checks[0] with { Operation = "write" };
+        var granted = false;
+        var writeQuestion = new FinanceAuthorizationFilter(
+            authorizationService, _ => FinanceAuthorizationTargets.Authorize(writeCheck), FinanceDenial.UniformNotFound, probe);
+        await writeQuestion.InvokeAsync(context, _ =>
+        {
+            granted = true;
+            return ValueTask.FromResult<object?>(null);
+        });
+
+        return granted;
+    }
+
+    /// <summary>The subject-Write answer the route filter published (<c>false</c> when it did not run — fail closed).</summary>
+    private static bool GetSubjectWriteAuthorized(HttpContext httpContext) =>
+        httpContext.Items.TryGetValue(SubjectWriteAuthorizedItemKey, out var value) && value is true;
 
     /// <summary>
     /// MIME-type identifier for Server-Sent Events negotiation (Wave F task 051 v1.1).
@@ -211,7 +339,12 @@ public static class InsightsAssistantEndpoint
             PreviousTurnSummary: request.ConversationContext?.PreviousTurnSummary,
             TenantId: tenantId,
             CallerOid: callerOid,
-            CallerPrincipal: httpContext.User);
+            CallerPrincipal: httpContext.User)
+        {
+            // Task 163: the subject-Write answer the route filter established as the caller. Without it, the playbook
+            // path runs only a playbook that cannot write (the facade refuses the rest).
+            SubjectWriteAuthorized = GetSubjectWriteAuthorized(httpContext),
+        };
 
         // ─── Wave F task 051 — Accept-header negotiation (v1.1 streaming) ─────────────
         // Per R5 §2.1: clients request streaming via `Accept: text/event-stream`. Otherwise
@@ -255,6 +388,15 @@ public static class InsightsAssistantEndpoint
                     ["errorCode"] = DefaultPlaybookUnconfiguredErrorCode,
                     ["correlationId"] = httpContext.TraceIdentifier
                 });
+        }
+        catch (SdapProblemException ex) when (ex.Code == InsightsAgentRequest.SubjectWriteRequiredCode)
+        {
+            // Task 163: the picked playbook can write and the caller's Write on the subject was not established;
+            // nothing ran. The route's deny shape — the uniform 404.
+            logger.LogWarning(
+                "[INSIGHTS-ASSISTANT] playbook run refused: it can write and the caller's Write on the subject was not established. TenantId={TenantId}",
+                tenantId);
+            return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
         }
         catch (OperationCanceledException)
         {
@@ -452,6 +594,14 @@ public static class InsightsAssistantEndpoint
                         ["correlationId"] = httpContext.TraceIdentifier
                     });
             }
+            catch (SdapProblemException ex) when (ex.Code == InsightsAgentRequest.SubjectWriteRequiredCode)
+            {
+                // Task 163: refused before the stream opened — the uniform 404, no SSE body.
+                logger.LogWarning(
+                    "[INSIGHTS-ASSISTANT-STREAM] playbook run refused pre-stream: the caller's Write on the subject was not established. TenantId={TenantId}",
+                    tenantId);
+                return FinanceAuthorizationFilter.UniformRecordNotFound(httpContext);
+            }
             catch (OperationCanceledException)
             {
                 throw;
@@ -514,6 +664,20 @@ public static class InsightsAssistantEndpoint
                     "[INSIGHTS-ASSISTANT-STREAM] Feature disabled mid-stream. ErrorCode={ErrorCode} TenantId={TenantId}",
                     ex.ErrorCode, tenantId);
                 await WriteSseErrorAsync(response, ex.ErrorCode, ex.Message, ct).ConfigureAwait(false);
+            }
+            catch (SdapProblemException ex) when (ex.Code == InsightsAgentRequest.SubjectWriteRequiredCode)
+            {
+                // Task 163: the classifier (or the default Binding) picked a playbook that can write, after the stream
+                // opened, for a caller whose Write on the subject was not established. Nothing ran. A stable code and a
+                // fixed detail — no record id (ADR-019); the caller already holds Read on the subject.
+                logger.LogWarning(
+                    "[INSIGHTS-ASSISTANT-STREAM] playbook run refused mid-stream: the caller's Write on the subject was not established. TenantId={TenantId}",
+                    tenantId);
+                await WriteSseErrorAsync(
+                    response,
+                    InsightsAgentRequest.SubjectWriteRequiredCode,
+                    "This answer needs a playbook that writes to the subject, and you do not have write access to it.",
+                    ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {

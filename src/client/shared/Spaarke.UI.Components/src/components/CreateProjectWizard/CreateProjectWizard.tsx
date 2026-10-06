@@ -42,7 +42,9 @@ import type { IDataService, INavigationService, IUploadService } from '../../typ
 import type { ILookupItem } from '../../types/LookupTypes';
 import type { IUploadedFile, UploadedFileType } from '../FileUpload/fileUploadTypes';
 import { completeOrClose } from '../../services/surfaceHandoff/readHandoff';
-import { provisionSecureProject } from './provisioningService';
+import { describeHeldBackForSecure, provisionSecureProject, type IProvisionProjectResult } from './provisioningService';
+import { syncAssignedAccess } from '../../services/assignedAccessSync';
+import { SecureProvisioningOutcome } from './SecureProvisioningOutcome';
 import { EventService } from '../CreateEventWizard/eventService';
 import { WorkAssignmentService } from '../CreateWorkAssignmentWizard/workAssignmentService';
 import type { ICreateWorkAssignmentFormState, IAssignWorkState } from '../CreateWorkAssignmentWizard/formTypes';
@@ -567,12 +569,77 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         const projectName = result.projectName!;
         warnings.push(...result.warnings);
 
+        // 1a. Provision Secure Project infrastructure when the Secure Project toggle is enabled — FIRST, before any
+        //     child record or file (task 150). The server marks the project secure (sprk_issecure is field-secured;
+        //     this client never writes it), shares it to the creator (task 061; task 133 issues it BEFORE the move and
+        //     proves it after), assigns it to the Secure Record business unit's named owner team, then provisions its
+        //     own SPE container and records it. No business unit or account is created (BFF task 021).
+        let provisioningWarning: string | undefined;
+        let provisioningSucceeded = false;
+        // Task 133: a failure the SAME caller can finish is rendered with its "Try securing again" action instead of
+        // as a warning, because the success screen is static and the action needs state.
+        let retryableProvisioning: IProvisionProjectResult | undefined;
+        if (mergedFormValues.isSecure && authFetch && bffBaseUrl) {
+          const provisionResult = await provisionSecureProject(
+            {
+              projectId,
+              // Only a fallback for the SPE container's display name; it no longer names anything
+              // in Dataverse.
+              projectRef: projectName,
+              // The wizard collects no colleagues, so no `sharePrincipalIds` are sent. The creator
+              // is shared to regardless — the server takes their identity from the token, not from
+              // this request. Colleagues are added afterwards through Manage Access (FR-29).
+            },
+            authFetch,
+            bffBaseUrl
+          );
+
+          provisioningSucceeded = provisionResult.success;
+          // Round 29: per-person warnings (named colleagues the server did not share to). The wizard names none today,
+          // so none arrive; a host that does shows them with its other warnings.
+          if (provisionResult.warnings && provisionResult.warnings.length > 0)
+            warnings.push(...provisionResult.warnings);
+
+          if (!provisionResult.success) {
+            // Non-fatal for the WIZARD — the project record exists either way. What the failure left
+            // behind depends on where it stopped (task 133): before any change, undone, secured without
+            // storage, or — only on a double failure — needing an administrator. `errorMessage` is
+            // authored copy classified from the endpoint's `reasonCode` (task 068) and describes that
+            // state; the server's raw ProblemDetails detail never reaches it.
+            if (provisionResult.retryable) {
+              retryableProvisioning = provisionResult;
+            } else {
+              provisioningWarning = provisionResult.errorMessage;
+            }
+          }
+        } else if (mergedFormValues.isSecure) {
+          // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
+          // authenticated fetch or a base URL. This branch used to fall through silently and then
+          // announce "Secure Project created!", which named a designation the record did not have.
+          // Same user-visible situation as an unconfigured environment, so it gets the same
+          // treatment: say what did not happen, in copy written for the person reading it.
+          // (Task 150: now literally true — the client no longer writes the flag, so the record is not marked secure.)
+          provisioningWarning =
+            'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
+        }
+
+        // Task 150 — THE ORDERING TRAP. The client no longer writes sprk_issecure, so a secure-requested project whose
+        // provisioning stopped BEFORE the server marked it secure is an ordinary record: an upload or a child created
+        // now would land in the shared business-unit container (or, for an email, the shared archive), and SPE cannot
+        // take that back. So when secure was requested and provisioning did not succeed, NOTHING is added to the
+        // project — no file, no work assignment, no event, no email. What was skipped is said in `skippedForSecure`.
+        const secureBlocked = mergedFormValues.isSecure && !provisioningSucceeded;
+        const skippedForSecure: string[] = [];
+
         // 1b. Create Work Assignment (sprk_workassignment) linked to this project
         // Delegates to the shared WorkAssignmentService, which performs nav-prop
         // discovery and applies the Polymorphic Resolver pattern (ADR-024).
         // Hardcoded relationship-style names would otherwise fail with
         // "undeclared property" errors.
-        if (context.selectedActions.includes('assign-counsel') && context.followOn.assignWorkName.trim()) {
+        const wantsWorkAssignment =
+          context.selectedActions.includes('assign-counsel') && !!context.followOn.assignWorkName.trim();
+        if (secureBlocked && wantsWorkAssignment) skippedForSecure.push('the work assignment');
+        if (!secureBlocked && wantsWorkAssignment) {
           try {
             const waForm: ICreateWorkAssignmentFormState = {
               recordType: 'project',
@@ -623,7 +690,10 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         }
 
         // 1b-ii. Create Event (sprk_event) linked to this project
-        if (context.selectedActions.includes('create-event') && context.followOn.createEventName.trim()) {
+        const wantsEvent =
+          context.selectedActions.includes('create-event') && !!context.followOn.createEventName.trim();
+        if (secureBlocked && wantsEvent) skippedForSecure.push('the event');
+        if (!secureBlocked && wantsEvent) {
           try {
             // Task 020: authFetch/bffBaseUrl also drive the Field Mapping
             // Framework engine for this follow-on Event create (Project ->
@@ -680,45 +750,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
           }
         }
 
-        // 1d. Provision Secure Project infrastructure when the Secure Project toggle is enabled:
-        //     assign the project to the canonical Secure Record business unit's owner team, share
-        //     it back to the creator (task 061 — the owner team is memberless, so without this the
-        //     record is unreachable), then provision its own SPE container and record it. No
-        //     business unit or account is created (BFF task 021, 2026-08-25).
-        let provisioningWarning: string | undefined;
-        let provisioningSucceeded = false;
-        if (mergedFormValues.isSecure && authFetch && bffBaseUrl) {
-          const provisionResult = await provisionSecureProject(
-            {
-              projectId,
-              // Only a fallback for the SPE container's display name; it no longer names anything
-              // in Dataverse.
-              projectRef: projectName,
-              // The wizard collects no colleagues, so no `sharePrincipalIds` are sent. The creator
-              // is shared to regardless — the server takes their identity from the token, not from
-              // this request. Colleagues are added afterwards through Manage Access (FR-29).
-            },
-            authFetch,
-            bffBaseUrl
-          );
-
-          provisioningSucceeded = provisionResult.success;
-
-          if (!provisionResult.success) {
-            // Non-fatal for the WIZARD — the project record exists either way, and the endpoint
-            // fails closed, so a refusal means nothing was moved and no container was orphaned.
-            // `errorMessage` is authored copy classified from the endpoint's `reasonCode`
-            // (task 068); the server's raw ProblemDetails detail never reaches this string.
-            provisioningWarning = provisionResult.errorMessage;
-          }
-        } else if (mergedFormValues.isSecure) {
-          // Secure was REQUESTED but there is no BFF to ask — the host did not supply an
-          // authenticated fetch or a base URL. This branch used to fall through silently and then
-          // announce "Secure Project created!", which named a designation the record did not have.
-          // Same user-visible situation as an unconfigured environment, so it gets the same
-          // treatment: say what did not happen, in copy written for the person reading it.
-          provisioningWarning =
-            'This project was not secured, because securing a project needs a connection to the Spaarke service that is not configured here. The project was created as a normal project; an administrator can secure it.';
+        // 1e. Task 142 (owner Q5 + A3): a project created SECURE is synced only now, after provisioning, so the
+        //     Assigned-To rule sees the secure flag and suggests its people in Manage Access instead of granting them
+        //     before the record was secured. (A non-secure project was synced by ProjectService at create.) Task 150
+        //     moved provisioning to step 1a, first; this sync still runs after it.
+        if (mergedFormValues.isSecure) {
+          await syncAssignedAccess(authFetch, bffBaseUrl, 'project', projectId);
         }
 
         // 2. Upload files to SPE + create document records
@@ -729,7 +766,8 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         // business-unit container, and the correct stamp was discarded. Resolving server-side from
         // `projectId` closes that window: provisioning has already run by the time we get here, so
         // the server reads the container provisioning just stamped.
-        if (context.uploadedFiles.length > 0 && authFetch && bffBaseUrl) {
+        if (secureBlocked && context.uploadedFiles.length > 0) skippedForSecure.push('the files you attached');
+        if (!secureBlocked && context.uploadedFiles.length > 0 && authFetch && bffBaseUrl) {
           try {
             const entityService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
 
@@ -780,17 +818,14 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
             const message = err instanceof Error ? err.message : 'File processing failed';
             warnings.push(`File pipeline error: ${message}`);
           }
-        } else if (context.uploadedFiles.length > 0 && !context.speContainerId) {
+        } else if (!secureBlocked && context.uploadedFiles.length > 0 && !context.speContainerId) {
           warnings.push('SPE container not configured — files were not uploaded to SharePoint Embedded.');
         }
 
-        // 3. Send email (if selected)
-        if (
-          context.selectedActions.includes('send-email') &&
-          context.followOn.emailTo.trim() &&
-          authFetch &&
-          bffBaseUrl
-        ) {
+        // 3. Send email (if selected) — the sent message is recorded against the project, so it is held back too.
+        const wantsEmail = context.selectedActions.includes('send-email') && !!context.followOn.emailTo.trim();
+        if (secureBlocked && wantsEmail) skippedForSecure.push('the email');
+        if (!secureBlocked && wantsEmail && authFetch && bffBaseUrl) {
           const emailService = new EntityCreationService(webApiAdapter, authFetch, bffBaseUrl);
           const emailResult = await emailService.sendEmail({
             to: context.followOn.emailTo,
@@ -810,6 +845,12 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
         // to do about it, per failure kind — anything added here would contradict it.
         if (provisioningWarning) {
           warnings.push(provisioningWarning);
+        }
+
+        // Task 150: what was held back because securing did not finish (nothing reached shared storage).
+        const heldBack = describeHeldBackForSecure(skippedForSecure);
+        if (heldBack) {
+          warnings.push(heldBack);
         }
 
         const hasWarnings = warnings.length > 0;
@@ -839,15 +880,30 @@ const CreateProjectWizard: React.FC<ICreateProjectWizardProps> = ({
               ? 'Secure Project created!'
               : 'Project created!',
           body: (
-            <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
-              <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>&ldquo;{projectName}&rdquo;</span>{' '}
-              has been created
-              {hasWarnings
-                ? ', though some operations could not complete. See details below.'
-                : provisioningSucceeded
-                  ? ' with its own document container, and is shared with you. Anyone else who needs it has to be added explicitly.'
-                  : ' and is ready to use.'}
-            </Text>
+            <>
+              <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                <span style={{ color: tokens.colorBrandForeground1, fontWeight: 600 }}>
+                  &ldquo;{projectName}&rdquo;
+                </span>{' '}
+                has been created
+                {hasWarnings
+                  ? ', though some operations could not complete. See details below.'
+                  : provisioningSucceeded
+                    ? ' with its own document container, and is shared with you. Anyone else who needs it has to be added explicitly.'
+                    : retryableProvisioning
+                      ? '.'
+                      : ' and is ready to use.'}
+              </Text>
+              {retryableProvisioning && authFetch && bffBaseUrl && (
+                <SecureProvisioningOutcome
+                  projectId={projectId}
+                  projectRef={projectName}
+                  initialResult={retryableProvisioning}
+                  authenticatedFetch={authFetch}
+                  bffBaseUrl={bffBaseUrl}
+                />
+              )}
+            </>
           ),
           actions: (
             <>
