@@ -6,8 +6,6 @@
  */
 import { getXrmUserId, readXrmUserId } from '../xrmUserId';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 const ID = 'A1B2C3D4-0000-4000-8000-000000000001';
 const CLEAN = ID.toLowerCase();
 

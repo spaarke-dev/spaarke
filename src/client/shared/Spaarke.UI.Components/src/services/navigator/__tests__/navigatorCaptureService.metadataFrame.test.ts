@@ -11,8 +11,6 @@
  */
 import { startNavigatorCapture } from '../navigatorCaptureService';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 const OWNER_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
 const MATTER_ID = '11111111-1111-1111-1111-111111111111';
 const originalParent = window.parent;
