@@ -450,7 +450,7 @@ Before merging any PR to master, verify all of the following:
 
 ### Automated Checks (Must Pass)
 
-- [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. This is the only required status check; it is skipped entirely (and still reports pass) on a docs-only diff.
+- [ ] **`CI / Router` green** — `gh pr checks` shows `CI / Router` passing. This is the only required status check; it is skipped entirely (and still reports pass) on a docs-only diff, i.e. one in which every changed file is documentation.
 - [ ] **Tier 1 (blocking) jobs pass** — compile (whole solution, Debug), the full NetArchTest ArchTests suite, changed-surface integration smoke (conditional on changed BFF paths), auth smoke (conditional on auth-path changes), the golden-utterance eval gate, the I1–I5 tenant-isolation invariants, the Compose fidelity corpus round-trip, and the Xrm capability guard (conditional on client/solution/workflow changes)
 - [ ] **Tier 2 (advisory) results reviewed** — format, lint, the full unit-test suite, ADR compliance, markdown-link validation, Last-Reviewed stamp, and plugin size are posted as one deduplicated "Tier 2 Advisory Report" PR comment; they never block, but address real failures
 - [ ] **Path-scoped gates reviewed if touched** — `office-addins-tests.yml` (office-addins + related server/test paths), `css-reset-gate.yml` (Code Page `index.html`), `build-provisioning-sidecar.yml` (sidecar paths, hard-fails on a fixable HIGH/CRITICAL Trivy finding), `deploy-infrastructure.yml`'s `validate` job (bicep paths; lint + compile) — none of these are in the required-check list, but each reports a real pass/fail
@@ -497,7 +497,7 @@ The subsections below are grouped by what each workflow does: the PR gate, stand
 
 **Triggers**: `pull_request` → `master`, `push` → `master`, `merge_group`
 
-The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` booleans and a derived `docs_only` flag. `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
+The single required status check (`CI / Router`). A `classify` job (dorny/paths-filter, no `on:`-level path filter — a path filter here would re-introduce the stuck-pending trap) emits `bff` / `spaarke_ai` / `docs` / `ci_workflows` booleans and a derived `docs_only` flag, which is true only when EVERY changed file is documentation (a second `dorny/paths-filter` step with `predicate-quantifier: 'every'` detects any non-doc file; until 2026-10-06 client code plus a doc file counted as docs-only and skipped Tier 1). `tier1` and `tier2` are reusable-workflow calls gated on `docs_only != 'true'`. The final `router-result` job runs `if: always()` and aggregates via `re-actors/alls-green`, with Tier 2 **excluded from adjudication by construction** (not just `allowed-failures`) so a cancelled or red Tier 2 can never redden the gate. Tier 1 may legitimately be `skipped` (counts as pass) when no Tier-1 surface changed.
 
 #### `ci-tier1-blocking.yml` — CI Tier 1 (Blocking)
 
