@@ -4,7 +4,7 @@
     <title>Json.Schema.Net concurrent Evaluate race in AI tool-schema validation, own PR</title>
     <phase>8 Remaining cleanup and repairs</phase>
     <gate>startable</gate>
-    <status>in-progress</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF .cs code on a validation path; quality gates apply.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -49,6 +49,8 @@
   </acceptance-criteria>
 
   <notes>Created 2026-10-05 by the main session. Owner rule: fix found defects now, in their own PR when unrelated to ontology.</notes>
+
+  <completion>COMPLETED 2026-10-05 (recorded by main session). PR #1294 merged as 23bdc5679, fixes issue #1295. Both Json.Schema.Net meta-schema Evaluate sites (AnalysisToolService.MapJsonSchema, ToolHandlerToAIFunctionAdapter.ValidateAgainstMetaSchema) share one MetaSchemas.Draft202012 instance, so per-site locks still leaked 75-111/1000; one shared gate in Draft202012MetaSchemaValidator gave 0 false-valid over 18 rounds. Independent review PASS-WITH-FINDINGS, all fixed: the gate is on the per-chat-message path (not session start), so a bounded verdict cache keyed by exact schema text (1,024 entries / 2M chars) checked before the lock (owner approved ADR-009 path A, spec ADR Tensions); regression tests renamed Issue1295_*; ArchTests guard against direct MetaSchemas use; publish size +437 bytes; full suite 3 unrelated timeouts that passed alone and on master.</completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>
