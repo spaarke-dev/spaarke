@@ -1,5 +1,4 @@
 using System.Reflection;
-using FluentAssertions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
 
@@ -41,14 +40,14 @@ public class SpeBrokerOnlyByteIdentityGuardTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
 
-        granters.Should().BeEquivalentTo(
-            [
+        Assert.True(
+            granters.SequenceEqual(new[] {
                 "Sprk.Bff.Api.Infrastructure.ExternalAccess.SpeContainerMembershipService",
                 "Sprk.Bff.Api.Infrastructure.Graph.SpeAdminGraphService",
                 "Sprk.Bff.Api.Services.Registration.DemoProvisioningService",
-            ],
+            }.OrderBy(n => n, StringComparer.Ordinal)),
             "a user is granted an SPE container role only by the marked JIT / standing grants (round 69 / 70), the admin "
-            + "console, or self-registration Step 8 — anything else lets access drift from Dataverse");
+            + "console, or self-registration Step 8 — anything else lets access drift from Dataverse" + " Found: " + string.Join(", ", granters));
     }
 
     /// <summary>The OBO byte members of the facade (task 171 left exactly these).</summary>
@@ -76,8 +75,8 @@ public class SpeBrokerOnlyByteIdentityGuardTests
             .OrderBy(n => n, StringComparer.Ordinal)
             .ToList();
 
-        callers.Should().BeEquivalentTo(
-            [
+        Assert.True(
+            callers.SequenceEqual(new[] {
                 // Compose "Path B" (no sprk_document row, or a row whose pointer does not verify) — the ONE identity
                 // rule for every Compose byte call...
                 "Sprk.Bff.Api.Services.Compose.ComposeSpeAccess",
@@ -92,9 +91,9 @@ public class SpeBrokerOnlyByteIdentityGuardTests
                 "Sprk.Bff.Api.Api.Ai.ChatWordExportEndpoints",
                 "Sprk.Bff.Api.Services.Workspace.MatterPreFillService",
                 "Sprk.Bff.Api.Services.Workspace.ProjectPreFillService",
-            ],
+            }.OrderBy(n => n, StringComparer.Ordinal)),
             "every byte path with a Dataverse record behind it runs app-only after that record's decision (owner round "
             + "69); an OBO byte call works only for a caller who holds a container role, which per-record secure "
-            + "containers never grant");
+            + "containers never grant" + " Found: " + string.Join(", ", callers));
     }
 }

@@ -509,7 +509,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
 
         // ── CONVERTED by issue #858 (2026-09-01) — was ClientSupplied ("SaveComposeDocumentRequest."
         // ── "ContainerId (client body)"), the entry this guard carried since the census was built. ──
-        new SinkSite("Services/Compose/ComposeService.cs", "UploadSmallAsUserAsync", 1,
+        new SinkSite("Services/Compose/ComposeService.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "ResolveCreateOnSaveContainerAsync: session-bound matter (ownership-checked, then authorized "
             + "via CallerRecordAccessProbe + OperationAccessPolicy entity.associate_document) -> "
@@ -567,41 +567,33 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // already closes. An attacker cannot make a row's drive id DISAPPEAR, so the fallback covers legacy
         // data, not an attack path. A divergence between the two values logs at Warning: that divergence is
         // the signal the fix exists to produce.
-        new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 1,
+        // ── MOVED 2026-10-06 (unified-access-control-r2 task 171): the three ComposeSaveStorageCoordinator replaces
+        // (blind PUT, If-Match PUT, the rebase retry) now call ComposeSpeAccess.ReplaceForComposeAsync — the ONE Compose
+        // identity rule — and the sinks live in that helper: APP-ONLY when ComposeDocumentAuthorizationFilter authorized
+        // the item's sprk_document row and verified its pointer, otherwise the caller's OBO identity. The DRIVE each
+        // receives is unchanged: the coordinator still passes the drive ResolveAuthoritativeDriveIdAsync took from the row.
+        new SinkSite("Services/Compose/ComposeSpeAccess.cs", "ReplaceFileContentAsync", 1,
             Provenance.ServerDerivedRecord, "",
-            "driveId parameter <- ComposeService.SaveAsync/ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync "
-            + "<- ComposeRecordResolution.TryResolveRecordedDriveIdAsync (sprk_graphdriveid on the sprk_document "
-            + "row keyed by sprk_graphitemid); caller-supplied value only when the row records no drive",
-            "The blind-PUT branch of the ordinary Compose save: no resolved version to precondition on "
-            + "(a drive-less path), so it replaces content with no If-Match (ADR-049; ADR-003). The DRIVE, "
-            + "however, is now the one the authorized record itself records, so a missing precondition is a "
-            + "concurrency exposure and not also a provenance one. Was ComposeService #3 until PR #806 "
-            + "extracted it, and ClientSupplied under #858 until the drive-provenance fix converted it."),
+            "driveId parameter <- ComposeSaveStorageCoordinator (blind / If-Match / rebase retry) <- ComposeService.SaveAsync / "
+            + "ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync (sprk_graphdriveid on the sprk_document row keyed by "
+            + "sprk_graphitemid); reached ONLY when ComposeBrokeredDocument.Covers(drive, item) — the row the route filter authorized",
+            "The app-only branch of every Compose save replace (task 171, owner round 69): the drive and item are the "
+            + "authorized row's own, verified by the document-pointer check before the request was marked (ADR-003; ADR-007; "
+            + "ADR-049)."),
 
-        new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 2,
+        new SinkSite("Services/Compose/ComposeSpeAccess.cs", "ReplaceFileContentAsUserAsync", 1,
             Provenance.ServerDerivedRecord, "",
-            "driveId parameter <- ComposeService.SaveAsync/ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync "
-            + "<- ComposeRecordResolution.TryResolveRecordedDriveIdAsync (sprk_graphdriveid on the sprk_document "
-            + "row keyed by sprk_graphitemid); caller-supplied value only when the row records no drive",
-            "The preconditioned branch of the same save (FR-S02 If-Match, added by PR #806). Its old entry "
-            + "made a point worth keeping now that it reads the other way round: an ETag check protects "
-            + "against a lost UPDATE and says nothing about WHERE the update lands, so the precondition was "
-            + "never evidence about drive provenance (ADR-049; ADR-003). The two concerns are now covered by "
-            + "two different mechanisms — If-Match for the version, the record for the drive — rather than "
-            + "one of them being mistaken for both."),
+            "the same coordinator drive (row-recorded, caller-supplied only when the row records none) — the OBO branch for a "
+            + "row-less item (Compose Path B) or an unverified pointer",
+            "The blind (no If-Match) OBO replace: SPE decides for the caller, exactly as before task 171 (ADR-049; ADR-003). "
+            + "Was ComposeSaveStorageCoordinator #1."),
 
-        new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 3,
+        new SinkSite("Services/Compose/ComposeSpeAccess.cs", "ReplaceFileContentAsUserAsync", 2,
             Provenance.ServerDerivedRecord, "",
-            "driveId parameter <- ComposeService.SaveAsync/ApplyTemplateAsync <- ResolveAuthoritativeDriveIdAsync "
-            + "<- ComposeRecordResolution.TryResolveRecordedDriveIdAsync (sprk_graphdriveid on the sprk_document "
-            + "row keyed by sprk_graphitemid); caller-supplied value only when the row records no drive",
-            "The single rebase RETRY inside catch(EtagPreconditionFailedException): re-reads the live "
-            + "version and re-issues the replace against the same drive the record names (ADR-049; ADR-003). "
-            + "Declared separately because it is a distinct write that a reader skimming the method will "
-            + "miss — it sits inside a catch block, three sites deep, and I missed it myself on first read, "
-            + "declaring only ordinals 1 and 2 until Rule A named the third. That is the argument for "
-            + "keying this list per CALL SITE rather than per method in one line, and it is why the "
-            + "provenance conversion had to reach all three ordinals rather than the two obvious ones."),
+            "the same coordinator drive — the OBO branch with If-Match (the FR-S02 precondition and its rebase retry)",
+            "The preconditioned OBO replace (was ComposeSaveStorageCoordinator #2 and #3 — the retry now reaches the same "
+            + "helper line). An ETag protects against a lost update and says nothing about WHERE it lands; the drive is the "
+            + "record's (ADR-049; ADR-003)."),
 
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
@@ -712,9 +704,16 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // used to occupy #1 EARLIER IN THE SAME FILE. The guard caught it as a matched pair (this entry
         // stale + the dedup site undeclared) in one run, which is what distinguished a renumber from a
         // deletion; had it reported only the stale half, the honest move would have looked like a fix.
+        new SinkSite("Services/Compose/ComposeService.cs", "ReplaceFileContentAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "match.DriveId / match.SpeId from the Dataverse transient-key lookup, after Write on that row (as the caller) and a "
+            + "verified pointer (task 171 AuthorizeTransientKeyReplaceAsync)",
+            "The APP-ONLY branch of the create-on-save dedup replace (task 171): the drive and item come from the row the "
+            + "transient key resolved to, which the caller must hold Write on (ADR-049; ADR-003)."),
+
         new SinkSite("Services/Compose/ComposeService.cs", "ReplaceFileContentAsUserAsync", 1,
             Provenance.ServerDerivedRecord, "",
-            "match.DriveId / match.SpeId from the Dataverse transient-key lookup",
+            "match.DriveId / match.SpeId from the Dataverse transient-key lookup (OBO branch: the row's pointer did not verify)",
             "The create-on-save dedup path replaces content in the drive item recorded on the row the "
             + "transient key resolved to, so the drive comes from Dataverse and not from the request "
             + "(ADR-049; ADR-003). Was ordinal #2 until #776 removed the apply-template sink above it. "
@@ -744,13 +743,13 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // sprk_graphdriveid/sprk_graphitemid off the sprk_document row. The CLIENT supplies only that row's id
         // (SaveRequest.Document.ExistingDocumentId) — a record key, never a container or drive — and
         // OfficeVersionSaveAuthorizationFilter requires "write" on that same row before the handler runs.
-        new SinkSite("Services/Office/OfficeStorageUploader.cs", "ReplaceFileContentAsUserAsync", 1,
+        new SinkSite("Services/Office/OfficeStorageUploader.cs", "ReplaceFileContentAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "driveId/itemId parameters <- OfficeService.CompleteVersionSaveAsync <- "
             + "OfficeDocumentPersistence.ResolveVersionTargetAsync (sprk_graphdriveid / sprk_graphitemid on the "
             + "sprk_document row named by SaveRequest.Document.ExistingDocumentId, which the route's "
             + "OfficeVersionSaveAuthorizationFilter authorized for \"write\")",
-            "The Office version save (FR-11): a new SPE version of an EXISTING item, written OBO into the "
+            "The Office version save (FR-11): a new SPE version of an EXISTING item, written APP-ONLY (task 171) into the "
             + "drive the authorized record itself records (ADR-003; ADR-007; ADR-008). The client names the "
             + "document, and the document names the drive — so the authorization key and the write "
             + "destination are one row, the same shape as the Compose save's ServerDerivedRecord replaces. "
@@ -815,7 +814,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         //
         // Both are the SANCTIONED shape, traced not assumed — hence ServerDerivedRecord and no owning
         // task. This is a declaration gap being closed, not a hole being waived.
-        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 1,
+        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId) -> decision.ContainerId",
             "The task-076 record-keyed upload route: the container is derived from the RECORD named in the "
@@ -828,7 +827,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "2026-09-03, when the container-KEYED route that held ordinal 1 was deleted; there is no "
             + "longer any ClientSupplied upload sink in this file."),
 
-        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 2,
+        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsync", 2,
             Provenance.ServerDerivedActingUser, "",
             "RecordContainerResolver.ResolveForActingUserAsync(callerOid) -> decision.ContainerId",
             "The task-076 record-LESS upload route (PUT /api/obo/me/files/{*path}), for content with no "
@@ -843,7 +842,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "fail closed there. This was ordinal 3 until 2026-09-03; providing this route is what made "
             + "the container-KEYED legacy route deletable, and it was deleted the same day."),
 
-        new SinkSite("Api/OBOEndpoints.cs", "CreateUploadSessionAsUserAsync", 1,
+        new SinkSite("Api/OBOEndpoints.cs", "CreateUploadSessionAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId) -> decision.ContainerId",
             "The >=4 MiB sibling of the record-keyed upload route, resolving the container identically — "
@@ -870,7 +869,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "correct source and a missing value THROWS rather than defaulting (ADR-003; ADR-045). This is "
             + "the one config read the model blesses; the others in this section are staging, not archive."),
 
-        new SinkSite("Services/Workspace/MatterPreFillService.cs", "UploadSmallAsUserAsync", 1,
+        new SinkSite("Services/Workspace/MatterPreFillService.cs", "UploadSmallToStagingAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
             "_speOptions.StagingContainerId (SharePointEmbedded:StagingContainerId)",
             "AI pre-fill uploads a candidate document to the STAGING container for text extraction before "
@@ -878,14 +877,14 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "container legitimate (ADR-003; ADR-007). Runs under OBO, so the acting user must already hold "
             + "the staging container. The content's permanent home is decided later, by the resolver."),
 
-        new SinkSite("Services/Workspace/ProjectPreFillService.cs", "UploadSmallAsUserAsync", 1,
+        new SinkSite("Services/Workspace/ProjectPreFillService.cs", "UploadSmallToStagingAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
             "_speOptions.StagingContainerId (SharePointEmbedded:StagingContainerId)",
             "The project twin of the matter pre-fill site, identical provenance and identical reasoning "
             + "(ADR-003; ADR-007). Listed separately rather than folded in because the two services diverge "
             + "in every other respect and a shared entry would hide a future divergence here."),
 
-        new SinkSite("Api/Ai/ChatWordExportEndpoints.cs", "UploadSmallAsUserAsync", 1,
+        new SinkSite("Api/Ai/ChatWordExportEndpoints.cs", "UploadSmallToStagingAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
             "SharePointEmbedded:StagingContainerId, falling back to EmailProcessing:DefaultContainerId",
             "Chat Word export writes the generated DOCX to the staging container under OBO (ADR-003; "
@@ -894,7 +893,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "'ZERO callers' note, so treat the sink as reachable; source analysis cannot attest client "
             + "usage either way."),
 
-        new SinkSite("Api/Ai/ChatDocumentEndpoints.cs", "UploadSmallAsUserAsync", 1,
+        new SinkSite("Api/Ai/ChatDocumentEndpoints.cs", "UploadSmallToStagingAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
             "ResolveContainerId(session, configuration) -> SharePointEmbedded:StagingContainerId, "
             + "falling back to EmailProcessing:DefaultContainerId",
@@ -992,10 +991,15 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             "App-only (MI) small-file upload — the most-used content write in the codebase (ADR-007). "
             + "Creates a drive item at a caller-chosen path inside the drive it is handed."),
 
-        new SinkName("UploadSmallAsUserAsync", SinkKind.ContentWrite,
-            "The OBO twin of UploadSmallAsync (ADR-007). Creates a drive item under the acting user's "
-            + "identity, so the user's own container ACL applies — a constraint, not an authorization "
-            + "decision about the RECORD."),
+        // UploadSmallAsUserAsync DELETED by task 171 (every record-backed caller writes app-only); the one OBO upload
+        // left is the staging-only UploadSmallToStagingAsUserAsync below.
+        new SinkName("UploadSmallToStagingAsUserAsync", SinkKind.ContentWrite,
+            "OBO small upload into the CONFIGURED staging container only (chat persist, chat Word export, workspace "
+            + "pre-fill) — task 171 left it OBO because no record stands behind those writes (ADR-007)."),
+
+        new SinkName("UploadSmallCoreAsync", SinkKind.ContentWrite,
+            "UploadSessionManager's private shared body behind UploadSmallAsync and UploadSmallToStagingAsUserAsync "
+            + "(task 171) — reachable only through them, so the site scan sees their callers (ADR-007)."),
 
         new SinkName("UploadSmallFileAsync", SinkKind.ContentWrite,
             "SpeAdminGraphService's private small-file leg, selected by UploadFileToContainerAsync for "
@@ -1019,6 +1023,14 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "caller since task 076 deleted the chunked route pair; kept in the vocabulary so a new caller "
             + "would be caught rather than silently un-scanned."),
 
+        new SinkName("ReplaceFileContentAsync", SinkKind.ContentWrite,
+            "APP-ONLY in-place content replacement with optional If-Match (task 171): the Office version save, Compose's "
+            + "row-backed save (via ComposeSpeAccess) and create-on-save's verified dedup hit (ADR-007; ADR-049)."),
+
+        new SinkName("ReplaceFileContentCoreAsync", SinkKind.ContentWrite,
+            "UploadSessionManager's private shared body behind both replace members (task 171) — reachable only through "
+            + "them (ADR-007)."),
+
         new SinkName("ReplaceFileContentAsUserAsync", SinkKind.ContentWrite,
             "OBO in-place content replacement, minting a new SPE version of an EXISTING item (ADR-007; "
             + "ADR-049 makes this Compose's canonical persist idiom). A replace is a write into the "
@@ -1028,9 +1040,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             "App-only (MI) drive-item delete (ADR-007). A destroy, so the wrong-resource-domain failure mode "
             + "leaves nothing behind to audit."),
 
-        new SinkName("DeleteItemAsUserAsync", SinkKind.ContentWrite,
-            "The OBO twin of DeleteFileAsync (ADR-007). Zero callers since tasks 071/076 retired the OBO "
-            + "drive-keyed routes; retained in the vocabulary for the same reason as UploadChunkAsUserAsync."),
+        // DeleteItemAsUserAsync DELETED by task 171 (no caller since tasks 071/076).
 
         new SinkName("DeleteDriveItemAsync", SinkKind.ContentWrite,
             "SpeAdminGraphService's drive-item delete, reached through DeleteDriveItemForConfigAsync "
@@ -1040,9 +1050,9 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             "The container-type-config-scoped delete used by the SPE-admin item surface (ADR-007). One of "
             + "the three client-named writes in ContainerItemEndpoints.cs."),
 
-        new SinkName("CreateUploadSessionAsUserAsync", SinkKind.ContentWrite,
-            "Opens an OBO Graph upload session against a drive path, which is the act that reserves the "
-            + "destination item (ADR-007). Dead alongside UploadChunkAsUserAsync since task 076."),
+        new SinkName("CreateUploadSessionAsync", SinkKind.ContentWrite,
+            "Opens an APP-ONLY Graph upload session against a drive path (task 171 — replaced the OBO twin that 403'd on "
+            + "every secure container), which is the act that reserves the destination item (ADR-007)."),
 
         new SinkName("CreateFolderAsync", SinkKind.ContentWrite,
             "Creates a folder item inside a container via Children.PostAsync (ADR-007). No bytes, but it is "

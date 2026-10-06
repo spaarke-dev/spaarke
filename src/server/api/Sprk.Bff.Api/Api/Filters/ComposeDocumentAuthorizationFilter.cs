@@ -122,9 +122,9 @@ public sealed class ComposeDocumentAuthorizationFilter : IEndpointFilter
                 detail: "Whether you may open this document could not be determined just now. Try again shortly.");
         }
 
+        // Path B: no record stands behind this item, so SPE's OBO answer for the caller stays the decision.
         if (row is null)
         {
-            // Path B: no record stands behind this item, so SPE's OBO answer for the caller stays the decision.
             return await next(context);
         }
 
