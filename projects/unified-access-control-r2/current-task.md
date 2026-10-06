@@ -1,15 +1,66 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-10-06 (checkpoint #15). Supersedes #14. Read the Quick Recovery table first.
+> **Last Updated**: 2026-10-06 ~16:20 UTC (checkpoint #16, by context-handoff before /compact). Supersedes #15. Read Quick Recovery first.
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |---|---|
-| **Task** | Batch 4 + route sweep: MERGED to master as `d254d7166` (PR #1312, squash, 2026-10-06). Now: dev deploy and live gates; then batch 5 |
-| **Step** | Dev live steps in the order listed in PR #1312 "Deploy and live steps after merge" (schema/FLS first, then the BFF) |
-| **Status** | in-progress. Integ tip `6ec6e3096` (master merged at `58fbcfe73`; .claude edits for AP-15 and bff-deploy). Suites on the merge: unit 18016/0/54, ArchTests 803, Integration 87, Spe 350/25, L2 2171/1. Publish 36.13 MB vs master 45.88 MB (QuestPDF removed by 162; like-for-like +0.78 MB). CVE clean. Owner round 66: 148's double fault accepted as a known limit |
-| **Next Action** | (1) Run the PR #1312 deploy list on dev, step by step: schema (142/158 ledger, 143 subject column, 140 grantor columns, 133 creator person) → 144 default-team migration → 165 operator marker + binding backfill (`-Bind`) → BFF deploy from a fresh worktree of master + external SPA → 150 FLS lock immediately → 166 gates 23a/23/24/25/26 + PowerBi setting → 148 backfill → 168 forms/grids (SpaarkeGridCustomizer v1.1.1 first) → clients + ribbons. (2) Notify word-add-in-r1 when 161 is live on spaarke-bff-dev; the merge notice was held by both of its sessions, so the user relays it. (3) Live gates per task note as `uac.child.user`; mark tasks ✅ as gates pass. (4) Batch 5. |
+| **Task** | Batch 4 + route sweep: merged to master (`d254d7166`, PR #1312) and **DEPLOYED TO DEV** (all 3 phases done). Now: follow-up PR #1314, then the live gates (161 first), then batch 5 |
+| **Step** | PR #1314 open on branch `fix/uac-r2-deploy-script-fixes` (worktree `C:\wtF`), CI running. Task 161 live gate run (results in the 161 note on #1314); waiting for the owner's OK to mark 161 ✅ |
+| **Status** | in-progress |
+| **Next Action** | (1) `gh pr checks 1314`. On Router green: `gh pr merge 1314 --squash`. Then redeploy the BFF to dev from a fresh worktree of master: `pwsh -File scripts/Deploy-BffApi.ps1 -Environment dev -AppServiceName spaarke-bff-dev -ResourceGroupName rg-spaarke-dev`, with `pac.cmd`/pwsh from a short path. Then re-check, as testuser1: template render on a readable matter (expect 200) and Save to SharePoint on communication `8ebf88cd-9fc1-f111-a05c-0022482913fc` (expect 200). The scratchpad script `gate161.py` has `call()`/`tok()` helpers; the testuser1 token comes from `AZURE_CONFIG_DIR=C:/tmp/az-uac-child az account get-access-token --resource api://1e40baad-e065-4aea-a8d4-4b7ab273458c`. (2) The owner was asked whether to mark **161 ✅ now**: everything 161 changed passes, and the two failures are pre-existing bugs fixed in #1314. If yes: set POML 161 status completed + TASK-INDEX ✅ (work branch), then give the owner the word-add-in-r1 note. Peer messages to word-add-in-r1 are always held, so the owner relays them. (3) The remaining live gates per task note, run as testuser1@spaarke.com (the non-admin child-BU user; `uac.child.user` has no known password). Mark tasks ✅ as gates pass. (4) Batch 5. |
+
+### This session (2026-10-06), done
+- **PR #1312 merged** (`d254d7166`, squash; Router + Tier 1 green; legacy SDAP CI also green afterwards).
+- **Dev deploy** (deploy agent, worktree `C:\wtD` at d254d7166). Backups and manifests are in `C:\wtD\scripts\logs\{,deploy-phase2\,deploy-phase3\}`.
+  - **Phase 1:**
+    - Schema: 142/158 ledger, 143, 140, 133.
+    - 165: marker and binding backfill (5/5 stamped).
+    - 144: migration (0 rows).
+    - BFF deployed (36.13 MB, hashes OK) plus the external SPA.
+    - 150: FLS lock.
+  - **Phase 2:**
+    - Clients that wrote `sprk_issecure` rebuilt.
+    - 166 gate 23a/26; 148 backfill (0 changes).
+    - 168 in full.
+    - PCFs RegardingResolver 1.6.1, CommunicationConnections 1.7.0, TrackingFieldTrio 1.0.35.
+    - 4 web resources; 142 G-4 form libraries.
+    - Ribbons: 147 G147-6 and 142 G-5 (Update Access + Remove Secure).
+    - 144 full -Verify PASS.
+  - **Phase 3:**
+    - Removed (owner-approved, backed up first): UniversalDatasetGrid, `sprk_externalworkspace`, UniversalDocumentUpload (UQC solution plus its "File Upload" custom page).
+    - "New Document" appaction repointed to `Spaarke_UploadDocumentsStandalone` (the wizard).
+    - Gate 21: 17 code pages + 5 PCFs rebuilt; 0 of 5,327 web resources write the pointer.
+    - Gate 22 census.
+    - Gate 23 (owner option a): `sprk_graphdriveid` and the relocation columns locked; `sprk_graphitemid` NOT secured (alternate key `sprk_graphitemid_uk`, 0x80060896).
+    - Gate 24: 367 moved, 0 failed.
+    - Gate 25: `DocumentPointer__StrictDerivedContainer=true`.
+    - 150 G-11: Make Secure live.
+  - **Held:** the Power BI workspace id (owner: leave unset; reporting answers 503). `PowerBi__ClientSecret` is a plain app setting (owner: leave it).
+- **Owner decisions this session:**
+  - Round 66: 148's double fault is a known limit.
+  - 142 G-5 option a.
+  - Gate 23 option a.
+  - Delete UDG / externalworkspace / UQC; repoint "New Document".
+  - The 25 client rebuilds.
+- **Issue #1313:** the 165 backfill cannot list a config with no secret name (Model 1); container `b!MVasATu…` is unexamined (fails closed).
+- **PR #1314** (`C:\wtF`, branch `fix/uac-r2-deploy-script-fixes`), contents:
+  - Fixes to the deploy scripts: ledger cascade, platform-role census (fails closed, seeded), grantor loop variable, contact Merge cascade, the graphitemid skip, restart waits.
+  - **BFF:** `DataverseEmailTemplate.TemplateTypeCode` int→string (every template read was a 500).
+  - **BFF:** the archive lookup column `sprk_communication`→`sprk_relatedcommunication` (every Save to SharePoint was a 500).
+  - Each BFF fix has a test, seeded.
+  - PCF versions and bundles as deployed.
+  - The work-assignment ribbon export.
+  - The 161 gate results.
+- **161 live gate** (as testuser1): a, b(refusal), c, d (send/thread/pin/pin-refusal/direct-delete 403), e, g pass. b(parity) and archive are blocked by the two pre-existing bugs (#1314). Reconcile tabs and (f) are not testable.
+- **Follow-ups, recorded in the #1314 body:**
+  - `/disable` does not survive a restart.
+  - The `pac` bash shim.
+  - `deploy-spaarke-ai.yml` fails ("Could not resolve react").
+  - Orphans: `sprk_OpenDocumentQuickCreate` and the empty "Upload Documents" form.
+  - The `Create_Task_From_Email` schema error (missing `dueDate`), seen in the logs.
+  - The thread `sprk_regardingreportcard` fault on send (already known in the 161 note §4.9).
 
 **Session rules (memory):**
 - Keep the session cwd as uppercase `C:/code_files/spaarke`. A bare `cd` elsewhere resets it, so use `git -C` and absolute paths.
