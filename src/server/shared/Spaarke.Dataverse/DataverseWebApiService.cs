@@ -752,8 +752,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             ["sprk_eventlogname"] = logName,
             ["sprk_Event@odata.bind"] = $"/sprk_events({eventId})", // R5 002: PascalCase nav prop (metadata-verified)
-            ["sprk_action"] = action,
-            ["sprk_description"] = description
+            ["sprk_action"] = action
+            // No description column: sprk_eventlog has none, and writing one made every log write a 400. The
+            // description is recorded in the caller's [EventLog] trace only.
         };
         if (owningTeamId is { } teamId && teamId != Guid.Empty)
         {

@@ -645,6 +645,7 @@ public static class EventEndpoints
                 assignedToContactId,
                 owner.CreatedByPerson, // task 146 c1-r1 — the caller, recorded as the app-created event's creator person
                 regarding,
+                logger,
                 ct);
 
             var response = new CreateEventResponse(eventId, request.Subject, createdOn);
@@ -931,6 +932,7 @@ public static class EventEndpoints
         Guid? assignedToContactId,
         Guid? createdByPersonId,
         RegardingWrite? regarding,
+        ILogger logger,
         CancellationToken ct)
     {
         // Map API request to Dataverse request
@@ -962,14 +964,23 @@ public static class EventEndpoints
         // Create the event record
         var (id, createdOn) = await dataverseService.CreateEventAsync(dataverseRequest, ct);
 
-        // Create Event Log entry for the creation
-        await dataverseService.CreateEventLogAsync(
-            id,
-            Spaarke.Dataverse.EventLogAction.Created,
-            "Event created via API",
-            owningTeamId, // task 146 — owned like the event it logs
-            createdByPersonId,
-            ct);
+        // Create Event Log entry for the creation. Best-effort, like every other log write here: the event already
+        // exists, so a failed log must not turn the create into a 500 the caller retries into a duplicate event.
+        try
+        {
+            await dataverseService.CreateEventLogAsync(
+                id,
+                Spaarke.Dataverse.EventLogAction.Created,
+                "Event created via API",
+                owningTeamId, // task 146 — owned like the event it logs
+                createdByPersonId,
+                ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to create event log entry. EventId={EventId}, Action={Action}",
+                id, Spaarke.Dataverse.EventLogAction.Created);
+        }
 
         return (id, createdOn);
     }
