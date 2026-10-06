@@ -194,7 +194,7 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
 
     /// <summary>
     /// The BFF settings that name the customer's own SPE container (task 227c) — both must equal the container H8
-    /// created (one container per customer, owner D28).
+    /// created (the customer's root container, owner D28; secure-record containers are the BFF's, created at runtime).
     /// </summary>
     public static readonly IReadOnlyList<string> CustomerContainerAppSettingNames =
         ["EmailProcessing__DefaultContainerId", "Communication__ArchiveContainerId"];

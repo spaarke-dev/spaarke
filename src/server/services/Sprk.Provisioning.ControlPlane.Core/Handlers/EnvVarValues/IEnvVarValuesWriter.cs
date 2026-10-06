@@ -89,12 +89,19 @@ public interface IEnvVarValuesWriter
 /// Values MAY be empty string (e.g. <c>sprk_ShareLinkBaseUrl</c> when the
 /// operator did not supply <c>shareLinkBaseUrl</c>) but are never null.
 /// </param>
+/// <param name="RootBusinessUnitContainerId">
+/// Task 227g: H8's root container, linked to the environment's ROOT business unit as <c>businessunit.sprk_containerid</c>
+/// BEFORE the values are written — the non-secure default unified-access-control-r2 task 076 resolves a record's
+/// container from (<c>RecordContainerResolver</c>: the record's owning business unit → its <c>sprk_containerid</c>).
+/// Null = no link (callers that write values only).
+/// </param>
 public sealed record EnvVarValuesWriteRequest(
     string TargetDataverseUrl,
     string TenantId,
     string ClientId,
     string? ClientSecret,
-    IReadOnlyList<KeyValuePair<string, string>> Values);
+    IReadOnlyList<KeyValuePair<string, string>> Values,
+    string? RootBusinessUnitContainerId = null);
 
 /// <summary>
 /// Discriminated result of <see cref="IEnvVarValuesWriter.WriteAsync"/>.
@@ -106,8 +113,13 @@ public abstract record EnvVarValuesWriteOutcome
 
     /// <summary>All (schemaName, value) pairs were successfully upserted.</summary>
     /// <param name="WrittenVariables">The schema names + values that were written, in write order.</param>
+    /// <param name="LinkedRootBusinessUnitId">
+    /// Task 227g: the root business unit whose <c>sprk_containerid</c> names the container (already, or written and read
+    /// back by this call); null when the request asked for no link.
+    /// </param>
     public sealed record Success(
-        IReadOnlyList<KeyValuePair<string, string>> WrittenVariables) : EnvVarValuesWriteOutcome;
+        IReadOnlyList<KeyValuePair<string, string>> WrittenVariables,
+        Guid? LinkedRootBusinessUnitId = null) : EnvVarValuesWriteOutcome;
 
     /// <summary>
     /// The upsert failed on one variable (writer stops at the first failure —
@@ -155,4 +167,17 @@ public enum EnvVarValuesWriteFailureKind
     /// <see cref="EnvVarValuesRejectionCodes.WriterInvocationFailed"/>.
     /// </summary>
     UnknownInvocationFailure = 4,
+
+    /// <summary>
+    /// Task 227g: the environment reports no root business unit, or more than one. Handler maps to
+    /// <see cref="EnvVarValuesRejectionCodes.RootBusinessUnitUnresolved"/>.
+    /// </summary>
+    RootBusinessUnitUnresolved = 5,
+
+    /// <summary>
+    /// Task 227g: the root business unit's <c>sprk_containerid</c> already names ANOTHER container. Nothing is written —
+    /// overwriting it would move where the customer's non-secure files go. Handler maps to
+    /// <see cref="EnvVarValuesRejectionCodes.RootBusinessUnitContainerConflict"/>.
+    /// </summary>
+    RootBusinessUnitContainerConflict = 6,
 }

@@ -1129,9 +1129,11 @@ bind its containers with `-Bind`). This script is the ONE remaining reader of `s
 ```
 
 **Shared module:** `common/SpeContainerBinding.ps1` — THE PowerShell constant for the property name and
-`Invoke-SpeContainerBindOrRemove` (stamp, read back, remove the container if the stamp did not land), used by every script
-that creates a container (`New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
-`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`). `SpeAdminContainerBindingGuardTests`
+`Invoke-SpeContainerBindOrRemove` (stamp the business unit AND mark the customer — `-CustomerId`, the BFF's `Customer__Id`,
+task 227g — read both back, remove the container if either did not land), used by every script that creates a container
+(`New-BusinessUnitContainer.ps1 -CustomerId`, `Provision-Customer.ps1` step 10, `Create-NewContainerType.ps1
+-CreateTestContainer -TestContainerBusinessUnitId <bu> -TestContainerCustomerId <id>`). `SpeContainerMarkerParityTests` fails
+the build on a call without `-CustomerId`. `SpeAdminContainerBindingGuardTests`
 fails the build on a script that creates a container without it — including a URI held in a variable, a splat, `az rest`,
 or the Graph PowerShell `New-MgStorageFileStorageContainer` cmdlet (round 41 item 5).
 

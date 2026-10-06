@@ -251,7 +251,8 @@ per customer in both models (D-12).
 > application `full` on the shared registration (H8, T227b), and Microsoft documents that an app-only token reaches
 > **every container of the type** — there is no per-container app scoping (Learn, *Configure authentication and
 > authorization*, 2026-08-24). Delegated (OBO) access is isolated by container membership. The owner chose one container
-> type per model and one container per customer (per Dataverse environment), with app-only isolation **enforced in the
+> type per model and one root container per customer (per Dataverse environment; the BFF adds one per secure record at
+> runtime — T227g), with app-only isolation **enforced in the
 > BFF's code and tests (T227d)**: an app-only SPE call may only target the stamp's own container(s).
 >
 > **How it is enforced (T227d).** Every app-only SPE call in the BFF gets its Graph client from
@@ -418,8 +419,8 @@ POST https://graph.microsoft.com/beta/storage/fileStorage/containers
 POST /beta/storage/fileStorage/containers/{id}/activate
 ```
 
-A container is **not usable until activated**. One container per customer (trials, Model 1) or per
-customer tenant (Model 2).
+A container is **not usable until activated**. One root container per customer (trials, Model 1) or per
+customer tenant (Model 2), plus one per secure project / matter / work assignment, which the BFF creates at runtime.
 
 **Deleting** is two steps — soft-delete then purge from the deleted collection:
 
@@ -653,7 +654,7 @@ flow inherits this defect and should be treated as unproven.
 
 | # | Question | Why it matters | Status |
 |---|---|---|---|
-| 1 | **How many containers can one *standard* container type hold?** | If Model 1 holds one container per customer, this is the ceiling on Model 1 customers. Only the trial cap of 5 is published | ⚠️ **UNDOCUMENTED** — confirm with Microsoft before it becomes load-bearing |
+| 1 | **How many containers can one *standard* container type hold?** | Model 1 holds one root container per customer plus one per secure record, so this caps the sum over all Model 1 customers of (1 + secure records). Only the trial cap of 5 is published | ⚠️ **UNDOCUMENTED** — confirm with Microsoft before it becomes load-bearing |
 | 2 | Does the create-role documentation conflict still stand? | Learn's Graph reference and its conceptual doc disagree on whether an admin role is needed to create | Open — see [`knowledge/sharepoint-embedded/docs/learn-containertypes.md`](../../knowledge/sharepoint-embedded/docs/learn-containertypes.md) |
 | 3 | Is `scripts/Create-NewContainerType.ps1` used anywhere that currently succeeds? | If H8 has ever worked, our understanding of R5 is incomplete | Open — §7 |
 | 4 | ~~Are `applicationPermissions` scoped per consuming tenant, or global to the container type?~~ | Decides whether Model 2 customers' BFF apps are isolated from each other | ✅ **RESOLVED 2026-08-30** — per consuming tenant. Grants hang off `fileStorageContainerTypeRegistration`, not the container type (§3A) |

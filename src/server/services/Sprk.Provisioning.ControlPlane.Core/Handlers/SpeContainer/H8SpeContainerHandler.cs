@@ -132,7 +132,7 @@
 // IDEMPOTENCY (unchanged from H8-A): key is <c>spe-{customerId}</c>. Level-3
 // (handler-body durable dedup): scans ProvisioningRun.CompletedPhases for
 // (Phase=="H8", IdempotencyKey==<key>). Match → Success no-op BEFORE any
-// external side effect. Enforces "one container per customer, never re-create"
+// external side effect. Enforces "one ROOT container per customer, never re-create"
 // (topology doc §6: containers are cheap but the customer's container = data).
 // The creation record extends this to an INCOMPLETE H8 (task 165).
 //

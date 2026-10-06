@@ -1333,8 +1333,9 @@ function Invoke-Step10_ProvisionSPEContainers {
 
     # 5. Bind it to the root business unit (task 165, owner round 35 item 1): stamp, read back, or remove.
     try {
+        # -CustomerId: the marker the stamp's BFF recognises its containers by (customer.bicep sets Customer__Id = customerId).
         Invoke-SpeContainerBindOrRemove -Token $graphToken -ContainerId $containerId -BusinessUnitId $rootBuId `
-            -GraphBase 'https://graph.microsoft.com/v1.0'
+            -CustomerId $CustomerId -GraphBase 'https://graph.microsoft.com/v1.0'
         Write-Log "SPE container $containerId bound to root business unit $rootBuId." -Level SUCCESS
     }
     catch {

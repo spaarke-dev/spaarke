@@ -7,6 +7,18 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — One ROOT container per customer; H7 links the root business unit; secure-record setup is a runbook phase (T227g)
+
+`customer-provisioning-orchestration-r1` T227g (owner question: how do the Secure Record containers fit?).
+
+- **`.claude/constraints/provisioning.md`** (SPE section): "one container per customer" corrected to one ROOT container —
+  secure-record containers (one per secure project / matter / work assignment) and further business-unit containers are
+  the BFF's, at runtime, bound and marked. New binding bullet: H7 sets the root business unit's `sprk_containerid` to H8's
+  container (unified-access-control-r2 task 076's non-secure default), never overwriting another container (Resumable
+  `root-business-unit-container-conflict`); every script-created container carries the `spaarkeCustomerId` marker.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 6d — the secure-record environment setup
+  (`SECURE-PROJECT-ENVIRONMENT-SETUP.md`, gated by its §7 checklist) before the customer is told the environment is ready.
+
 ###### 2026-10-06 — One definition of the stamp's containers; the I4 resolver diagnostic retired (T227f)
 
 `customer-provisioning-orchestration-r1` T227f.

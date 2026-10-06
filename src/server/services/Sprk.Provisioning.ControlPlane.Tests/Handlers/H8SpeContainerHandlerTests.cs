@@ -1209,7 +1209,7 @@ public sealed class H8SpeContainerHandlerTests
         provisioner.Calls.Should().Equal("grants");
     }
 
-    // ---------- R1..R7 one container per customer, ever + the ownership marker (task 227e) ----------
+    // ---------- R1..R7 one root container per customer, ever + the ownership marker (task 227e) ----------
 
     [Fact]
     public async Task R1_LaterRun_ReusesTheContainerTheEnvironmentRecords_CreatesNothing_NeverRemovesIt()

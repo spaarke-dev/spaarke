@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // GraphContainerProvisionerReuseTests.cs
 //
-// Task 227e — the Graph calls H8 adds for "one container per customer, ever": EnsureCustomerMarkerAsync (the
+// Task 227e — the Graph calls H8 adds for "one root container per customer, ever": EnsureCustomerMarkerAsync (the
 // spaarkeCustomerId marker the customer's BFF recognises its containers by, T227d) and the bind of a REUSED container
 // (SpeContainerBindRequest.RemoveIfNotBound = false — the customer's existing container is never deleted). The real
 // Microsoft Graph SDK runs against a routed fake HttpMessageHandler with a fake owning-app TokenCredential, both injected

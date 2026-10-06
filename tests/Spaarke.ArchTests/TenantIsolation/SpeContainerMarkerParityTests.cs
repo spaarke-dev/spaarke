@@ -11,10 +11,16 @@ namespace Spaarke.ArchTests.TenantIsolation;
 /// the source-linked contract <c>src/server/shared/Contracts/SpeContainerCustomerMarker.cs</c> — and both projects compile
 /// that file (the mechanism of <c>SpeContainerBusinessUnitBinding.cs</c>, pinned by
 /// <c>SpeAdminContainerBindingGuardTests</c>).
+/// <para>The PowerShell side has ONE constant too (<c>$SpeContainerCustomerMarkerProperty</c> in
+/// <c>scripts/common/SpeContainerBinding.ps1</c>), equal to the C# one, and every script that binds a container it just
+/// created passes <c>-CustomerId</c> — a container a script makes is otherwise unreachable to its own BFF. Containers the BFF
+/// creates at runtime (secure-record containers, admin-plane creates) are marked by <c>SpeContainerOwnershipGuard</c>.</para>
 /// </summary>
 public class SpeContainerMarkerParityTests
 {
     private const string Contract = "src/server/shared/Contracts/SpeContainerCustomerMarker.cs";
+    private const string ScriptModule = "scripts/common/SpeContainerBinding.ps1";
+    private const string ScriptBinder = "Invoke-SpeContainerBindOrRemove";
 
     private static readonly string[] LinkingProjects =
     [
@@ -49,6 +55,65 @@ public class SpeContainerMarkerParityTests
     }
 
     [Fact]
+    public void MarkerName_IsOneConstantInPowerShell_AndAgreesWithTheContract()
+    {
+        var value = ContractValue();
+        var spelledIn = Scripts()
+            .Where(f =>
+            {
+                var text = File.ReadAllText(f);
+                return text.Contains($"'{value}'", StringComparison.OrdinalIgnoreCase)
+                       || text.Contains($"\"{value}\"", StringComparison.OrdinalIgnoreCase);
+            })
+            .Select(f => SourceScan.Relative(f).Replace(Path.DirectorySeparatorChar, '/'))
+            .ToList();
+
+        Assert.True(spelledIn.Count == 1 && spelledIn[0] == ScriptModule,
+            $"The SPE ownership marker '{value}' must be spelled in exactly one script, {ScriptModule}; found in: " +
+            $"{string.Join(", ", spelledIn)}. Use $SpeContainerCustomerMarkerProperty instead.");
+
+        var module = File.ReadAllText(Path.Combine(SourceScan.RepoRoot, ScriptModule));
+        var match = Regex.Match(module, @"^\s*\$SpeContainerCustomerMarkerProperty\s*=\s*'(?<value>[^']*)'", RegexOptions.Multiline);
+        Assert.True(match.Success, $"{ScriptModule} no longer declares $SpeContainerCustomerMarkerProperty = '...'.");
+        Assert.Equal(value, match.Groups["value"].Value);
+    }
+
+    [Fact]
+    public void EveryScriptBindCall_PassesTheCustomerId()
+    {
+        var calls = Scripts()
+            .SelectMany(f => BindCalls(File.ReadAllText(f)).Select(c => (File: SourceScan.Relative(f), Call: c)))
+            .ToList();
+        Assert.True(calls.Count >= 3,
+            $"the scan must find the script bind calls (New-BusinessUnitContainer, Provision-Customer, Create-NewContainerType) — " +
+            $"found {calls.Count}, so it would pass vacuously");
+
+        var unmarked = calls.Where(c => !PassesCustomerId(c.Call)).Select(c => $"{c.File}: {c.Call}").ToList();
+        Assert.True(unmarked.Count == 0,
+            $"Every {ScriptBinder} call must pass -CustomerId (the BFF's Customer__Id) — an unmarked container is refused by " +
+            $"the BFF's SpeContainerOwnershipGuard:\n  {string.Join("\n  ", unmarked)}");
+    }
+
+    [Fact]
+    public void BindCallScan_FlagsACallWithoutTheCustomerId_NegativeControl()
+    {
+        const string script = """
+            <# Invoke-SpeContainerBindOrRemove in a block comment is not a call #>
+            function Invoke-SpeContainerBindOrRemove { param($Token) }
+            # Invoke-SpeContainerBindOrRemove -Token $t (a line comment)
+            Invoke-SpeContainerBindOrRemove -Token $t -ContainerId $c `
+                -BusinessUnitId $u -CustomerId $id -GraphBase $g
+            Invoke-SpeContainerBindOrRemove -Token $t -ContainerId $c `
+                -BusinessUnitId $u -GraphBase $g
+            """;
+
+        var calls = BindCalls(script);
+        Assert.Equal(2, calls.Count);
+        Assert.True(PassesCustomerId(calls[0]));
+        Assert.False(PassesCustomerId(calls[1]));
+    }
+
+    [Fact]
     public void ContractValue_ReadsTheConstant_PositiveControl()
         => Assert.Equal("x-y", ConstantValueIn("public const string PropertyName = \"x-y\";"));
 
@@ -64,6 +129,30 @@ public class SpeContainerMarkerParityTests
         var match = Regex.Match(text, @"const\s+string\s+PropertyName\s*=\s*""(?<value>[^""]+)""");
         return match.Success ? match.Groups["value"].Value : null;
     }
+
+    private static IEnumerable<string> Scripts() =>
+        new[] { "scripts", "src" }
+            .Select(root => Path.Combine(SourceScan.RepoRoot, root))
+            .SelectMany(root => Directory.EnumerateFiles(root, "*.ps1", SearchOption.AllDirectories)
+                .Concat(Directory.EnumerateFiles(root, "*.psm1", SearchOption.AllDirectories)))
+            .Where(f => !IsBuildOutput(f) && !f.Replace('\\', '/').Contains("/node_modules/", StringComparison.Ordinal));
+
+    /// <summary>
+    /// Each <see cref="ScriptBinder"/> call as one logical line (backtick continuations joined), comments and the function's
+    /// own definition excluded.
+    /// </summary>
+    private static List<string> BindCalls(string script)
+    {
+        var code = Regex.Replace(script.Replace("\r\n", "\n"), @"<#.*?#>", string.Empty, RegexOptions.Singleline);
+        code = Regex.Replace(code, @"^\s*#.*$", string.Empty, RegexOptions.Multiline);
+        code = Regex.Replace(code, @"`[ \t]*\n", " ");
+        return Regex.Matches(code, $@"(?<!function\s+)(?<![\w-]){ScriptBinder}(?![\w-])[^\n]*")
+            .Select(m => Regex.Replace(m.Value, @"\s+", " ").Trim())
+            .ToList();
+    }
+
+    private static bool PassesCustomerId(string call) =>
+        Regex.IsMatch(call, @"(?<![\w-])-CustomerId(?![\w-])", RegexOptions.IgnoreCase);
 
     private static bool IsBuildOutput(string path)
     {

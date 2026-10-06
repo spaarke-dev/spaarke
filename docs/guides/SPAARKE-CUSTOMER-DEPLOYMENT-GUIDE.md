@@ -473,7 +473,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H4** | Key Vault secrets | Grant L2's own principal Secrets Officer on the customer vault; populate KV secrets per canonical catalog manifest; `keyVaultReferenceIdentity` PATCH to UAMI on both slots (**T1** trap) | — | `kv-{customerId}-{secretsVer}` — `secretsVer` = content version of the manifest |
 | **H5** | Dataverse env creation | Interim: `pac admin create-environment`; target: TF `powerplatform_environment` (deferred to first-customer engagement per M-10) | `sprk_dataverseurl` populated + env accessible | `dvenv-{customerId}` |
 | **H6** | Managed solution import | Package Deployer dependency-ordered import — **9 authoritative solutions** (§11.1a; raised 8→9 SESSION 19 MDA-GAP fix): Tier 1 `SpaarkeCore` → Tier 2 `SpaarkeWebResources` → Tier 3 (parallel) `CalendarSidePane` / `DocumentUploadWizard` / `EventRibbons` / `EventDetailSidePane` / `EventsPage` / `LegalWorkspace` → Tier 4 MDA `SpaarkeCorporateCounselApp` | All 9 imported at correct versions | `solimport-{customerId}-{solutionVer}` |
-| **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`) | Client startup validates no hardcoded URL fallbacks | `envvars-{customerId}-{configVer}` |
+| **H7** | Dataverse env-var values | Set 7 per-customer env vars per §10.3 (`sprk_BffApiBaseUrl`, `sprk_BffApiAppId`, `sprk_MsalClientId`, `sprk_TenantId`, `sprk_AzureOpenAiEndpoint`, `sprk_ShareLinkBaseUrl`, `sprk_SharePointEmbeddedContainerId`). First links the environment's **root business unit** to H8's container (`businessunit.sprk_containerid` — unified-access-control-r2 task 076's non-secure default); a root unit already naming another container → Resumable `root-business-unit-container-conflict` naming both, never overwritten (task 227g) | Client startup validates no hardcoded URL fallbacks; the root unit's container reads back | `envvars-{customerId}-{configVer}` |
 | **H8** | SPE container | Creates ONE customer container in the pre-existing container type, then activates and verifies it, app-only as that type's **owning app** (signed in through the Worker UAMI's federated credential on the owning app named in `SpeContainerOptions:ContainerTypeOwners` — never the customer BFF app or the BFF's UAMI; **T6** trap — delegated 403s). **Binds the container to the new environment's ROOT business unit** (custom property `spaarkeBusinessUnitId`, read back, container removed if it did not land — unified-access-control-r2 task 165, owner round 35 item 1), so it needs **H5**. Before creating, grants the customer's BFF identities on the container-type registration (stamp UAMI application `full`, BFF app delegated `full` — task 227b). **Records what it created at once and RESUMES with it** (rounds 41 + 49): a recorded container is never created again, and one whose activation failed is re-activated. A create whose answer was lost is QuarantineRequired `spe-container-creation-in-doubt`: never repeated, never auto-adopted (§7.5). **A later run reuses the customer's existing container** — the one the environment records in `sprk_SharePointEmbeddedContainerId` — and never removes it; the run's record and the environment naming different containers stops the run naming both (task 227e). After the bind it writes the `spaarkeCustomerId` marker the BFF recognises its containers by (T227d) | Container GET succeeds; stamp reads back; container ID handed to H7 only once bound | `spe-{customerId}` |
 | **H9** | BFF deploy | CI-published artifact (`latest.json` manifest) → scheduled-jobs slot guard on the staging slot (`Scheduling__RunScheduledJobs=false`, slot-sticky — ADR-036 A1 rule 2) → Kudu zip-deploy to staging → slot swap; hardened `Deploy-Release.ps1` Phase 4 scanned for a `spaarkedev1` hardcode | `/health` = 200; slot-swap smoke test produces no cold-start KV-ref failures | `bff-{customerId}-{buildId}` |
 | **H10** | Dataverse App User + Graph app-role parity | Register 2 App Users (BFF app-reg + UAMI) as System Administrator; sync Graph app-role parity from `GraphAppRoles.cs` (**T3**) | `systemusers?$filter=applicationid eq {uami-app-id}` returns 1 (**T2**) | `appuser-{customerId}` |
@@ -937,8 +937,13 @@ import — the script never customises a managed component (ADR-027); it then on
 
 **H8** creates (or reuses), activates, verifies, binds and marks the customer's root container inside the pre-existing container type (the
 container type itself is created once by the operator — [`SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`](./SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md)).
-**One container per customer, ever**: a re-entry of the run resumes with the container it recorded; a later run reuses
-the container the environment records (task 227e — details below).
+**One root container per customer, ever**: a re-entry of the run resumes with the container it recorded; a later run reuses
+the container the environment records (task 227e — details below). It is the root business unit's container — the default,
+email and communication-archive container; H7 records it on the root unit (`businessunit.sprk_containerid`, task 227g).
+**The customer's other containers are not provisioning's**: unified-access-control-r2 gives every secure project, matter and
+work assignment its OWN container (`ProvisionProjectEndpoint`, at runtime), and an administrator may add a business unit's
+container through the SPE admin plane. The BFF creates both, binds each to its business unit and marks it with
+`spaarkeCustomerId`. The `Secure Record` business unit itself has no container.
 **T6 fix**: H8 uses an app-only token as the container type's **owning app**, obtained through the Worker UAMI's
 federated identity credential on that app (task 248) — no certificate or secret is involved. Delegated tokens produce
 `public client not allowed` 403s.
@@ -950,7 +955,9 @@ unbound container — not even for a root-unit administrator. H8 therefore runs 
 once the root container is verified readable stamps it, reads the stamp back, and **removes** the container if the stamp
 did not land (QuarantineRequired: `spe-container-binding-failed` / `…-not-removed` / `…-infra-fault`). Every other creation
 path follows the same rule: the BFF, `New-BusinessUnitContainer.ps1`, `Provision-Customer.ps1` step 10,
-`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`.
+`Create-NewContainerType.ps1 -CreateTestContainer -TestContainerBusinessUnitId <bu>`. Each also writes the `spaarkeCustomerId`
+marker (the scripts take `-CustomerId` / `-TestContainerCustomerId` = the BFF's `Customer__Id`) and removes the container if
+either property did not read back (task 227g) — the BFF's app-only calls refuse an unmarked container (T227d).
 
 **The replication wait and every other resume (owner rounds 41 + 49; ported onto the single-container H8 at the
 2026-10-05 master merge).** An SPE container may be unaddressable for up to 24h after creation, so H8 binds only after the
@@ -1081,6 +1088,16 @@ Three DAG-parallel sub-steps:
 - Cost envelope ≤ target per pricing model
 
 **`sprk_dataverseenvironment.Setup Status` transitions to `Ready` only if H13 exits 0.**
+
+### 7.11 Phase 11 — Secure-record environment setup (operator; before the customer is told the environment is ready)
+
+Secure projects, matters and work assignments (unified-access-control-r2) need Dataverse security configuration no handler
+creates: the `Secure Record` business unit (holding no users and **no container**), the named `Secure Record Owners` team, the
+`Secure Record Owner` role and its privileges, role depth, and field security on `sprk_issecure`. Until it is done the BFF
+refuses to make any record secure (fail closed). Follow [`SECURE-PROJECT-ENVIRONMENT-SETUP.md`](./SECURE-PROJECT-ENVIRONMENT-SETUP.md)
+for this environment — it is the one source for the steps and their scripts — and treat **its §7 verification checklist as
+the gate**: do not report the environment as secure-record ready until every item passes. The containers are not part of
+this phase: the BFF creates each secure record's container when the record is made secure (task 227g).
 
 ---
 

@@ -2197,6 +2197,17 @@ if ($script:RegistryStale) {
 
 ---
 
+#### 6d. Secure-record environment setup (MANDATORY before the customer is told the environment is ready — task 227g)
+
+No handler configures unified-access-control-r2's secure records: the `Secure Record` business unit (no users, **no
+container**), the named `Secure Record Owners` team, the `Secure Record Owner` role + privileges, role depth, and
+`sprk_issecure` field security. Run [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md)
+against THIS environment (it is the one source — do not copy its steps here) and gate on its **§7 verification checklist**:
+record each item's result in `runs/{runId}.md`. Any item not passing → report the environment as NOT secure-record ready
+(the BFF fails closed — nothing leaks — but no record can be made secure). Containers are not part of this step: the BFF
+creates each secure record's container when the record is made secure, and H7 has already linked the root business unit
+to H8's container.
+
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 
 Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
