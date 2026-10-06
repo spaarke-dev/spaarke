@@ -3,7 +3,7 @@
   <metadata>
     <title>SECURITY: /api/communications/send attaches any document and links any record without checking the caller — authorize both per item, and fix the outbound archive writing a document id into sprk_graphitemid</title>
     <phase>6 UAT round 3-4 (2026-10-03/04)</phase>
-    <status>blocked</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization change on a live BFF route (`.cs`), plus a data-correctness fix and tests.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -21,7 +21,7 @@
 
   <role>SPAARKE BFF security engineer: endpoint-filter authorization (ADR-008), OBO vs app-only access (ADR-028), SPE file access (ADR-007).</role>
 
-  <goal>`POST /api/communications/send` (and `/send-bulk`, which shares the code) sends only documents the caller can read and associates the communication only with records the caller may link to; anything else is refused with a clear reason before any mail is sent. The outbound archive stores correct Graph identifiers.</goal>
+  <goal>RE-SCOPED 2026-10-06 (owner decision option 1, notes/097 §6; owner go 2026-10-06: "uac-r2 task 161 is working so you can proceed with completing the dependent work"). The send authorization is unified-access-control-r2 task 161's (`Api/Filters/CommunicationRecordAuthorizationFilter.cs`, on master via #1312, d254d7166) and is NOT rebuilt here. This task: (1) fixes the outbound archive (it wrote the `sprk_document` id and the archive container into the pointer fields, so the archived row named no file) — REVISED by owner OPTION A, 2026-10-06 (notes §9): each attachment is saved to SPE as its OWN NEW file in the communication's container and the archived `sprk_document` points at that file, as inbound archiving does (never the source document's file, which would make two rows share one), keeping UAC-r2 task 146's owner behaviour; (2) switches the Word Email tab on in the deploy workflow (`ADDIN_EMAIL_TAB_ENABLED: "true"`; the code default stays off); (3) records, by reading 161's filter, that the Word Email tab's request passes it; (4) leaves the live checks open for the main session.</goal>
 
   <context>
     <background>
@@ -58,16 +58,17 @@
   </constraints>
 
   <acceptance-criteria>
-    <criterion testable="true">A send whose every attachment the caller can read and every association the caller may link to succeeds as before (User and SharedMailbox modes).</criterion>
-    <criterion testable="true">One attachment the caller cannot read (or that does not exist) → 403 with a stable code, nothing sent, no `sprk_communication` row; denied and not-found are indistinguishable.</criterion>
-    <criterion testable="true">One association the caller may not link to → 403, nothing sent, no row.</criterion>
-    <criterion testable="true">The access check itself failing → the request fails closed (no send).</criterion>
-    <criterion testable="true">`/send-bulk` enforces the same checks (test).</criterion>
-    <criterion testable="true">Seeded negative control: with the new check removed, the 403 tests fail; restored, they pass. Both outputs recorded.</criterion>
-    <criterion testable="true">Archive: an outbound archive stores the Graph item id (not a `sprk_document` id) in `sprk_graphitemid` — regression test red before, green after.</criterion>
-    <criterion testable="true">Every other caller of `CommunicationService` is listed with its verdict (unaffected / now checked / app-only by design, with reason).</criterion>
-    <criterion testable="true">Gates: build 0/0; Communication + Office test scopes green; ArchTests green (incl. `RouteAuthorizationGuardTests` — add the route to its census if it is not governed); CVE clean.</criterion>
-    <criterion testable="true">Live (after deploy): the Word Email tab still sends the user's own document; an attempt with a document id the user cannot read is refused. If unavailable, leave open.</criterion>
+    <!-- RE-SCOPED 2026-10-06. The original ten criteria are kept verbatim in <notes> as history. -->
+    <!-- ARCHIVE criteria REVISED 2026-10-06 for owner OPTION A (notes/097 §9). The earlier criterion "the archived row stores the SOURCE document's drive/item ids" is SUPERSEDED: it made two rows share one SPE file (notes §7.1). -->
+    <criterion testable="true">Archive (option A): with ArchiveToSpe on, each outbound attachment is saved to SharePoint Embedded as its OWN NEW file — the bytes the send already read, one upload per attachment, through `SpeFileStore` — in the communication's container (the same `CommunicationContainerResolver` decision as the `.eml` and the inbound archive), named `{communicationId:N}_{sanitized name}`; the archived `sprk_document` stores THAT upload's item id and container (never the source document's item, never a `sprk_document` id), is linked by `sprk_relatedcommunication`, and gets the Document Profile job. Both send modes (SharedMailbox and User).</criterion>
+    <criterion testable="true">Never two rows on one file: a name repeated within one send gets its own path, and an archive upload never replaces an existing file (`ConflictBehavior.Fail`). The source document's file is never written, moved or deleted. An upload that returns no item creates no row.</criterion>
+    <criterion testable="true">As protected as the original (owner decision 2026-10-06, notes §11): whether a SOURCE is secure is decided only by task 166's `RecordContainerResolver` — `DeriveDocumentContainersAsync(source id)` ("marked secure") and `ResolveOwningRecordAsync(the drive the source row points at)` ("lives in a secure record's own container"). A secure source's copy is uploaded to the source's secure container (also when the communication is secure in a DIFFERENT container), carries the source's record links that resolve to that container plus `sprk_relatedcommunication`, and is owned by task 146's resolver over the copy's own parents (secure record primary, the sender as requester). A non-secure source keeps the communication's container. When the source's security cannot be determined (undecided derivation, a lookup fault, the two answers disagreeing, or a secure filing the copy cannot carry), that attachment gets no file and no row, the others are archived and the send succeeds — never a fallback to the communication's container. Tests: secure source + non-secure communication; non-secure source; lookup failure; different secure containers — red on option A as committed (3 of 4; the non-secure one pins unchanged behaviour), green on the fix, each bitten by a seeded removal (notes §11.3).</criterion>
+    <criterion testable="true">Invariants kept: task 146's owner (`ResolveContentOwnerAsync` / `ApplyContentOwner`, refusal → nothing uploaded or created); best-effort semantics (the email is already sent; any archive failure is logged and never fails the send).</criterion>
+    <criterion testable="true">Regression tests in `tests/unit/Sprk.Bff.Api.Tests/` (no `Mock&lt;HttpMessageHandler&gt;`): red on the old code and on the superseded shared-pointer draft, green on the fix, seeded removals bite (outputs recorded in notes §10.3); a &gt;4 MB attachment goes through the same upload inbound uses (inbound has no upload-session path).</criterion>
+    <criterion testable="true">`.github/workflows/deploy-office-addins.yml` sets `ADDIN_EMAIL_TAB_ENABLED: "true"` with a comment citing 161 on master (#1312) and the owner go of 2026-10-06; `webpack.config.js` keeps the default OFF and its comment says the workflow turns it on; `.env.example` no longer says "held off".</criterion>
+    <criterion testable="true">notes/097 §7 records, from reading 161's filter, which checks run for the Word Email tab's request (sendMode User, the user's own document as the attachment, the document's record as the association) and why they pass.</criterion>
+    <criterion testable="true">Gates: `/conflict-check`; build 0/0; Communication + Office test scopes and ArchTests green; no new HIGH CVE; publish size master vs branch from fresh short-path worktrees (equal file counts); inline code-review + adr-check.</criterion>
+    <criterion testable="false">Live (main session, after deploy): the Word Email tab sends the user's own document; a foreign document id is refused with `sdap.access.deny.communication.send`. Left OPEN by this task.</criterion>
   </acceptance-criteria>
 
   <escalation>
@@ -116,6 +117,56 @@
   </outputs>
 
   <notes>
+    HISTORY: the ORIGINAL goal and acceptance criteria (superseded 2026-10-06 by the re-scope above).
+    Original goal: `POST /api/communications/send` (and `/send-bulk`, which shares the code) sends only documents the
+    caller can read and associates the communication only with records the caller may link to; anything else is
+    refused with a clear reason before any mail is sent. The outbound archive stores correct Graph identifiers.
+    Original criteria: (1) a send whose every attachment the caller can read and every association the caller may link
+    to succeeds as before (User and SharedMailbox modes); (2) one attachment the caller cannot read (or that does not
+    exist) → 403 with a stable code, nothing sent, no `sprk_communication` row; denied and not-found are
+    indistinguishable; (3) one association the caller may not link to → 403, nothing sent, no row; (4) the access check
+    itself failing → the request fails closed (no send); (5) `/send-bulk` enforces the same checks (test); (6) seeded
+    negative control: with the new check removed, the 403 tests fail; restored, they pass; both outputs recorded;
+    (7) archive: an outbound archive stores the Graph item id (not a `sprk_document` id) in `sprk_graphitemid` —
+    regression test red before, green after; (8) every other caller of `CommunicationService` is listed with its
+    verdict; (9) gates: build 0/0; Communication + Office test scopes green; ArchTests green (incl.
+    `RouteAuthorizationGuardTests`); CVE clean; (10) live (after deploy): the Word Email tab still sends the user's own
+    document; an attempt with a document id the user cannot read is refused. Criteria 1-6 and 8 are met by UAC-r2
+    task 161 (its `CommunicationRecordAuthorizationContractTests`); 7 and the live check carry into the re-scope.
+
+    2026-10-06 (protection run): DONE. Owner decision on the §10.5 medium finding: "keep the copy as protected as the
+    original". ResolveArchiveCopyPlacementAsync decides per attachment with task 166's RecordContainerResolver
+    (DeriveDocumentContainersAsync + ResolveOwningRecordAsync — one secure notion, two directions; not ambiguous): secure
+    source -> the source's secure container (source wins over a differently-secure communication), carrying the source's
+    secure record links + sprk_relatedcommunication, owned via 146's ForChild resolution (Secure team); non-secure -> the
+    communication's container; undeterminable -> not archived (logged), never the shared archive. Tests: 4 new over the
+    real resolvers (3 red on option A, 8/8 green, seeds S4-S7 bite). Gates: build 0/0; Communication|Office 1910 passed /
+    16 skipped / 0 failed; ArchTests 806/806 (provenance entry amended); no CVE; publish vs merge base dc469d4a2 +4,188 B
+    (192 files each side). Owner to note: in the different-containers case the copy's own derivation is undecided, so the
+    STRICT pointer rule would refuse its app-only reads (notes §11.4). Full record: notes §11.
+
+    2026-10-06 (option A run): DONE. Owner chose OPTION A (notes §9). ArchiveOutboundAttachmentsAsync now saves each
+    outbound attachment as its own new SPE file in the communication's container (same container call as the .eml and the
+    inbound archive, same {C:N}_ naming, ConflictBehavior.Fail + per-send name de-duplication) from the bytes the send
+    already read, and the archived sprk_document points at that file; 146's owner and the profile job kept; best-effort
+    unchanged. Tests: OutboundAttachmentArchiveTests (4) red on HEAD and on the shared-pointer draft, green on the fix,
+    3 seeded removals bite. ArchTests caught the new SPE write sink (flat-path sanitizer at the call site; container
+    provenance entry added as ServerDerivedRecord in SpeWriteSinkContainerProvenanceGuardTests). Gates: build 0/0, unit
+    Communication|Office + ArchTests (806/806) green, no CVE, publish +653 B (192 files each side). Observation for the owner: a secure-record document attached to an email filed against a non-secure
+    record is copied into that communication's (shared) container (notes §10.5). Live checks open (notes §10.6).
+    Full record: notes/097-communications-send-authorization.md §10.
+
+    2026-10-06 (re-scoped run): DONE: Word Email tab switched on in deploy-office-addins.yml (code default stays off);
+    161's coverage of the Word tab's request recorded (notes §7.3, verdict unaffected); archive pointer fix implemented
+    with a regression test (red on HEAD, green on the fix, both send modes); gates green (build 0/0, 1904 unit +
+    contract tests, 806 ArchTests, no CVE, publish +735 B at 192 files each side). STILL BLOCKED (new, notes §7.1): the
+    instructed fix makes the archived copy and the source document share ONE SPE file. DELETE /api/documents/{id}
+    (DocumentCheckoutService) and DocumentContainerRelocator both delete the file a row points at, so deleting or
+    relocating the copy would destroy the original document's file. Owner to choose A (copy the bytes into the
+    communication's container), B (no duplicate document; the attachment row already links the source) or C (ship
+    as is, not recommended). The CommunicationService change and its test stay uncommitted pending that decision.
+    Live checks: open.
+
     2026-10-04: BLOCKED on escalation trigger 3 before any code edit. `/conflict-check` found that
     unified-access-control-r2 task 161 (#1100), commits 7f9159027 and 0f8cc61ea, merged and pushed to
     origin/integ/uac-r2-batch4 but not on master, already authorizes /send and /send-bulk. It checks Read on

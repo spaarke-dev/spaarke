@@ -168,6 +168,89 @@ public class DataverseWebApiServiceImpersonationTests
         handler.Requests.Should().BeEmpty();
     }
 
+    // ── unified-access-control-r2 (live on dev 2026-10-06): the record owner's own share ───────────────────────────
+    //
+    // Dataverse refuses an app-only RevokeAccess of the share held by the record's CURRENT owning user (400 0x80040223
+    // "Only owner can revoke access to the owner") and accepts it sent as that user. The owner-aware revoke stamps
+    // MSCRMCallerID for exactly that case; every other revoke is the app-only request it always was.
+
+    private static readonly Guid OtherUserId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+
+    /// <summary>The owner's own share is revoked AS the owner: one MSCRMCallerID, naming the revokee, and no CallerObjectId.</summary>
+    [Fact]
+    public async Task RevokeAccessAsync_OfTheOwningUsersOwnShare_RunsAsThatUser()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        var sut = new OfflineService(handler);
+        var owner = DataversePrincipalRef.User(CallerSystemUserId);
+
+        await sut.RevokeAccessAsync("sprk_matters", Guid.NewGuid(), owner, recordOwner: owner);
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Method.Should().Be(HttpMethod.Post);
+        sent.Target!.ToString().Should().EndWith("RevokeAccess");
+        sent.Values("MSCRMCallerID").Should().ContainSingle().Which.Should().Be(CallerSystemUserId.ToString());
+        sent.Headers.Keys.Should().NotContain("CallerObjectId");
+    }
+
+    /// <summary>
+    /// Every other principal / owner pairing stays app-only — exactly the headers an app-only request carries. A user who
+    /// does not own the record, a team that owns it (Dataverse's rule is about the owning USER), a user principal whose id
+    /// equals the owning TEAM's, and a team principal whose id equals the owning user's: none is ever impersonated.
+    /// </summary>
+    [Theory]
+    [InlineData("other-user-on-user-owned")]
+    [InlineData("team-on-own-team")]
+    [InlineData("user-id-of-owning-team")]
+    [InlineData("team-id-of-owning-user")]
+    public async Task RevokeAccessAsync_OfAnyShareButTheOwningUsersOwn_IsAppOnly(string pairing)
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        var sut = new OfflineService(handler);
+        var (principal, owner) = pairing switch
+        {
+            "other-user-on-user-owned" => (DataversePrincipalRef.User(OtherUserId), DataversePrincipalRef.User(CallerSystemUserId)),
+            "team-on-own-team" => (DataversePrincipalRef.Team(OtherUserId), DataversePrincipalRef.Team(OtherUserId)),
+            "user-id-of-owning-team" => (DataversePrincipalRef.User(OtherUserId), DataversePrincipalRef.Team(OtherUserId)),
+            "team-id-of-owning-user" => (DataversePrincipalRef.Team(OtherUserId), DataversePrincipalRef.User(OtherUserId)),
+            _ => throw new ArgumentOutOfRangeException(nameof(pairing), pairing, null),
+        };
+
+        await sut.RevokeAccessAsync("sprk_matters", Guid.NewGuid(), principal, recordOwner: owner);
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Headers.Keys.Should().BeEquivalentTo(AppOnlyHeaders, "only the owning user's own share is sent as a user");
+    }
+
+    /// <summary>The revoke that names no owner is unchanged: app-only even for the owner's share (Dataverse then refuses it).</summary>
+    [Fact]
+    public async Task RevokeAccessAsync_WithoutAnOwner_IsAppOnly()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.NoContent));
+        var sut = new OfflineService(handler);
+
+        await sut.RevokeAccessAsync("sprk_matters", Guid.NewGuid(), DataversePrincipalRef.User(CallerSystemUserId));
+
+        var sent = handler.Requests.Should().ContainSingle().Subject;
+        sent.Headers.Keys.Should().BeEquivalentTo(AppOnlyHeaders);
+    }
+
+    /// <summary>
+    /// The owner-aware revoke is still a share write that fails loud: Dataverse's refusal (here, as if the impersonated
+    /// owner were refused) surfaces as an exception, so a caller's read-back / completeness report never counts it.
+    /// </summary>
+    [Fact]
+    public async Task RevokeAccessAsync_AsTheOwner_WhenDataverseRefuses_Throws()
+    {
+        var handler = new RecordingHandler(_ => new HttpResponseMessage(HttpStatusCode.BadRequest));
+        var sut = new OfflineService(handler);
+        var owner = DataversePrincipalRef.User(CallerSystemUserId);
+
+        var act = () => sut.RevokeAccessAsync("sprk_matters", Guid.NewGuid(), owner, recordOwner: owner);
+
+        await act.Should().ThrowAsync<HttpRequestException>();
+    }
+
     private static HttpResponseMessage PatchOrEntitySetName(HttpRequestMessage request) =>
         request.Method == HttpMethod.Patch
             ? new HttpResponseMessage(HttpStatusCode.NoContent)

@@ -28,7 +28,7 @@
     The script provisions, in order:
       (a) COLUMN     sprk_grantedbycontact (schema sprk_GrantedByContact) on sprk_externalrecordaccess: a lookup to
                      contact through the 1:N relationship sprk_contact_sprk_externalrecordaccess_grantedbycontact, cascade
-                     NoCascade for Assign/Share/Unshare/Reparent/Merge and RemoveLink for Delete (nothing about the
+                     NoCascade for Assign/Share/Unshare/Reparent and RemoveLink for Delete (Merge is Cascade, forced by Dataverse for any lookup to contact; nothing about the
                      issuing contact may move, share or delete a grant). The navigation property is the PascalCase schema
                      name, sprk_GrantedByContact — the bind name the BFF uses (asserted below). The target solution's
                      publisher must carry the sprk prefix (asserted before the create).
@@ -143,7 +143,9 @@ $Tables = @('sprk_externalrecordaccess')
 $ReaderProfileName = 'Spaarke BFF-Managed Field Readers'
 $WriterProfileName = 'Spaarke BFF-Managed Field Writers'
 $Secured = $true
-$ExpectedCascade = [ordered]@{ Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Merge = 'NoCascade'; Delete = 'RemoveLink' }
+# Merge is not checked: Dataverse stores Merge=Cascade on every relationship that references `contact` (a contact merge
+# re-points it to the survivor) whatever the create asked for. The next provenance backfill re-derives sprk_grantedbycontactid.
+$ExpectedCascade = [ordered]@{ Assign = 'NoCascade'; Share = 'NoCascade'; Unshare = 'NoCascade'; Reparent = 'NoCascade'; Delete = 'RemoveLink' }
 function RelationshipSchemaName([string]$Table) { "sprk_contact_$($Table)_grantedbycontact" }
 
 # ── Auth + helpers ──────────────────────────────────────────────────────────────────────────────────────────
@@ -357,11 +359,11 @@ if ($writerId) {
 # grant be stamped +90 instead of ended).
 Write-Host "`n(c) Field-level security"
 foreach ($t in $Tables) {
-  foreach ($secured in @(@{ Column = $Column; Attr = $attrs[$t] }, @{ Column = $ProvenanceColumn; Attr = $provAttrs[$t] })) {
-    $col = $secured.Column
-    if (-not $secured.Attr) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$col and grant both profiles (after the column exists)"; continue }
+  foreach ($fls in @(@{ Column = $Column; Attr = $attrs[$t] }, @{ Column = $ProvenanceColumn; Attr = $provAttrs[$t] })) {
+    $col = $fls.Column
+    if (-not $fls.Attr) { Report $(if ($Verify) { 'MISSING' } else { 'WOULD' }) "secure $t.$col and grant both profiles (after the column exists)"; continue }
 
-    if ($secured.Attr.IsSecured -eq $Secured) { Report 'OK' "$t.$col is field-secured" }
+    if ($fls.Attr.IsSecured -eq $Secured) { Report 'OK' "$t.$col is field-secured" }
     elseif ($Verify) { Report 'MISSING' "$t.$col is NOT field-secured — any user with Write on a grant could forge or erase who issued it" }
     elseif ($IsDryRun) { Report 'WOULD' "secure $t.$col" }
     else {

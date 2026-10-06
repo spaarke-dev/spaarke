@@ -232,6 +232,7 @@ if ($Apply) {
     try {
         az webapp config appsettings set --resource-group $ResourceGroup --name $AppName --settings "$WritesSetting=true" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw "Could not set $WritesSetting." }
+        Start-Sleep -Seconds 90  # An app-setting change restarts the app; polling /healthz at once can answer from the old instance (dev deploy 2026-10-06)
         Wait-Healthy
         $pass = Invoke-Pass 'write'
     } finally {

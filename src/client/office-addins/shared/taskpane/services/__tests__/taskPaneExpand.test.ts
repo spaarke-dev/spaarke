@@ -1,0 +1,145 @@
+/**
+ * taskPaneWidthService expand/collapse (task 103, UAT round 6 item 6): requests 3x the platform default and steps
+ * down when the host silently ignores an out-of-limit request; collapse returns to the round-4 width.
+ */
+import {
+  collapseTaskPane,
+  expandCandidateWidths,
+  expandTaskPane,
+  isTaskPaneResizeSupported,
+} from '../taskPaneWidthService';
+
+interface HostOptions {
+  platform?: string;
+  supported?: boolean;
+  min?: number;
+  max?: number;
+  noApi?: boolean;
+}
+
+/** A fake host whose setWidth silently ignores values outside [min, max] — like the real one. */
+function installHost(options: HostOptions = {}): jest.Mock {
+  const { platform = 'OfficeOnline', supported = true, min = 330, max = 500, noApi = false } = options;
+  const setWidth = jest.fn((width: number) => {
+    if (width < min || width > max) return;
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    window.dispatchEvent(new Event('resize'));
+  });
+  (globalThis as unknown as { Office: unknown }).Office = {
+    context: { platform, requirements: { isSetSupported: jest.fn().mockReturnValue(supported) } },
+    extensionLifeCycle: noApi ? {} : { taskpane: { setWidth } },
+  };
+  return setWidth;
+}
+
+function setInnerWidth(value: number): void {
+  Object.defineProperty(window, 'innerWidth', { configurable: true, value });
+}
+
+function setScreenWidth(value: number): void {
+  Object.defineProperty(window.screen, 'availWidth', { configurable: true, value });
+}
+
+describe('taskPaneWidthService expand/collapse (task 103)', () => {
+  const originalOffice = (globalThis as unknown as { Office?: unknown }).Office;
+  const originalWidth = window.innerWidth;
+  const originalScreen = window.screen.availWidth;
+  beforeEach(() => {
+    jest.useFakeTimers();
+    setInnerWidth(330);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+    (globalThis as unknown as { Office?: unknown }).Office = originalOffice;
+    setInnerWidth(originalWidth);
+    setScreenWidth(originalScreen);
+  });
+
+  it('is supported only with TaskPaneApi 1.1, setWidth and a known platform (never by host type)', () => {
+    installHost();
+    expect(isTaskPaneResizeSupported()).toBe(true);
+    installHost({ supported: false });
+    expect(isTaskPaneResizeSupported()).toBe(false);
+    installHost({ noApi: true });
+    expect(isTaskPaneResizeSupported()).toBe(false);
+    installHost({ platform: 'iOS' });
+    expect(isTaskPaneResizeSupported()).toBe(false);
+    (globalThis as unknown as { Office?: unknown }).Office = undefined;
+    expect(isTaskPaneResizeSupported()).toBe(false);
+  });
+
+  it('builds candidates widest-first: 3x default, screen fractions, then the web cap', () => {
+    expect(expandCandidateWidths('OfficeOnline', 330, 1920)).toEqual([990, 960, 768, 576, 500]);
+    expect(expandCandidateWidths('PC', 395, 1920)).toEqual([960, 768, 576]);
+    expect(expandCandidateWidths('Mac', 345, 0)).toEqual([810]);
+    expect(expandCandidateWidths('iOS', 300, 1920)).toEqual([]);
+  });
+
+  it('drops candidates that are not wider than the current pane', () => {
+    expect(expandCandidateWidths('OfficeOnline', 600, 1920)).toEqual([990, 960, 768]);
+  });
+
+  it('web: steps down past ignored requests until 500 takes', async () => {
+    const setWidth = installHost({ platform: 'OfficeOnline', min: 330, max: 500 });
+    setScreenWidth(1920);
+    const pending = expandTaskPane();
+    await jest.advanceTimersByTimeAsync(5000);
+    await expect(pending).resolves.toBe(500);
+    expect(setWidth.mock.calls.map(c => c[0])).toEqual([990, 960, 768, 576, 500]);
+    expect(window.innerWidth).toBe(500);
+  });
+
+  it('Windows: stops at the first width the host accepts (3x here)', async () => {
+    const setWidth = installHost({ platform: 'PC', min: 86, max: 1200 });
+    setScreenWidth(1920);
+    setInnerWidth(395);
+    const pending = expandTaskPane();
+    await jest.advanceTimersByTimeAsync(5000);
+    await expect(pending).resolves.toBe(960);
+    expect(setWidth).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns null and leaves the width when every request is ignored', async () => {
+    installHost({ platform: 'OfficeOnline', min: 600, max: 700 });
+    setScreenWidth(800);
+    const pending = expandTaskPane();
+    await jest.advanceTimersByTimeAsync(5000);
+    await expect(pending).resolves.toBeNull();
+    expect(window.innerWidth).toBe(330);
+  });
+
+  it('returns null without calling setWidth when unsupported, and never throws', async () => {
+    const unsupported = installHost({ supported: false });
+    await expect(expandTaskPane()).resolves.toBeNull();
+    expect(unsupported).not.toHaveBeenCalled();
+
+    const throwing = installHost();
+    throwing.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    await expect(expandTaskPane()).resolves.toBeNull();
+  });
+
+  it('collapse returns to the round-4 width per platform', () => {
+    for (const [platform, width] of [
+      ['OfficeOnline', 405],
+      ['PC', 395],
+      ['Mac', 345],
+    ] as const) {
+      const setWidth = installHost({ platform });
+      expect(collapseTaskPane()).toBe(width);
+      expect(setWidth).toHaveBeenCalledWith(width);
+    }
+  });
+
+  it('collapse is a no-op when unsupported and never throws', () => {
+    const setWidth = installHost({ supported: false });
+    expect(collapseTaskPane()).toBeNull();
+    expect(setWidth).not.toHaveBeenCalled();
+    const throwing = installHost();
+    throwing.mockImplementation(() => {
+      throw new Error('boom');
+    });
+    expect(collapseTaskPane()).toBeNull();
+  });
+});

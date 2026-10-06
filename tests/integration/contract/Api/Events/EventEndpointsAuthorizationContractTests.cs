@@ -508,6 +508,23 @@ public class EventEndpointsAuthorizationContractTests
     }
 
     [Fact]
+    public async Task Create_WhenTheEventLogWriteFails_StillAnswers201_BecauseTheEventExists()
+    {
+        // The event is written before its log row. A failed log (on dev it was a 400 for a column sprk_eventlog lacks)
+        // must not turn a successful create into a 500 that the caller retries into a duplicate event.
+        await using var host = await EventsAuthHost.StartAsync();
+        host.Probe.Hold(CreateEventPrivilege);
+        var creates = host.CaptureCreates();
+        host.Events.Setup(e => e.CreateEventLogAsync(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Response status code does not indicate success: 400 (Bad Request)."));
+
+        var response = await host.SendAsync(CreateRequest(new { subject = "Log write fails" }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        creates.Should().ContainSingle();
+    }
+
+    [Fact]
     public async Task Create_HalfARegardingIs400_BeforeAnyCheck()
     {
         await using var host = await EventsAuthHost.StartAsync();

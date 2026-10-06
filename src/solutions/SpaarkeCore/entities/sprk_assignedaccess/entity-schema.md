@@ -40,7 +40,7 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 |---|---|---|
 | `sprk_ledgerkey` | Text 200 | **Uniqueness.** BFF-computed `{rootLogicalName}:{rootId}:{sourceField}:{contact|organization}:{subjectId}` (lower-case "D" GUIDs; `AssignedAccessStore.LedgerKey` — the ONE place it is computed). Carries alternate key `sprk_AssignedAccessLedgerKey`. |
 | `sprk_sourcefield` | Text 100 | The "Assigned *" column (logical name) that named the subject — or, on an inherited-share row (task 158 r1), `inherited:{parentTable}:{parentId}`: the secure matter / project whose share was passed on to the filed record. |
-| `sprk_project` / `sprk_matter` / `sprk_workassignment` | Lookup | The root — exactly one is set (same typed-root shape as `sprk_externalrecordaccess`). Nav props `sprk_Project` / `sprk_Matter` / `sprk_WorkAssignment`. Delete = **Cascade** (a deleted root takes its ledger). |
+| `sprk_project` / `sprk_matter` / `sprk_workassignment` | Lookup | The root — exactly one is set (same typed-root shape as `sprk_externalrecordaccess`). Nav props `sprk_Project` / `sprk_Matter` / `sprk_WorkAssignment`. Delete: **Cascade** for `sprk_project`, **RemoveLink** for `sprk_matter` / `sprk_workassignment` (Dataverse allows one cascade-delete parent per table; see "Verify live"). |
 | `sprk_subjectcontact` / `sprk_subjectorganization` | Lookup → `contact` / `sprk_organization` | The named subject — exactly one is set. Delete = RemoveLink. |
 | `sprk_subjectsystemuser` | Lookup → `systemuser` | The internal user a linked contact represents (a share, a suggested share, or an ineligible link). On an inherited-share row (task 158 r1): the USER a secure parent's share was passed on to. Delete = RemoveLink. |
 | `sprk_subjectteam` | Lookup → `team` | **Task 158 r1 (owner round 30).** On an inherited-share row: the TEAM a secure parent's share was passed on to. Nav prop `sprk_SubjectTeam`. Delete = RemoveLink. |
@@ -121,10 +121,15 @@ removed this auto grant" (Declined is NOT a No Access entry: a manual grant stil
 ### Verify live before relying on it
 
 - `sprk_AssignedAccessLedgerKey` index status **Active** (the script waits for it).
-- The three root relationships accept `Delete = Cascade` with the other cascades `NoCascade` (a non-parental custom
-  cascade; if Dataverse refuses it, fall back to `RemoveLink` and note it here — the ledger then keeps rows of a deleted
-  root, which the job ignores because the root reads as not found).
-- The privilege census in step (f) lists only System Administrator / System Customizer for Create/Write/Delete.
+- Root relationships: only `sprk_project` takes `Delete = Cascade`. **Dataverse refused a second one** on dev
+  (2026-10-06, 0x80047007 "sprk_assignedaccess is parented to sprk_project. Cannot create another parental relation
+  with sprk_Matter"): a table may have one cascade-delete parent. So `sprk_matter` and `sprk_workassignment` use
+  `RemoveLink`. A deleted matter or work assignment leaves its ledger rows with the root cleared, and the job ignores
+  them because the root reads as not found.
+- The privilege census in step (f) allows System Administrator / System Customizer for Create/Write/Delete, plus
+  the Microsoft platform roles `Service Writer` / `Service Deleter`, which Dataverse grants on every new table. Those
+  two pass only while every holder is an application user (no person, no team); the census reads the holders, and a
+  failed read fails.
 
 ### Deployment record
 
