@@ -526,6 +526,8 @@ public static class FieldMappingEndpoints
             // does not cover field-level security: an app-only read would return a secured source column the caller
             // cannot read and copy it into children they CAN read. Impersonated, Dataverse returns such a column as
             // null (the rule is then skipped), and a source the caller cannot read at all returns no row (404).
+            // Lookup-aware (2026-10-06): which rule fields are lookups — and which exist at all — is read from the
+            // source's metadata, so a lookup is selected as `_x_value` and an unknown field never poisons the read.
             var sourceFields = profile.Rules.Select(r => r.SourceField).Distinct().ToArray();
             var sourceValues = await RetrieveSourceRecordValuesAsCallerAsync(
                 impersonatedQuery,
@@ -549,8 +551,11 @@ public static class FieldMappingEndpoints
             // relationship metadata — the target's many-to-one relationships whose referenced entity is the source —
             // instead of the `sprk_regarding{base}` naming convention, which sprk_invoice (it carries sprk_matter) does
             // not follow. Exactly one lookup is required; none or several fail closed before any child is read.
-            var (parentLookup, parentLookupCount) = await ResolveParentLookupAsync(
-                impersonatedQuery, request.SourceEntity, request.TargetEntity, callerSystemUserId.Value, ct);
+            // The same one read of the target's relationships also tells the lookup writes below which navigation
+            // property binds each target lookup.
+            var targetRelationships = await ReadManyToOneRelationshipsAsync(
+                impersonatedQuery, request.TargetEntity, callerSystemUserId.Value, ct);
+            var (parentLookup, parentLookupCount) = ResolveParentLookup(targetRelationships, request.SourceEntity);
             if (parentLookup is null)
             {
                 logger.LogWarning(
@@ -601,6 +606,17 @@ public static class FieldMappingEndpoints
                 });
             }
 
+            // Step 3b (2026-10-06): a rule whose TARGET is a lookup is written as `{nav}@odata.bind` — decided once here,
+            // since the source value is the same for every child. A rule whose referent cannot be resolved is refused
+            // on its own (an Error field result); it never fails the push or the other rules.
+            var lookupBinds = await FieldMappingPushLookups.PlanLookupWritesAsync(
+                profile.Rules,
+                sourceValues,
+                FieldMappingPushLookups.TargetLookups(targetRelationships),
+                request.TargetEntity,
+                entityService,
+                ct);
+
             // Step 4: For each child, apply mapping rules and update
             var (updatedCount, failedCount, skippedCount, errors, fieldResults) = await ApplyMappingsToChildRecordsAsync(
                 dataverseService,
@@ -613,7 +629,8 @@ public static class FieldMappingEndpoints
                 logger,
                 ct,
                 scopes,
-                rootFiling);
+                rootFiling,
+                lookupBinds);
 
             var success = updatedCount > 0 || (failedCount == 0 && childRecords.RecordIds.Length > 0);
 
@@ -706,6 +723,13 @@ public static class FieldMappingEndpoints
     /// Replaces the app-only <c>IFieldMappingDataverseService.RetrieveRecordFieldsAsync</c> call. Values are converted
     /// exactly as that method converts them (string, Int64 or double, bool, null, else raw JSON text), so the rule
     /// engine sees the same shapes.
+    /// <para><b>Lookup-aware (2026-10-06).</b> The source's attribute metadata (read as the caller, like everything
+    /// here) decides each field's column: a lookup is selected as <c>_x_value</c> and returned as a
+    /// <see cref="SourceLookupValue"/> under the rule's own key; a field that is not a readable attribute of the source
+    /// is not selected and is absent from the result (its rule is skipped as "not found"). Before this, one lookup rule
+    /// made Dataverse reject the whole read (400 0x80060888) and every push of the profile 500ed. Only when a selected
+    /// field is a lookup are the source's relationships read, to learn which table each single-table lookup
+    /// references.</para>
     /// </remarks>
     private static async Task<Dictionary<string, object?>?> RetrieveSourceRecordValuesAsCallerAsync(
         IImpersonatedCommunicationQuery impersonatedQuery,
@@ -716,23 +740,31 @@ public static class FieldMappingEndpoints
         Guid callerSystemUserId,
         CancellationToken ct)
     {
+        var attributes = FieldMappingPushLookups.ReadableAttributes(await impersonatedQuery.QueryAsync(
+            FieldMappingPushLookups.AttributeMetadataPath(sourceEntity),
+            FieldMappingPushLookups.AttributeMetadataQuery,
+            callerSystemUserId,
+            ct));
+
+        var selectsALookup = fields.Any(f => attributes.TryGetValue(f, out var type) && FieldMappingPushLookups.IsLookupType(type));
+        var referents = selectsALookup
+            ? FieldMappingPushLookups.SingleTableReferents(
+                await ReadManyToOneRelationshipsAsync(impersonatedQuery, sourceEntity, callerSystemUserId, ct), attributes)
+            : new Dictionary<string, string>();
+
         var entitySet = await entityService.GetEntitySetNameAsync(sourceEntity, ct);
         var rows = await impersonatedQuery.QueryAsync(
-            entitySet, BuildSourceRecordQuery(sourceEntity, sourceRecordId, fields), callerSystemUserId, ct);
+            entitySet,
+            BuildSourceRecordQuery(sourceEntity, sourceRecordId, FieldMappingPushLookups.SourceSelectColumns(fields, attributes)),
+            callerSystemUserId,
+            ct);
 
         if (rows.Count == 0)
         {
             return null;
         }
 
-        var row = rows[0];
-        var result = new Dictionary<string, object?>();
-        foreach (var field in fields)
-        {
-            result[field] = row.TryGetValue(field, out var value) ? ToClrValue(value) : null;
-        }
-
-        return result;
+        return FieldMappingPushLookups.MapSourceRow(rows[0], fields, attributes, referents, ToClrValue);
     }
 
     /// <summary>The JSON → CLR conversion the app-only field read applied (kept identical for the rule engine).</summary>
@@ -827,7 +859,7 @@ public static class FieldMappingEndpoints
 
     /// <summary>
     /// Builds the child-record query issued AS THE CALLER (task 166). <paramref name="parentLookupAttribute"/> is the
-    /// target's lookup LOGICAL name (from <see cref="ResolveParentLookupAsync"/>), and the <c>_…_value</c> wrap is
+    /// target's lookup LOGICAL name (from <see cref="ResolveParentLookup"/>), and the <c>_…_value</c> wrap is
     /// applied EXACTLY ONCE, here. The old path wrapped an already-wrapped name a second time
     /// (<c>__sprk_regardingmatter_value_value</c>) — Dataverse answered 400 and the route always 500ed.
     /// </summary>
@@ -844,8 +876,16 @@ public static class FieldMappingEndpoints
     internal static string ParentLookupMetadataPath(string targetEntity)
         => $"EntityDefinitions(LogicalName='{targetEntity}')/ManyToOneRelationships";
 
-    /// <summary>The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed).</summary>
-    internal const string ParentLookupMetadataQuery = "$select=ReferencingAttribute,ReferencedEntity";
+    /// <summary>
+    /// The columns read from each relationship (filtered in memory, so no metadata $filter support is assumed). The
+    /// navigation property (2026-10-06) is what a lookup write binds through; the parent-lookup match ignores it.
+    /// </summary>
+    internal const string ParentLookupMetadataQuery = FieldMappingPushLookups.RelationshipMetadataQuery;
+
+    /// <summary>An entity's many-to-one relationships, read AS THE CALLER through the impersonated seam.</summary>
+    internal static Task<IReadOnlyList<Dictionary<string, System.Text.Json.JsonElement>>> ReadManyToOneRelationshipsAsync(
+        IImpersonatedCommunicationQuery impersonatedQuery, string entity, Guid callerSystemUserId, CancellationToken ct)
+        => impersonatedQuery.QueryAsync(ParentLookupMetadataPath(entity), ParentLookupMetadataQuery, callerSystemUserId, ct);
 
     /// <summary>
     /// Task 166 r1 (owner round 21 item 3): the target's ONE lookup that references the source entity, from
@@ -862,16 +902,10 @@ public static class FieldMappingEndpoints
     /// (sprk_matter). No schema change, no per-table convention, no deactivated profile. A metadata fault propagates
     /// to the route's 500 — never to a guessed lookup.
     /// </remarks>
-    internal static async Task<(string? Attribute, int Matches)> ResolveParentLookupAsync(
-        IImpersonatedCommunicationQuery impersonatedQuery,
-        string sourceEntity,
-        string targetEntity,
-        Guid callerSystemUserId,
-        CancellationToken ct)
+    internal static (string? Attribute, int Matches) ResolveParentLookup(
+        IEnumerable<Dictionary<string, System.Text.Json.JsonElement>> relationships,
+        string sourceEntity)
     {
-        var relationships = await impersonatedQuery.QueryAsync(
-            ParentLookupMetadataPath(targetEntity), ParentLookupMetadataQuery, callerSystemUserId, ct);
-
         var matches = relationships
             .Where(r => r.TryGetValue("ReferencedEntity", out var referenced)
                         && referenced.ValueKind == System.Text.Json.JsonValueKind.String
@@ -970,7 +1004,8 @@ public static class FieldMappingEndpoints
         ILogger logger,
         CancellationToken ct,
         IServiceScopeFactory? scopes = null,
-        Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null)
+        Sprk.Bff.Api.Services.Access.SecureRootFilingGate? rootFiling = null,
+        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null)
     {
         var errors = new List<PushFieldMappingsError>();
         var fieldResults = new List<FieldMappingResultDto>();
@@ -989,7 +1024,7 @@ public static class FieldMappingEndpoints
 
                 foreach (var rule in rules.OrderBy(r => r.Priority))
                 {
-                    var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload);
+                    var fieldResult = ApplyMappingRule(rule, sourceValues, updatePayload, lookupBinds);
                     recordFieldResults.Add(fieldResult);
                 }
 
@@ -1074,11 +1109,15 @@ public static class FieldMappingEndpoints
     /// <remarks>
     /// Internal (not private) so the test assembly (InternalsVisibleTo, see .csproj) can exercise
     /// the push-path engine helper directly without reflection — see FieldMappingRuleProjectionTests.
+    /// <para><b>Lookups (2026-10-06).</b> A rule in <paramref name="lookupBinds"/> targets a lookup: it writes its planned
+    /// <c>{nav}@odata.bind</c>, or — when the plan refused it — reports an Error and writes nothing. A source lookup
+    /// copied into a non-lookup target writes the referenced record's display name, never its raw id.</para>
     /// </remarks>
     internal static FieldMappingResultDto ApplyMappingRule(
         FieldMappingRuleDto rule,
         Dictionary<string, object?> sourceValues,
-        Dictionary<string, object?> updatePayload)
+        Dictionary<string, object?> updatePayload,
+        IReadOnlyDictionary<FieldMappingRuleDto, LookupBindPlan>? lookupBinds = null)
     {
         try
         {
@@ -1116,6 +1155,50 @@ public static class FieldMappingEndpoints
                     TargetField = rule.TargetField,
                     Status = FieldMappingStatus.Error,
                     ErrorMessage = $"Type compatibility error: {string.Join("; ", validation.Errors)}"
+                };
+            }
+
+            if (lookupBinds is not null && lookupBinds.TryGetValue(rule, out var bind))
+            {
+                if (bind.BindKey is null || bind.BindValue is null)
+                {
+                    return new FieldMappingResultDto
+                    {
+                        SourceField = rule.SourceField,
+                        TargetField = rule.TargetField,
+                        Status = FieldMappingStatus.Error,
+                        ErrorMessage = bind.Problem ?? "The lookup could not be resolved; it was not copied."
+                    };
+                }
+
+                updatePayload[bind.BindKey] = bind.BindValue;
+                return new FieldMappingResultDto
+                {
+                    SourceField = rule.SourceField,
+                    TargetField = rule.TargetField,
+                    Status = FieldMappingStatus.Mapped
+                };
+            }
+
+            if (sourceValue is SourceLookupValue lookup)
+            {
+                if (string.IsNullOrEmpty(lookup.DisplayName))
+                {
+                    return new FieldMappingResultDto
+                    {
+                        SourceField = rule.SourceField,
+                        TargetField = rule.TargetField,
+                        Status = FieldMappingStatus.Skipped,
+                        ErrorMessage = "The source lookup's display name is not available"
+                    };
+                }
+
+                updatePayload[rule.TargetField] = lookup.DisplayName;
+                return new FieldMappingResultDto
+                {
+                    SourceField = rule.SourceField,
+                    TargetField = rule.TargetField,
+                    Status = FieldMappingStatus.Mapped
                 };
             }
 

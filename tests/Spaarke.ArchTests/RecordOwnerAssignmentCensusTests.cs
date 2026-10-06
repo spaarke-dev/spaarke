@@ -467,6 +467,9 @@ public class RecordOwnerAssignmentCensusTests
             "appnotification from a playbook — owned by its recipient."),
         new OwnerWriteEntry("DirectThreadAccessService.cs", "FindOrCreateDirectThreadAsync", 1, OwnerWriteKind.PerUser,
             "A Direct (two-party) thread — per-participant by design (E2)."),
+        new OwnerWriteEntry("PlaybookService.cs", "BuildCreatePayload", 1, OwnerWriteKind.PerUser,
+            "sprk_analysisplaybook — a playbook definition owned by the person who created it, so task 164's OwnerOnly "
+            + "(caller systemuserid == _ownerid_value) admits its creator; never a business record's child (dev gate D-G6-2)."),
 
         new OwnerWriteEntry("CommunicationEnrichmentService.cs", "AssignOwningTeamAsync", 1, OwnerWriteKind.UnfiledOnly,
             "FR-E7 category routing — a communication FILED under a record is the resolver's (r2): routing applies only to "

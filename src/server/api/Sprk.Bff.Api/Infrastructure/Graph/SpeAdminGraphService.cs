@@ -2619,8 +2619,9 @@ public sealed class SpeAdminGraphService
     /// <summary>
     /// Reads <paramref name="containerId"/>'s business-unit binding: <c>GET /containers/{id}</c> (or
     /// <c>/deletedContainers/{id}</c> when <paramref name="deleted"/>) with
-    /// <c>$select=id,containerTypeId,customProperties</c>. Null when Graph answers 404 (not there). Any other
-    /// failure throws — the caller refuses (ADR-003), never reads a fault as "unbound".
+    /// <c>$select=id,containerTypeId,customProperties</c>. Null when Graph answers 404 (not there) or cannot resolve
+    /// the id at all (<see cref="IsUnresolvableContainerId"/>). Any other failure throws — the caller refuses
+    /// (ADR-003), never reads a fault as "unbound".
     /// </summary>
     /// <remarks>
     /// One container per call, by design: on the containers COLLECTION Graph accepts <c>customProperties</c> in
@@ -2668,11 +2669,30 @@ public sealed class SpeAdminGraphService
                 ContainerTypeId: container.ContainerTypeId?.ToString(),
                 Binding: Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp.Read(ReadCustomProperties(container)));
         }
-        catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound || IsUnresolvableContainerId(ex))
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// Whether Graph refused a single-container read because it cannot RESOLVE the id — the id names no container in
+    /// this tenancy — rather than failing to answer: <c>400 invalidRequest</c>. Read as "not there" (null), so the
+    /// caller answers the same uniform 404 as an absent or out-of-scope container (task 165 §11.3), not a 503 telling
+    /// the admin to retry an answer that will never change (gate F-G6-1).
+    /// </summary>
+    /// <remarks>
+    /// <para>Measured read-only on dev 2026-10-06: an id whose site part does not resolve (another tenancy's container, a
+    /// garbled or invented id) answers <c>400 invalidRequest "Invalid hostname for this tenancy"</c>; a truncated id
+    /// <c>400 invalidRequest "The drive ID is incorrectly formatted or was not recognized"</c>; a well-formed id of no
+    /// container <c>404 itemNotFound</c>. Only the <c>invalidRequest</c> code counts — the request is otherwise fixed, and
+    /// a malformed QUERY (e.g. a bad <c>$select</c>) answers <c>400 BadRequest</c>, which stays a fault.</para>
+    /// <para>Throttling (429), server errors (5xx), access refusals and timeouts are not this, and still throw: the caller
+    /// refuses with the 503 (ADR-003).</para>
+    /// </remarks>
+    internal static bool IsUnresolvableContainerId(ODataError ex) =>
+        ex.ResponseStatusCode == (int)HttpStatusCode.BadRequest
+        && string.Equals(ex.Error?.Code, "invalidRequest", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Writes the business-unit stamp on <paramref name="containerId"/>: <c>PATCH /containers/{id}/customProperties</c>

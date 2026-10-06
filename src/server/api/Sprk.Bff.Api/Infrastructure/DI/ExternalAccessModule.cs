@@ -516,7 +516,8 @@ public static class ExternalAccessModule
 
         // Owner decision D-1 option B + D-2 part 3, task 117 — the reconciliation pass that makes a row's own
         // statecode / sprk_expiresdate the truth (stamp an undated grant, deactivate a grant whose organization
-        // is inactive, deactivate a membership whose end date has passed). Same host, same registration seam as
+        // is inactive, deactivate a membership whose end date has passed, and — R4, owner round 71 — deactivate a grant
+        // whose record was deleted). Same host, same registration seam as
         // the reminder job above (ADR-036 A1 rule 6); ADR-052 places it in the BFF.
         //
         // POSTURE — owner decision, task 137 / owner round 7 item 1 (2026-10-02): "Enable the schedule in

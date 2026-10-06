@@ -304,6 +304,59 @@ public sealed class SpeAdminPerContainerScopeTests : IClassFixture<AdminSurfaceH
         otherType.Keys.Should().BeEquivalentTo(outOfScope.Keys);
     }
 
+    [Fact]
+    public async Task AContainerIdGraphCannotResolve_AnswersExactlyLikeAnotherCustomersContainer()
+    {
+        // Dev gate F-G6-1 (2026-10-06): Graph answers 400 invalidRequest — not 404 — for an id whose site part does not
+        // resolve in this tenancy (another tenancy's container, a garbled or invented id) and for a truncated one. That is
+        // a final answer about the id, so it is the uniform not-found, never a 503 "try again shortly".
+        _fixture.Graph.StubGet($"{ContainersPath}/c-badhost",
+            """{"error":{"code":"invalidRequest","message":"Invalid hostname for this tenancy","innerError":{"code":"badArgument"}}}""", 400);
+        _fixture.Graph.StubGet($"{ContainersPath}/c-badformat",
+            """{"error":{"code":"invalidRequest","message":"The drive ID is incorrectly formatted or was not recognized"}}""", 400);
+        using var client = Admin();
+
+        var outOfScope = await Problem(await client.GetAsync(Url("/api/spe/containers/{c}", "c-other")));
+        var badHost = await Problem(await client.GetAsync(Url("/api/spe/containers/{c}", "c-badhost")));
+        var badFormat = await Problem(await client.GetAsync(Url("/api/spe/containers/{c}/items", "c-badformat")));
+
+        AssertUniformContainerNotFound(badHost, "c-badhost", recycleBin: false);
+        AssertUniformContainerNotFound(badFormat, "c-badformat", recycleBin: false);
+        badHost.Keys.Should().BeEquivalentTo(outOfScope.Keys);
+        _fixture.Graph.AllRequests.Should().OnlyContain(r => r.Method == "GET" && r.RawQuery.Contains("customProperties"),
+            "only the bindings were read; nothing was acted on");
+    }
+
+    [Fact]
+    public async Task ADeletedContainerIdGraphCannotResolve_IsTheUniformRecycleBin404()
+    {
+        _fixture.Graph.StubGet($"{DeletedPath}/c-badhost",
+            """{"error":{"code":"invalidRequest","message":"Invalid hostname for this tenancy"}}""", 400);
+        using var client = Admin();
+
+        var problem = await Problem(await client.PostAsync(Url("/api/spe/recyclebin/{c}/restore", "c-badhost"), null));
+
+        AssertUniformContainerNotFound(problem, "c-badhost", recycleBin: true);
+        _fixture.Graph.AllRequests.Should().ContainSingle("only the binding was read; nothing was restored");
+    }
+
+    [Theory]
+    [InlineData(400, "BadRequest", "Parsing OData Select and Expand failed")]   // a refused QUERY is ours, not the id's
+    [InlineData(403, "accessDenied", "Caller does not have required permissions for this API")]
+    // A 5xx is the existing c-fault case (WhenTheContainersBindingCannotBeRead_EveryRouteIs503_AndNothingIsActedOn).
+    public async Task ABindingReadGraphRefusesForAnyOtherReason_IsStillThe503(int status, string code, string message)
+    {
+        _fixture.Graph.StubGet($"{ContainersPath}/c-refused",
+            "{\"error\":{\"code\":\"" + code + "\",\"message\":\"" + message + "\"}}", status);
+        using var client = Admin();
+
+        var problem = await Problem(
+            await client.GetAsync(Url("/api/spe/containers/{c}", "c-refused")), HttpStatusCode.ServiceUnavailable);
+
+        problem["errorCode"].GetString().Should().Be(UnverifiableCode);
+        HandlerConfigReads().Should().Be(1);
+    }
+
     [Theory]
     [MemberData(nameof(ActiveContainerRoutes))]
     public async Task WhenTheContainersBindingCannotBeRead_EveryRouteIs503_AndNothingIsActedOn(

@@ -46,9 +46,18 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 ///     <c>sprk_organization</c> is deactivated.</item>
 ///   <item><b>R3</b> — an ACTIVE <c>sprk_contactorganization</c> whose <c>sprk_enddate</c> has PASSED is
 ///     deactivated. Access holds THROUGH the end date, matching the read path's expiry boundary.</item>
+///   <item><b>R4</b> (owner round 71, 2026-10-06) — an ACTIVE grant whose record is GONE is deactivated: every typed record
+///     lookup (<see cref="RootLookupAttributes"/>: <c>sprk_project</c>, <c>sprk_matter</c>, <c>sprk_workassignment</c>) is
+///     empty. Deleting a matter or work assignment does not delete its grants — the relationship's delete behaviour is
+///     RemoveLink (a table may have only one cascade-delete parent), so the row survives ACTIVE with its record cleared,
+///     including task 142's Assigned-To auto-grants. Such a row confers nothing (no record, no key —
+///     <c>ExternalGrantLifecycle.DeriveKey</c>) but still reads as an active grant. The grant carries no TEXT copy of its
+///     record id (live metadata, 2026-10-06), so emptiness of the lookups IS the evidence and no per-row read is made; a
+///     row naming any record, live or not, is not R4's.</item>
 /// </list>
-/// R2 wins over R1 on the same row: stamping an expiry onto a row this run is about to deactivate is wasted
-/// work, and would put two updates for one id into one transaction.</para>
+/// R4 wins over R2 and R1 on the same row (a row with no record ends whatever else is true of it), and R2 wins over
+/// R1: stamping an expiry onto a row this run is about to deactivate is wasted work, and would put two updates for one
+/// id into one transaction.</para>
 ///
 /// <para><b>Coherent with task 107, which shipped first.</b> Task 107 (D-1 option A) inverted the READ default:
 /// a null <c>sprk_expiresdate</c> now confers NOTHING. So R1 is no longer a security fix — the exposure is
@@ -155,6 +164,9 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     /// <summary>R3 — deactivate an active membership whose end date has passed.</summary>
     internal const string RuleDeactivateEndedMembership = "R3-deactivate-ended-membership";
 
+    /// <summary>R4 — deactivate an active grant whose record is gone (every record lookup empty; owner round 71).</summary>
+    internal const string RuleDeactivateRecordGone = "R4-deactivate-grant-whose-record-is-gone";
+
     internal const string JunctionEntityLogicalName = "sprk_contactorganization";
     internal const string OrganizationEntityLogicalName = "sprk_organization";
 
@@ -216,8 +228,9 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     public string Description =>
         "Makes an external-access row's own state the truth: stamps the default expiry on an undated grant (a " +
         "contact-issued one is capped at its issuing contact's own access, or ended when that contact holds none or was " +
-        "deleted), deactivates a grant whose organization is inactive, and deactivates a membership whose end date has " +
-        "passed. Runs on its schedule in report-only mode — writes require an explicit owner switch.";
+        "deleted), deactivates a grant whose organization is inactive, deactivates a membership whose end date has " +
+        "passed, and deactivates a grant whose record was deleted. Runs on its schedule in report-only mode — writes " +
+        "require an explicit owner switch.";
 
     /// <summary>
     /// Whether this run may write. Report-only is the default and the fail-safe: an absent, empty or
@@ -239,7 +252,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         var grantStamp = new RuleCounts(RuleStampDefaultExpiry, ExternalGrantLifecycle.EntityLogicalName);
         var grantDeactivate = new RuleCounts(RuleDeactivateOrphanedOrgGrant, ExternalGrantLifecycle.EntityLogicalName);
         var membershipDeactivate = new RuleCounts(RuleDeactivateEndedMembership, JunctionEntityLogicalName);
-        var rules = new[] { grantStamp, grantDeactivate, membershipDeactivate };
+        var grantRecordGone = new RuleCounts(RuleDeactivateRecordGone, ExternalGrantLifecycle.EntityLogicalName);
+        var rules = new[] { grantStamp, grantDeactivate, membershipDeactivate, grantRecordGone };
 
         var status = StatusOk;
         var problems = new List<string>();
@@ -250,16 +264,16 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             var entityService = scope.ServiceProvider.GetRequiredService<IGenericEntityService>();
             var idempotency = scope.ServiceProvider.GetRequiredService<IIdempotencyService>();
 
-            // ── Grants: ONE scan serves R1 and R2 ──────────────────────────────────────────────────────
-            // Two rules over the same table read once. That is not only cheaper — it is what makes R2's
-            // precedence over R1 STRUCTURAL: a row is classified once, so it cannot end up in both rules'
-            // change sets and put two updates for one id into one transaction.
+            // ── Grants: ONE scan serves R1, R2 and R4 ──────────────────────────────────────────────────
+            // Three rules over the same table read once. That is not only cheaper — it is what makes the
+            // precedence (R4, then R2, then R1) STRUCTURAL: a row is classified once, so it cannot end up in two
+            // rules' change sets and put two updates for one id into one transaction.
             var services = scope.ServiceProvider;
             await ReconcileAsync(
                 entityService, idempotency, context, mode,
                 page => BuildGrantScanFetchXml(page.Page, page.Cookie),
                 row => PlanGrantChange(row, today),
-                new[] { grantStamp, grantDeactivate },
+                new[] { grantStamp, grantDeactivate, grantRecordGone },
                 writesEnabled, cancellationToken,
                 // R1's contact-issued rows are decided after the scan, once every other row's planned change is known
                 // (round 42 item 2) — so an issuer's own undated row is judged at the date this same run gives it.
@@ -332,7 +346,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         var duration = _timeProvider.GetElapsedTime(started);
         var changed = rules.Sum(r => r.Changed);
 
-        LogHeartbeat(status, mode, today, context, grantStamp, grantDeactivate, membershipDeactivate, rules, duration);
+        LogHeartbeat(status, mode, today, context, grantStamp, grantDeactivate, membershipDeactivate, grantRecordGone, rules, duration);
 
         return new JobRunResult(
             Success: status == StatusOk,
@@ -366,6 +380,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
         RuleCounts grantStamp,
         RuleCounts grantDeactivate,
         RuleCounts membershipDeactivate,
+        RuleCounts grantRecordGone,
         IReadOnlyList<RuleCounts> rules,
         TimeSpan duration)
     {
@@ -378,6 +393,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             "r1ContactIssuedUnresolved={R1ContactIssuedUnresolved} " +
             "r2Scanned={R2Scanned} r2Planned={R2Planned} r2Changed={R2Changed} r2Failed={R2Failed} r2Truncated={R2Truncated} r2ScanFailed={R2ScanFailed} " +
             "r3Scanned={R3Scanned} r3Planned={R3Planned} r3Changed={R3Changed} r3Failed={R3Failed} r3Truncated={R3Truncated} r3ScanFailed={R3ScanFailed} " +
+            "r4Scanned={R4Scanned} r4Planned={R4Planned} r4Changed={R4Changed} r4Failed={R4Failed} r4Truncated={R4Truncated} r4ScanFailed={R4ScanFailed} " +
             "claimHeld={ClaimHeld} alreadyApplied={AlreadyApplied} markFailed={MarkFailed} durationMs={DurationMs} " +
             "trigger={Trigger} runId={RunId} correlationId={CorrelationId}",
             status, mode, today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), context.Attempt,
@@ -387,6 +403,7 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             grantStamp.ContactIssued?.Unresolved ?? 0,
             grantDeactivate.Scanned, grantDeactivate.Planned, grantDeactivate.Changed, grantDeactivate.Failed, grantDeactivate.Truncated, grantDeactivate.ScanFailed,
             membershipDeactivate.Scanned, membershipDeactivate.Planned, membershipDeactivate.Changed, membershipDeactivate.Failed, membershipDeactivate.Truncated, membershipDeactivate.ScanFailed,
+            grantRecordGone.Scanned, grantRecordGone.Planned, grantRecordGone.Changed, grantRecordGone.Failed, grantRecordGone.Truncated, grantRecordGone.ScanFailed,
             rules.Sum(r => r.ClaimHeld), rules.Sum(r => r.AlreadyApplied), rules.Sum(r => r.MarkFailed),
             (long)duration.TotalMilliseconds, context.Trigger, context.RunId, context.CorrelationId);
     }
@@ -628,8 +645,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     }
 
     /// <summary>
-    /// Classifies one grant row: R2 (its organization is inactive) beats R1 (it carries no expiry), and a row
-    /// matching neither yields <c>null</c>.
+    /// Classifies one grant row: R4 (its record is gone) beats R2 (its organization is inactive), which beats R1 (it
+    /// carries no expiry); a row matching none yields <c>null</c>.
     /// </summary>
     /// <remarks>
     /// Re-decided IN CODE rather than trusted from the scan filter. The filter is a bound on how much comes
@@ -647,7 +664,24 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
             return null;
         }
 
-        // R2 FIRST. A row that is about to be deactivated must not also be stamped with an expiry: the write
+        // R4 FIRST (owner round 71): a row whose record is gone ends, whatever else is true of it — its organization's
+        // state and its expiry are moot, and it must not also be stamped or decided as a contact-issued row. The lookups
+        // are SELECTED by the scan (BuildGrantScanFetchXml), so an absent attribute here is an empty lookup, not an
+        // unread one.
+        if (RootOf(row) is null)
+        {
+            return new PlannedChange(
+                RuleDeactivateRecordGone,
+                ExternalGrantLifecycle.EntityLogicalName,
+                row.Id,
+                BeforeState: $"statecode={Describe(StateCodeOf(row))} " +
+                             string.Join(" ", RootLookupAttributes.Select(r => $"{r.Attribute}=(empty)")) +
+                             $" expiresDate={DescribeDate(row.GetAttributeValue<DateTime?>(ExpiresDateAttribute))}",
+                AfterState: $"statecode={StateCodeInactive} statuscode={StatusCodeInactive} (its record is gone)",
+                Fields: DeactivationFields());
+        }
+
+        // R2 next. A row that is about to be deactivated must not also be stamped with an expiry: the write
         // would be wasted, and two updates for one id in one transaction is a shape worth never producing.
         var organization = row.GetAttributeValue<EntityReference>(OrganizationLookupAttribute);
         if (organization is { } org && org.Id != Guid.Empty)
@@ -778,9 +812,12 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
 
         // What this run does to every OTHER grant row, so an issuer's own row is judged as the run will leave it.
         var stampedByDefault = stamps.Where(c => c.ContactIssued is null).Select(c => c.RowId).ToHashSet();
-        var endedByR2 = planned.TryGetValue(RuleDeactivateOrphanedOrgGrant, out var r2)
-            ? r2.Select(c => c.RowId).ToHashSet()
-            : new HashSet<Guid>();
+        // R2 and R4 both END a row this run; either way it counts for nothing as an issuer's own grant.
+        var endedByR2 = new[] { RuleDeactivateOrphanedOrgGrant, RuleDeactivateRecordGone }
+            .Where(planned.ContainsKey)
+            .SelectMany(rule => planned[rule])
+            .Select(c => c.RowId)
+            .ToHashSet();
         var pendingIds = pending.Select(c => c.RowId).ToHashSet();
 
         // row → the latest date its issuer's own grant confers (null = none). A row whose issuing contact was DELETED (round 50
@@ -1115,17 +1152,17 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     };
 
     /// <summary>
-    /// The grant scan: ACTIVE rows that could match R1 or R2, with the organization's own state joined in.
+    /// The grant scan: ACTIVE rows that could match R1, R2 or R4, with the organization's own state joined in.
     /// </summary>
     /// <remarks>
     /// <para><b>Null statecode is ACTIVE</b> (<see cref="ExternalGrantRow.IsActive"/>: <c>StateCode is null
     /// or 0</c>). A bare <c>statecode eq 0</c> would silently EXCLUDE such a row from every rule, so the
     /// condition is a disjunction with an explicit null test.</para>
     /// <para><b>The second disjunction is a provable superset, not a guess.</b> R1 needs a row with no
-    /// <c>sprk_expiresdate</c>; R2 needs a row with an <c>sprk_organization</c>. A row with a date AND no
-    /// organization can match neither, so excluding it cannot change any outcome — and it is the common case,
-    /// so the scan stays proportional to the drift rather than to the table. The rule itself is still decided
-    /// in code (<see cref="PlanGrantChange"/>).</para>
+    /// <c>sprk_expiresdate</c>; R2 needs a row with an <c>sprk_organization</c>; R4 needs a row whose every record
+    /// lookup is empty. A row with a date, no organization AND a record can match none, so excluding it cannot change
+    /// any outcome — and it is the common case, so the scan stays proportional to the drift rather than to the table.
+    /// The rule itself is still decided in code (<see cref="PlanGrantChange"/>).</para>
     /// <para>The join is OUTER: a grant whose organization lookup is empty, or points at a row the join cannot
     /// resolve, must still come back — an inner join would drop exactly the contact-keyed grants R1 exists
     /// for. Ordered by the row id so paging is stable.</para>
@@ -1133,7 +1170,8 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
     internal static string BuildGrantScanFetchXml(int page, string? pagingCookie)
     {
         // The issuer, its recorded provenance, level and record are read for R1's contact-issued rule (round 42 item 2; the
-        // provenance for a deleted issuer, round 50 item 2); nothing else uses them.
+        // provenance for a deleted issuer, round 50 item 2). The record lookups are ALSO R4's evidence (owner round 71): a
+        // lookup missing from this list would read as empty and end a live row, which is why they are always selected.
         var entity = new XElement("entity", new XAttribute("name", ExternalGrantLifecycle.EntityLogicalName),
             Attributes(new[] { "sprk_externalrecordaccessid", ExpiresDateAttribute, OrganizationLookupAttribute, "statecode",
                     GrantedByContactAttribute, GrantedByContactIdAttribute, AccessLevelAttribute }
@@ -1143,7 +1181,10 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
                 ActiveOrNullStateFilter(),
                 new XElement("filter", new XAttribute("type", "or"),
                     Condition(ExpiresDateAttribute, "null"),
-                    Condition(OrganizationLookupAttribute, "not-null"))),
+                    Condition(OrganizationLookupAttribute, "not-null"),
+                    // R4: every record lookup empty (owner round 71).
+                    new XElement("filter", new XAttribute("type", "and"),
+                        RootLookupAttributes.Select(r => Condition(r.Attribute, "null"))))),
             new XElement("link-entity",
                 new XAttribute("name", OrganizationEntityLogicalName),
                 new XAttribute("from", "sprk_organizationid"),
@@ -1251,6 +1292,9 @@ public sealed class ExternalAccessReconciliationJob : IScheduledJob
 
     private static string Describe(int? stateCode)
         => stateCode?.ToString(CultureInfo.InvariantCulture) ?? "(null)";
+
+    private static string DescribeDate(DateTime? value)
+        => value is { } v ? DateOnly.FromDateTime(v).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) : "(null)";
 
     private static object? Aliased(Entity row, string alias, string attribute)
         => row.Attributes.TryGetValue($"{alias}.{attribute}", out var value)
