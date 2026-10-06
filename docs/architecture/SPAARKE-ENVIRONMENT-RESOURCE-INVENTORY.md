@@ -128,6 +128,7 @@ T228 lands.
 | Container | Resource group | Dedicated | `rg-spaarke-{customerId}-prod` (`customer.bicep:135`) | H2a | ✅ |
 | Identity | User-assigned managed identity (bound to both App Service slots; T5 fix) | Dedicated | `mi-spaarke-{customerId}-prod` (`:214`) | H2a | ✅ |
 | Identity | BFF Entra app registration (D-13) + FIC `spaarke-uami-trust` | Dedicated | `spaarke-bff-api-{customerId}` | **H3** | ✅ task 222 |
+| Identity | App role `Provisioning.KeylessProof` on that registration, assigned to the L2 Worker identity (Model 1) | Dedicated | role id `528b7c40-41f6-4dbe-aaf0-9e6d1a622f4b` (`KeylessProofContract`) | **H3** | ✅ task 230b — lets H13 call the stamp BFF's keyless proof |
 | Secrets | Key Vault (RBAC, soft-delete 90d, purge protection) | Dedicated | `sprk-{customerId}-prod-kv`, capped at 24 chars (`:150`) | H2a; **H4** populates | ✅ |
 | Observability | Log Analytics + App Insights | Dedicated | `sprk-{customerId}-prod-logs` / `-insights` (`:174-177`) | H2a (`modules/monitoring.bicep`) | ✅ |
 | Data | Storage account (+ containers `temp-files`, `document-processing`, `ai-chunks`) — **shared-key access disabled** (T244, owner D13); callers use the blob endpoint with an identity (the stamp UAMI holds Storage Blob Data Contributor) | Dedicated | `sprk{customerId}prodsa`, ≤24 chars, no hyphens (`:141`) | H2a | ✅ |

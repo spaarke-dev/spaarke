@@ -7,6 +7,21 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Keyless proof: H13 proves every stamp service with the BFF's managed identity (T230b)
+
+`customer-provisioning-orchestration-r1` T230b (owner D13).
+
+- **`.claude/constraints/provisioning.md`** ("Stamp resources are keyless"): the per-run proof — H13 calls the stamp BFF's
+  `POST /api/platform/keyless-proof` as the L2 Worker identity (app role `Provisioning.KeylessProof`, assigned by H3); an
+  auth failure is never a skip; ARM keyless check (`ArmStampKeylessVerifier`); new MUST NOT: a key credential in server
+  code needs its `KeyCredentialCensusTests` entry and, for a stamp resource, its `StampKeySettingCatalog` + probe entries.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** E-2: informational note — the stamp measurement mechanism exists;
+  the measurement is pending T186.
+- **`.claude/skills/provision-environment/SKILL.md`**: H13 line names the keyless gate.
+- H13's four user-workflow "sample" checks (agent message, search count, layouts, field mappings) are removed: an app-only
+  token could never pass them and their auth failures were skipped, so they never ran.
+
+---
 ###### 2026-10-06 — H13 checks the deployed stamp; naming conformance + I1 are build gates (T230a)
 
 `customer-provisioning-orchestration-r1` T230a (G5).

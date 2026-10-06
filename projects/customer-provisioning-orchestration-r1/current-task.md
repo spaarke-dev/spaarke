@@ -57,7 +57,7 @@
 - (T227g) the BFF app registration (H7's identity, before H10) can PATCH `businessunit.sprk_containerid` — a 403 surfaces as Resumable `dataverse-auth-failure` before any env-var write.
 - (T227d) marker PATCH on a just-created (inactive) container; `deletedContainers/{id}` returns the marker; Graph refuses app-only container-type operations for a stamp UAMI (plus T227b's two — see the 227b POML).
 - (T251) W1 (group Name vs DisplayName).
-- (T230b) ADR-028 E-2 measured on the stamp's `kind: OpenAI` account.
+- (T230b) ADR-028 E-2 measured on the stamp's `kind: OpenAI` account (H13 log line "ADR-028 E-2 measurement"); every keyless-proof service `proved` live (Prompt Shield + groundedness on the stamp Content Safety region; Document Intelligence resource-details read under Cognitive Services User); H3's `appRoleAssignedTo` POST for the L2 identity succeeds (no 400 after the propagation retries); the L2 token for `api://{BffAppRegId}` carries `roles: Provisioning.KeylessProof` and no `scp`; ARM keyless check reads every stamp resource as the L2 identity (Owner).
 
 ## Follow-ups parked in POML notes (non-blocking)
 

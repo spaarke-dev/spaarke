@@ -1341,7 +1341,7 @@ RUN PLAN
     H12a      AI seed chain (playbooks + embeddings)
     H12b      playbook consumers seed
     H12c      agents seed
-    H13       acceptance gate (all traps clear + invariants pass + cost envelope)
+    H13       acceptance gate (all traps clear + invariants pass + the stamp proved keyless + cost envelope)
     H14       Exchange mailbox roles scoped to the customer's group (T4)
 
   Estimated wall-clock: 42 min (no lead-time gates surfaced by H0)
