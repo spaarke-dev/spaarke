@@ -628,6 +628,15 @@ documented deviation.
 proposed from a single case; (C) comply — either no cache (correct, but every chat turn serializes on the lock) or a
 Redis-backed verdict cache (a network round trip to avoid a microsecond lookup, plus a new dependency on the hot path).
 
+| Rule | Rule challenged | Conflict | Path | Rationale |
+|---|---|---|---|---|
+| **ci-cd-unit-test-remediation-r1 FR-A02** (`ci-tier1-blocking.yml` header: "do not extend without spec amendment") | Tier 1 holds a fixed set of blocking jobs; new jobs need a spec amendment | Task 081 (PR #1309, outside the ontology code) adds a blocking Tier 1 job running the Xrm capability guard (`xrmCapabilityUsage.guard.test.ts`, the TypeScript-AST analyzer `xrmCapabilityAnalyzer.ts`), gated on a new `classify-tier1` output for `src/client/**`, `src/solutions/**`, `.github/workflows/**`, failing the Router | **A — project-scoped exception (✅ APPROVED by owner 2026-10-06)** | The guard catches a defect class that fails **silently** in Dataverse (code reading an Xrm member from a frame that lacks it → a button that does nothing, a name that never resolves); only a blocking check stops it at PR time, and the Router is the only check the master ruleset requires. Cost ≈70 s on client-touching PRs only; master is clean, so it blocks only a PR that introduces a violation. Scoped to this one job |
+
+**Alternatives considered for FR-A02**: (B) amend the CI project's spec to allow client-guard jobs generally — not
+proposed from a single case; (C) comply — keep the guard advisory in legacy SDAP CI, where a job-level
+`continue-on-error` and the ruleset (Router only) mean a violation never stops a merge; also "Tier 1 advisory first"
+(the DataGrid gate's pattern) — declined by the owner.
+
 ---
 
 ## 7. Success criteria
