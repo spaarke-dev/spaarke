@@ -9,7 +9,7 @@ public enum RecordShareWrite
     /// <summary>A share's rights replaced (<see cref="DataverseWebApiService.ModifyAccessAsync"/>).</summary>
     Modify,
 
-    /// <summary>A share removed (<see cref="DataverseWebApiService.RevokeAccessAsync"/>).</summary>
+    /// <summary>A share removed (<see cref="DataverseWebApiService.RevokeAccessAsync(string, Guid, DataversePrincipalRef, CancellationToken)"/>).</summary>
     Revoke,
 }
 
