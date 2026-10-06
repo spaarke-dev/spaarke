@@ -2038,7 +2038,7 @@ Template shape:
 - I1 (no hardcoded tenant): ✅
 - I2 (AI Search tenantId filter): ✅
 - I3 (Cosmos partition-key predicate): ✅
-- I4 (SPE container ID from ITenantContainerResolver): ✅
+- I4 (the deployed BFF is configured with this run's container type and container; app-only SPE calls pass SpeContainerOwnershipGuard): ✅
 - I5 (Graph per-tenant token): ✅
 
 ## Cost snapshot

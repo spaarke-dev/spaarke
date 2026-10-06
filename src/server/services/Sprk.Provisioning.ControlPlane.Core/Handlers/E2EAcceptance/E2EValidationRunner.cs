@@ -51,8 +51,8 @@
 //   Each is a live, authenticated HttpClient call against the CUSTOMER's BFF
 //   (bffApiUrl from the run envelope via H9 — NOT the L2 platform BFF), using
 //   a bearer token from the shared UAMI-pinned TokenCredential singleton with
-//   scope '{bffAuthority}/.default' (identical auth posture to
-//   SpeContainerResolverInvariantProbe / task 176). Per-check timeout is
+//   scope '{bffAuthority}/.default' (the auth posture of the retired task-176 I4 resolver probe, deleted
+//   by task 227f). Per-check timeout is
 //   H13AcceptanceOptions.SampleWorkloadCheckTimeout (default 60s) with ONE
 //   retry on transient transport faults (HttpRequestException / 502 / 503 /
 //   504). Checks:
@@ -96,7 +96,7 @@
 //                                 NOT a spurious Fail).
 //     * HTTP 401 / 403          → ChecksSkipped with reason suffix
 //                                 '-skipped-auth-http-{code}-l2-identity-not-granted-on-bff'
-//                                 (parity with SpeContainerResolverInvariantProbe's
+//                                 (parity with the sibling H13 probes'
 //                                 InfraFault posture for RBAC gaps — the runner
 //                                 outcome shape has no InfraFault channel, so the
 //                                 gap is surfaced as an explicit named skip the
@@ -160,7 +160,7 @@
 //              defect the shell-out retirement wave exists to close.
 //
 // PATTERN PARITY:
-//   Mirrors SpeContainerResolverInvariantProbe (task 176) for the injected
+//   Mirrors AiSearchTenantFilterInvariantProbe (task 173) for the injected
 //   IHttpClientFactory + named-client convention + FakeHttpMessageHandler-
 //   friendly test seam; mirrors NamingConformanceChecker (task 182) for the
 //   pure-C# port banner + forcing-function ArchTest-style source-file
@@ -191,7 +191,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     /// isolated client via <see cref="IHttpClientFactory"/> (parity with the
     /// sibling H13 probe named-client convention -- see
     /// <see cref="AiSearchTenantFilterInvariantProbe.HttpClientName"/> and
-    /// <see cref="SpeContainerResolverInvariantProbe.HttpClientName"/>).
+    /// <see cref="SpeContainerTenantDerivationInvariantProbe.HttpClientName"/>, which follows the same convention).
     /// </summary>
     public const string HttpClientName = "H13-E2EValidationRunner";
 
@@ -279,7 +279,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     /// <summary>
     /// URL scheme allow-list -- accepts only http(s). Any other scheme
     /// (file://, ftp://) is treated as a Failed BffApiUrl parameter, mirroring
-    /// the sibling probes' identical posture (SpeContainerResolverInvariantProbe).
+    /// the sibling probes' identical posture (AiSearchTenantFilterInvariantProbe).
     /// </summary>
     private static readonly HashSet<string> AllowedSchemes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -296,7 +296,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     /// UAMI-pinned <see cref="TokenCredential"/> singleton (Worker Program.cs /
     /// ADR-028 MI-outbound) — used ONLY by the G-8 Batch 11 sample-workload
     /// checks to acquire a bearer token scoped to the customer's BFF authority
-    /// (parity with <see cref="SpeContainerResolverInvariantProbe"/>).
+    /// (the posture of the retired task-176 I4 resolver probe, deleted by task 227f).
     /// </summary>
     public E2EValidationRunner(
         IHttpClientFactory httpClientFactory,
@@ -469,8 +469,7 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     /// <summary>
     /// Runs the four SC #5 sample-workload checks against the customer's BFF.
     /// Acquires ONE bearer token (scope '{bffAuthority}/.default' via the
-    /// shared UAMI-pinned credential — parity with
-    /// <see cref="SpeContainerResolverInvariantProbe"/>) and reuses it across
+    /// shared UAMI-pinned credential — as the retired task-176 I4 resolver probe did) and reuses it across
     /// all four calls. Token-acquisition failure skips all four with an
     /// explicit reason (infra gap, not a semantic sample-workload failure).
     /// </summary>

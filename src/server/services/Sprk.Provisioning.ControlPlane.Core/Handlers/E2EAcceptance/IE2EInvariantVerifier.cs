@@ -18,9 +18,9 @@
 //     reachable from the test host).
 //   I3 sample Cosmos query — asserts partition-key predicate present (probes
 //     the customer's Cosmos endpoint).
-//   I4 SPE container-ID resolution — asserts the customer's BFF resolves via
-//     ITenantContainerResolver (queries a BFF diagnostic endpoint or the
-//     runtime code path).
+//   I4 SPE container-ID resolution — asserts the customer's deployed BFF is configured with the run's container
+//     type and container (app settings; SpeContainerTenantDerivationInvariantProbe). In the BFF itself,
+//     SpeContainerOwnershipGuard is the one definition of the stamp's containers (T227d / T227f).
 //   I5 Graph token acquisition — asserts the sample-request path includes an
 //     explicit tenantId.
 //   Same posture as trap verifier: per-probe infra faults surface as
@@ -85,7 +85,7 @@ public enum InvariantKind
     /// <summary>I3 — every Cosmos read/write includes partition-key predicate (FR-30).</summary>
     I3CosmosPartitionKey = 3,
 
-    /// <summary>I4 — SPE container IDs resolve via <c>ITenantContainerResolver</c> (FR-31).</summary>
+    /// <summary>I4 — SPE container IDs are the stamp's own: the deployed BFF is configured with the run's container (FR-31).</summary>
     I4SpeContainerResolver = 4,
 
     /// <summary>I5 — Graph tokens are per-tenant scoped (FR-32).</summary>

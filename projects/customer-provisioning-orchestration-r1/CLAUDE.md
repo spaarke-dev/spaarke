@@ -120,7 +120,7 @@ Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rul
 - **MUST** pre-check LIVE App Service + KV + Dataverse before removing any alias (FR-35 pre-check gate)
 - **MUST** ensure all AI Search queries include unconditional `tenantId eq` filter (§4D I2 / FR-29)
 - **MUST** ensure all Cosmos reads/writes include partition-key predicate (§4D I3 / FR-30)
-- **MUST** derive SPE container IDs from tenant context via `ITenantContainerResolver` (§4D I4 / FR-31)
+- **MUST** take SPE container IDs from the record being served or the stamp's own settings, and pass every app-only SPE call through `SpeContainerOwnershipGuard` — the one definition of this stamp's containers (§4D I4 / FR-31; T227d/T227f)
 - **MUST** acquire Graph tokens per-tenant scoped (§4D I5 / FR-32)
 - **MUST NOT** hardcode default tenant in provisioning scripts (§4D I1 / FR-28)
 - **MUST** report BFF publish size + delta in every BFF-touching task's PR description (NFR-01)

@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-06 SESSION 38 — T246 ✅, **T247 ✅** (see its POML notes). **T227a ✅, T227b ✅** (owner D28: one container type per model, one container per customer; app-only isolation in code → 227d). **T227c ✅**. **T227d ✅** (owner D29: SPE Admin confined to the stamp's own containers). **T227e ✅** (H8 never creates a second container; unread SPE-ContainerTypeId retired). Next: **227f** (retire the unused tenant-container resolver). Older header text below is history.
+> **Last Updated**: 2026-10-06 SESSION 38 — T246 ✅, **T247 ✅** (see its POML notes). **T227a ✅, T227b ✅** (owner D28: one container type per model, one container per customer; app-only isolation in code → 227d). **T227c ✅**. **T227d ✅** (owner D29: SPE Admin confined to the stamp's own containers). **T227e ✅** (H8 never creates a second container; unread SPE-ContainerTypeId retired). **T227f ✅** (resolver diagnostic + StagingContainerId retired). Next: **T228**. Older header text below is history.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,11 +40,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T227f** — retire the unused tenant-container resolver: `ITenantContainerResolver` + its diagnostic endpoint, the unregistered L2 `SpeContainerResolverInvariantProbe`, `StagingContainerId`; amend FR-31 / project MUST row / design §4D I4; lower the ADR010 ceiling by one (`tasks/227f-retire-tenant-container-resolver.poml`). |
-| **Step** | 0 — not started. (SESSION 38 merged origin/master — uac-r2 #1312 — into the branch with T227e; see the T227e outcome below.) |
+| **Task** | **T228** — next in the plan order (no task POML yet: create it from the plan §7 T228 row with task-create, then task-execute). |
+| **Step** | 0 — not started. |
 | **Status** | pending. Owner items: W7; **dev rollout of T227d** — set `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (values in the 227d POML notes; live change, ask first). |
-| **Next Action** | Run task-execute on `tasks/227f-retire-tenant-container-resolver.poml`, then T228. |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a ✅ b ✅ c ✅ d ✅ e ✅ → f) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+| **Next Action** | Read the plan's §7 T228 row; create `tasks/228-*.poml` (task-create); run task-execute on it. |
+| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a ✅ b ✅ c ✅ d ✅ e ✅ f ✅) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+
+### T227f outcome (SESSION 38)
+
+- Retired `ITenantContainerResolver` + `GET /api/diagnostics/tenant-container-resolver` + `DiagnosticsModule`, the unregistered L2 `SpeContainerResolverInvariantProbe`, `SharePointEmbedded:StagingContainerId` and `SharePointEmbeddedOptions` (no environment set the key — dev/demo/shared-prod checked read-only). Pre-fill now in-memory only; chat persist/export use the stamp default container. FR-31 / MUST / §4D I4 name `SpeContainerOwnershipGuard`. uac-r2 takes the route deletion on its next master merge.
 
 ### T227e outcome (SESSION 38)
 

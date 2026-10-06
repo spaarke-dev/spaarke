@@ -13,7 +13,7 @@
 // test of the runner class (a pure L2 seam with no BFF wiring). It exercises
 // behavior through the runner's PUBLIC RunAsync surface. It lives in the
 // existing Tests project alongside the sibling H13 real-probe test files
-// (AiSearchTenantFilterInvariantProbeTests, SpeContainerResolverInvariantProbeTests,
+// (AiSearchTenantFilterInvariantProbeTests, SpeContainerTenantDerivationInvariantProbeTests,
 // NamingConformanceCheckerTests, ArmCostEnvelopeCheckerTests). Path is not
 // under tests/integration/** because the runner is not itself an integration
 // boundary -- the LIVE-run integration lands in Phase F rerun (task 186).

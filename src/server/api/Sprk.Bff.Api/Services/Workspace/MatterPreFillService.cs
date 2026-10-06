@@ -2,10 +2,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Workspace.Models;
-using Sprk.Bff.Api.Configuration;
-using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -13,33 +10,26 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 namespace Sprk.Bff.Api.Services.Workspace;
 
 /// <summary>
-/// Service that orchestrates matter AI pre-fill: stores uploaded files temporarily via SpeFileStore,
-/// extracts text, invokes the AI Playbook platform for structured matter field extraction, and
+/// Service that orchestrates matter AI pre-fill: extracts text from the uploaded files in memory,
+/// invokes the AI Playbook platform for structured matter field extraction, and
 /// returns a PreFillResponse.
 /// </summary>
 /// <remarks>
-/// Follows ADR-007: File uploads routed through SpeFileStore facade — no direct SPE access.
 /// Follows refined ADR-013 (2026-05-20, task 046): AI analysis via the
 /// <see cref="IWorkspacePrefillAi"/> public facade — no direct injection of
 /// AI-internal orchestration or completion-client types. Extraction prompts
 /// remain configured as playbook Skills in Dataverse (the facade wraps the same
 /// underlying orchestrator; only the injected type changes).
 ///
-/// File storage lifecycle:
-/// Files uploaded here are stored FLAT in the staging container root, with a per-request
-/// prefix folded into the FILE NAME ({requestId}_{fileName}) rather than into a folder path —
-/// an upload path with folder segments makes Graph implicitly create those folders in SPE.
-/// They are available for later association when the matter record is created.
-/// Cleanup of orphaned staging files is a separate concern (background job).
+/// Uploaded files are not stored: text is extracted in memory. (An optional SPE staging container was configured by
+/// no environment and was retired by customer-provisioning-orchestration-r1 task 227f.)
 /// </remarks>
 public sealed class MatterPreFillService
 {
-    private readonly SpeFileStore _speFileStore;
     private readonly ITextExtractor _textExtractor;
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IWorkspacePrefillAi? _prefillAi;
-    private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
 
     // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dispatch. When the
@@ -91,19 +81,15 @@ public sealed class MatterPreFillService
     };
 
     public MatterPreFillService(
-        SpeFileStore speFileStore,
         ITextExtractor textExtractor,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
-        IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<MatterPreFillService> logger,
         IWorkspacePrefillAi? prefillAi = null)
     {
-        _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
-        _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
@@ -165,8 +151,7 @@ public sealed class MatterPreFillService
     }
 
     /// <summary>
-    /// Stores uploaded files temporarily via SpeFileStore (when staging container is configured),
-    /// extracts text from the documents, invokes the AI Playbook platform for structured matter
+    /// Extracts text from the uploaded documents in memory, invokes the AI Playbook platform for structured matter
     /// field extraction, and returns a PreFillResponse.
     ///
     /// On AI timeout or service unavailability, returns an empty PreFillResponse with confidence=0
@@ -184,8 +169,8 @@ public sealed class MatterPreFillService
             "Matter AI pre-fill started. UserId={UserId}, FileCount={FileCount}, RequestId={RequestId}",
             userId, files.Count, requestId);
 
-        // --- Step 1: Store files temporarily via SpeFileStore and extract text ---
-        var combinedText = await ExtractTextFromFilesAsync(files, requestId, httpContext, cancellationToken);
+        // --- Step 1: Extract text from the files (in memory) ---
+        var combinedText = await ExtractTextFromFilesAsync(files, requestId, cancellationToken);
 
         if (string.IsNullOrWhiteSpace(combinedText))
         {
@@ -295,16 +280,14 @@ public sealed class MatterPreFillService
     }
 
     /// <summary>
-    /// Extracts text from uploaded files, optionally staging them in SPE.
+    /// Extracts text from uploaded files, in memory.
     /// </summary>
     private async Task<string> ExtractTextFromFilesAsync(
         IFormFileCollection files,
         Guid requestId,
-        HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var allExtractedText = new StringBuilder();
-        var stagingContainerId = _speOptions.StagingContainerId;
         var filesExtracted = 0;
         var filesFailed = 0;
         var filesSkipped = 0;
@@ -322,57 +305,9 @@ public sealed class MatterPreFillService
                 continue;
             }
 
-            TextExtractionResult extractionResult;
-            if (!string.IsNullOrEmpty(stagingContainerId))
-            {
-                // FLAT staging-container root — see the twin in ProjectPreFillService. The folder prefix
-                // was minted implicitly by Graph on every upload; the {requestId} that was carrying the
-                // per-request uniqueness moves into the filename rather than being dropped, because the
-                // path-keyed simple PUT behind UploadSmallAsUserAsync silently replaces on collision.
-                // SANITIZED 2026-08-29: fileName is Path.GetFileName(IFormFile.FileName) — client-supplied,
-                // and GetFileName splits on the HOST OS separator only, so on the linux-x64 runtime a
-                // "a\b.docx" survives intact while Graph may still read the backslash as a separator.
-                var stagingPath = $"{requestId}_{SpeUploadPath.SanitizeFileName(fileName)}";
-
-                try
-                {
-                    using var buffer = new MemoryStream();
-                    await fileStream.CopyToAsync(buffer, cancellationToken);
-                    buffer.Position = 0;
-
-                    var uploadResult = await _speFileStore.UploadSmallAsUserAsync(
-                        httpContext,
-                        stagingContainerId,
-                        stagingPath,
-                        buffer,
-                        cancellationToken);
-
-                    // Staging result tracked in batch summary below
-
-                    buffer.Position = 0;
-                    extractionResult = await _textExtractor.ExtractAsync(buffer, fileName, cancellationToken);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex,
-                        "Failed to stage file '{FileName}' to SPE. Falling back to in-memory extraction. " +
-                        "RequestId={RequestId}",
-                        fileName, requestId);
-
-                    using var fallbackBuffer = new MemoryStream();
-                    await file.OpenReadStream().CopyToAsync(fallbackBuffer, cancellationToken);
-                    fallbackBuffer.Position = 0;
-                    extractionResult = await _textExtractor.ExtractAsync(fallbackBuffer, fileName, cancellationToken);
-                }
-            }
-            else
-            {
-                _logger.LogDebug(
-                    "No staging container configured. Extracting text from '{FileName}' in-memory. " +
-                    "RequestId={RequestId}",
-                    fileName, requestId);
-                extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
-            }
+            // In memory only. The optional SPE staging container was configured by no environment and was retired
+            // (customer-provisioning-orchestration-r1 task 227f).
+            var extractionResult = await _textExtractor.ExtractAsync(fileStream, fileName, cancellationToken);
 
             if (extractionResult.Success && !string.IsNullOrWhiteSpace(extractionResult.Text))
             {

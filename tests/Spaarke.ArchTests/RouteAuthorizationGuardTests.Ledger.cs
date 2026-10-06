@@ -390,8 +390,6 @@ public partial class RouteAuthorizationGuardTests
         new GovernedFile("Api/SpeAdmin/SecurityEndpoints.cs", Scope.GroupGated, "SPE security alerts and score (nested group)."),
 
         // ---- outside Api/** ----
-        new GovernedFile("Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs", Scope.RouteLevelGate,
-            "the I4 tenant-container-resolver diagnostic, operator-gated in the handler (task 081); path from a const."),
         new GovernedFile("Endpoints/Onboarding/ConsentCallbackEndpoint.cs", Scope.RouteLevelGate,
             "the anonymous, HMAC-verified admin-consent callback; path from a const."),
         new GovernedFile("Infrastructure/DI/EndpointMappingExtensions.cs", Scope.RouteLevelGate,
@@ -655,7 +653,16 @@ public partial class RouteAuthorizationGuardTests
     // EndpointFiles() now selects by the scanner's own registration vocabulary (Map{Verb}, MapMethods, MapHealthChecks — a
     // file registering only MapMethods would have been invisible), and it reads code with comments AND string literals
     // blanked (a log message naming ".MapGet(" no longer counts).
-    private const int ExpectedEndpointFileCount = 117;
+    //
+    // 117 -> 116 (2026-10-06, customer-provisioning-orchestration-r1 task 227f). A DOWNWARD move:
+    //
+    //   227f  -1  Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs DELETED with ITenantContainerResolver — GET
+    //             /api/diagnostics/tenant-container-resolver (the I4 diagnostic task 081 scoped) had no consumer left: the
+    //             L2 probe that called it was unregistered and H13's I4 reads the deployed app settings since T227c.
+    //             SpeContainerOwnershipGuard is the BFF's one definition of this stamp's containers (T227d). Its
+    //             GovernedFiles entry and its P:OperatorGateInHandler waiver went with it — a route that no longer exists
+    //             needs no gate.
+    private const int ExpectedEndpointFileCount = 116;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -1697,7 +1704,9 @@ public partial class RouteAuthorizationGuardTests
     //                                                  parent or regarding id.
     //                      CallerSuppliedContentOnly — processes only the request's own bytes or text; reads no stored
     //                                                  record, index or file by any id.
-    //                      OperatorGateInHandler     — the handler denies every caller outside an operator allow-list or
+    //                      OperatorGateInHandler     — (no route uses it since task 227f deleted the I4 diagnostic; kept as
+    //                                                  the basis a future operator-only route would declare) the handler
+    //                                                  denies every caller outside an operator allow-list or
     //                                                  app-only classification before any data access.
     //                      OwnerComparison           — (OWNER-COMPARISON, owner round 12 item 4) the handler loads the
     //                                                  record a caller-chosen id names and refuses unless its recorded
@@ -2528,9 +2537,8 @@ public partial class RouteAuthorizationGuardTests
             + "and an unresolvable caller gets a typed 403."),
 
         // ---------- P:OperatorGateInHandler ----------
-        Permanent("GET /api/diagnostics/tenant-container-resolver", PermanentBasis.OperatorGateInHandler, "167",
-            "Task 081: denies every caller that is not a positively classified app-only caller on the operator "
-            + "allow-list (TenantContainerResolverEndpoint.cs:159-177), before any resolver call."),
+        // (GET /api/diagnostics/tenant-container-resolver was its only entry; the route was REMOVED by
+        // customer-provisioning-orchestration-r1 task 227f — a route that no longer exists needs no gate.)
 
         // ---------- N:161 ----------
         // The four thread/message write routes (rename, pin, DELETE thread, DELETE message) task 161's amendment owned were

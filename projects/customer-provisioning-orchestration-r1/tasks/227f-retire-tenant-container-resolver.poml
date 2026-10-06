@@ -4,7 +4,7 @@
     <title>Retire the unused ITenantContainerResolver diagnostic (superseded by SpeContainerOwnershipGuard) and the unwritten StagingContainerId</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (found during T227d, 2026-10-06)</phase>
     <gate>after 227d (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>BFF code + L2 code deletion, ArchTests, spec/MUST wording; touches another project's scoped diagnostic.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -77,5 +77,34 @@
   </acceptance-criteria>
 
   <notes>
+    COMPLETED 2026-10-06 (SESSION 38).
+    - Removed (BFF): ITenantContainerResolver, OptionsTenantContainerResolver, TenantContainerResolverEndpoint
+      (GET /api/diagnostics/tenant-container-resolver), DiagnosticsModule + their unit tests (tests/unit — not a KEEP
+      path), wiring in Program.cs / EndpointMappingExtensions.cs; SharePointEmbeddedOptions (its staging key was the only
+      reason it was injected; SharePointEmbedded:ContainerTypeId is read directly by ProvisionProjectEndpoint) and its
+      registration; StagingContainerId reads: Matter/ProjectPreFillService now extract text in memory only (dropped
+      SpeFileStore + options deps and the unused HttpContext parameter), ChatDocument/ChatWordExport ResolveContainerId →
+      EmailProcessing:DefaultContainerId only, ProvisionProjectEndpoint.SharedContainerConfigKeys drops the staging key.
+    - Removed (L2): SpeContainerResolverInvariantProbe (unregistered since task 204c) + its tests; comments / crefs repointed.
+    - Live check (read-only): no BFF App Service sets SharePointEmbedded__StagingContainerId or the diagnostic allow-list
+      setting — spaarke-bff-dev, spaarke-bff-demo, sprksharedprod-api — so nothing live changes behaviour.
+    - The route's authorization (unified-access-control-r2 task 081) and its task-167 ledger waiver are REMOVED with it: a
+      route that no longer exists needs no gate. uac-r2's own branch still has the file; it takes the deletion when it
+      next merges master after this branch lands (coordination point — its GovernedFiles/census lines move with it).
+    - KEEP-path constraint: nothing under tests/integration/{auth,regression,data-mutation,tenant,contract} was deleted;
+      the scenario (no fallback container; the stamp's own containers only) is covered by
+      tests/integration/tenant/Spe/SpeAppOnlyContainerIsolationTests.cs (T227d).
+    - ArchTests: ADR010 ceiling 159 → 158 (exactly the removed interface); route census 117 → 116 with the GovernedFile,
+      the P:OperatorGateInHandler waiver and the runtime key removed (basis kept, documented as unused); write-sink entries
+      for the two deleted pre-fill staging sites removed; I4 messages now name SpeContainerOwnershipGuard.
+    - Acceptance grep: the remaining src/tests hits are history comments (Program.cs, ADR010, route ledger, composition-root
+      test) and the deliberate Rule D detector vocabulary in SpeWriteSinkContainerProvenanceGuardTests (the regex that
+      flags any reintroduction of the key in the Graph plumbing layer — removing it would weaken the rule).
+    - Wording: spec FR-31 + MUST row, project CLAUDE.md MUST row, design §4D I4, .claude/constraints/provisioning.md I4,
+      provision-environment SKILL I4 line, provisioning-runs/_templates/CLAUDE.md, deployment / pre-fill / secure-project
+      guides name SpeContainerOwnershipGuard as the single definition of the stamp's containers.
+    - Step 9.5: code-review 0 critical, adr-check 0 violations; all 18 findings fixed (incl. ADR-010 W: dead
+      SharePointEmbeddedOptions removed — Path C; Upload integration fixture sets the default container; pre-fill tests pin
+      that uploads are never stored).
   </notes>
 </task>

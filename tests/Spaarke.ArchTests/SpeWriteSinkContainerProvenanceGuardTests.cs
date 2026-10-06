@@ -868,27 +868,12 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             "The sanctioned server-ingest case named explicitly by the settled model: outbound .eml archival "
             + "has no owning record at the moment of the write, so Communication:ArchiveContainerId is the "
             + "correct source and a missing value THROWS rather than defaulting (ADR-003; ADR-045). This is "
-            + "the one config read the model blesses; the others in this section are staging, not archive."),
-
-        new SinkSite("Services/Workspace/MatterPreFillService.cs", "UploadSmallAsUserAsync", 1,
-            Provenance.ServerDerivedConfig, "",
-            "_speOptions.StagingContainerId (SharePointEmbedded:StagingContainerId)",
-            "AI pre-fill uploads a candidate document to the STAGING container for text extraction before "
-            + "any matter exists — there is no owning record yet, which is the condition that makes a config "
-            + "container legitimate (ADR-003; ADR-007). Runs under OBO, so the acting user must already hold "
-            + "the staging container. The content's permanent home is decided later, by the resolver."),
-
-        new SinkSite("Services/Workspace/ProjectPreFillService.cs", "UploadSmallAsUserAsync", 1,
-            Provenance.ServerDerivedConfig, "",
-            "_speOptions.StagingContainerId (SharePointEmbedded:StagingContainerId)",
-            "The project twin of the matter pre-fill site, identical provenance and identical reasoning "
-            + "(ADR-003; ADR-007). Listed separately rather than folded in because the two services diverge "
-            + "in every other respect and a shared entry would hide a future divergence here."),
+            + "the one config read the model blesses; the others in this section are the stamp default, not archive."),
 
         new SinkSite("Api/Ai/ChatWordExportEndpoints.cs", "UploadSmallAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
-            "SharePointEmbedded:StagingContainerId, falling back to EmailProcessing:DefaultContainerId",
-            "Chat Word export writes the generated DOCX to the staging container under OBO (ADR-003; "
+            "EmailProcessing:DefaultContainerId (task 227f retired the staging key read first)",
+            "Chat Word export writes the generated DOCX to the stamp's default container under OBO (ADR-003; "
             + "ADR-013). No owning record exists — the artifact is minted from a chat message. The route IS "
             + "mapped (Infrastructure/DI/EndpointMappingExtensions.cs), contrary to the sweep's "
             + "'ZERO callers' note, so treat the sink as reachable; source analysis cannot attest client "
@@ -896,12 +881,12 @@ public class SpeWriteSinkContainerProvenanceGuardTests
 
         new SinkSite("Api/Ai/ChatDocumentEndpoints.cs", "UploadSmallAsUserAsync", 1,
             Provenance.ServerDerivedConfig, "",
-            "ResolveContainerId(session, configuration) -> SharePointEmbedded:StagingContainerId, "
-            + "falling back to EmailProcessing:DefaultContainerId",
+            "ResolveContainerId(session, configuration) -> EmailProcessing:DefaultContainerId "
+            + "(task 227f retired the staging key read first)",
             "Chat document persistence, same config keys and same reasoning as the Word export sibling "
-            + "(ADR-003; ADR-013). Worth one caution for whoever revisits this: the fallback to "
-            + "EmailProcessing:DefaultContainerId means a deployment that configures only the email default "
-            + "will route chat artifacts into the email container. Server-derived either way, so not this "
+            + "(ADR-003; ADR-013). Worth one caution for whoever revisits this: since task 227f "
+            + "EmailProcessing:DefaultContainerId is the only source, so chat artifacts land in the email "
+            + "container. Server-derived either way, so not this "
             + "guard's business, but it is the kind of config coupling that produces a surprise."),
 
         // ⚠️ DELETED 2026-08-28, RESTORED 2026-08-29 — the entry below replaces the deletion note that

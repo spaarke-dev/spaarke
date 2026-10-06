@@ -3,7 +3,7 @@
 //
 // H13 I4 REAL invariant probe (task 204c B07 — sub-agent authored 2026-08-26).
 // INDEPENDENT re-verification variant for InvariantKind.I4SpeContainerResolver
-// — replaces the earlier SpeContainerResolverInvariantProbe (task 176) whose
+// — replaces the earlier task-176 resolver probe (deleted by task 227f) whose
 // verdict was mediated by the customer BFF's own /api/diagnostics/tenant-
 // container-resolver endpoint. Per task 204c dispatch directive:
 //
@@ -108,7 +108,7 @@
 //   types (ADR-013). No BFF-facade dependencies. No shell-out.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md §11):
-//   Existing: SpeContainerResolverInvariantProbe (task 176) — its verdict
+//   Existing: the task-176 resolver probe (deleted by task 227f) — its verdict
 //     depends on the customer BFF's own /api/diagnostics/tenant-container-
 //     resolver endpoint being deployed AND being truthful. That coverage is
 //     legitimate but NOT INDEPENDENT of the subject BFF.
@@ -131,19 +131,12 @@
 //   * ADR-038 (integration-heavy pyramid): tests exercise the probe against a
 //     hand-rolled FakeHttpMessageHandler (never Mock<HttpMessageHandler>),
 //     hand-rolled FakeTokenCredential — parity with
-//     SpeContainerResolverInvariantProbeTests (task 176) and
+//     the task-176 probe's tests (deleted with it) and
 //     AiSearchTenantFilterInvariantProbeTests (task 173).
 //
-// DI SWAP NOTE (task 204c B07 dispatch — main-session action):
-//   The composite CompositeInvariantVerifier throws at composition time if two
-//   probes register for the same InvariantKind (fail-loud silent-fail
-//   protection). Wiring THIS probe requires REPLACING task 176's registration
-//   in E2EAcceptanceModule.cs (currently lines 183-184: HttpClient +
-//   AddSingleton<IInvariantProbe, SpeContainerResolverInvariantProbe>). Both
-//   probes cover InvariantKind.I4SpeContainerResolver; keep exactly ONE
-//   registered. Recommended swap: retire task 176's registration; keep task
-//   176's class on disk with an updated banner explaining the retirement (per
-//   Wave G-6 retired-on-disk-with-banner convention).
+// DI HISTORY: this probe replaced task 176's registration for InvariantKind.I4SpeContainerResolver (task 204c B07;
+//   CompositeInvariantVerifier refuses two probes for one kind). Task 176's class stayed on disk unregistered until
+//   task 227f deleted it with the BFF diagnostic route it called.
 // -----------------------------------------------------------------------------
 
 using System.Net;
@@ -160,7 +153,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// Independent H13 I4 invariant probe — reads the deployed App Service
 /// configuration directly via ARM and verifies the SPE settings name this run's
 /// container type and this customer's own container (task 227c, owner D28). Runs independently of the customer BFF's own
-/// diagnostic endpoint (contrast task 176's SpeContainerResolverInvariantProbe).
+/// diagnostic endpoint (contrast task 176's resolver probe, deleted by task 227f).
 /// See file header for the honest can-vs-cannot-detect breakdown and the
 /// silent-fail class this probe catches that task 176's probe cannot.
 /// </summary>
@@ -169,7 +162,7 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
     /// <summary>
     /// Named HttpClient key the DI module registers so the probe can pull an
     /// isolated client via <see cref="IHttpClientFactory"/> (parity with
-    /// <see cref="SpeContainerResolverInvariantProbe.HttpClientName"/>).
+    /// <see cref="AiSearchTenantFilterInvariantProbe.HttpClientName"/>).
     /// </summary>
     public const string HttpClientName = "H13-I4-SpeContainerTenantDerivationProbe";
 
@@ -185,8 +178,8 @@ public sealed class SpeContainerTenantDerivationInvariantProbe : IInvariantProbe
     /// <summary>
     /// Canonical BFF App Service app-setting name for the SPE container-type
     /// id. ASP.NET Core config-provider convention converts the code-level
-    /// key <c>SharePointEmbedded:ContainerTypeId</c> (see
-    /// <c>Sprk.Bff.Api/Configuration/SharePointEmbeddedOptions.cs</c>) to
+    /// key <c>SharePointEmbedded:ContainerTypeId</c> (read by the BFF's
+    /// <c>ProvisionProjectEndpoint</c>) to
     /// double-underscore in Azure App Service app-settings.
     /// </summary>
     public const string ContainerTypeAppSettingName = "SharePointEmbedded__ContainerTypeId";

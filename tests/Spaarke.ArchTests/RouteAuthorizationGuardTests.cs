@@ -2472,8 +2472,7 @@ public partial class RouteAuthorizationGuardTests
                      "PATCH /api/ai/chat/sessions/{sessionId}/tabs",
                      "GET /healthz",                                              // MapHealthChecks
                      "GET /healthz/catalog",
-                     "GET /api/diagnostics/tenant-container-resolver",            // const path
-                     "POST /api/onboarding/consent-callback",
+                     "POST /api/onboarding/consent-callback",                     // const path
                      "GET /api/spe/configs/{configId:guid}",                      // aggregator, extension form + nested group
                      "GET /api/spe/containers/{containerId}",                     // aggregator, static form
                      "POST /api/compose/upload",

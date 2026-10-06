@@ -101,9 +101,9 @@ public static class E2EAcceptanceModule
         //                     under the composite pattern.
         //   - task 173 (I2)  — sibling I2 AI Search tenant-filter probe.
         //   - task 174 (I3)  — CosmosPartitionKeyInvariantProbe.
-        //   - task 176 (I4)  — SpeContainerResolverInvariantProbe (real BFF
-        //                     diagnostic call; LIVE-verification deferred to
-        //                     task 186 per that POML's escalation trigger).
+        //   - task 176 (I4)  — a BFF-diagnostic resolver probe, superseded by task 204c's
+        //                     SpeContainerTenantDerivationInvariantProbe and retired with the
+        //                     diagnostic route by task 227f.
         //   - task 179 (I5)  — I5GraphTokenTenantScopeProbe.
         // PlaceholderInvariantVerifier.cs is retained on disk unregistered
         // per the Wave G-6 retirement convention.
@@ -194,11 +194,9 @@ public static class E2EAcceptanceModule
         // is hardcoded (§4D I4 CATASTROPHIC class). See probe file header
         // § SILENT-FAIL AUDIT for the failure-mode delta. Needs a NAMED
         // HttpClient (registered below) + the shared UAMI-pinned
-        // TokenCredential + IOptions<H13AcceptanceOptions>. Task 176's
-        // SpeContainerResolverInvariantProbe is retained on disk UNREGISTERED
-        // per Wave G-6 retirement convention (see its retirement banner);
-        // its BFF-diagnostic complementary coverage may be re-registered
-        // under a distinct InvariantKind post-186 if operator sign-off.
+        // TokenCredential + IOptions<H13AcceptanceOptions>. (Task 176's BFF-diagnostic
+        // resolver probe, kept unregistered after this replaced it, was deleted with the
+        // diagnostic route by task 227f — nothing could call it.)
         services.AddHttpClient(SpeContainerTenantDerivationInvariantProbe.HttpClientName);
         services.AddSingleton<IInvariantProbe, SpeContainerTenantDerivationInvariantProbe>();   // I4 (task 204c B07; supersedes task 176)
         services.AddSingleton<IInvariantProbe, I5GraphTokenTenantScopeProbe>();         // I5 (task 179)

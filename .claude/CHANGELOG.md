@@ -7,6 +7,15 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — One definition of the stamp's containers; the I4 resolver diagnostic retired (T227f)
+
+`customer-provisioning-orchestration-r1` T227f.
+
+- **`.claude/constraints/provisioning.md`** I4: container ids come from the record or the stamp's settings and every
+  app-only SPE call passes `SpeContainerOwnershipGuard`; the unused `ITenantContainerResolver` (and its diagnostic route)
+  and `SharePointEmbedded:StagingContainerId` were removed.
+- **`.claude/skills/provision-environment/SKILL.md`**: the I4 checklist line names what H13 actually checks.
+
 ###### 2026-10-06 — H8 reuses the customer's container; unread SPE-ContainerTypeId retired (T227e)
 
 `customer-provisioning-orchestration-r1` T227e.

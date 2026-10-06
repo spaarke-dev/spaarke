@@ -6,12 +6,12 @@
 // HttpClient probe path against ARM (sites/list + config/appsettings/list) via
 // a hand-rolled FakeHttpMessageHandler — never Mock<HttpMessageHandler> per
 // ADR-038 path #1 + testing.md's ban. Complements
-// SpeContainerResolverInvariantProbeTests (task 176 BFF-diagnostic variant);
+// the task-176 BFF-diagnostic variant's tests (retired with it by task 227f);
 // this file exercises the INDEPENDENT ARM-config-read variant.
 //
 // PATH: tests/CLAUDE.md 7 KEEP paths — component-scoped unit test of the probe
 // class through its PUBLIC ProbeAsync surface. Sits alongside sibling H13
-// real-probe test files (SpeContainerResolverInvariantProbeTests,
+// real-probe test files (the retired task-176 probe tests,
 // AiSearchTenantFilterInvariantProbeTests, CosmosPartitionKeyInvariantProbeTests).
 //
 // COVERAGE — every branch enumerated in the SpeContainerTenantDerivationInvariantProbe.cs

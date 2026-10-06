@@ -120,7 +120,7 @@ public static class H13Rejections
     /// <summary>I3 CATASTROPHIC — a sample Cosmos query does NOT carry the required partition-key predicate.</summary>
     public const string InvariantI3Failed = "h13-invariant-I3-cosmos-partition-key";
 
-    /// <summary>I4 CATASTROPHIC — SPE container-ID resolution does NOT flow through <c>ITenantContainerResolver</c> (direct hard-coded id observed).</summary>
+    /// <summary>I4 CATASTROPHIC — the deployed BFF is not configured with this run's container type and container (SpeContainerTenantDerivationInvariantProbe). The code string predates task 227f, which retired the resolver it names.</summary>
     public const string InvariantI4Failed = "h13-invariant-I4-spe-container-resolver";
 
     /// <summary>I5 CATASTROPHIC — Graph token acquisition is NOT per-tenant scoped (ambient default-tenant credential detected in the sample).</summary>
