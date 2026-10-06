@@ -735,8 +735,12 @@ public static class UnsecureProjectEndpoint
             // After Step 3.5 every related record is out of isolation and carries none of the record's sharees, so
             // revoking the record's own shares now leaves nothing reachable by nobody (owner round 11 item 3: 148 re-owns
             // the children before the record's shares go).
+            //
+            // The new owner's OWN share (a creator-driven unsecure hands the record back to its creator, who still holds the
+            // share provisioning gave them) is revoked AS that owner: Dataverse refuses it app-only (0x80040223). Step 3's
+            // read-back proved newOwnerId is the owning user, so the sweep is told so.
             sweep = await RevokeAllSharesAsync(
-                recordShare, root, recordId, logger, traceId, ct);
+                recordShare, root, recordId, DataversePrincipalRef.User(newOwnerId.Value), logger, traceId, ct);
         }
         finally
         {
@@ -1109,11 +1113,19 @@ public static class UnsecureProjectEndpoint
     /// consequence is intended for a completed unsecure and is accepted here for an incomplete one,
     /// because the alternative — a record that is owner-reassigned but still flagged secure — is the
     /// half-applied state above.</para>
+    ///
+    /// <para><b>The new owner's own share goes too, revoked as the owner.</b> Every revoke names
+    /// <paramref name="owner"/> (the owning user Step 3 read back): Dataverse refuses an app-only revoke of the
+    /// owning user's own share ("Only owner can revoke access to the owner", 0x80040223), so the seam sends THAT one
+    /// revoke as the owner and every other share's app-only. Before this, a creator-driven unsecure — the record handed
+    /// back to the creator, who still held provisioning's share — always ended <c>sweepComplete = false</c>, and the
+    /// stale explicit share (Share included) survived a later reassignment.</para>
     /// </remarks>
     private static async Task<ShareSweep> RevokeAllSharesAsync(
         IDataverseRecordShareService recordShare,
         SecureRecordRoot root,
         Guid recordId,
+        DataversePrincipalRef owner,
         ILogger logger,
         string traceId,
         CancellationToken ct)
@@ -1125,7 +1137,7 @@ public static class UnsecureProjectEndpoint
         {
             try
             {
-                await recordShare.RevokeAccessAsync(root.EntitySet, recordId, share.Principal, ct);
+                await recordShare.RevokeAccessAsync(root.EntitySet, recordId, share.Principal, owner, ct);
                 revoked++;
             }
             catch (Exception ex)
