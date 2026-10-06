@@ -258,8 +258,17 @@ Rigor level and reason are logged in current-task.md:
 ### Step 0: Context Recovery Check
 
 ```
+SIZE GUARD (every start, before reading):
+  IF current-task.md > 20 KB:
+    → It is carrying history, not state. Do NOT load it whole.
+    → Read only its newest block, then clean it up per context-handoff
+      "State, not history" (archive verbatim to notes/handoff-history/,
+      move standing items to project CLAUDE.md, rewrite as current state)
+      BEFORE starting the task.
+
 IF resuming work (not fresh start):
   READ projects/{project-name}/current-task.md
+  READ the project CLAUDE.md "Standing directives & gotchas" section (if present)
 
   IF current-task.md exists AND status == "in-progress":
     → This is a continuation
@@ -589,7 +598,7 @@ FOR each <step> in <steps>:
 #### Checkpoint Behavior
 
 ```
-WHEN checkpointing:
+WHEN checkpointing (REWRITE the file, never prepend a new block; see context-handoff "State, not history"):
 
 1. UPDATE current-task.md Quick Recovery section:
    | Field | Value |
@@ -664,15 +673,14 @@ AFTER all implementation steps and acceptance criteria verified:
    → Get list from current-task.md "Files Modified" section
    → Execute /code-review {file-list}
 
-   IF critical issues found:
-     → LIST critical issues
-     → FIX each issue before proceeding
-     → RE-RUN code-review to verify fixes
+   TRIAGE every finding (Critical, Warning and Suggestion alike) using
+   "Finding triage and round limits" below. Act on the class, not the severity label:
+     → FIX-NOW classes (F1-F4): fix in this task
+     → KNOWN-LIMIT classes (K1-K4): one line each in task notes + PR, no fix round
+     → A genuine product or policy choice: ask the user (batch the questions)
 
-   IF warnings found:
-     → REPORT warnings to user
-     → ASK: "Fix warnings now or proceed?"
-     → Address per user preference
+   AFTER fixing: RE-RUN code-review on the FIX DIFF ONLY (not the whole task surface).
+   STOP at the round cap below.
 
 2. RUN adr-check on modified files:
    → Execute /adr-check {file-list}
@@ -728,6 +736,32 @@ UPDATE current-task.md:
     - ADR Check: ✅ Passed (or violations found/fixed)
     - Lint: ✅ Passed (or N/A)
 ```
+
+#### Finding triage and round limits (BINDING — added 2026-10-06)
+
+**Why this exists.** `code-review` is coverage-first by design: it reports every finding, including low-confidence ones, and leaves filtering to this step. But this step never defined the filter. It said "fix critical issues → re-run code-review", and each re-run reviewed the whole surface again and surfaced new findings. Adversarial-verifier workflows followed the same pattern. Nothing stopped the loop. In `unified-access-control-r2`, tasks reached fix round `-r6`, owner decision rounds passed 50, and the owner recorded the project at ~10× budget. The owner named the cause as "static-guard arms races and edge-case machinery … without real-world benefit". The classes below are the owner's own rule from that project (owner rounds 56 and 59, 2026-10-05), made repo-wide.
+
+**Classify every finding before acting:**
+
+| Class | Meaning | Action |
+|---|---|---|
+| **F1** | Runtime defect: security hole, fail-open, data loss, cross-customer exposure, broken real path | Fix in this task |
+| **F2** | Maintainability defect that compounds: duplicates an existing mechanism, a comment contradicting the code, important behaviour with no test | Fix in this task |
+| **F3** | Measurable performance problem | Fix in this task |
+| **F4** | Unmet acceptance criterion, or required/promised functionality missing | Fix in this task. **Never trimmed**: robustness and completeness of required functionality is not "over-engineering" |
+| **K1** | Guard or static-analysis bypass reachable only by deliberately adversarial code in our own repo | Known limit: one line in notes + PR |
+| **K2** | Rare edge that already fails closed | Known limit |
+| **K3** | Seeding proof (mutation check) of a minor branch | Known limit |
+| **K4** | Low-confidence finding with no concrete failure scenario you can state | Known limit |
+
+**Over-engineering check (applies to every fix).** A new column, job, setting or abstraction needs a realistic failure behind it, and a fix is never bigger than the problem. Prefer reusing an existing component (CLAUDE.md §11).
+
+**Round limits:**
+1. **Review → fix round 1 → re-verify the fix diff → (only if F1–F4 remain) fix round 2 → stop.**
+2. **Re-verification scope is the fix diff,** not the task's whole surface. A fresh full review after every fix is what generated an endless supply of new findings.
+3. **After round 2,** escalate any F1 still open to the user (root §6). Never accept it silently and never start round 3. Record anything else that remains as a known limit.
+4. **Adversarial-verifier passes** (workflow scripts, verify-after-execute lanes) follow the same classes and caps: **one** verifier pass per task. A second pass is allowed only for tasks tagged `auth`, `security` or `tenant-isolation`, and it is scoped to the fix diff.
+5. **Flag diminishing returns proactively.** If a round produced only K-class findings, say so and stop. Don't continue rounds silently.
 
 ### Step 9.7: UI Testing (PCF/Frontend Tasks)
 
@@ -900,9 +934,11 @@ REASONING:
 ```
 TRANSITION current-task.md:
 
-1. ARCHIVE completed task info (optional - for session notes):
-   - Add to "Session Notes > Key Learnings" if significant discoveries
-   - Add to "Handoff Notes" if important context for future tasks
+1. MOVE OUT anything worth keeping (do NOT leave it in current-task.md):
+   - A gotcha or standing directive that outlives this task → project CLAUDE.md
+     "Standing directives & gotchas"
+   - Decisions and rationale → the task's notes file / POML <notes>
+   - The narrative → the completion commit message
 
 2. RESET for next task:
    - Clear "Completed Steps" section
@@ -953,6 +989,7 @@ TRANSITION current-task.md:
   - Individual `.poml` files (status + notes sections)
   - Git commits (what changed when)
 - Keeping it focused prevents file bloat and faster recovery
+- Measured cost of not doing this (2026-10-06): three active projects had 150 / 445 / 483 KB files, read at Step 0 and Step 2 of every task (~120k tokens at the top end) before any work began
 
 ---
 
