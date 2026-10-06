@@ -488,6 +488,18 @@ archive's secure question. The communication's container comes from the real `Co
   Document Profile job — are refused, and the legacy migration / Make Secure would report it as underivable. Owner: both
   are acceptable consequences of "the source's container wins", or the copy should drop `sprk_relatedcommunication` in
   that one case (the owner said "still associated", so it is kept).
+  - **Checked 2026-10-06 (main session's question), NO code change:** (1) the ONLY link on the copy that pulls the
+    communication's secure container Y into its derivation is `sprk_relatedcommunication` — `DeriveCoreAsync` resolves a
+    `sprk_communication` target with `ResolveForRecordWithFixedFallbackAsync` (`RecordContainerResolver.DocumentPointer.cs:545-549`);
+    the copy carries no regarding copied from the communication. (2) Omitting it would NOT keep the copy associated with
+    the email: the `sprk_communicationattachment` rows link the communication to the **SOURCE** documents
+    (`CreateAttachmentRecordsAsync`, `CommunicationService.cs:2480`, called with `request.AttachmentDocumentIds` at
+    `:1373` / `:1691`), never to the copy. The copy's only association to the email is `sprk_relatedcommunication`.
+    **Lost if omitted:** the copy would no longer be a document of that communication (the communication's related-documents
+    relationship) — it would be filed only to the source's secure record; the email's attachment list (which shows the
+    sources) is unaffected. Options for the owner: accept the strict-rule refusal for this rare case; drop the link and
+    accept that loss; or associate the copy another way (for example an additional `sprk_communicationattachment` row
+    pointing at the copy — which changes what the email's attachment list shows, so it is a product decision).
 - A secure copy now also appears in the secure record's document list (it carries the record link) and is owned by the
   Secure team. A non-secure copy is unchanged (listed only under the communication).
 - Fail-closed skips, each logged: a source whose secure filing comes only through its parent document or its own
