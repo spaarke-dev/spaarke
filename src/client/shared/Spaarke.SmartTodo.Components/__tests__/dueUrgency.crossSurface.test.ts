@@ -29,7 +29,10 @@ import { computeDueLabel } from '../src/utils/todoScoring';
 import {
   FEED_DUE_ACCENT,
   feedDueUrgency,
+  isFeedEventOverdue,
 } from '../../../../solutions/LegalWorkspace/src/components/ActivityFeed/feedDueAccent';
+import { computeCategoryCounts } from '../../../../solutions/LegalWorkspace/src/hooks/useActivityFeedFilters';
+import { EventFilterCategory } from '../../../../solutions/LegalWorkspace/src/types/enums';
 import { mapEventToCardProps } from '../../../pcf/VisualHost/control/utils/eventDueDate';
 import {
   EVENT_DUE_BADGE_COLOR,
@@ -58,6 +61,14 @@ describe('due-date tier is the same on every surface (America/New_York, 9pm)', (
   });
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  // Guard (review F11): if the TZ override were not in effect (e.g. a UTC CI
+  // runner where local == UTC), a UTC-midnight parse would pass these cases
+  // trivially. A date-only string must parse to 8pm the PREVIOUS day here.
+  it('the zone override is in effect', () => {
+    expect(new Date('2026-10-05').getDate()).toBe(4);
+    expect(new Date('2026-10-05').getHours()).toBe(20);
   });
 
   it.each([
@@ -111,5 +122,39 @@ describe('owner palette (SmartTodo badges) on the feed and event card', () => {
       '10d': tokens.colorNeutralBackground3,
       none: tokens.colorNeutralBackground3,
     });
+  });
+});
+
+describe('LegalWorkspace feed: Overdue filter, Overdue badge and card accent agree (review F5)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.setSystemTime(NOW);
+  });
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const event = (id: string, daysFromNow: number) =>
+    ({ sprk_eventid: id, sprk_duedate: dateOnly(daysFromNow) }) as unknown as Parameters<
+      typeof computeCategoryCounts
+    >[0][number];
+
+  it('a DateOnly due date of TODAY is not overdue anywhere (the badge and filter read it as UTC midnight before)', () => {
+    expect(isFeedEventOverdue(dateOnly(0), NOW)).toBe(false);
+    expect(feedDueUrgency(dateOnly(0), NOW)).toBe('3d');
+    expect(computeCategoryCounts([event('t', 0)])[EventFilterCategory.Overdue]).toBe(0);
+  });
+
+  it('yesterday is overdue on all three', () => {
+    expect(isFeedEventOverdue(dateOnly(-1), NOW)).toBe(true);
+    expect(feedDueUrgency(dateOnly(-1), NOW)).toBe('overdue');
+    expect(computeCategoryCounts([event('y', -1)])[EventFilterCategory.Overdue]).toBe(1);
+  });
+
+  it('badge count equals the number of cards with the overdue tier', () => {
+    const events = [-3, -1, 0, 1, 5].map((d, i) => event(`e${i}`, d));
+    const redCards = events.filter(e => feedDueUrgency(e.sprk_duedate as string, NOW) === 'overdue').length;
+    expect(computeCategoryCounts(events)[EventFilterCategory.Overdue]).toBe(redCards);
+    expect(redCards).toBe(2);
   });
 });

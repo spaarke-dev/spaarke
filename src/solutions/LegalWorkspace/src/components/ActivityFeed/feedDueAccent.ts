@@ -34,3 +34,16 @@ export function feedDueUrgency(dueDate: string | null | undefined, now: Date = n
   const due = parseDueDate(dueDate);
   return dueUrgencyForDays(due ? daysBetweenLocalMidnight(now, due) : null);
 }
+
+/**
+ * Whether a feed event is overdue: its tier is `'overdue'` (due before today,
+ * calendar days, local time). The feed's Overdue FILTER, its Overdue BADGE
+ * count and the card's red accent all use this, so they agree (task 081
+ * round 4, review F5). The filter and the badge used to compare
+ * `new Date("YYYY-MM-DD")` (UTC midnight) with local midnight, so in every US
+ * zone a task due TODAY was counted and listed as overdue while its card showed
+ * it as due today.
+ */
+export function isFeedEventOverdue(dueDate: string | null | undefined, now: Date = new Date()): boolean {
+  return feedDueUrgency(dueDate, now) === "overdue";
+}

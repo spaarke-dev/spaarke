@@ -21,6 +21,7 @@
 import { useState, useMemo, useCallback } from 'react';
 import { IEvent } from '../types/entities';
 import { EventFilterCategory } from '../types/enums';
+import { isFeedEventOverdue } from '../components/ActivityFeed/feedDueAccent';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -63,14 +64,12 @@ function isHighPriority(event: IEvent): boolean {
 
 /**
  * Compute whether a single event matches the Overdue category.
- * Mirrors: buildEventCategoryFilter(Overdue) → duedate lt today
+ * Mirrors: buildEventCategoryFilter(Overdue) → duedate lt today. Uses the
+ * feed's shared rule so the badge count, the filter and the card accent agree
+ * (task 081 round 4 — this parsed a DateOnly due date as UTC midnight).
  */
 function isOverdue(event: IEvent): boolean {
-  if (!event.sprk_duedate) return false;
-  const dueDate = new Date(event.sprk_duedate);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  return dueDate < today;
+  return isFeedEventOverdue(event.sprk_duedate);
 }
 
 /**
@@ -78,7 +77,8 @@ function isOverdue(event: IEvent): boolean {
  * Predicates intentionally mirror the OData filters in queryHelpers.ts so
  * badge counts match what the server would return for each filter.
  */
-function computeCategoryCounts(events: IEvent[]): CategoryCounts {
+/** @internal exported for the cross-surface overdue test. */
+export function computeCategoryCounts(events: IEvent[]): CategoryCounts {
   const counts: CategoryCounts = {
     [EventFilterCategory.All]: events.length,
     [EventFilterCategory.HighPriority]: 0,
