@@ -64,16 +64,74 @@ public class EventEndpointsMembershipPublishingTests
         site.Created!.AssignedToContactId.Should().BeNull("no link → blank; never an email/UPN/name match (C7)");
     }
 
+    // Task 097 round 6 (review F6): this test used to assert "still creates" — an app-only create for a caller who is no
+    // Dataverse user. The CallerResolution contract now applies: an oid that maps to no systemuser is 403, nothing written.
     [Fact]
-    public async Task CreateEvent_CallerNotResolvedToASystemUser_LeavesAssignedToBlank_AndStillCreates()
+    public async Task CreateEvent_CallerNotResolvedToASystemUser_Is403_AndNothingIsCreated()
     {
         var site = new Site(linkedContact: ActingUsersContactId, callerResolved: false);
 
         var result = await site.RunAsync();
 
-        StatusOf(result).Should().Be(StatusCodes.Status201Created);
-        site.Created!.AssignedToContactId.Should().BeNull();
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        site.Created.Should().BeNull();
         site.Identity.Verify(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task CreateEvent_CallerWithNoOid_Is401_AndNothingIsCreated()
+    {
+        var site = new Site(linkedContact: ActingUsersContactId);
+
+        var result = await site.RunAsync(withOid: false);
+
+        StatusOf(result).Should().Be(StatusCodes.Status401Unauthorized);
+        site.Created.Should().BeNull();
+    }
+
+    // ── Task 097 round 6 (review F1, registry I-6): the owner is the I-6 owner's team, never the app user ─────────
+
+    [Fact]
+    public async Task CreateEvent_NoParent_IsOwnedByTheTeamTheI6OwnerResolvesFromTheActingUser()
+    {
+        var site = new Site(linkedContact: ActingUsersContactId);
+
+        var result = await site.RunAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status201Created);
+        site.Created!.OwnerTeamId.Should().Be(Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId);
+        var asked = site.Ownership.Requests.Should().ContainSingle().Subject;
+        asked.HasTarget.Should().BeFalse();
+        asked.CallerSystemUserId.Should().Be(ActingSystemUserId, "no parent → the acting user's business unit (record-first fallback)");
+        DataverseWebApiService.BuildCreateEventPayload(site.Created)
+            .Should().ContainKey("ownerid@odata.bind")
+            .WhoseValue.Should().Be($"/teams({Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble.DefaultTeamId:D})");
+    }
+
+    [Fact]
+    public async Task CreateEvent_WithAParent_AsksTheI6OwnerRecordFirst()
+    {
+        var matterId = Guid.Parse("97097097-0006-4000-8000-000000000001");
+        var site = new Site(linkedContact: ActingUsersContactId);
+
+        await site.RunAsync(new ApiCreateEventRequest("Hearing prep", RegardingRecordId: matterId,
+            RegardingRecordType: Spaarke.Dataverse.RegardingRecordType.Matter));
+
+        var asked = site.Ownership.Requests.Should().ContainSingle().Subject;
+        asked.TargetEntityLogicalName.Should().Be("sprk_matter");
+        asked.TargetRecordId.Should().Be(matterId);
+    }
+
+    [Fact]
+    public async Task CreateEvent_OwnerTeamUnresolved_IsRefused_NeverAppOwned()
+    {
+        var site = new Site(linkedContact: ActingUsersContactId);
+        site.Ownership.TeamId = null;
+
+        var result = await site.RunAsync();
+
+        StatusOf(result).Should().Be(StatusCodes.Status403Forbidden);
+        site.Created.Should().BeNull("an app-owned event lands in the ROOT business unit, unreachable by its creator");
     }
 
     [Fact]
@@ -226,15 +284,24 @@ public class EventEndpointsMembershipPublishingTests
         public RecordingMembershipEventPublisher Publisher { get; } = new();
         public DataverseCreateEventRequest? Created { get; private set; }
 
-        public Task<IResult> RunAsync() => EventEndpoints.CreateEventAsync(
-            new ApiCreateEventRequest("Hearing prep"),
+        /// <summary>Task 097 round 6 (I-6): the owner-team resolver; set <c>TeamId</c> to null to make it refuse.</summary>
+        public Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble Ownership { get; } = new();
+
+        public Task<IResult> RunAsync(ApiCreateEventRequest? request = null, bool withOid = true) => EventEndpoints.CreateEventAsync(
+            request ?? new ApiCreateEventRequest("Hearing prep"),
             EventService.Object,
             _publisher,
             Dataverse.Object,
             CallerResolver.Object,
             Identity.Object,
             Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
-            new DefaultHttpContext { TraceIdentifier = TraceId },
+            Ownership,
+            new DefaultHttpContext
+            {
+                TraceIdentifier = TraceId,
+                User = new ClaimsPrincipal(new ClaimsIdentity(
+                    withOid ? new[] { new Claim("oid", OwnerEventTestKit.CallerOid.ToString("D")) } : Array.Empty<Claim>(), "Test")),
+            },
             NullLogger<Program>.Instance,
             CancellationToken.None);
     }

@@ -153,7 +153,7 @@ public class EventRegardingResolutionTests
             .ThrowsAsync(new EventRegardingResolutionException("The regarding sprk_matter x does not exist."));
         var callers = new Mock<ICallerSystemUserResolver>();
         callers.Setup(c => c.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CallerSystemUserResolution.Unresolved("test"));
+            .ReturnsAsync(CallerSystemUserResolution.Resolved("97097097-0000-4000-8000-0000000000c1"));
 
         var result = await EventEndpoints.CreateEventAsync(
             new ApiCreateEventRequest("zz-097", RegardingRecordId: MatterId, RegardingRecordType: RegardingRecordType.Matter),
@@ -163,7 +163,12 @@ public class EventRegardingResolutionTests
             callers.Object,
             Mock.Of<IIdentityNormalizationService>(),
             CoreAncestorResolverFixtures.Inert(),
-            new DefaultHttpContext(),
+            new RecordOwnershipResolverDouble(),
+            new DefaultHttpContext
+            {
+                User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity(
+                    new[] { new System.Security.Claims.Claim("oid", Guid.NewGuid().ToString("D")) }, "Test")),
+            },
             NullLogger<Program>.Instance,
             default);
 
@@ -210,6 +215,38 @@ public class EventRegardingResolutionTests
             Times.Never, "fail closed: an event re-parented without its matter/project stamp would be hidden from that team");
     }
 
+    // ── Round 6 (review F4): the list query really runs AS the caller ─────────────────────────────────────────
+
+    [Fact]
+    public async Task QueryEvents_WithACaller_SendsExactlyOneMscrmCallerIdHeader_OnTheEventsRequest()
+    {
+        var caller = Guid.Parse("97097097-0000-4000-8000-0000000000f4");
+        var handler = new RecordingHandler(r => IsCatalog(r)
+            ? Json($"{{\"value\":[{{\"sprk_recordtype_refid\":\"{MatterTypeRefId}\",\"sprk_recordlogicalname\":\"sprk_matter\"}}]}}")
+            : Json("{\"value\":[]}"));
+        var sut = new OfflineService(handler);
+
+        await sut.QueryEventsAsync(new EventQueryFilter { Top = 10, OwnerUserId = caller, ImpersonateSystemUserId = caller });
+
+        var events = handler.Requests.Should().ContainSingle(r => r.Path.EndsWith("/sprk_events")).Subject;
+        events.CallerIds.Should().ContainSingle().Which.Should().Be(caller.ToString(),
+            "without MSCRMCallerID the list is the APPLICATION's view — every event, whatever the caller may read");
+        handler.Requests.Where(r => !r.Path.EndsWith("/sprk_events")).Should().OnlyContain(r => r.CallerIds.Length == 0,
+            "the record-type catalogue is environment metadata and stays app-only");
+    }
+
+    [Fact]
+    public async Task QueryEvents_WithAnEmptyCallerId_IsRefused_NoAppOnlyFallback()
+    {
+        var handler = new RecordingHandler(r => IsCatalog(r) ? Json("{\"value\":[]}") : Json("{\"value\":[]}"));
+        var sut = new OfflineService(handler);
+
+        var act = () => sut.QueryEventsAsync(new EventQueryFilter { Top = 10, ImpersonateSystemUserId = Guid.Empty });
+
+        await act.Should().ThrowAsync<ArgumentException>();
+        handler.Requests.Should().NotContain(r => r.Path.EndsWith("/sprk_events"));
+    }
+
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
     private static Mock<IEventDataverseService> ExistingEvent()
@@ -246,7 +283,7 @@ public class EventRegardingResolutionTests
         confidentialClients: null,
         credential: new StaticTokenCredential());
 
-    private sealed record SentRequest(HttpMethod Method, string Query);
+    private sealed record SentRequest(HttpMethod Method, string Path, string Query, string[] CallerIds);
 
     private sealed class RecordingHandler(Func<HttpRequestMessage, HttpResponseMessage> respond) : HttpMessageHandler
     {
@@ -254,7 +291,11 @@ public class EventRegardingResolutionTests
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            Requests.Add(new SentRequest(request.Method, Uri.UnescapeDataString(request.RequestUri!.Query)));
+            Requests.Add(new SentRequest(
+                request.Method,
+                request.RequestUri!.AbsolutePath,
+                Uri.UnescapeDataString(request.RequestUri!.Query),
+                request.Headers.TryGetValues("MSCRMCallerID", out var ids) ? ids.ToArray() : Array.Empty<string>()));
             return Task.FromResult(respond(request));
         }
     }

@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Dataverse;
@@ -146,6 +148,40 @@ public class EventRouteAuthorizationTests
     // ── Create / re-parent: the PARENT is authorized before it is resolved, read or stamped ──────────────────
 
     [Fact]
+    public async Task Create_CallerWithoutTheCreatePrivilege_Is403_AndTheHandlerNeverRuns()
+    {
+        // Round 6 (review F3): the app creates the row, so the CALLER's Create privilege on sprk_event is asked first
+        // (the FinanceAuthorizationFilter Privilege path). No privilege → refused before the parent or the handler.
+        using var factory = new EventAccessTestWebAppFactory(holdsCreatePrivilege: false);
+        factory.Grant("sprk_matters", MatterId, AccessRights.AppendTo);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/events",
+            new ApiCreateEventRequest("zz-097", RegardingRecordId: MatterId, RegardingRecordType: RegardingRecordType.Matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sdap.access.deny.insufficient_privilege");
+        factory.PrivilegesAsked.Should().Equal("prvCreatesprk_Event");
+        factory.Events.Invocations.Should().BeEmpty();
+        factory.Probed.Should().BeEmpty("the privilege is checked before the parent is probed");
+    }
+
+    [Fact]
+    public async Task Create_WithReadButNotAppendToOnTheParent_Is403()
+    {
+        // Round 6 (review F2): attaching a child costs AppendTo on the parent — the right Dataverse itself demands.
+        using var factory = new EventAccessTestWebAppFactory();
+        factory.Grant("sprk_matters", MatterId, AccessRights.Read | AccessRights.Write);
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/v1/events",
+            new ApiCreateEventRequest("zz-097", RegardingRecordId: MatterId, RegardingRecordType: RegardingRecordType.Matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        factory.Events.Invocations.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Create_WithAParentTheCallerCannotRead_Is403_AndNothingIsWritten()
     {
         using var factory = new EventAccessTestWebAppFactory();
@@ -160,17 +196,34 @@ public class EventRouteAuthorizationTests
     }
 
     [Fact]
-    public async Task Create_WithAReadableParent_ReachesTheHandler()
+    public async Task Create_WithAppendToOnTheParent_ReachesTheHandler_OwnedByTheResolvedTeam()
     {
         using var factory = new EventAccessTestWebAppFactory();
-        factory.Grant("sprk_matters", MatterId, AccessRights.Read);
+        factory.Grant("sprk_matters", MatterId, AccessRights.AppendTo);
         using var client = factory.CreateClient();
 
         var response = await client.PostAsJsonAsync("/api/v1/events",
             new ApiCreateEventRequest("zz-097", RegardingRecordId: MatterId, RegardingRecordType: RegardingRecordType.Matter));
 
         response.StatusCode.Should().Be(HttpStatusCode.Created);
-        factory.Events.Verify(e => e.CreateEventAsync(It.IsAny<DataverseCreateEventRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        factory.Events.Verify(e => e.CreateEventAsync(
+            It.Is<DataverseCreateEventRequest>(r => r.OwnerTeamId == factory.Ownership.TeamId),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Reparent_WithWriteOnTheEventAndOnlyReadOnTheNewParent_Is403()
+    {
+        using var factory = new EventAccessTestWebAppFactory();
+        factory.Grant("sprk_events", EventId, AccessRights.Read | AccessRights.Write);
+        factory.Grant("sprk_matters", MatterId, AccessRights.Read);
+        using var client = factory.CreateClient();
+
+        var response = await client.PutAsJsonAsync($"/api/v1/events/{EventId}",
+            new ApiUpdateEventRequest(RegardingRecordId: MatterId, RegardingRecordType: RegardingRecordType.Matter));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        factory.Events.Invocations.Should().BeEmpty();
     }
 
     [Fact]
@@ -186,7 +239,7 @@ public class EventRouteAuthorizationTests
     }
 
     [Fact]
-    public async Task Reparent_WithWriteOnTheEventButNoReadOnTheNewParent_Is403_AndNothingIsWritten()
+    public async Task Reparent_WithWriteOnTheEventButNoRightsOnTheNewParent_Is403_AndNothingIsWritten()
     {
         using var factory = new EventAccessTestWebAppFactory();
         factory.Grant("sprk_events", EventId, AccessRights.Read | AccessRights.Write);
@@ -227,6 +280,57 @@ public class EventRouteAuthorizationTests
             It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    // ── Round 6 (review F5): the id comes from the ROUTE, not from "the first Guid argument" ───────────────────
+
+    [Fact]
+    public async Task RecordFilter_AuthorizesTheRouteValueId_NotAnotherGuidArgument()
+    {
+        var other = Guid.Parse("97097097-ffff-4000-8000-0000000000f5");
+        var probed = new List<(string, Guid)>();
+        var probe = new GrantTableProbe(new() { [("sprk_events", EventId)] = AccessRights.Read }, probed, new(), holdsCreate: true);
+        var http = new DefaultHttpContext();
+        http.Request.RouteValues["id"] = EventId.ToString();
+        // A handler argument list whose FIRST Guid is not the route's id — the shape that fooled OfType<Guid>().First().
+        var context = new DefaultEndpointFilterInvocationContext(http, other, EventId);
+        var reached = false;
+
+        var result = await new Sprk.Bff.Api.Api.Filters.EventAccessFilter(probe)
+            .AuthorizeEventAsync(context, _ => { reached = true; return ValueTask.FromResult<object?>(Results.Ok()); }, "read");
+
+        reached.Should().BeTrue();
+        probed.Should().Equal(("sprk_events", EventId));
+        result.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task RecordFilter_WithNoRouteId_Denies_WithoutAskingDataverse()
+    {
+        var probed = new List<(string, Guid)>();
+        var probe = new GrantTableProbe(new(), probed, new(), holdsCreate: true);
+        var context = new DefaultEndpointFilterInvocationContext(new DefaultHttpContext(), EventId);
+
+        var result = await new Sprk.Bff.Api.Api.Filters.EventAccessFilter(probe)
+            .AuthorizeEventAsync(context, _ => throw new InvalidOperationException("must not run"), "read");
+
+        ((IStatusCodeHttpResult)result!).StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        probed.Should().BeEmpty();
+    }
+
+    // ── Round 6 (review F6): the list follows the CallerResolution contract ───────────────────────────────────
+
+    [Fact]
+    public async Task ListHandler_CallerWithNoOid_Is401_AndNothingIsQueried()
+    {
+        var events = new Mock<IEventDataverseService>(MockBehavior.Strict);
+        var callers = new Mock<ICallerSystemUserResolver>(MockBehavior.Strict);
+
+        var result = await Sprk.Bff.Api.Api.Events.EventEndpoints.GetEventsAsync(
+            null, null, null, null, null, null, null, null, 1, 50,
+            new DefaultHttpContext(), events.Object, callers.Object,
+            Mock.Of<IIdentityNormalizationService>(), NullLogger<Program>.Instance, default);
+
+        ((IStatusCodeHttpResult)result).StatusCode.Should().Be(StatusCodes.Status401Unauthorized);
+    }
     // ── Helpers ───────────────────────────────────────────────────────────────────────────────────────────────
 
     private static HttpRequestMessage Request(string method, string suffix)
@@ -245,12 +349,17 @@ public class EventRouteAuthorizationTests
     {
         private readonly Dictionary<(string, Guid), AccessRights> _grants = new();
         private readonly Guid? _callerSystemUser;
+        private readonly bool _holdsCreatePrivilege;
 
-        public EventAccessTestWebAppFactory(bool callerResolves = true) =>
+        public EventAccessTestWebAppFactory(bool callerResolves = true, bool holdsCreatePrivilege = true)
+        {
             _callerSystemUser = callerResolves ? CallerSystemUserId : null;
+            _holdsCreatePrivilege = holdsCreatePrivilege;
+        }
 
         public Mock<IEventDataverseService> Events { get; } = new(MockBehavior.Loose);
         public List<(string EntitySet, Guid Id)> Probed { get; } = new();
+        public List<string> PrivilegesAsked { get; } = new();
 
         public void Grant(string entitySet, Guid id, AccessRights rights) => _grants[(entitySet, id)] = rights;
 
@@ -272,11 +381,14 @@ public class EventRouteAuthorizationTests
                 services.RemoveAll<IEventDataverseService>();
                 services.AddSingleton(Events.Object);
 
-                var communication = new Mock<ICommunicationDataverseService>(MockBehavior.Loose);
-                communication.Setup(c => c.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                    .ReturnsAsync(_callerSystemUser);
-                services.RemoveAll<ICommunicationDataverseService>();
-                services.AddSingleton(communication.Object);
+                // Round 6 (review F6): list and create resolve the caller through the ONE injectable resolver.
+                var callers = new Mock<ICallerSystemUserResolver>(MockBehavior.Strict);
+                callers.Setup(c => c.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(_callerSystemUser is { } id
+                        ? CallerSystemUserResolution.Resolved(id.ToString("D"))
+                        : CallerSystemUserResolution.Unresolved("no-matching-systemuser"));
+                services.RemoveAll<ICallerSystemUserResolver>();
+                services.AddSingleton(callers.Object);
 
                 var identity = new Mock<IIdentityNormalizationService>(MockBehavior.Loose);
                 identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
@@ -288,14 +400,22 @@ public class EventRouteAuthorizationTests
                 services.AddSingleton(CoreAncestorResolverFixtures.Inert());
 
                 services.RemoveAll<CallerRecordAccessProbe>();
-                services.AddSingleton<CallerRecordAccessProbe>(new GrantTableProbe(_grants, Probed));
+                services.AddSingleton<CallerRecordAccessProbe>(new GrantTableProbe(_grants, Probed, PrivilegesAsked, _holdsCreatePrivilege));
             });
         }
     }
 
-    private sealed class GrantTableProbe(Dictionary<(string, Guid), AccessRights> grants, List<(string, Guid)> probed)
+    private sealed class GrantTableProbe(
+        Dictionary<(string, Guid), AccessRights> grants, List<(string, Guid)> probed, List<string> privilegesAsked, bool holdsCreate)
         : CallerRecordAccessProbe(new HttpClient(), new ConfigurationBuilder().Build(), NullLogger<CallerRecordAccessProbe>.Instance)
     {
+        public override Task<bool> CallerHoldsPrivilegeAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            lock (privilegesAsked)
+                privilegesAsked.Add(privilegeName);
+            return Task.FromResult(holdsCreate && privilegeName == "prvCreatesprk_Event");
+        }
+
         public override Task<AccessRights> GetCallerRightsAsync(
             string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
         {

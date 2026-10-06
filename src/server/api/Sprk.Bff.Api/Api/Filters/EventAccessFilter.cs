@@ -12,34 +12,41 @@ namespace Sprk.Bff.Api.Api.Filters;
 public static class EventAccessFilterExtensions
 {
     /// <summary>
-    /// Authorize the CALLER against the <c>sprk_event</c> named by the route's <c>{id}</c>, for
+    /// Authorize the CALLER against the <c>sprk_event</c> named by the route value <c>id</c>, for
     /// <paramref name="operation"/> (an <see cref="OperationAccessPolicy"/> key: <c>read</c> or <c>write</c>).
     /// </summary>
     public static TBuilder AddEventRecordAccessFilter<TBuilder>(this TBuilder builder, string operation)
         where TBuilder : IEndpointConventionBuilder =>
         builder.AddEndpointFilter(async (context, next) =>
-        {
-            var services = context.HttpContext.RequestServices;
-            var filter = new EventAccessFilter(
-                services.GetRequiredService<CallerRecordAccessProbe>(),
-                services.GetService<ILogger<EventAccessFilter>>());
-            return await filter.AuthorizeEventAsync(context, next, operation);
-        });
+            await Create(context).AuthorizeEventAsync(context, next, operation));
 
     /// <summary>
-    /// Authorize the CALLER's Read right on the regarding PARENT a create/update request names, BEFORE the server
-    /// resolves it, reads its name/number, or stamps its ancestors (review: existence oracle + data copy).
+    /// Authorize the CALLER's right to attach a child to the regarding PARENT a create/update request names
+    /// (<see cref="EventAccessFilter.AttachOperation"/>: AppendTo), BEFORE the server resolves it, reads its
+    /// name/number, or stamps its ancestors (existence oracle + data copy).
     /// </summary>
     public static TBuilder AddEventParentAccessFilter<TBuilder>(this TBuilder builder)
         where TBuilder : IEndpointConventionBuilder =>
         builder.AddEndpointFilter(async (context, next) =>
-        {
-            var services = context.HttpContext.RequestServices;
-            var filter = new EventAccessFilter(
-                services.GetRequiredService<CallerRecordAccessProbe>(),
-                services.GetService<ILogger<EventAccessFilter>>());
-            return await filter.AuthorizeParentAsync(context, next);
-        });
+            await Create(context).AuthorizeParentAsync(context, next));
+
+    /// <summary>
+    /// Require the CALLER to hold the Create privilege on <c>sprk_event</c> (<see cref="EventAccessFilter.CreateEventPrivilege"/>)
+    /// before the app creates one on their behalf — there is no record yet, so no record right can answer it
+    /// (the <c>FinanceAuthorizationFilter</c> Privilege path, owner decision G5).
+    /// </summary>
+    public static TBuilder AddEventCreatePrivilegeFilter<TBuilder>(this TBuilder builder)
+        where TBuilder : IEndpointConventionBuilder =>
+        builder.AddEndpointFilter(async (context, next) =>
+            await Create(context).AuthorizeCreatePrivilegeAsync(context, next));
+
+    private static EventAccessFilter Create(EndpointFilterInvocationContext context)
+    {
+        var services = context.HttpContext.RequestServices;
+        return new EventAccessFilter(
+            services.GetRequiredService<CallerRecordAccessProbe>(),
+            services.GetService<ILogger<EventAccessFilter>>());
+    }
 }
 
 /// <summary>
@@ -50,31 +57,52 @@ public static class EventAccessFilterExtensions
 /// <remarks>
 /// <para><b>The established pattern, applied — not a new one.</b> This is the record-route gate the BFF already uses
 /// for record routes: <see cref="RecordRouteAccessAuthorizationFilter"/> (record-keyed uploads),
-/// <see cref="EntityAccessFilter"/> (Office save), <see cref="TodoSourceAccessFilter"/> and
-/// <c>QuickCreateSourceAccessFilter</c> — an ADR-008 endpoint filter that asks Dataverse, AS THE CALLER, what rights
-/// they hold on the record (<see cref="CallerRecordAccessProbe"/>, <c>RetrievePrincipalAccess</c>), and lets
-/// <see cref="OperationAccessPolicy"/> decide which right the operation costs (<c>read</c> for GET / logs,
-/// <c>write</c> for PUT / complete / cancel / DELETE — DELETE is a soft delete, i.e. a status WRITE). The
-/// <c>sprk_events</c> collection comes from the shared <see cref="EntityAccessFilter.TryResolveEntitySet"/> table; a
-/// regarding parent's from the one regarding catalogue in <see cref="RegardingRecordType"/>.</para>
+/// <see cref="EntityAccessFilter"/> (Office save), <see cref="TodoSourceAccessFilter"/>,
+/// <c>QuickCreateSourceAccessFilter</c> and <see cref="FinanceAuthorizationFilter"/> — an ADR-008 endpoint filter that
+/// asks Dataverse, AS THE CALLER, what rights they hold on the record (<see cref="CallerRecordAccessProbe"/>,
+/// <c>RetrievePrincipalAccess</c>), and lets <see cref="OperationAccessPolicy"/> decide which right the operation
+/// costs: <c>read</c> for GET / logs; <c>write</c> for PUT / complete / cancel / DELETE (a soft delete is a status
+/// WRITE); <see cref="AttachOperation"/> (AppendTo) on a create/re-parent's regarding parent; and, for a create, the
+/// caller's Create TABLE privilege. The <c>sprk_events</c> collection comes from the shared
+/// <see cref="EntityAccessFilter.TryResolveEntitySet"/> table; a regarding parent's from the one regarding catalogue in
+/// <see cref="RegardingRecordType"/>.</para>
 ///
-/// <para><b>One deny body, 403, for every refusal</b> — exactly <see cref="TodoSourceAccessFilter"/>'s reasoning:
-/// the probe collapses "no such record", "you may not see it" and "the check could not run" to
+/// <para><b>One deny body, 403, for every record refusal</b> — exactly <see cref="TodoSourceAccessFilter"/>'s
+/// reasoning: the probe collapses "no such record", "you may not see it" and "the check could not run" to
 /// <see cref="AccessRights.None"/> (Dataverse hides existence under OBO), and a single constant body means no route
-/// can be used as an existence oracle. 403 rather than 404 because one answer must cover both cases and 403
-/// asserts nothing about existence.</para>
+/// can be used as an existence oracle. 403 rather than 404 because one answer must cover both cases and 403 asserts
+/// nothing about existence. The missing-privilege refusal names its own reason: it is about the caller's role, not
+/// about any record, so it discloses nothing.</para>
 /// </remarks>
 public sealed class EventAccessFilter
 {
     internal const string ReadOperation = "read";
     internal const string WriteOperation = "write";
 
-    /// <summary>The ONE reason code for every refusal (see remarks: a varying code would be an existence oracle).</summary>
+    /// <summary>AppendTo on the regarding parent (task 097 review F2; <see cref="OperationAccessPolicy"/> key).</summary>
+    internal const string AttachOperation = "event.attach";
+
+    /// <summary>
+    /// The Create privilege on <c>sprk_event</c>, by its live name (spaarkedev1 <c>RetrieveUserSetOfPrivilegesByNames</c>,
+    /// 2026-10-06 — the schema name is <c>sprk_Event</c>, so the privilege is not all lower case). A misspelt name
+    /// answers "not held" for every caller, which is why a test pins it.
+    /// </summary>
+    internal const string CreateEventPrivilege = "prvCreatesprk_Event";
+
+    /// <summary>The ONE reason code for every record refusal (a varying code would be an existence oracle).</summary>
     internal const string DeniedReasonCode = "event_access_denied";
+
+    /// <summary>The caller's role lacks Create on sprk_event (same code as <see cref="FinanceAuthorizationFilter"/>).</summary>
+    internal const string InsufficientPrivilegeReasonCode = FinanceAuthorizationFilter.InsufficientPrivilegeReasonCode;
+
+    /// <summary>The route value the event id is read from — never a handler argument (review F5).</summary>
+    internal const string EventIdRouteValue = "id";
 
     private const string DeniedDetail =
         "You do not have permission to do this to the event or to the record it refers to, or those records are not "
         + "available.";
+
+    private const string PrivilegeDeniedDetail = "Your security role does not allow you to create events.";
 
     private readonly CallerRecordAccessProbe _probe;
     private readonly ILogger<EventAccessFilter>? _logger;
@@ -89,17 +117,23 @@ public sealed class EventAccessFilter
         EndpointFilterInvocationContext context, EndpointFilterDelegate next, string operation)
     {
         var httpContext = context.HttpContext;
-        var eventId = context.Arguments.OfType<Guid>().FirstOrDefault();
-        if (eventId == Guid.Empty || !EntityAccessFilter.TryResolveEntitySet("sprk_event", out var entitySet))
+
+        // Review F5: the id the ROUTE names (RecordRouteAccessAuthorizationFilter's source), not "the first Guid
+        // argument", which would silently authorize the wrong record if a handler ever took another Guid first.
+        if (!httpContext.Request.RouteValues.TryGetValue(EventIdRouteValue, out var raw)
+            || !Guid.TryParse(raw?.ToString(), out var eventId)
+            || eventId == Guid.Empty
+            || !EntityAccessFilter.TryResolveEntitySet("sprk_event", out var entitySet))
         {
             _logger?.LogWarning("[EVENT-AUTH] Denying: no event id on the route. CorrelationId: {CorrelationId}",
                 httpContext.TraceIdentifier);
             return Deny(httpContext);
         }
 
-        return await IsAllowedAsync(httpContext, entitySet, eventId, operation)
+        var rights = await GetRightsAsync(httpContext, entitySet, eventId);
+        return OperationAccessPolicy.HasRequiredRights(rights, operation)
             ? await next(context)
-            : Deny(httpContext);
+            : Denied(httpContext, operation, entitySet, eventId, rights);
     }
 
     internal async ValueTask<object?> AuthorizeParentAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
@@ -112,8 +146,8 @@ public sealed class EventAccessFilter
             _ => ((int?)null, (Guid?)null),
         };
 
-        // No parent named → nothing is read or stamped → nothing to authorize. A half-specified parent is the
-        // handler's 400, which writes nothing.
+        // No parent named → nothing is read, attached or stamped → nothing to authorize. A half-specified parent is
+        // the handler's 400, which writes nothing.
         if (type is null || id is null)
             return await next(context);
 
@@ -125,17 +159,46 @@ public sealed class EventAccessFilter
             return Deny(httpContext);
         }
 
-        return await IsAllowedAsync(httpContext, parentSet, id.Value, ReadOperation)
+        var rights = await GetRightsAsync(httpContext, parentSet, id.Value);
+        return OperationAccessPolicy.HasRequiredRights(rights, AttachOperation)
             ? await next(context)
-            : Deny(httpContext);
+            : Denied(httpContext, AttachOperation, parentSet, id.Value, rights);
     }
 
-    private async Task<bool> IsAllowedAsync(HttpContext httpContext, string entitySet, Guid recordId, string operation)
+    internal async ValueTask<object?> AuthorizeCreatePrivilegeAsync(EndpointFilterInvocationContext context, EndpointFilterDelegate next)
     {
-        AccessRights rights;
+        var httpContext = context.HttpContext;
+        bool holds;
         try
         {
-            rights = await _probe.GetCallerRightsAsync(
+            holds = await _probe.CallerHoldsPrivilegeAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext), CreateEventPrivilege, httpContext.RequestAborted);
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "[EVENT-AUTH] The privilege check threw for {Privilege}. Denying. CorrelationId: {CorrelationId}",
+                CreateEventPrivilege, httpContext.TraceIdentifier);
+            holds = false;
+        }
+
+        if (holds)
+            return await next(context);
+
+        _logger?.LogWarning("[EVENT-AUTH] Denied: caller does not hold {Privilege}. CorrelationId: {CorrelationId}",
+            CreateEventPrivilege, httpContext.TraceIdentifier);
+        return ProblemDetailsHelper.Forbidden(InsufficientPrivilegeReasonCode, PrivilegeDeniedDetail, httpContext.TraceIdentifier);
+    }
+
+    /// <summary>The caller's rights on one record; any fault is <see cref="AccessRights.None"/> (fail closed).</summary>
+    private async Task<AccessRights> GetRightsAsync(HttpContext httpContext, string entitySet, Guid recordId)
+    {
+        try
+        {
+            return await _probe.GetCallerRightsAsync(
                 TokenHelper.ExtractBearerTokenOrNull(httpContext), entitySet, recordId, httpContext.RequestAborted);
         }
         catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
@@ -147,15 +210,15 @@ public sealed class EventAccessFilter
             // Covers the AUTHORIZATION DECISION only — never next(), so downstream faults are not relabelled.
             _logger?.LogError(ex, "[EVENT-AUTH] The caller-rights probe threw for {EntitySet}({RecordId}). Denying. "
                 + "CorrelationId: {CorrelationId}", entitySet, recordId, httpContext.TraceIdentifier);
-            return false;
+            return AccessRights.None;
         }
+    }
 
-        if (OperationAccessPolicy.HasRequiredRights(rights, operation))
-            return true;
-
+    private IResult Denied(HttpContext httpContext, string operation, string entitySet, Guid recordId, AccessRights rights)
+    {
         _logger?.LogWarning("[EVENT-AUTH] Denied: caller may not '{Operation}' {EntitySet}({RecordId}); holds {Rights}. "
             + "CorrelationId: {CorrelationId}", operation, entitySet, recordId, rights, httpContext.TraceIdentifier);
-        return false;
+        return Deny(httpContext);
     }
 
     private static IResult Deny(HttpContext httpContext) =>

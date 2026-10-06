@@ -192,6 +192,14 @@ public static class OperationAccessPolicy
         // lookup on the document instead — see "finance.link_invoice".)
         ["finance.attach_invoice"] = AccessRights.AppendTo,
 
+        // "event.attach" — AppendTo on the regarding PARENT a POST/PUT /api/v1/events names (sprk_event's
+        // regarding lookup points at it). spaarke-ontology-platform-r1 task 097 round 6 (review F2), same reasoning
+        // as "finance.attach_invoice" above: attaching a child is the right Dataverse itself demands of the parent,
+        // and neither Read nor Write implies it. Its own key so the deny log names the operation truthfully.
+        // ⚠️ TodoSourceAccessFilter (POST /api/office/todo) still asks Read of its regarding parent — a split
+        // precedent recorded in task 097's PR, not changed there.
+        ["event.attach"] = AccessRights.AppendTo,
+
         // "finance.link_invoice" — Write AND Append on the body DocumentId of POST /api/finance/invoice-review/
         // confirm, through the entity-generic record path. Added by task 130 (owner decision G5, 2026-10-01).
         // The live schema has NO sprk_invoice → sprk_document lookup; the link is sprk_document.sprk_invoice,

@@ -961,6 +961,15 @@ public class CreateEventRequest
 
     /// <summary>FR-26 core-ancestor stamps for the regarding parent (BFF-derived; written after the regarding).</summary>
     public IReadOnlyList<EventAncestorStamp>? AncestorStamps { get; set; }
+
+    /// <summary>
+    /// Write-path invariant I-6: the owning TEAM, resolved by the BFF's <c>RecordOwnershipResolver</c> (record-first:
+    /// the regarding parent's business unit, else the acting user's) and written as <c>ownerid</c>. Without it an
+    /// app-only create is owned by the application user in the ROOT business unit, where child-BU users cannot reach
+    /// it. Resolved by the caller and passed in — this library does not depend on BFF services (the
+    /// <c>CreateDocumentRequest.OwningTeamId</c> precedent).
+    /// </summary>
+    public Guid? OwnerTeamId { get; set; }
 }
 
 /// <summary>
@@ -1499,7 +1508,8 @@ public static class RegardingRecordType
     /// <summary>
     /// EVERY entity-specific regarding navigation property on <c>sprk_event</c> — the 14 live ones (spaarkedev1,
     /// 2026-10-05, ManyToOneRelationships), not only the 8 this API can set. A re-parent clears all of them except
-    /// the new parent's, so at most one is ever populated (ADR-024; task 097 review F3a). Pinned against the doc.
+    /// the new parent's (ADR-024; task 097 review F3a), so exactly one is set as the REGARDING parent; the FR-26 core-ancestor
+    /// stamp written after the clear may populate a second (matter/project) one on purpose (registry I-1). Pinned against the doc.
     /// </summary>
     public static IReadOnlyList<string> AllEventRegardingNavigationProperties { get; } = new[]
     {

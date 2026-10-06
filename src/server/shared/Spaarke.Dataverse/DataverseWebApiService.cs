@@ -451,7 +451,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         else if (f.AssignedToContactId is { } onlyContact)
             filters.Add($"_sprk_assignedto_value eq {onlyContact:D}");
 
-        // The record type is the entity-specific regarding lookup being populated (ADR-024: at most one is). The
+        // The record type was once inferred from which entity-specific lookup is populated. The
         // former `sprk_regardingrecordtype eq <int>` compared a LOOKUP to a number and was rejected.
         // Review H3: filter on the ADR-024 TYPE column, not on a specific lookup — a core-ancestor-stamped row carries
         // its child's lookup AND a matter/project lookup, so "matter lookup populated" would also match an invoice's
@@ -595,6 +595,11 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         if (request.AssignedToContactId is { } assignedTo && assignedTo != Guid.Empty)
             payload["sprk_AssignedTo@odata.bind"] = $"/contacts({assignedTo:D})";
 
+        // Task 097 round 6 (I-6): the BFF-resolved owning team. Owner is a polymorphic lookup; the team is bound
+        // through the generic ownerid navigation property (the ProvisionProjectEndpoint / InvoiceReviewService shape).
+        if (request.OwnerTeamId is { } ownerTeam && ownerTeam != Guid.Empty)
+            payload["ownerid@odata.bind"] = $"/teams({ownerTeam:D})";
+
         ApplyRegarding(payload, request.RegardingRecordType, regarding, clearOtherLookups: false, request.AncestorStamps);
 
         return payload;
@@ -607,7 +612,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// integer, which Dataverse rejects), and the five denormalized fields — id, name, number, URL
     /// (<see cref="RegardingRecordType.BuildRecordUrl"/>, the one server-side owner of that format) and the entity
     /// logical name — all written together, a missing name/number written as null so no stale value survives. On
-    /// update EVERY other live regarding navigation property (all 14) is cleared, so at most one is ever populated.
+    /// update EVERY other live regarding navigation property (all 14) is cleared, so exactly one REGARDING lookup is set;
     /// </summary>
     /// <exception cref="InvalidOperationException">A regarding type was requested but not resolved — the caller must
     /// resolve first; an unresolved type is never written (it would leave the old type bound).</exception>
@@ -1949,7 +1954,7 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
             RegardingRecordName = data.TryGetValue("sprk_regardingrecordname", out var rrn) && rrn.ValueKind != JsonValueKind.Null
                 ? rrn.GetString() : null,
             // Task 097: sprk_regardingrecordtype is a LOOKUP (no int to read); the API's 0..7 type is the mapped
-            // entity-specific regarding lookup that is populated (ADR-024: at most one).
+            // entity-specific regarding lookup that is populated.
             // Review H3: the ADR-024 type column first; only when it is empty (rows written by other paths) fall back to
             // the populated lookups, CHILD types before CORE (a stamped row has both).
             RegardingRecordType = RegardingRecordType.FromEntityLogicalName(

@@ -68,7 +68,7 @@ public static class EventEndpoints
 
         // GET /api/v1/events/{id} - Get single event by ID
         group.MapGet("/{id:guid}", GetEventByIdAsync)
-            .AddEventRecordAccessFilter(EventAccessFilter.ReadOperation)
+            .AddEventRecordAccessFilter("read")
             .WithName("GetEventById")
             .WithSummary("Get a single event by ID")
             .WithDescription("Returns the event with the specified ID. Returns 404 if the event does not exist.")
@@ -79,7 +79,7 @@ public static class EventEndpoints
 
         // DELETE /api/v1/events/{id} - Soft delete (set status to Canceled)
         group.MapDelete("/{id:guid}", DeleteEventAsync)
-            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
+            .AddEventRecordAccessFilter("write")
             .WithName("DeleteEvent")
             .WithSummary("Soft delete an event")
             .WithDescription("Soft deletes the event by setting its status to Canceled. " +
@@ -91,6 +91,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events - Create a new event
         group.MapPost("/", CreateEventAsync)
+            .AddEventCreatePrivilegeFilter()
             .AddEventParentAccessFilter()
             .WithName("CreateEvent")
             .WithSummary("Create a new event")
@@ -103,7 +104,7 @@ public static class EventEndpoints
 
         // PUT /api/v1/events/{id} - Update an existing event
         group.MapPut("/{id:guid}", UpdateEventAsync)
-            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
+            .AddEventRecordAccessFilter("write")
             .AddEventParentAccessFilter()
             .WithName("UpdateEvent")
             .WithSummary("Update an existing event")
@@ -117,7 +118,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events/{id}/complete - Mark event as completed
         group.MapPost("/{id:guid}/complete", CompleteEventAsync)
-            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
+            .AddEventRecordAccessFilter("write")
             .WithName("CompleteEvent")
             .WithSummary("Mark an event as completed")
             .WithDescription("Changes the event status to Completed (659490002, which stays Active). " +
@@ -131,7 +132,7 @@ public static class EventEndpoints
 
         // POST /api/v1/events/{id}/cancel - Mark event as canceled
         group.MapPost("/{id:guid}/cancel", CancelEventAsync)
-            .AddEventRecordAccessFilter(EventAccessFilter.WriteOperation)
+            .AddEventRecordAccessFilter("write")
             .WithName("CancelEvent")
             .WithSummary("Mark an event as canceled")
             .WithDescription("Changes the event status to Cancelled (659490004, Inactive). " +
@@ -145,7 +146,7 @@ public static class EventEndpoints
 
         // GET /api/v1/events/{id}/logs - Get event log entries
         group.MapGet("/{id:guid}/logs", GetEventLogsAsync)
-            .AddEventRecordAccessFilter(EventAccessFilter.ReadOperation)
+            .AddEventRecordAccessFilter("read")
             .WithName("GetEventLogs")
             .WithSummary("Get event log entries")
             .WithDescription("Returns all log entries for the specified event, tracking state transitions. " +
@@ -187,7 +188,7 @@ public static class EventEndpoints
         [FromQuery] int pageSize = 50,
         HttpContext httpContext = null!,
         IEventDataverseService dataverseService = null!,
-        ICommunicationDataverseService communicationService = null!,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver = null!,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity = null!,
         ILogger<Program> logger = null!,
         CancellationToken ct = default)
@@ -260,19 +261,12 @@ public static class EventEndpoints
             // Security review: the list is the caller's view, not the application's. Resolve the caller's
             // systemuser, then run the query IMPERSONATED as them (ADR-028 A5 — the workforce list seam, the same one
             // PortfolioService and OfficeSearchService use), so Dataverse itself drops every event they may not read.
-            // An unresolvable caller cannot be impersonated → refuse (fail closed); never an app-only list.
-            Guid? callerSystemUserId = null;
-            var oid = ExtractOid(httpContext);
-            if (!string.IsNullOrEmpty(oid))
-                callerSystemUserId = await communicationService.QuerySystemUserByAzureAdOidAsync(oid, ct);
-
-            if (callerSystemUserId is not { } systemUserId || systemUserId == Guid.Empty)
-            {
-                logger.LogWarning("[EVENTS] Caller oid {Oid} does not resolve to a systemuser; refusing the list (fail closed).", oid);
-                return ProblemDetailsHelper.Forbidden(
-                    EventAccessFilter.DeniedReasonCode, "Your account could not be resolved, so events cannot be listed.",
-                    httpContext.TraceIdentifier);
-            }
+            // Round 6 (F6): the CallerResolution contract — no oid → 401; an oid that is no systemuser → 403. Never an
+            // app-only list.
+            var caller = await ResolveCallerAsync(callerResolver, httpContext, "list events", logger, ct);
+            if (caller.Refusal is not null)
+                return caller.Refusal;
+            var systemUserId = caller.SystemUserId;
 
             // "Mine": owned by the caller OR assigned to the caller's linked contact (BFF-created events are owned by
             // the BFF application user and name their person in sprk_assignedto — task 152 S1).
@@ -406,6 +400,7 @@ public static class EventEndpoints
         Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
         Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
+        Sprk.Bff.Api.Services.Dataverse.IRecordOwnershipResolver ownershipResolver,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -465,17 +460,54 @@ public static class EventEndpoints
             // UAC-r2 task 152 / owner decision S1: the create is app-only, so Created By is the BFF application user
             // and cannot say who the event is FOR. The acting user's LINKED contact (task 141) is written to
             // sprk_assignedto — never an email match; no link → blank + todo_unassigned.
-            var assignedToContactId = await ResolveActingUserContactAsync(
-                callerResolver, identity, httpContext, logger, ct);
+            // Round 6 (F6): the CallerResolution contract — no oid → 401; an oid that is no systemuser → 403. The
+            // create needs the caller for Assigned To (S1) AND for the owner when no parent is named (I-6).
+            var caller = await ResolveCallerAsync(callerResolver, httpContext, "create an event", logger, ct);
+            if (caller.Refusal is not null)
+                return caller.Refusal;
+
+            var assignedToContactId = await ResolveActingUserContactAsync(identity, caller.SystemUserId, logger, ct);
 
             // Review H2 (registry I-1): the FR-26 core-ancestor stamp, derived BEFORE the write; fail closed.
             var stamps = await DeriveAncestorStampsAsync(coreAncestors, request.RegardingRecordType, request.RegardingRecordId, logger, ct);
+
+            // Round 6 (F1, registry I-6): the owner, from the I-6 owner (RecordOwnershipResolver) — record-first: the
+            // regarding parent's business unit, else the acting user's. Without it this app-only create is owned by
+            // the application user in the ROOT business unit, where the child-BU user who created it cannot read it.
+            // Unresolved → refuse; never app-owned.
+            var ownerTeamId = await ownershipResolver.ResolveOwningTeamAsync(
+                new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext
+                {
+                    TargetEntityLogicalName = request.RegardingRecordType is { } parentType
+                        ? Spaarke.Dataverse.RegardingRecordType.GetEntityLogicalName(parentType)
+                        : null,
+                    TargetRecordId = request.RegardingRecordId,
+                    CallerSystemUserId = caller.SystemUserId,
+                },
+                ct);
+            if (ownerTeamId is null || ownerTeamId == Guid.Empty)
+            {
+                logger.LogWarning("Refusing event create: no owner team resolved (I-6). Regarding={Type}/{Id}",
+                    request.RegardingRecordType, request.RegardingRecordId);
+                const string ownerUnresolved = Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.RecordOwnerUnresolved;
+                return TypedResults.Problem(
+                    statusCode: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetStatusCode(ownerUnresolved),
+                    type: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetTypeUri(ownerUnresolved),
+                    title: Sprk.Bff.Api.Api.Office.Errors.OfficeErrorCodes.GetTitle(ownerUnresolved),
+                    detail: "The event could not be assigned to a business unit's team, so it was not created.",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = ownerUnresolved,
+                        ["traceId"] = httpContext.TraceIdentifier
+                    });
+            }
 
             var (eventId, createdOn) = await CreateEventInDataverseAsync(
                 dataverseService,
                 request,
                 assignedToContactId,
                 stamps,
+                ownerTeamId.Value,
                 logger,
                 ct);
 
@@ -730,16 +762,6 @@ public static class EventEndpoints
     }
 
     /// <summary>
-    /// Extracts the user's Azure AD Object ID (OID) string from token claims.
-    /// Returns null if not available (e.g., app-only token), which means no owner filter is applied.
-    /// Note: OID is NOT the Dataverse systemuserid — callers must map via QuerySystemUserByAzureAdOidAsync.
-    /// </summary>
-    private static string? ExtractOid(HttpContext httpContext)
-    {
-        return CallerResolution.ResolveObjectId(httpContext.User);
-    }
-
-    /// <summary>
     /// Maps a Dataverse EventEntity to an EventDto.
     /// </summary>
     private static EventDto MapEntityToDto(Spaarke.Dataverse.EventEntity entity)
@@ -796,27 +818,20 @@ public static class EventEndpoints
 
     /// <summary>
     /// UAC-r2 task 152: the acting user's LINKED contact (task 141 — <c>PersonIdentity.ContactId</c>), or null when the
-    /// caller does not resolve to a systemuser, has no link, or the read fails. Never an email/UPN match.
+    /// user has no link or the read fails. Never an email/UPN match.
     /// </summary>
     private static async Task<Guid?> ResolveActingUserContactAsync(
-        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         Sprk.Bff.Api.Services.Ai.Membership.IIdentityNormalizationService identity,
-        HttpContext httpContext,
+        Guid systemUserId,
         ILogger logger,
         CancellationToken ct)
     {
         try
         {
-            var resolution = await callerResolver.ResolveAsync(httpContext.User, ct);
-            if (resolution.IsResolved
-                && Guid.TryParse(resolution.SystemUserId, out var systemUserId)
-                && systemUserId != Guid.Empty)
+            var person = await identity.ResolveAsync(systemUserId, ct);
+            if (person.ContactId is { } contactId && contactId != Guid.Empty)
             {
-                var person = await identity.ResolveAsync(systemUserId, ct);
-                if (person.ContactId is { } contactId && contactId != Guid.Empty)
-                {
-                    return contactId;
-                }
+                return contactId;
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -835,6 +850,45 @@ public static class EventEndpoints
         return null;
     }
 
+    /// <summary>The caller's systemuser, or the refusal to return instead (round 6, review F6).</summary>
+    internal readonly record struct CallerOutcome(Guid SystemUserId, IResult? Refusal);
+
+    /// <summary>
+    /// The CallerResolution contract (<see cref="CallerResolution.ResolveObjectId"/> — FinanceAuthorizationFilter,
+    /// CreateDocumentAsync): a caller with NO resolvable <c>oid</c> is unauthenticated for this purpose → <b>401</b>;
+    /// an <c>oid</c> that maps to no Dataverse systemuser (or a lookup that fails) → <b>403</b>, fail closed — never an
+    /// app-only fallback. The systemuser comes from the one injectable resolver (<see cref="Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver"/>),
+    /// used by both the list and the create.
+    /// </summary>
+    internal static async Task<CallerOutcome> ResolveCallerAsync(
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        HttpContext httpContext,
+        string purpose,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrEmpty(CallerResolution.ResolveObjectId(httpContext.User)))
+        {
+            return new CallerOutcome(Guid.Empty, Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1"));
+        }
+
+        var resolution = await callerResolver.ResolveAsync(httpContext.User, ct);
+        if (resolution.IsResolved && Guid.TryParse(resolution.SystemUserId, out var systemUserId) && systemUserId != Guid.Empty)
+        {
+            return new CallerOutcome(systemUserId, null);
+        }
+
+        logger.LogWarning("[EVENTS] Caller does not resolve to a systemuser ({Reason}); refusing to {Purpose} (fail closed).",
+            resolution.UnresolvedReason, purpose);
+        return new CallerOutcome(Guid.Empty, ProblemDetailsHelper.Forbidden(
+            EventAccessFilter.DeniedReasonCode,
+            $"Your account could not be matched to a Dataverse user, so you cannot {purpose}.",
+            httpContext.TraceIdentifier));
+    }
     /// <summary>
     /// Creates a new event in Dataverse.
     /// </summary>
@@ -846,6 +900,7 @@ public static class EventEndpoints
         ApiCreateEventRequest request,
         Guid? assignedToContactId,
         IReadOnlyList<EventAncestorStamp>? ancestorStamps,
+        Guid ownerTeamId,
         ILogger logger,
         CancellationToken ct)
     {
@@ -863,6 +918,7 @@ public static class EventEndpoints
             RegardingRecordName = request.RegardingRecordName,
             AssignedToContactId = assignedToContactId,
             AncestorStamps = ancestorStamps,
+            OwnerTeamId = ownerTeamId,
         };
 
         // Create the event record

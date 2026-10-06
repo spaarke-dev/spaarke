@@ -112,6 +112,10 @@ public sealed class EventRoutesLiveTests
             row.GetProperty("sprk_regardingrecordid").GetString().Should().Be(matterId.ToString("D"));
             row.GetProperty("sprk_regardingrecordtypelogicalname").GetString().Should().Be("sprk_matter");
             row.GetProperty("sprk_regardingrecordurl").GetString().Should().Contain(matterId.ToString("D"));
+            // Round 6 (F1, I-6): owned by the MATTER's business-unit default owner team (record-first), never the app user.
+            var matterTeam = await DefaultOwnerTeamOfRecordAsync(dv, "sprk_matters", matterId);
+            row.GetProperty("_ownerid_value").GetGuid().Should().Be(matterTeam, "I-6 record-first: the parent's BU team");
+            row.GetProperty("_ownerid_value@Microsoft.Dynamics.CRM.lookuplogicalname").GetString().Should().Be("team");
             var matter = await dv.GetFromJsonAsync<JsonElement>($"sprk_matters({matterId})?$select=sprk_mattername,sprk_matternumber");
             row.GetProperty("sprk_regardingrecordname").GetString().Should().Be(matter.GetProperty("sprk_mattername").GetString(),
                 "M2: the server-read name is written");
@@ -197,6 +201,9 @@ public sealed class EventRoutesLiveTests
 
             // 9. cancel + DELETE on two more events.
             var second = await CreateAsync(bff, "zz-097-test route cancel", createdEvents);
+            var operatorTeam = await DefaultOwnerTeamOfUserAsync(dv, operatorId);
+            (await ReadEventAsync(dv, second)).GetProperty("_ownerid_value").GetGuid().Should().Be(operatorTeam,
+                "I-6 fallback: no parent → the acting user's business-unit default owner team");
             var cancel = await bff.PostAsync($"/api/v1/events/{second}/cancel", null);
             Log("POST /cancel", cancel);
             cancel.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -227,7 +234,9 @@ public sealed class EventRoutesLiveTests
             mine.SprkName.Should().Be("zz-097-test external create");
             mine.SprkStatus.Should().Be(EventStatusCode.Open);
 
-            // ── UNAUTHORIZED leg: a REAL low-privilege systemuser ────────────────────────────────────────────────
+            // ── CHILD-BU leg: a REAL non-root, non-admin systemuser ──────────────────────────────────────────────
+            // Round 6 (F1/F4): this user is DENIED on the operator's root-BU event, and ALLOWED on its own — it creates,
+            // reads, completes, cancels and lists events that the I-6 owner places in its business unit.
             if (deniedUser is { } denied)
             {
                 var direct = await RetrievePrincipalAccessAsync(dv, denied, "sprk_events", second);
@@ -259,8 +268,8 @@ public sealed class EventRoutesLiveTests
                 var directAnalysis = await RetrievePrincipalAccessAsync(dv, denied, "sprk_analysises", analysisId);
                 _out.WriteLine($"RetrievePrincipalAccess({denied}, sprk_analysises({analysisId})) asked directly = {directAnalysis}");
                 (int Type, Guid Id)? unreadableParent =
-                    !directParent.Contains("ReadAccess") ? (RegardingRecordType.Matter, matterId)
-                    : !directAnalysis.Contains("ReadAccess") ? (RegardingRecordType.Analysis, analysisId)
+                    !directParent.Contains("AppendToAccess") ? (RegardingRecordType.Matter, matterId)
+                    : !directAnalysis.Contains("AppendToAccess") ? (RegardingRecordType.Analysis, analysisId)
                     : null;
                 if (unreadableParent is { } p)
                 {
@@ -279,16 +288,61 @@ public sealed class EventRoutesLiveTests
                     _out.WriteLine($"[as {denied}] POST-with-parent leg not run: Dataverse grants this user Read on every candidate parent.");
                 }
 
-                var deniedList = await bff.GetAsync("/api/v1/events?pageSize=100");
-                Log($"[as {denied}] GET /api/v1/events (impersonated)", deniedList);
-                deniedList.StatusCode.Should().Be(HttpStatusCode.OK);
-                var deniedBody = await deniedList.Content.ReadAsStringAsync();
-                foreach (var ours in createdEvents)
-                    deniedBody.Should().NotContain(ours.ToString(), "Dataverse trims rows the impersonated user cannot read");
-
                 var after = await ReadEventAsync(dv, second);
                 after.GetProperty("statuscode").GetInt32().Should().Be(before.GetProperty("statuscode").GetInt32(),
                     "no denied write reached Dataverse");
+
+                // ALLOWED: the same user's OWN events.
+                var operatorsEvents = createdEvents.ToList();
+                var childContact = await LinkedContactAsync(dv, denied);
+                var childTeam = await DefaultOwnerTeamOfUserAsync(dv, denied);
+                _out.WriteLine($"child user {denied}: linked contact {childContact}, BU default owner team {childTeam}; matter team {matterTeam}");
+
+                var ownPost = await bff.PostAsJsonAsync("/api/v1/events", new
+                {
+                    subject = "zz-097-test child-BU own event",
+                    regardingRecordType = RegardingRecordType.Matter,
+                    regardingRecordId = matterId,
+                });
+                var own = await RegisterCreatedAsync(ownPost, createdEvents);
+                Log($"[as {denied}] POST (own, regarding matter)", ownPost);
+                ownPost.StatusCode.Should().Be(HttpStatusCode.Created);
+                var ownRow = await ReadEventAsync(dv, own);
+                Log("  read-back", ownRow);
+                ownRow.GetProperty("_ownerid_value").GetGuid().Should().Be(matterTeam);
+                ownRow.GetProperty("_sprk_assignedto_value").GetGuid().Should().Be(childContact!.Value);
+
+                var ownGet = await bff.GetAsync($"/api/v1/events/{own}");
+                Log($"[as {denied}] GET own", ownGet);
+                ownGet.StatusCode.Should().Be(HttpStatusCode.OK);
+
+                var ownComplete = await bff.PostAsync($"/api/v1/events/{own}/complete", null);
+                Log($"[as {denied}] POST own /complete", ownComplete);
+                ownComplete.StatusCode.Should().Be(HttpStatusCode.OK);
+                (await ReadEventAsync(dv, own)).GetProperty("statuscode").GetInt32().Should().Be(EventStatusCode.Completed);
+
+                var ownPost2 = await bff.PostAsJsonAsync("/api/v1/events", new { subject = "zz-097-test child-BU own unfiled event" });
+                var own2 = await RegisterCreatedAsync(ownPost2, createdEvents);
+                Log($"[as {denied}] POST (own, no parent)", ownPost2);
+                ownPost2.StatusCode.Should().Be(HttpStatusCode.Created);
+                (await ReadEventAsync(dv, own2)).GetProperty("_ownerid_value").GetGuid().Should().Be(childTeam,
+                    "no parent → the acting (child-BU) user's own business-unit team");
+                var ownCancel = await bff.PostAsync($"/api/v1/events/{own2}/cancel", null);
+                Log($"[as {denied}] POST own /cancel", ownCancel);
+                ownCancel.StatusCode.Should().Be(HttpStatusCode.OK);
+
+                // F4: the list, impersonated as this user, shows exactly its own events (it had none before this run).
+                var preExisting = await CountAssignedOrOwnedAsync(dv, denied, childContact.Value, exclude: new[] { own, own2 });
+                _out.WriteLine($"events assigned to / owned by {denied} other than this run's: {preExisting}");
+                var childList = await bff.GetAsync("/api/v1/events?pageSize=100");
+                Log($"[as {denied}] GET /api/v1/events (impersonated)", childList);
+                childList.StatusCode.Should().Be(HttpStatusCode.OK);
+                var listed = (await childList.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("items").EnumerateArray()
+                    .Select(i => i.GetProperty("id").GetGuid()).ToList();
+                listed.Should().Contain(new[] { own, own2 });
+                listed.Should().NotIntersectWith(operatorsEvents, "the operator's events are not this user's");
+                if (preExisting == 0)
+                    listed.Should().BeEquivalentTo(new[] { own, own2 }, "it sees ONLY its own events");
                 factory.CallerSystemUserId = null;
             }
         }
@@ -362,11 +416,52 @@ public sealed class EventRoutesLiveTests
         return client;
     }
 
-    private static async Task<JsonElement> ReadEventAsync(HttpClient dv, Guid id) =>
-        await dv.GetFromJsonAsync<JsonElement>(
+    private static async Task<JsonElement> ReadEventAsync(HttpClient dv, Guid id)
+    {
+        using var request = new HttpRequestMessage(HttpMethod.Get,
             $"sprk_events({id})?$select=statuscode,statecode,sprk_priority,sprk_completeddate,_sprk_regardingmatter_value," +
             "_sprk_regardingproject_value,_sprk_regardinganalysis_value,_sprk_regardingrecordtype_value,sprk_regardingrecordid," +
-            "sprk_regardingrecordname,sprk_regardingrecordnumber,sprk_regardingrecordurl,sprk_regardingrecordtypelogicalname");
+            "sprk_regardingrecordname,sprk_regardingrecordnumber,sprk_regardingrecordurl,sprk_regardingrecordtypelogicalname," +
+            "_ownerid_value,_sprk_assignedto_value");
+        request.Headers.Add("Prefer", "odata.include-annotations=\"Microsoft.Dynamics.CRM.lookuplogicalname\"");
+        using var response = await dv.SendAsync(request);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<JsonElement>();
+    }
+
+    /// <summary>Expected owner (I-6), computed independently: the record's business unit's default owner team.</summary>
+    private static async Task<Guid> DefaultOwnerTeamOfRecordAsync(HttpClient dv, string set, Guid id)
+    {
+        var bu = (await dv.GetFromJsonAsync<JsonElement>($"{set}({id})?$select=_owningbusinessunit_value"))
+            .GetProperty("_owningbusinessunit_value").GetGuid();
+        return await DefaultOwnerTeamOfBusinessUnitAsync(dv, bu);
+    }
+
+    private static async Task<Guid> DefaultOwnerTeamOfUserAsync(HttpClient dv, Guid systemUserId)
+    {
+        var bu = (await dv.GetFromJsonAsync<JsonElement>($"systemusers({systemUserId})?$select=_businessunitid_value"))
+            .GetProperty("_businessunitid_value").GetGuid();
+        return await DefaultOwnerTeamOfBusinessUnitAsync(dv, bu);
+    }
+
+    private static async Task<Guid> DefaultOwnerTeamOfBusinessUnitAsync(HttpClient dv, Guid businessUnitId) =>
+        (await dv.GetFromJsonAsync<JsonElement>(
+            $"teams?$select=teamid&$filter=_businessunitid_value eq {businessUnitId} and isdefault eq true and teamtype eq 0"))
+        .GetProperty("value").EnumerateArray().Single().GetProperty("teamid").GetGuid();
+
+    /// <summary>The user's linked contact (sprk_primarycontact), or null.</summary>
+    private static async Task<Guid?> LinkedContactAsync(HttpClient dv, Guid systemUserId)
+    {
+        var row = await dv.GetFromJsonAsync<JsonElement>($"systemusers({systemUserId})?$select=_sprk_primarycontact_value");
+        return row.TryGetProperty("_sprk_primarycontact_value", out var v) && v.ValueKind == JsonValueKind.String ? v.GetGuid() : null;
+    }
+
+    private static async Task<int> CountAssignedOrOwnedAsync(HttpClient dv, Guid systemUserId, Guid contactId, Guid[] exclude)
+    {
+        var rows = await dv.GetFromJsonAsync<JsonElement>(
+            $"sprk_events?$select=sprk_eventid&$filter=_sprk_assignedto_value eq {contactId} or _ownerid_value eq {systemUserId}");
+        return rows.GetProperty("value").EnumerateArray().Count(r => !exclude.Contains(r.GetProperty("sprk_eventid").GetGuid()));
+    }
 
     /// <summary>M4: deletes an event and its log rows; returns what could NOT be deleted (never throws).</summary>
     private static async Task<List<string>> DeleteEventWithLogsAsync(HttpClient dv, Guid id)
@@ -434,10 +529,12 @@ public sealed class EventRoutesLiveTests
 
             // The list's oid → systemuser lookup (substitution 3) and the generic row read the core-ancestor
             // resolver uses — both answered from the real environment / the configured principal.
-            DataverseServiceMock.Setup(s => s.QuerySystemUserByAzureAdOidAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(() => CallerSystemUserId ?? _operatorId);
             DataverseServiceMock.Setup(s => s.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
                 .Returns((string logicalName, Guid id, string[] columns, CancellationToken ct) => LiveRetrieveAsync(logicalName, id, columns, ct));
+            // The PRODUCTION RecordOwnershipResolver (I-6) reads through IGenericEntityService.RetrieveMultipleAsync;
+            // its simple equality QueryExpressions are translated to the Web API against the real environment.
+            DataverseServiceMock.Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+                .Returns((Microsoft.Xrm.Sdk.Query.QueryExpression q, CancellationToken ct) => LiveRetrieveMultipleAsync(q, ct));
 
             builder.ConfigureTestServices(services =>
             {
@@ -457,11 +554,23 @@ public sealed class EventRoutesLiveTests
                     sp.GetRequiredService<IGenericEntityService>(), LiveColumnsAsync,
                     sp.GetRequiredService<ILogger<CoreAncestorResolver>>()));
 
+                // The linked contact (task 141), read live: the user's sprk_primarycontact, as the production service
+                // reads first. Substituted only because the production service sits on the fixture's mocked SDK client.
                 var identity = new Mock<IIdentityNormalizationService>();
                 identity.Setup(i => i.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-                    .ReturnsAsync((Guid id, CancellationToken _) => new PersonIdentity(id, ContactId: null));
+                    .Returns((Guid id, CancellationToken ct) => LinkedContactAsync(_metadata, id)
+                        .ContinueWith(t => new PersonIdentity(id, ContactId: t.Result), ct));
                 services.RemoveAll<IIdentityNormalizationService>();
                 services.AddSingleton(identity.Object);
+
+                // Substitution 3: oid → systemuser. The fake inbound identity has no real oid, so the resolver answers
+                // with the principal under test; everything downstream (impersonation, ownership) uses it for real.
+                var callers = new Mock<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+                callers.Setup(c => c.ResolveAsync(It.IsAny<System.Security.Claims.ClaimsPrincipal?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(() => Sprk.Bff.Api.Services.Ai.Context.CallerSystemUserResolution.Resolved(
+                        (CallerSystemUserId ?? _operatorId).ToString("D")));
+                services.RemoveAll<Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver>();
+                services.AddSingleton(callers.Object);
             });
         }
 
@@ -499,7 +608,81 @@ public sealed class EventRoutesLiveTests
 
             return entity;
         }
-    }
+        private readonly Dictionary<string, (string Set, string PrimaryId, Dictionary<string, string> Types)> _meta = new();
+
+        private async Task<(string Set, string PrimaryId, Dictionary<string, string> Types)> MetaAsync(string logicalName, CancellationToken ct)
+        {
+            if (_meta.TryGetValue(logicalName, out var m))
+                return m;
+            var def = await _metadata.GetFromJsonAsync<JsonElement>(
+                $"EntityDefinitions(LogicalName='{logicalName}')?$select=EntitySetName,PrimaryIdAttribute", ct);
+            var attrs = await _metadata.GetFromJsonAsync<JsonElement>(
+                $"EntityDefinitions(LogicalName='{logicalName}')/Attributes?$select=LogicalName,AttributeType", ct);
+            m = (def.GetProperty("EntitySetName").GetString()!, def.GetProperty("PrimaryIdAttribute").GetString()!,
+                attrs.GetProperty("value").EnumerateArray().ToDictionary(
+                    a => a.GetProperty("LogicalName").GetString()!, a => a.GetProperty("AttributeType").GetString()!));
+            _meta[logicalName] = m;
+            return m;
+        }
+
+        private static bool IsLookup(string type) => type is "Lookup" or "Owner" or "Customer";
+
+        /// <summary>
+        /// Translates the simple QueryExpressions RecordOwnershipResolver sends (equality conditions, a column set, TOP)
+        /// into Web API reads against the real environment. Anything else throws — the harness never guesses.
+        /// </summary>
+        private async Task<Microsoft.Xrm.Sdk.EntityCollection> LiveRetrieveMultipleAsync(
+            Microsoft.Xrm.Sdk.Query.QueryExpression query, CancellationToken ct)
+        {
+            var meta = await MetaAsync(query.EntityName, ct);
+            string Col(string attr) => IsLookup(meta.Types[attr]) ? $"_{attr}_value" : attr;
+            string Lit(object v) => v switch
+            {
+                Guid g => g.ToString("D"),
+                bool b => b ? "true" : "false",
+                int n => n.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                string s => $"'{s.Replace("'", "''")}'",
+                _ => throw new NotSupportedException($"Condition value type {v.GetType()} is not translated."),
+            };
+            var filters = query.Criteria.Conditions.Select(cond =>
+                cond.Operator == Microsoft.Xrm.Sdk.Query.ConditionOperator.Equal && cond.Values.Count == 1
+                    ? $"{Col(cond.AttributeName)} eq {Lit(cond.Values[0])}"
+                    : throw new NotSupportedException($"Condition {cond.AttributeName} {cond.Operator} is not translated."));
+            var columns = query.ColumnSet.Columns.Append(meta.PrimaryId).Distinct().Select(Col);
+            var url = $"{meta.Set}?$select={string.Join(',', columns)}&$filter={string.Join(" and ", filters)}"
+                + (query.TopCount is { } top ? $"&$top={top}" : "");
+            using var request = new HttpRequestMessage(HttpMethod.Get, url);
+            request.Headers.Add("Prefer", "odata.include-annotations=\"Microsoft.Dynamics.CRM.lookuplogicalname\"");
+            using var response = await _metadata.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            var body = await response.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            var collection = new Microsoft.Xrm.Sdk.EntityCollection();
+            foreach (var row in body.GetProperty("value").EnumerateArray())
+            {
+                var entity = new Entity(query.EntityName, row.GetProperty(meta.PrimaryId).GetGuid());
+                foreach (var attr in query.ColumnSet.Columns)
+                {
+                    if (!row.TryGetProperty(Col(attr), out var v) || v.ValueKind == JsonValueKind.Null)
+                        continue;
+                    entity[attr] = IsLookup(meta.Types[attr])
+                        ? new EntityReference(row.GetProperty($"{Col(attr)}@Microsoft.Dynamics.CRM.lookuplogicalname").GetString(), v.GetGuid())
+                        : v.ValueKind switch
+                        {
+                            JsonValueKind.True => true,
+                            JsonValueKind.False => false,
+                            JsonValueKind.Number => v.GetInt32(),
+                            _ => Guid.TryParse(v.GetString(), out var g) ? g : v.GetString(),
+                        };
+                }
+
+                collection.Entities.Add(entity);
+            }
+
+            Trace($"    I-6 read: {url} -> {collection.Entities.Count} row(s)");
+            return collection;
+        }
+
+        internal HttpClient MetadataClient => _metadata;    }
 
     /// <summary>
     /// The production probe with ONE step substituted: the OBO exchange (substitution 2). WhoAmI and
@@ -518,6 +701,23 @@ public sealed class EventRoutesLiveTests
             var rights = await RetrievePrincipalAccessAsync(token, principal.Value, entitySet, recordId, ct);
             factory.Trace($"    probe: RetrievePrincipalAccess(principal {principal}, {entitySet}({recordId})) = {rights}");
             return rights;
+        }
+
+        /// <summary>
+        /// The Create-privilege check (round 6, F3) for the principal under test: the same Dataverse function the
+        /// production probe calls (RetrieveUserSetOfPrivilegesByNames), read by its production parser.
+        /// </summary>
+        public override async Task<bool> CallerHoldsPrivilegeAsync(string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            var token = await factory.DataverseTokenAsync(ct);
+            var principal = factory.CallerSystemUserId ?? await ResolveCallerSystemUserIdAsync(token, ct);
+            var names = Uri.EscapeDataString(JsonSerializer.Serialize(new[] { privilegeName }));
+            var response = await factory.MetadataClient.GetAsync(
+                $"systemusers({principal})/Microsoft.Dynamics.CRM.RetrieveUserSetOfPrivilegesByNames(PrivilegeNames=@p1)?@p1={names}", ct);
+            var holds = response.IsSuccessStatusCode
+                && ResponseGrantsPrivilege(await response.Content.ReadAsStringAsync(ct), privilegeName);
+            factory.Trace($"    probe: {privilegeName} held by principal {principal} = {holds}");
+            return holds;
         }
     }
 
