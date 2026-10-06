@@ -329,6 +329,42 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 reachabilityResult.Diagnostic);
         }
 
+        // (5.2) T228 (ADR-027 one subscription per customer): the operator typed this id, so before H1 writes anything
+        //       (provider registration below) prove the subscription holds no other customer's stamp.
+        SubscriptionReadinessCheckResult dedicationResult;
+        try
+        {
+            dedicationResult = await _probe.CheckSubscriptionDedicatedAsync(
+                subscriptionId, envelope.CustomerId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H1 subscription-readiness probe (dedication) threw unexpected exception: runId={RunId} " +
+                "customerId={CustomerId} subscriptionId={SubscriptionId}",
+                envelope.RunId, envelope.CustomerId, subscriptionId);
+            var diagnostic =
+                $"Subscription-readiness probe (dedication) infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                "Resumable — nothing was written.";
+            await MarkFailedAsync(
+                run, etag, SubscriptionReadinessRejectionCodes.ProbeInfrastructureError,
+                diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
+            return new HandlerResult.Failure(
+                FailureClass.Resumable, SubscriptionReadinessRejectionCodes.ProbeInfrastructureError, diagnostic);
+        }
+
+        if (!dedicationResult.Passed)
+        {
+            _logger.LogWarning(
+                "H1 subscription readiness failed (dedication): runId={RunId} customerId={CustomerId} subscriptionId={SubscriptionId}",
+                envelope.RunId, envelope.CustomerId, subscriptionId);
+            await MarkFailedAsync(
+                run, etag, SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated,
+                dedicationResult.Diagnostic, dedicationResult.Evidence, cancellationToken).ConfigureAwait(false);
+            return new HandlerResult.Failure(
+                FailureClass.Resumable, SubscriptionReadinessRejectionCodes.SubscriptionNotDedicated, dedicationResult.Diagnostic);
+        }
+
         // (5.5) HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6:
         //       register + poll canonical Azure resource providers on the
         //       target subscription BEFORE H2a's ~20 min Bicep deploy fails

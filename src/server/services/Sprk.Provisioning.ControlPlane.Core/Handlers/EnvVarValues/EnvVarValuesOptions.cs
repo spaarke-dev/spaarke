@@ -3,7 +3,7 @@
 //
 // Bound options for the H7 handler's Dataverse Web API writer collaborator.
 // Loaded from the "EnvVarValues" configuration section (SectionName below) by
-// Program.cs. Parity with SolutionImportOptions (H6) + DataverseEnvCreationOptions
+// Program.cs. Parity with SolutionImportOptions (H6) + DataverseEnvAdoptionOptions
 // (H5) for the shape of the class; parity with DataverseEnvironmentRegistryOptions
 // (task 112/122) for the fail-fast Validate()/ValidateOnStart() wiring added
 // by task 142 (Wave G-4, H7 credential provisioning + NFR-05).

@@ -384,33 +384,13 @@ builder.Services.AddSingleton<IEntraAppRegProvisioner>(sp =>
 builder.Services.AddSingleton<IAdminConsentVerifier, GraphAdminConsentVerifier>();
 builder.Services.AddScoped<H3EntraAppRegHandler>();
 
-// Task 048 / task 140: H5 Dataverse env creation handler + 2 collaborator
-// seams (IDataverseEnvCreator creates + polls via the BAP admin REST API —
-// see BapRestEnvironmentCreator.cs file header for the ground-truthed
-// endpoint/audience port of Provision-Customer.ps1 STEP 5/6, replacing the
-// retired `pac admin create-environment` shell-out (PacAdminDataverseEnvCreator
-// — kept on disk unregistered per Wave G-2/G-3 retirement convention);
-// IDataverseHealthProbe polls Web API `WhoAmI` via DefaultAzureCredential
-// until Reachable — implements the Pending→Verified gate for the long-
-// running Dataverse env-creation flow).
-builder.Services.Configure<DataverseEnvCreationOptions>(
-    builder.Configuration.GetSection(nameof(DataverseEnvCreationOptions)));
-// Typed HttpClient (BapRestEnvironmentCreator's public ctor takes HttpClient
-// directly, matching BapRestEnvironmentRateProbe's established pattern —
-// parity with the other raw-HttpClient BAP-REST collaborator in Handlers/**).
-builder.Services.AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>();
-// NAMED HttpClient (task 103 fix): DataverseWebApiHealthProbe takes
-// IHttpClientFactory + calls _httpClientFactory.CreateClient(HttpClientName)
-// itself — it is NOT a typed client (no HttpClient-accepting constructor).
-// The previous AddHttpClient<IDataverseHealthProbe, DataverseWebApiHealthProbe>()
-// typed-client registration could never construct this type (ActivatorUtilities
-// requires an HttpClient ctor param for typed clients), so IDataverseHealthProbe
-// — and therefore H5DataverseEnvCreationHandler — was NOT resolvable via DI.
-// HandlerRegistrationCompletenessTests (task 103) surfaced this pre-existing
-// defect the first time anything actually built the real container down to H5.
+// H5 (T228): adopts the Dataverse environment the operator created — no creation seam. The WhoAmI probe uses a NAMED
+// HttpClient (task 103: its ctor takes IHttpClientFactory, which a typed AddHttpClient<I, T>() registration cannot satisfy).
+builder.Services.Configure<DataverseEnvAdoptionOptions>(
+    builder.Configuration.GetSection(nameof(DataverseEnvAdoptionOptions)));
 builder.Services.AddHttpClient(DataverseWebApiHealthProbe.HttpClientName);
 builder.Services.AddScoped<IDataverseHealthProbe, DataverseWebApiHealthProbe>();
-builder.Services.AddScoped<H5DataverseEnvCreationHandler>();
+builder.Services.AddScoped<H5DataverseEnvAdoptionHandler>();
 
 // Task 047 / task 125: H4 KV secrets-population handler + FOUR collaborator
 // seams. Task 125 (Wave G-2, Option D hybrid) replaced the three shell-out
@@ -663,9 +643,7 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
 });
 // DataverseWebApiSolutionVerifier's public ctor only needs HttpClient +
 // IOptions<SolutionImportOptions> + ILogger — all DI-resolvable — so the
-// plain typed-client registration (parity with H5's
-// AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>()) applies
-// directly, no manual factory lambda / named client required.
+// plain typed-client registration applies directly, no manual factory lambda / named client required.
 builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>();
 // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27):
 // required-applications installer + org-settings applier + their canonical

@@ -83,9 +83,6 @@ public static class HandlerRunInputs
                 RunInput.Intake("tier", required: false),
                 RunInput.Intake("estimatedMonthlyUsd", required: false),
                 RunInput.Intake("costEnvelopePolicy", required: false),
-                RunInput.Intake("minSlotsRequired", required: false),
-                RunInput.Intake("rateWindowHours", required: false),
-                RunInput.Intake("rateLimit", required: false),
                 RunInput.Intake("openaiPinFreshnessMinDays", required: false),
                 RunInput.Intake("openAiLocation", required: false),   // T247: H0's OpenAI probes (else westus3)
                 RunInput.Intake("provisionedOn", required: false),
@@ -160,9 +157,9 @@ public static class HandlerRunInputs
             [HandlerIds.H5] =
             [
                 Tenant,
-                RunInput.Intake("region"),
-                RunInput.Intake("tier"),
-                RunInput.Intake("dataverseDisplayName", required: false),
+                // T228: the environment the operator created — H5 adopts it, never creates one.
+                RunInput.Intake(IntakeParameterCatalog.DataverseEnvUrl),
+                RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
             ],
             [HandlerIds.H6] =
             [

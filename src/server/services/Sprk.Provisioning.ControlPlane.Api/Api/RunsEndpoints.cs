@@ -495,35 +495,41 @@ public static class RunsEndpoints
                 "would fail the H0 preflight envelope with missing-tenant-id — surface at intake instead.");
         }
 
-        // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
-        // 2026-08-27): for Model2 runs, subscriptionId MUST be present
-        // in nonSecretParameters (per ADR-027 D4 subscription-per-customer +
-        // intake.schema.json Model2 allOf). The handlers that read it are
-        // declared in Reconciler/HandlerRunInputs.cs; they hard-stop on absence —
-        // H1 typically fails within ~20s with MissingSubscriptionId, and the
-        // operator has no post-CreateRun add-nonSecret endpoint to recover.
-        //
-        // Model1 is EXEMPT — the skill's Step 4.0 auto-injects the Spaarke
-        // shared subscription id for Model 1 flows (documented in
-        // intake.schema.json subscriptionId description) so intake need not
-        // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
-        // in RunsEndpointsTests.
-        // Task 223 (D-12): the parse succeeds by construction — ValidateTenancyProfilePair above
-        // already TryParsed request.TenancyModel. Comparing against KnownTenancyModels.Model2
-        // via case-INsensitive string.Equals used to permit "model2dedicated" past this guard while
-        // downstream handlers require exact case; the enum comparison keeps H1's / H12c's strict
-        // literal contract in force at the HTTP edge.
-        if (Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(request.TenancyModel, out var m2Check)
-            && m2Check == Sprk.Provisioning.ControlPlane.Core.Models.TenancyModel.Model2
-            && (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SubscriptionId, out var subscriptionIdValue)
-                || string.IsNullOrWhiteSpace(subscriptionIdValue)))
+        // T228 (owner D4 / Q1; ADR-027 one subscription per customer): the operator creates the customer's subscription
+        // and Dataverse environment; L2 creates neither and defaults neither — for EVERY tenancy model. (ISH-02 used to
+        // exempt Model 1, and the skill then sent the operator's current `az account` subscription.) Intake is fixed here
+        // (there is no add-parameter endpoint), so each value is checked now, before the run guard, the registry lookup,
+        // any Cosmos write or enqueue.
+        if (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.SubscriptionId, out var subscriptionIdValue)
+            || !Guid.TryParse(subscriptionIdValue, out var subscriptionGuid) || subscriptionGuid == Guid.Empty)
         {
             return BadRequest(httpContext, ControlPlaneErrorCodes.SubscriptionIdRequired,
-                "nonSecretParameters['subscriptionId'] is required for tenancyModel='Model2' " +
-                "(ADR-027 D4 subscription-per-customer). H1 onward target the customer's own subscription; " +
-                "a missing value would fail H1 subscription-readiness with MissingSubscriptionId within ~20s " +
-                "and leave the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
-                "Model1 runs are exempt — the skill auto-injects the Spaarke shared sub-id.");
+                "nonSecretParameters['subscriptionId'] is required and must be the GUID of the customer's own Azure " +
+                "subscription, created by the operator (ADR-027: one subscription per customer; T228). No subscription " +
+                "is defaulted or shared for any tenancy model.");
+        }
+
+        // G19: H0, H4b and H8 each need the container type and would otherwise fail one by one deep in the DAG.
+        if (!request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var containerTypeIdValue)
+            || !Guid.TryParse(containerTypeIdValue, out var containerTypeGuid) || containerTypeGuid == Guid.Empty)
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.ContainerTypeIdRequired,
+                "nonSecretParameters['containerTypeId'] is required and must be the GUID of the model's SPE container type " +
+                "(spaarke-constants.yaml) — H0, H4b and H8 read it (G19).");
+        }
+
+        // The environment the operator created — and only one named for THIS customer (DataverseEnvironmentUrlRule:
+        // all Model 1 environments share Spaarke's tenant, so a typo could otherwise name another customer's).
+        request.NonSecretParameters.TryGetValue(IntakeParameterCatalog.DataverseEnvUrl, out var dataverseEnvUrlValue);
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule.TryNormalize(
+                dataverseEnvUrlValue,
+                request.CustomerId,
+                IntakeParameterCatalog.ResolveEnvironmentName(request.NonSecretParameters),
+                out var normalizedDataverseEnvUrl,
+                out var dataverseEnvUrlError))
+        {
+            return BadRequest(httpContext, ControlPlaneErrorCodes.DataverseEnvUrlInvalid,
+                $"nonSecretParameters['{IntakeParameterCatalog.DataverseEnvUrl}'] {dataverseEnvUrlError}");
         }
 
         // Task 245c (G25): the operator-owned values H11, H14 and H4 need, checked with the handlers' own rules.
@@ -696,6 +702,9 @@ public static class RunsEndpoints
         {
             run.Parameters.NonSecret[IntakeParameterCatalog.EnvironmentName] = IntakeParameterCatalog.DefaultEnvironmentName;
         }
+
+        // T228: the canonical form (https://{host}/) — the one H5 compares against and hands to every later handler.
+        run.Parameters.NonSecret[IntakeParameterCatalog.DataverseEnvUrl] = normalizedDataverseEnvUrl;
 
         try
         {
@@ -1305,8 +1314,8 @@ public static class RunsEndpoints
 
         /// <summary>
         /// Intake values for the run — keys must be in <see cref="IntakeParameterCatalog"/> (closed set,
-        /// case-sensitive; anything else is a 400 <c>intake-unknown-key</c>). <c>tenantId</c> is required;
-        /// <c>subscriptionId</c> is required for Model 2.
+        /// case-sensitive; anything else is a 400 <c>intake-unknown-key</c>). <c>tenantId</c>, <c>subscriptionId</c>,
+        /// <c>containerTypeId</c> and <c>dataverseEnvUrl</c> are required for every model (T228).
         /// </summary>
         [JsonPropertyName("nonSecretParameters")]
         public IDictionary<string, string>? NonSecretParameters { get; init; }

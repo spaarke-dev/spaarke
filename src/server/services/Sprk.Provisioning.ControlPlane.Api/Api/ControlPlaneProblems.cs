@@ -31,6 +31,9 @@ internal static class ControlPlaneErrorCodes
     public const string IntakeInvalidEnvironmentName = "intake-invalid-environment-name";
     public const string TenantIdRequired = "tenant-id-required";
     public const string SubscriptionIdRequired = "subscription-id-required";
+    // T228: the operator-created Dataverse environment, and the container type (G19) — required for every model.
+    public const string DataverseEnvUrlInvalid = "dataverse-env-url-invalid";
+    public const string ContainerTypeIdRequired = "container-type-id-required";
     public const string CommunicationDefaultMailboxInvalid = "intake-communication-default-mailbox-invalid";
     // Task 245c: an intake value a HANDLER would refuse is refused with that handler's own rejection code —
     // H11Rejections (UserProvisioningIntake) for identityPreset / usersJson, H14aRejections.MissingPolicyScopeGroupId,

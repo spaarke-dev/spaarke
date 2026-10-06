@@ -99,7 +99,6 @@ public sealed class H0PreflightHandlerTests
         var probes = new[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
         };
@@ -190,7 +189,6 @@ public sealed class H0PreflightHandlerTests
 
     [Theory]
     [InlineData(PreflightCheckNames.AzureOpenAiTpmHeadroom, "quota-openai-tpm")]
-    [InlineData(PreflightCheckNames.DataverseEnvCreationRate, "quota-dataverse-env-rate")]
     [InlineData(PreflightCheckNames.SubscriptionVCpuQuota, "quota-subscription-vcpu")]
     [InlineData(PreflightCheckNames.SpeOwnerCredential, SpeOwnerCredentialProbe.OwnerTokenFailedRejectionCode)]
     public async Task ProbeFailure_ProducesDistinctRejectionCode_AndMarksCosmosFailed(
@@ -205,9 +203,6 @@ public sealed class H0PreflightHandlerTests
             failingCheck == PreflightCheckNames.AzureOpenAiTpmHeadroom
                 ? FakeProbe.Fail(PreflightCheckNames.AzureOpenAiTpmHeadroom, "OpenAI TPM: observed 100/1000 required in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            failingCheck == PreflightCheckNames.DataverseEnvCreationRate
-                ? FakeProbe.Fail(PreflightCheckNames.DataverseEnvCreationRate, "Env-rate: 4/4 used this hour")
-                : FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             failingCheck == PreflightCheckNames.SubscriptionVCpuQuota
                 ? FakeProbe.Fail(PreflightCheckNames.SubscriptionVCpuQuota, "vCPU: 0/8 required standardDv5Family in eastus")
                 : FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
@@ -454,7 +449,6 @@ public sealed class H0PreflightHandlerTests
         var probes = new IPreflightQuotaProbe[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             FakeProbe.Fail(
@@ -575,7 +569,6 @@ public sealed class H0PreflightHandlerTests
         var probes = new IPreflightQuotaProbe[]
         {
             FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
             FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
             FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
             realPinnedProbe,
@@ -1010,7 +1003,6 @@ public sealed class H0PreflightHandlerTests
     private static IPreflightQuotaProbe[] AllPassProbes() => new IPreflightQuotaProbe[]
     {
         FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
-        FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
         FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
         FakeProbe.Pass(PreflightCheckNames.SpeOwnerCredential),
     };

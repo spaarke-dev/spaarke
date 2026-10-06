@@ -42,7 +42,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.DataverseEnvCreation;
 public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
 {
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly DataverseEnvCreationOptions _options;
+    private readonly DataverseEnvAdoptionOptions _options;
     private readonly ILogger<DataverseWebApiHealthProbe> _logger;
 
     /// <summary>Named HttpClient for outbound Dataverse Web API calls.</summary>
@@ -51,7 +51,7 @@ public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
     /// <summary>Constructs the probe bound to the named HttpClient + per-request timeout.</summary>
     public DataverseWebApiHealthProbe(
         IHttpClientFactory httpClientFactory,
-        IOptions<DataverseEnvCreationOptions> options,
+        IOptions<DataverseEnvAdoptionOptions> options,
         ILogger<DataverseWebApiHealthProbe> logger)
     {
         ArgumentNullException.ThrowIfNull(httpClientFactory);
@@ -153,6 +153,13 @@ public sealed class DataverseWebApiHealthProbe : IDataverseHealthProbe
                 }
                 return new DataverseHealthProbeResult.InProgress(
                     $"WhoAmI returned {(int)response.StatusCode} {response.StatusCode}. Body: {bodyPreview}");
+            }
+
+            if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+            {
+                // T228: the environment answers; the Worker identity is not an application user of it.
+                return new DataverseHealthProbeResult.AccessDenied(
+                    $"WhoAmI returned {(int)response.StatusCode} {response.StatusCode}");
             }
 
             return new DataverseHealthProbeResult.Unreachable(

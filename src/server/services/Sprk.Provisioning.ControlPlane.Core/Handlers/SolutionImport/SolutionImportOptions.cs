@@ -29,7 +29,7 @@ public sealed class SolutionImportOptions
 
     /// <summary>
     /// Path to the pac CLI executable. Defaults to <c>pac</c> (resolved via
-    /// PATH). Parity with <see cref="DataverseEnvCreation.DataverseEnvCreationOptions.PacCliExecutable"/>.
+    /// PATH).
     /// Used by <see cref="PacCliSolutionVerifier"/> to query the target env's
     /// installed solutions post-import.
     /// </summary>

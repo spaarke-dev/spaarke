@@ -73,6 +73,12 @@ public static class SubscriptionReadinessRejectionCodes
     public const string SubscriptionUnreachable = "subready-subscription-unreachable";
 
     /// <summary>
+    /// T228 (ADR-027): the subscription already holds another Spaarke stamp's resource group (or could not be listed).
+    /// Resumable; nothing was written. The operator corrects the run's subscription.
+    /// </summary>
+    public const string SubscriptionNotDedicated = "subready-subscription-not-dedicated";
+
+    /// <summary>
     /// CustomerOwned tenancy — Lighthouse delegation from the customer tenant
     /// to Spaarke's managing tenant is MISSING or the delegated
     /// resource-group scope is inaccessible. Operator (or customer admin)

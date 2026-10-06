@@ -819,7 +819,6 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private static string BuildRejectionCode(string checkName) => checkName switch
     {
         PreflightCheckNames.AzureOpenAiTpmHeadroom => "quota-openai-tpm",
-        PreflightCheckNames.DataverseEnvCreationRate => "quota-dataverse-env-rate",
         PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
         // HANDLER-03 (pre-dispatch audit 2026-08-27) — F1 verbatim rejection
         // code the punchlist mandates so operators can filter for the

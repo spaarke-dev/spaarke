@@ -38,11 +38,21 @@ public static class IntakeParameterCatalog
     /// <summary>Entra tenant id — required at intake (§4D I1); read by every handler.</summary>
     public const string TenantId = "tenantId";
 
-    /// <summary>Azure subscription of the customer stamp — required at intake for Model 2 (ADR-027 D4).</summary>
+    /// <summary>
+    /// The customer's own Azure subscription — required at intake for every model, a GUID (ADR-027: one subscription per
+    /// customer; T228: the operator creates it, nothing defaults it).
+    /// </summary>
     public const string SubscriptionId = "subscriptionId";
 
-    /// <summary>SPE container-type id for the environment (spaarke-constants.yaml) — H4, H8, H13.</summary>
+    /// <summary>SPE container-type id for the environment (spaarke-constants.yaml) — required GUID (T228 / G19); H0, H4b, H8, H13.</summary>
     public const string ContainerTypeId = "containerTypeId";
+
+    /// <summary>
+    /// T228: URL of the Dataverse environment the operator created for this customer — required, checked by
+    /// <see cref="Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule"/> and stored in its canonical
+    /// form. H5 adopts it; nothing creates an environment.
+    /// </summary>
+    public const string DataverseEnvUrl = "dataverseEnvUrl";
 
     /// <summary>The customer stamp's environment segment — <c>customer.bicep</c> <c>environmentName</c>.</summary>
     public const string EnvironmentName = "environmentName";
@@ -108,13 +118,14 @@ public static class IntakeParameterCatalog
     [
         // --- Sent by /provision-environment Step 4.0 -------------------------------
         new(TenantId, "Entra tenant id (§4D I1). Required at intake. Every handler."),
-        new(SubscriptionId, "Customer Azure subscription. Required at intake for Model 2. H0 probes, H1, H2a, H4, H4b, H9, H13, H14."),
-        new("region", "Primary Azure region (H0 quota probes) / Dataverse region (H5)."),
-        new("tier", "Cost tier (H0 envelope) / Dataverse environment SKU (H5)."),
+        new(SubscriptionId, "The customer's own Azure subscription (GUID), created by the operator. Required at intake for every model (ADR-027, T228). H0 probes, H1, H2a, H4, H4b, H9, H13, H14."),
+        new(DataverseEnvUrl, "URL of the Dataverse environment the operator created (https://spaarke-{customerId}[-{environmentName}].crm[N].dynamics.com/). Required (T228); H5 adopts it."),
+        new("region", "Primary Azure region (H0 quota probes)."),
+        new("tier", "Cost tier (H0 envelope)."),
         new("estimatedMonthlyUsd", "H0 cost-envelope input."),
         new("costEnvelopePolicy", "H0 cost-envelope policy (abortOnOverrun | warnAndProceed)."),
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
-        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
+        new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6). Required; validated at POST /api/runs (UserProvisioningIntake)."),
         new(UsersJson, "H11 users to provision: JSON array of {firstName, lastName, email, companyName} — names required for NativeAccount, email for B2BGuest; 1 to 500 entries. Required; validated at POST /api/runs (UserProvisioningIntake). Stored in the run document (owner decision D15)."),
         new(ExchangePolicyScopeGroupId, "H14a: mail-enabled security group scoping the Exchange ApplicationAccessPolicy — created by the Exchange admin of the stamp's tenant before the run (prereqs.yaml PRQ-C-08). Required."),
@@ -130,7 +141,6 @@ public static class IntakeParameterCatalog
         new("location", "Primary Azure region for customer.bicep (H2a; default westus2)."),
         new("signalrEnabled", "Deploy SignalR (H2a; default false)."),
         new("requestedIndexes", "Subset of AI Search indexes to create (H2b; default all)."),
-        new("dataverseDisplayName", "Dataverse environment display name (H5)."),
         new("speContainerDisplayName", "SPE root container display name (H8)."),
         new("healthCheckPath", "BFF health probe path (H9; default /healthz)."),
         new("buildId", "BFF build to deploy (H9 optional — defaults to latest.json). H13 reads the deployed build from H9's output."),
@@ -145,9 +155,6 @@ public static class IntakeParameterCatalog
         new("ficOmitSecretNames", "H4: secret names to omit when the stamp is secret-free."),
 
         // --- H0 probe tuning ---------------------------------------------------------
-        new("minSlotsRequired", "H0 Dataverse capacity probe threshold."),
-        new("rateWindowHours", "H0 Dataverse environment-creation rate window."),
-        new("rateLimit", "H0 Dataverse environment-creation rate limit."),
         new("openaiPinFreshnessMinDays", "H0 OpenAI model-pin freshness threshold."),
 
         // --- Dataverse environment-variable values (H7) -------------------------------

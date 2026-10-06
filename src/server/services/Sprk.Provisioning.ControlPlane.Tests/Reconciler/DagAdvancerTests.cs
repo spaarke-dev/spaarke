@@ -227,13 +227,15 @@ public sealed class DagAdvancerTests
     }
 
     [Fact]
-    public void ComputeReadyHandlers_AfterH5AndH3_UnlocksH6()
+    public void ComputeReadyHandlers_AfterH5AndH3_UnlocksH10_AndH6WaitsForIt()
     {
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5");
+        // T228: H6 signs in to the customer environment as the BFF app registration, an application user there only once
+        // H10 has registered it — and H10 needs only H3 + H5 (H2a upstream of both).
+        var beforeH10 = _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5"));
+        beforeH10.Should().Contain("H10").And.NotContain("H6");
 
-        var ready = _sut.ComputeReadyHandlers(run);
-
-        ready.Should().Contain("H6");
+        var afterH10 = _sut.ComputeReadyHandlers(MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H4", "H3", "H5", "H10"));
+        afterH10.Should().Contain("H6").And.NotContain("H11", "H11's users get the solution's roles — it waits for H7 too");
     }
 
     [Fact]
@@ -280,7 +282,7 @@ public sealed class DagAdvancerTests
     [Fact]
     public void ComputeReadyHandlers_AfterH6AndH8_UnlocksH7()
     {
-        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H9", "H6", "H8");
+        var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a", "H2b", "H4", "H4b", "H3", "H5", "H10", "H9", "H6", "H8");
 
         var ready = _sut.ComputeReadyHandlers(run);
 

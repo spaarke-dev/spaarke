@@ -7,6 +7,8 @@
   "required": [
     "customerId",
     "tenantId",
+    "subscriptionId",
+    "dataverseEnvUrl",
     "tenancyModel",
     "controlPlaneEnv",
     "profile",
@@ -39,7 +41,12 @@
     "subscriptionId": {
       "type": "string",
       "format": "uuid",
-      "description": "Target Azure subscription id. REQUIRED for Model2 (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1 MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2 allOf below."
+      "description": "The customer's OWN Azure subscription, created by the operator before the run (prereqs.yaml PRQ-S-00; ADR-027: one subscription per customer). REQUIRED for every tenancy model (T228) — nothing defaults or shares a subscription. In Spaarke's tenant for Model 1, the customer's for Model 2. The L2 identity must hold Owner on it (PRQ-S-04). H1 refuses a subscription in another tenant or one that already holds another customer's rg-spaarke-* resource group. Same rule as POST /api/runs (subscription-id-required)."
+    },
+    "dataverseEnvUrl": {
+      "type": "string",
+      "pattern": "^https://spaarke-[a-z][a-z0-9]{2,7}(-(dev|staging|prod))?\\.crm[0-9]*\\.dynamics\\.com/?$",
+      "description": "T228 — URL of the Dataverse environment the operator created for this customer (prereqs.yaml PRQ-C-09), e.g. https://spaarke-acme.crm.dynamics.com/. Its domain must be spaarke-{customerId} or spaarke-{customerId}-{environmentName}: POST /api/runs (dataverse-env-url-invalid) and H5 check the customerId itself, which this pattern cannot. H5 adopts the environment and never creates one."
     },
     "tenancyModel": {
       "type": "string",
@@ -203,16 +210,6 @@
       }
     },
     {
-      "description": "ISH-02 — subscriptionId REQUIRED for Model2 (customer's own subscription per ADR-027 D4). Model1 runs auto-default the Spaarke shared sub-id in-skill at CreateRun time, so subscriptionId is OPTIONAL at intake for Model 1.",
-      "if": {
-        "properties": { "tenancyModel": { "const": "Model2" } },
-        "required": ["tenancyModel"]
-      },
-      "then": {
-        "required": ["subscriptionId"]
-      }
-    },
-    {
       "description": "T245c — H14b needs at least one Graph subscription resource (same rule as POST /api/runs: h14b-no-webhook-targets-configured).",
       "anyOf": [{ "required": ["communicationGraphResource"] }, { "required": ["emailGraphResource"] }]
     },
@@ -246,6 +243,8 @@
       "customerId": "trial1",
       "displayName": "Spaarke Trial 1",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "subscriptionId": "11111111-2222-3333-4444-555555555555",
+      "dataverseEnvUrl": "https://spaarke-trial1.crm.dynamics.com/",
       "tenancyModel": "Model1",
       "controlPlaneEnv": "dev",
       "profile": "spaarke-hosted-model2",
@@ -271,6 +270,7 @@
       "displayName": "Acme Corporation",
       "tenantId": "12345678-1234-1234-1234-123456789012",
       "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
+      "dataverseEnvUrl": "https://spaarke-acme.crm.dynamics.com/",
       "tenancyModel": "Model2",
       "controlPlaneEnv": "prod",
       "profile": "customer-owned-model2",

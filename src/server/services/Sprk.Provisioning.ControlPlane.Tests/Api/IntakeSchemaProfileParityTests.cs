@@ -260,6 +260,29 @@ public sealed class IntakeSchemaProfileParityTests
         }
     }
 
+    /// <summary>
+    /// T228: the schema requires the customer's subscription and Dataverse environment for every model, as POST /api/runs
+    /// does, and each example's environment passes the endpoint's rule (DataverseEnvironmentUrlRule) for that example's
+    /// customer — so a batch intake ajv accepts is not refused at the edge.
+    /// </summary>
+    [Fact]
+    public void T228_SubscriptionAndEnvironment_AreRequiredByBoth_AndTheExamplesPassTheEndpointRule()
+    {
+        var schemaRequired = ReadStringArrayFromSchema("required");
+        schemaRequired.Should().Contain(new[] { "subscriptionId", "dataverseEnvUrl" });
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        foreach (var example in doc.RootElement.GetProperty("examples").EnumerateArray())
+        {
+            var customerId = example.GetProperty("customerId").GetString()!;
+            Guid.TryParse(example.GetProperty("subscriptionId").GetString(), out _).Should().BeTrue();
+            Sprk.Provisioning.ControlPlane.Core.Models.DataverseEnvironmentUrlRule.TryNormalize(
+                    example.GetProperty("dataverseEnvUrl").GetString(), customerId,
+                    Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.DefaultEnvironmentName, out _, out var error)
+                .Should().BeTrue("example '{0}': {1}", customerId, error);
+        }
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [

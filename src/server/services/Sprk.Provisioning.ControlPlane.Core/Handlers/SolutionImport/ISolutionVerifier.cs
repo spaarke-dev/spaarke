@@ -23,8 +23,7 @@
 //   - Splits fail-modes: script-side per-tier gate failure vs verifier-side
 //     "script reported success but list disagrees" (bug or out-of-band
 //     mutation) are distinct operator diagnoses.
-//   - Same trade-off as H5's IDataverseEnvCreator + IDataverseHealthProbe
-//     split (parity per task 048 pattern).
+//   - Same trade-off as the former H5 creator + health-probe split (task 048).
 // -----------------------------------------------------------------------------
 
 using System.Collections.Immutable;

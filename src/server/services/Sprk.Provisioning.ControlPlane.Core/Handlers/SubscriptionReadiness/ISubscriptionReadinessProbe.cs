@@ -98,6 +98,19 @@ public interface ISubscriptionReadinessProbe
         CancellationToken cancellationToken);
 
     /// <summary>
+    /// T228 (ADR-027: one subscription per customer, MUST NOT hold two): passes when the subscription holds no Spaarke
+    /// stamp resource group of ANOTHER customer — no <c>rg-spaarke-{otherId}-{env}</c>
+    /// (<see cref="SubscriptionDedication.FindForeignStampGroups"/>). The operator creates the subscription, so a mistyped
+    /// id could otherwise point a run at another customer's stamp or at Spaarke's own platform subscription
+    /// (<c>rg-spaarke-platform-*</c>). A listing failure returns <c>Passed=false</c> (never "dedicated by default").
+    /// </summary>
+    Task<SubscriptionReadinessCheckResult> CheckSubscriptionDedicatedAsync(
+        string subscriptionId,
+        string customerId,
+        CancellationToken cancellationToken);
+
+
+    /// <summary>
     /// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6 verbatim
     /// absorption. Registers each provider in <paramref name="requiredProviders"/>
     /// on the target subscription (POST providers/{ns}/register) and polls

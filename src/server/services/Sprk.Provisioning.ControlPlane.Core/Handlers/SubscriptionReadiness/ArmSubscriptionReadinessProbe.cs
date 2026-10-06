@@ -99,6 +99,49 @@ public sealed class ArmSubscriptionReadinessProbe : ISubscriptionReadinessProbe
     }
 
     /// <inheritdoc/>
+    public async Task<SubscriptionReadinessCheckResult> CheckSubscriptionDedicatedAsync(
+        string subscriptionId,
+        string customerId,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subscriptionId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(customerId);
+
+        var subscription = _armClient.GetSubscriptionResource(SubscriptionResource.CreateResourceIdentifier(subscriptionId));
+        var names = new List<string>();
+        try
+        {
+            await foreach (var group in subscription.GetResourceGroups().GetAllAsync(cancellationToken: cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                names.Add(group.Data.Name);
+            }
+        }
+        catch (RequestFailedException ex)
+        {
+            _logger.LogWarning(ex, "H1 could not list the resource groups of subscription {SubscriptionId}", subscriptionId);
+            return new SubscriptionReadinessCheckResult(
+                Passed: false,
+                Diagnostic: $"Listing the resource groups of subscription '{subscriptionId}' failed ({ex.Status} {ex.ErrorCode}), " +
+                            "so H1 cannot confirm it holds no other customer's stamp. The L2 identity needs Owner on the " +
+                            "customer's subscription (prereqs.yaml PRQ-S-04). Nothing was written.",
+                Evidence: null);
+        }
+
+        var foreign = SubscriptionDedication.FindForeignStampGroups(names, customerId);
+        var evidence = JsonSerializer.SerializeToElement(new { subscriptionId, customerId, foreignStampGroups = foreign });
+        return foreign.Count == 0
+            ? new SubscriptionReadinessCheckResult(true, $"Subscription '{subscriptionId}' holds no other customer's stamp.", evidence)
+            : new SubscriptionReadinessCheckResult(
+                Passed: false,
+                Diagnostic: $"Subscription '{subscriptionId}' already holds another Spaarke stamp's resource group(s): " +
+                            $"{string.Join(", ", foreign)}. ADR-027: one subscription per customer — a customer's stamp is never " +
+                            $"deployed next to another's (or into Spaarke's platform subscription). Check the subscriptionId of " +
+                            $"customer '{customerId}'; nothing was written.",
+                Evidence: evidence);
+    }
+
+    /// <inheritdoc/>
     public async Task<SubscriptionReadinessCheckResult> CheckSubscriptionReachableAsync(
         string subscriptionId,
         string tenantId,

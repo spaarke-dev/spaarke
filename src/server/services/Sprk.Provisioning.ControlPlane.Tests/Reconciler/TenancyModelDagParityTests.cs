@@ -152,7 +152,7 @@ public sealed class TenancyModelDagParityTests
     //     - H4KvSecretsPopulationHandler
     //     - (H4SharedKvSecretsPopulationHandler was listed here; RETIRED T226 2026-09-30.)
     //     - H4bBulkAppSettingsHandler
-    //     - H5DataverseEnvCreationHandler
+    //     - H5DataverseEnvAdoptionHandler
     //     - H6SolutionImportHandler
     //     - H7DataverseEnvVarValuesHandler
     //     - H8SpeContainerHandler (H8-B rewrite per task 214, 2026-08-30)
