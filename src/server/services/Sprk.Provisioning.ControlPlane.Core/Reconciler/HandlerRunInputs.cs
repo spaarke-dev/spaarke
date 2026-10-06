@@ -30,6 +30,7 @@
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Handlers;
+using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Models;
 
 namespace Sprk.Provisioning.ControlPlane.Reconciler;
@@ -80,9 +81,8 @@ public static class HandlerRunInputs
             [
                 Tenant, Subscription,
                 RunInput.Intake("region"),
-                RunInput.Intake("tier", required: false),
-                RunInput.Intake("estimatedMonthlyUsd", required: false),
-                RunInput.Intake("costEnvelopePolicy", required: false),
+                RunInput.Intake(CostEnvelopeIntake.TierParameterKey),                    // T229: required (CostEnvelopeIntake)
+                RunInput.Intake(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey),
                 RunInput.Intake("openaiPinFreshnessMinDays", required: false),
                 RunInput.Intake("openAiLocation", required: false),   // T247: H0's OpenAI probes (else westus3)
                 RunInput.Intake("provisionedOn", required: false),

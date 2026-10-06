@@ -22,6 +22,8 @@
 // created. No known gaps remain (RunContextContractTests).
 // -----------------------------------------------------------------------------
 
+using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+
 namespace Sprk.Provisioning.ControlPlane.Models;
 
 /// <summary>One accepted intake key.</summary>
@@ -121,9 +123,8 @@ public static class IntakeParameterCatalog
         new(SubscriptionId, "The customer's own Azure subscription (GUID), created by the operator. Required at intake for every model (ADR-027, T228). H0 probes, H1, H2a, H4, H4b, H9, H13, H14."),
         new(DataverseEnvUrl, "URL of the Dataverse environment the operator created (https://spaarke-{customerId}[-{environmentName}].crm[N].dynamics.com/). Required (T228); H5 adopts it."),
         new("region", "Primary Azure region (H0 quota probes)."),
-        new("tier", "Cost tier (H0 envelope)."),
-        new("estimatedMonthlyUsd", "H0 cost-envelope input."),
-        new("costEnvelopePolicy", "H0 cost-envelope policy (abortOnOverrun | warnAndProceed)."),
+        new(CostEnvelopeIntake.TierParameterKey, "Cost tier whose monthly ceiling H0 compares the estimate with: smb | enterprise | dedicated (budget classes for one dedicated stamp; T229). Required; validated at POST /api/runs (CostEnvelopeIntake)."),
+        new(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey, "Projected monthly Azure spend of the stamp in USD (invariant decimal ≥ 0). Required; validated at POST /api/runs (CostEnvelopeIntake); H0 refuses a run whose estimate exceeds its tier ceiling (T229)."),
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
         new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6). Required; validated at POST /api/runs (UserProvisioningIntake)."),

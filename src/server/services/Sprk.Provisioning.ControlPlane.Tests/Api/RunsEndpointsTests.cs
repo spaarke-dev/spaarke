@@ -920,9 +920,8 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             ["confirmationAcknowledgment"] = "proceed with provisioning",
             ["intakeFileSha256"] = "ABCDEF",
             ["region"] = "westus2",
-            ["tier"] = "standard",
+            ["tier"] = "dedicated",          // T229: a CostEnvelopeIntake tier (required, exact case)
             ["estimatedMonthlyUsd"] = "900",
-            ["costEnvelopePolicy"] = "abortOnOverrun",
             ["operatorUpn"] = "operator@spaarke.com",
             ["containerTypeId"] = "33333333-3333-3333-3333-333333333333",
             ["dataverseEnvUrl"] = "https://spaarke-testcust.crm.dynamics.com/",   // T228
@@ -1087,6 +1086,9 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         nonSecret.TryAdd("subscriptionId", "abcdef01-2345-6789-abcd-ef0123456789");
         nonSecret.TryAdd("containerTypeId", "8a6ce34c-6055-4681-8f87-2f4f9f921c06");
         nonSecret.TryAdd("dataverseEnvUrl", $"https://spaarke-{TestCustomerId}.crm.dynamics.com/");
+        // T229: H0's cost tier + estimate, required for every model.
+        nonSecret.TryAdd("tier", "smb");
+        nonSecret.TryAdd("estimatedMonthlyUsd", "450");
         return nonSecret;
     }
 
@@ -1330,6 +1332,50 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
             status.Should().Be(HttpStatusCode.Accepted);
             factory.Repository.CreatedRuns.Single().Parameters.NonSecret["subscriptionId"]
                 .Should().Be("abcdef01-2345-6789-abcd-ef0123456789", "H1 / H2a and the rest read it from the run");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // T229 (G4) — every run deploys a dedicated stamp, so H0's cost tier + estimate are required for every model and
+    // validated with H0's own rules (CostEnvelopeIntake); there is no shared-trial tier and no warnAndProceed waiver.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Model1", null, "450", "quota-cost-envelope-required-missing")]
+    [InlineData("Model2", "  ", "450", "quota-cost-envelope-required-missing")]
+    [InlineData("Model1", "shared-trial", "450", "quota-cost-envelope-unknown-tier")]   // retired (D-12)
+    [InlineData("Model2", "Dedicated", "450", "quota-cost-envelope-unknown-tier")]      // exact case
+    [InlineData("Model1", "standard", "450", "quota-cost-envelope-unknown-tier")]
+    [InlineData("Model1", "smb", null, "quota-cost-envelope-required-missing")]
+    [InlineData("Model2", "smb", "lots", "quota-cost-envelope-unparseable-estimate")]
+    [InlineData("Model1", "smb", "-1", "quota-cost-envelope-unparseable-estimate")]
+    [InlineData("Model1", "smb", "1,200.50", "quota-cost-envelope-unparseable-estimate")]   // invariant decimal only
+    public async Task PostRuns_WithoutAUsableCostTierAndEstimate_Returns400_ForEveryModel(
+        string model, string? tier, string? estimate, string errorCode)
+    {
+        var (status, body, factory) = await PostT228RunAsync(model, p =>
+        {
+            if (tier is null) p.Remove("tier"); else p["tier"] = tier;
+            if (estimate is null) p.Remove("estimatedMonthlyUsd"); else p["estimatedMonthlyUsd"] = estimate;
+        });
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest, "H0 would refuse it — refuse it before anything is written (T229)");
+            ReadProblemErrorCode(body).Should().Be(errorCode);
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+            factory.Enqueuer.Enqueued.Should().BeEmpty();
+        }
+    }
+
+    [Fact]
+    public async Task PostRuns_TheRetiredCostEnvelopePolicy_IsAnUnknownParameter()
+    {
+        var (status, body, factory) = await PostT228RunAsync("Model1", p => p["costEnvelopePolicy"] = "warnAndProceed");
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest, "an overrun has no waiver for a dedicated stamp (T229)");
+            ReadProblemDetail(body).Should().Contain("costEnvelopePolicy");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
         }
     }
 

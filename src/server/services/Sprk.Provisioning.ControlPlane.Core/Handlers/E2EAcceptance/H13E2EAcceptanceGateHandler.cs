@@ -467,7 +467,8 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         // Task 223 (D-12): parse tenancyModel at the handler edge (matches H1's pattern) —
         // pre-D-12 the ArmCostEnvelopeChecker had an `_`-arm fallback that silently used
         // Model1SharedFloorEnvelopeUsd for any unrecognized string. That option + fallback are
-        // deleted; the checker's SelectExpectedEnvelope is now exhaustive over the enum.
+        // deleted; since task 229 the checker expects one DedicatedStampEnvelopeUsd for every
+        // model and uses the typed value only in its log line and summary.
         // Two distinct diagnostic channels below: costInfraDiag → CostQueryInfraFault (infra
         // fault from ARM); costTenancyDiag → InvalidTenancyModel (unparseable tenancyModel
         // at the H13 edge). Split rejection codes so operators pattern-matching on

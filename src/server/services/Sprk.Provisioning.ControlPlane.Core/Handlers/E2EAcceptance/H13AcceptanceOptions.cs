@@ -98,22 +98,19 @@ public sealed class H13AcceptanceOptions
     public TimeSpan CostQueryTimeout { get; set; } = TimeSpan.FromMinutes(3);
 
     /// <summary>
-    /// Expected monthly cost envelope for a Model 2 (dedicated) EMPTY customer
-    /// stamp in whole USD. Per spec.md §15 #14 target: ≤ $400/mo.
+    /// Expected monthly cost of an EMPTY dedicated customer stamp in whole USD — one envelope for both tenancy
+    /// models (spec.md §15 #14; task 229). Model 1 and Model 2 deploy the same <c>customer.bicep</c> (D19), each into
+    /// the customer's own subscription (T228), so the subscription-scope Cost Management query H13 runs measures
+    /// exactly one stamp.
+    /// Re-derived 2026-10-06 from the Azure Retail Prices API (westus2, 730 h/month, list prices): App Service plan S1
+    /// Linux $58.40 + AI Search Standard S1 (1 replica × 1 partition) $245.28 + Azure Managed Redis Balanced_B0 with
+    /// high availability (2 × $0.016/h) $23.36 + Service Bus Standard base $10.00 = $337.04 fixed. Cosmos DB
+    /// (serverless), Storage, Key Vault, Log Analytics / Application Insights, Azure OpenAI, Document Intelligence and
+    /// Content Safety are consumption-billed and near zero while the stamp is empty; $400 leaves room for them.
+    /// Re-derive when customer.bicep's SKUs change. (Replaces Model1MarginalEnvelopeUsd — a "marginal share of a
+    /// shared platform" that no longer exists — and Model2EmptyEnvelopeUsd.)
     /// </summary>
-    public decimal Model2EmptyEnvelopeUsd { get; set; } = 400m;
-
-    /// <summary>
-    /// Expected monthly cost envelope for a Model 1 (shared trial/SMB) MARGINAL
-    /// per-tenant footprint in whole USD. Per spec.md §15 #14 target: ≤ $430/mo.
-    /// </summary>
-    public decimal Model1MarginalEnvelopeUsd { get; set; } = 430m;
-
-    // Task 223 (D-12): Model1SharedFloorEnvelopeUsd DELETED. The "shared floor"
-    // concept was the pre-D-12 baseline for the shared platform tier; D-12 retires
-    // the shared tier entirely, so the option has no runtime meaning. The
-    // ArmCostEnvelopeChecker's `_`-arm fallback that consumed this option is also
-    // deleted — the switch is now exhaustive over the enum. Do NOT reintroduce.
+    public decimal DedicatedStampEnvelopeUsd { get; set; } = 400m;
 
     /// <summary>
     /// Cost drift fraction above which H13 emits an advisory warning per

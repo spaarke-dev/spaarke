@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="229" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Cost model for dedicated stamps: no shared-trial tier, the H0 cost envelope binds every model (tier + estimate required at intake, no warnAndProceed), one H13 envelope for an empty customer stamp re-derived from current prices</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T229 (G4, G13)</phase>
+    <gate>after 228 (✅)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>L2 API intake validation + H0/H13 code and options, intake schema, operator skill, binding docs; tests modified.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting provisioning-contract change (API, handlers, schema, skill) with a cost-control invariant.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the provision-environment skill and .claude/constraints (main-session-only).</parallel-reason>
+    <tags>provisioning, provisioning-handler, l2-controlplane, model1-dedicated, cost, testing</tags>
+    <deps>228</deps>
+  </metadata>
+
+  <prompt>Make the provisioning cost model match D-12: every customer gets a dedicated stamp (Model 1 paid by Spaarke, Model 2 by the customer), so no shared-tier cost concept may remain.</prompt>
+
+  <role>SPAARKE platform developer (L2 control plane, intake contract, operator skill).</role>
+
+  <goal>
+    The cost gates assume one thing: a run deploys one full customer stamp (customer.bicep) into the customer's own
+    subscription. H0 refuses any run whose operator-declared monthly estimate exceeds its tier ceiling, for every model,
+    with no override; H13 compares the measured subscription cost with ONE envelope for an empty stamp (spec §15 #14:
+    "one envelope per customer covering the full dedicated stamp, in both models … re-derive the number against current
+    Azure pricing").
+  </goal>
+
+  <context>
+    <background>
+      Mapped 2026-10-06. `tier` (shared-trial | smb | enterprise | dedicated) is read only by H0's cost gate. H0 fails
+      closed on missing/unknown inputs only for Model 2 (`RequireCostEnvelopeForModel2Dedicated`, `isModel2Dedicated`) and
+      allows `costEnvelopePolicy = warnAndProceed` — "Model 1 shared-trial ONLY" — for Model 1. Model 1 is now a Spaarke-paid
+      dedicated stamp, so the reason Model 2 barred an uncapped budget (an overrun wastes real money before H13 can see it)
+      applies to both models and no permitted case for warnAndProceed remains. The skill's interactive mode collects neither
+      tier nor estimate and offers a client-only "Proceed anyway?" that H0 then contradicts.
+      H13: `Model1MarginalEnvelopeUsd` (430, "marginal on a shared platform") and `Model2EmptyEnvelopeUsd` (400) — both models
+      deploy the same customer.bicep since D19, and since T228 the query scope (the customer's subscription) holds exactly
+      one stamp.
+      Re-derived 2026-10-06 from the Azure Retail Prices API (westus2, 730 h): App Service S1 Linux $58.40, AI Search
+      Standard S1 (1×1) $245.28, Managed Redis Balanced B0 with high availability (2 × $0.016/h) $23.36, Service Bus Standard
+      base $10.00 = $337.04 fixed; Cosmos serverless, Storage, Key Vault, Log Analytics/App Insights, OpenAI, Document
+      Intelligence and Content Safety are consumption-billed (near zero for an empty stamp). Envelope $400 stands, now
+      derived.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/Preflight/{H0Options,H0PreflightHandler}.cs; Core/Modules/HandlersModule.cs</file>
+      <file>Core/Handlers/E2EAcceptance/{H13AcceptanceOptions,ArmCostEnvelopeChecker}.cs</file>
+      <file>Api/Api/{RunsEndpoints,ControlPlaneProblems}.cs; Core/Models/IntakeParameterCatalog.cs; Core/Reconciler/HandlerRunInputs.cs</file>
+      <file>scripts/provisioning-prereqs/intake.schema.json; .claude/skills/provision-environment/SKILL.md (Step 1.0 batch loader, Step 1 interactive, Step 2 BAT-10, Step 4.0 payload)</file>
+      <file>spec.md NFR-04 + §15 #14; docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md; BFF Services/Ai/Metering XML docs (stale "shared trial/SMB" rationale)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="D-12">No shared-tier cost concept anywhere (tier, envelope, policy text) in src, scripts, the schema or the skill.</constraint>
+    <constraint source="needed-or-remove">`warnAndProceed` has no permitted case → `costEnvelopePolicy` goes (schema, catalog, H0, skill). `RequireCostEnvelopeForModel2Dedicated` / `isModel2Dedicated` go — the inputs are required for every model at intake and H0 fails closed on them while the gate is on (`CostEnvelopeAbortsPreflight` stays the one switch).</constraint>
+    <constraint source="parity">The intake schema and POST /api/runs agree: `tier` (smb | enterprise | dedicated) and `estimatedMonthlyUsd` (invariant decimal ≥ 0) are required by both; the schema's tier enum equals H0's built-in ceiling table.</constraint>
+    <constraint source="BFF">BFF changes are XML-doc text only (no code); state it — no publish-size measurement needed for comment-only edits.</constraint>
+    <constraint source="tests">Hand-written fakes; never Mock&lt;HttpMessageHandler&gt;.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">Intake: schema (tier enum without shared-trial; tier + estimatedMonthlyUsd required; costEnvelopePolicy removed; examples), catalog, POST /api/runs validation + problem codes, H0 run inputs; parity tests.</step>
+    <step order="2">H0: one decision path for every model (missing / unknown / unparseable → Resumable refusal; over ceiling → quota-cost-overrun); remove the policy branch and the Model 2 option; tests.</step>
+    <step order="3">H13: one `DedicatedStampEnvelopeUsd` (400, derivation in its doc comment); the checker stops selecting by model; tests.</step>
+    <step order="4">Skill: interactive prompts for tier + estimate (with the empty-stamp floor as guidance); batch loader requires them; Step 2 overrun is a hard stop in both modes; payload without costEnvelopePolicy.</step>
+    <step order="5">Docs: spec NFR-04 + §15 #14, guide, constraints, BFF metering XML docs, plan G4/G13, CHANGELOG.</step>
+    <step order="6">Verify (ControlPlane tests, ArchTests, Worker + Api builds 0 warnings); Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">POST /api/runs returns 400 for a request without `tier`, with an unknown tier (incl. `shared-trial`), without `estimatedMonthlyUsd`, or with a negative / non-decimal estimate; schema and endpoint agree (parity test); the schema's tier enum equals `H0Options.DefaultCeilingsUsd` keys.</criterion>
+    <criterion testable="true">H0, gate on, for Model 1 AND Model 2: missing tier / unknown tier / missing estimate / unparseable estimate → Resumable refusal; estimate over ceiling → `quota-cost-overrun` whatever else the run carries; under → pass. Gate off → skip.</criterion>
+    <criterion testable="true">H13 expects the same envelope for Model 1 and Model 2.</criterion>
+    <criterion testable="true">`git grep -i` finds no `shared-trial`, `warnAndProceed`, `costEnvelopePolicy`, `Model1MarginalEnvelope`, `Model2EmptyEnvelope`, `RequireCostEnvelopeForModel2Dedicated` in src, scripts or the skill (history notes excepted).</criterion>
+    <criterion testable="true">ControlPlane.Tests and ArchTests pass; Worker/Api build with 0 warnings.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Something other than H0 reads `tier` or `costEnvelopePolicy`.</trigger>
+    <trigger>A budget amount has to be chosen (e.g. a per-customer OpenAI cap) — that is the owner's number.</trigger>
+  </escalation>
+
+  <notes/>
+</task>

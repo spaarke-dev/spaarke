@@ -31,11 +31,14 @@
 //       "H0": { "CostEnvelopeAbortsPreflight": false }
 //
 // TIER CEILINGS:
-//   Mirror the SKILL.md Step 2 BAT-10 defaults (shared-trial=430,
-//   smb=700, enterprise=2500, dedicated=5000 USD/month). Operators can
-//   override via configuration:
-//       "H0": { "TierMonthlyCostCeilingsUsd": { "shared-trial": 500, ... } }
-//   Any tier missing from the map falls back to the built-in default table
+//   Mirror the SKILL.md Step 2 BAT-10 defaults (smb=700, enterprise=2500,
+//   dedicated=5000 USD/month). Task 229 (D-12): the shared-trial tier is
+//   retired — every tier is a budget class for ONE dedicated customer stamp
+//   (customer.bicep, about $340/month fixed before usage). The keys of the
+//   built-in table are the accepted tiers (CostEnvelopeIntake.Tiers, the
+//   intake.schema.json `tier` enum). Operators can change a tier's ceiling:
+//       "H0": { "TierMonthlyCostCeilingsUsd": { "smb": 800, ... } }
+//   A tier missing from the map falls back to the built-in default table
 //   below via `GetCeilingUsd(tier)`.
 //
 // PLACEMENT JUSTIFICATION (CLAUDE.md §11):
@@ -73,32 +76,13 @@ public sealed class H0Options
     /// <summary>
     /// When <c>true</c> (default), H0 fails Resumable with rejection code
     /// <c>quota-cost-overrun</c> if the run's estimated monthly cost exceeds
-    /// the tier ceiling AND the run's <c>costEnvelopePolicy</c> is not
-    /// <c>warnAndProceed</c>. When <c>false</c>, the entire gate is
-    /// skipped (log-only advisory). Default <c>true</c> per COMP-10 binding.
+    /// the tier ceiling, and fails it when the tier or estimate is absent or
+    /// unusable (<see cref="CostEnvelopeIntake"/>) — for every tenancy model
+    /// (task 229: no override, no Model-2-only strictness). When <c>false</c>,
+    /// the entire gate is skipped (log-only advisory; POST /api/runs still
+    /// requires both inputs). Default <c>true</c> per COMP-10 binding.
     /// </summary>
     public bool CostEnvelopeAbortsPreflight { get; set; } = true;
-
-    /// <summary>
-    /// Bucket B MED#4 SESSION 18 (customer-provisioning-orchestration-r1
-    /// adversarial e2e verify workflow wepdcb8we): when <c>true</c> (default),
-    /// H0 FAILS the run when tenancyModel=Model2Dedicated AND any of
-    /// {tier, estimatedMonthlyUsd, ceiling-for-tier} is missing/unknown/
-    /// unparseable. Prior behavior LOG-ONLY skipped those cases for ALL
-    /// tenancies, meaning a dedicated stamp (5000 USD/mo ceiling) could burn
-    /// budget silently if the intake omitted the estimate.
-    ///
-    /// Model2Dedicated is a HIGHER-BLAST-RADIUS tenancy than Model1Shared
-    /// (dedicated Azure sub, dedicated Dataverse env, per-customer stamp) —
-    /// silent skips are appropriate for shared-trial runs where the operator
-    /// sees the WARN log inline, but for Model2Dedicated the cost check is
-    /// a load-bearing precondition (an over-budget run wastes $$$$ of real
-    /// resources before H13 can catch the drift).
-    ///
-    /// When <c>false</c>, all tenancies use the pre-Bucket-B log-only skip
-    /// (opt-out for internal-test envs).
-    /// </summary>
-    public bool RequireCostEnvelopeForModel2Dedicated { get; set; } = true;
 
     /// <summary>
     /// Per-tier monthly cost ceilings in USD. Missing tiers fall back to
@@ -110,16 +94,16 @@ public sealed class H0Options
 
     /// <summary>
     /// Built-in default per-tier ceilings — used when
-    /// <see cref="TierMonthlyCostCeilingsUsd"/> omits a tier. Mirrors
-    /// SKILL.md Step 2 BAT-10 (shared-trial=430 / smb=700 / enterprise=2500 /
-    /// dedicated=5000). Kept immutable — operators override via
-    /// <see cref="TierMonthlyCostCeilingsUsd"/> config binding, not by
-    /// mutating this table.
+    /// <see cref="TierMonthlyCostCeilingsUsd"/> omits a tier. Its keys are the
+    /// accepted tiers (<see cref="CostEnvelopeIntake.Tiers"/>; intake.schema.json
+    /// <c>tier</c> enum). Mirrors SKILL.md Step 2 BAT-10 (smb=700 /
+    /// enterprise=2500 / dedicated=5000; task 229 retired shared-trial). Kept
+    /// immutable — operators override via <see cref="TierMonthlyCostCeilingsUsd"/>
+    /// config binding, not by mutating this table.
     /// </summary>
     public static IReadOnlyDictionary<string, decimal> DefaultCeilingsUsd { get; } =
         new Dictionary<string, decimal>(StringComparer.OrdinalIgnoreCase)
         {
-            ["shared-trial"] = 430m,
             ["smb"] = 700m,
             ["enterprise"] = 2500m,
             ["dedicated"] = 5000m,
@@ -128,9 +112,9 @@ public sealed class H0Options
     /// <summary>
     /// Resolves the monthly cost ceiling (USD) for a given tier — configured
     /// override wins over built-in default. Returns null when the tier is
-    /// unknown to BOTH the operator override AND the built-in table (H0
-    /// treats unknown tier as "skip gate + WARN in log"; a strict-reject
-    /// posture would require adding the tier to the enum in intake.schema.json).
+    /// unknown to BOTH the operator override AND the built-in table (H0 only
+    /// asks for a tier <see cref="CostEnvelopeIntake"/> accepted, which is
+    /// always in the built-in table).
     /// </summary>
     public decimal? GetCeilingUsd(string tier)
     {

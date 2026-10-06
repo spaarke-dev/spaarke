@@ -16,7 +16,9 @@
     "identityPreset",
     "users",
     "exchangePolicyScopeGroupId",
-    "communicationDefaultMailbox"
+    "communicationDefaultMailbox",
+    "tier",
+    "estimatedMonthlyUsd"
   ],
   "additionalProperties": false,
   "properties": {
@@ -80,13 +82,13 @@
     },
     "tier": {
       "type": "string",
-      "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
-      "description": "Cost-envelope tier hint for H0 preflight cost-envelope check. Optional."
+      "enum": ["smb", "enterprise", "dedicated"],
+      "description": "Required (T229). Budget class for this customer's dedicated stamp — H0 compares estimatedMonthlyUsd with its monthly ceiling: smb=$700, enterprise=$2500, dedicated=$5000 (H0Options.DefaultCeilingsUsd; configurable per tier). Every stamp is dedicated since D-12 (Model 1 paid by Spaarke, Model 2 by the customer); the shared-trial tier is retired. Exact case; POST /api/runs refuses any other value (CostEnvelopeIntake)."
     },
     "estimatedMonthlyUsd": {
       "type": "number",
       "minimum": 0,
-      "description": "COMP-10 (SESSION 17): projected monthly Azure spend in USD for the target stamp. Consumed by H0 preflight cost-envelope gate. When present + tier is set + gate is enabled (H0Options.CostEnvelopeAbortsPreflight=true, default), H0 fails Resumable with rejection code 'quota-cost-overrun' if this value exceeds the tier ceiling AND costEnvelopePolicy is not 'warnAndProceed'. Optional; missing/blank is a LOG-ONLY skip (server-side gate does not fail-close on plumbing gaps — SKILL.md Step 2 BAT-10 is the client-side authoritative check). Default tier ceilings: shared-trial=$430, smb=$700, enterprise=$2500, dedicated=$5000/mo (mirror SKILL Step 2 BAT-10)."
+      "description": "Required (T229). Projected monthly Azure spend of the customer stamp in USD, for every model. An empty stamp costs about $340/month fixed before usage (2026-10-06 list prices, westus2: App Service S1 Linux $58, AI Search S1 $245, Managed Redis B0 with high availability $23, Service Bus Standard $10); add the expected OpenAI, Document Intelligence, Content Safety, Cosmos DB, storage and log volume. H0 fails the run with quota-cost-overrun (Resumable) when it exceeds the tier ceiling — there is no override; choose the tier that covers it. POST /api/runs refuses a missing or negative value (CostEnvelopeIntake)."
     },
     "skipExternalPrereqs": {
       "type": "boolean",
@@ -130,12 +132,6 @@
       "enum": ["waitAndExit", "pollUntilTimeout", "failFast"],
       "default": "waitAndExit",
       "description": "Batch policy for skill Step 5 Manual Gate Handling (BAT-08). `waitAndExit` → write runs/{runId}-WAITING.md + runs/{runId}-gate.json + exit code 4 (operator resumes via `--resume` flag after clearing gate). `pollUntilTimeout` → poll GET /api/runs/{id} at 10s cadence until gate clears or configured timeout (currently 30 min hard-cap); exit 0 on clear, exit 4 on timeout. `failFast` → immediately exit code 4 (no wait, no polling). Applies to H0.5 admin consent · H1 quota bump · H8 SPE 24h · any WaitingOnGate transition."
-    },
-    "costEnvelopePolicy": {
-      "type": "string",
-      "enum": ["abortOnOverrun", "warnAndProceed"],
-      "default": "abortOnOverrun",
-      "description": "Batch policy for H0 preflight cost-envelope check (COMP-10). `abortOnOverrun` → H0 fail-fast if projected monthly cost exceeds tier ceiling; run enters Failed(cost-overrun) before any side-effecting handler dispatches. `warnAndProceed` → log warning to runs/{runId}-cost-warning.json but continue dispatch (Model 1 shared-trial ONLY — MUST reject for Model2 + prod). Default `abortOnOverrun` per binding NFR intent."
     },
     "postmortemFile": {
       "type": "string",
@@ -250,7 +246,8 @@
       "profile": "spaarke-hosted-model2",
       "region": "westus2",
       "openAiRegion": "westus3",
-      "tier": "shared-trial",
+      "tier": "smb",
+      "estimatedMonthlyUsd": 450,
       "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING).",
       "confirmationAcknowledgment": "proceed with provisioning",
       "mcpDisconnectPolicy": "proceedWithFallback",
@@ -258,7 +255,6 @@
       "onFailedPolicy": "abandon",
       "onQuarantinedPolicy": "failFast",
       "onManualGatePolicy": "waitAndExit",
-      "costEnvelopePolicy": "abortOnOverrun",
       "identityPreset": "NativeAccount",
       "users": [{ "firstName": "Trial", "lastName": "Admin", "companyName": "Spaarke" }],
       "exchangePolicyScopeGroupId": "spaarke-trial1-mail-scope@spaarke.com",
@@ -277,11 +273,11 @@
       "region": "westus2",
       "openAiRegion": "westus3",
       "tier": "dedicated",
+      "estimatedMonthlyUsd": 900,
       "confirmationAcknowledgment": "proceed with provisioning",
       "acknowledgeUpgradeMode": false,
       "onFailedPolicy": "abandon",
       "onManualGatePolicy": "waitAndExit",
-      "costEnvelopePolicy": "abortOnOverrun",
       "identityPreset": "B2BGuest",
       "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
       "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",

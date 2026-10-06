@@ -283,6 +283,23 @@ public sealed class IntakeSchemaProfileParityTests
         }
     }
 
+    /// <summary>
+    /// T229: the schema's tier enum is exactly the tiers H0 has ceilings for (CostEnvelopeIntake.Tiers — the keys of
+    /// H0Options.DefaultCeilingsUsd), both cost inputs are required, and the retired waiver is not in the schema.
+    /// </summary>
+    [Fact]
+    public void T229_TierEnumIsH0sCeilingTable_BothCostInputsAreRequired_AndNoWaiverExists()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var properties = doc.RootElement.GetProperty("properties");
+        properties.GetProperty("tier").GetProperty("enum").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(Sprk.Provisioning.ControlPlane.Handlers.Preflight.CostEnvelopeIntake.Tiers,
+                "a tier the schema accepts but H0 has no ceiling for would be refused at POST /api/runs");
+        ReadStringArrayFromSchema("required").Should().Contain(new[] { "tier", "estimatedMonthlyUsd" });
+        properties.TryGetProperty("costEnvelopePolicy", out _).Should().BeFalse(
+            "warnAndProceed was the shared-trial waiver; a dedicated stamp's overrun has none (T229)");
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [
@@ -292,6 +309,8 @@ public sealed class IntakeSchemaProfileParityTests
         ("communicationGraphResource", "communicationGraphResource"),
         ("emailGraphResource", "emailGraphResource"),
         ("communicationDefaultMailbox", "communicationDefaultMailbox"),
+        ("tier", "tier"),                                   // T229
+        ("estimatedMonthlyUsd", "estimatedMonthlyUsd"),
     ];
 
     private static Dictionary<string, string> ToOperatorNonSecret(JsonElement example)

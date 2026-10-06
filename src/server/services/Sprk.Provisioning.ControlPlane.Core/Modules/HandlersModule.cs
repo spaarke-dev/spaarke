@@ -141,8 +141,8 @@ public static class HandlersModule
         // COMP-10 (SESSION 17): H0Options — cost-envelope gate configuration.
         // Bound to the "H0" section (H0Options.SectionName). Absent-config
         // yields the built-in defaults (CostEnvelopeAbortsPreflight=true;
-        // shared-trial/smb/enterprise/dedicated ceilings per SKILL Step 2
-        // BAT-10). Operator overrides via appsettings / env:
+        // smb/enterprise/dedicated ceilings per SKILL Step 2 BAT-10; task 229
+        // retired shared-trial). Operator overrides via appsettings / env:
         //   "H0": { "CostEnvelopeAbortsPreflight": false }
         //   "H0__CostEnvelopeAbortsPreflight": "false"
         services.Configure<H0Options>(configuration.GetSection(H0Options.SectionName));

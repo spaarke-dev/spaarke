@@ -47,11 +47,8 @@ public sealed class ArmCostEnvelopeCheckerTests
     private const string CustomerId = "acme";
     private const string RunId = "run-abcdef";
 
-    // Envelope defaults from H13AcceptanceOptions.
-    private const decimal Model2EmptyEnvelope = 400m;
-    private const decimal Model1MarginalEnvelope = 430m;
-    // Task 223 (D-12): Model1SharedFloorEnvelope constant + its option field DELETED — the
-    // shared-tier "floor" concept was retired alongside the enum-exhaustive switch.
+    // Envelope default from H13AcceptanceOptions (task 229: one envelope for every tenancy model).
+    private const decimal DedicatedStampEnvelope = 400m;
     private const decimal DriftAdvisoryThreshold = 0.20m;
 
     // ---------- Silent-fail defense (a): missing SubscriptionId ----------
@@ -112,7 +109,7 @@ public sealed class ArmCostEnvelopeCheckerTests
         var checker = NewChecker(handler);
         var result = await checker.CheckAsync(NewRequest(tenancyModel: TenancyModel.Model2), CancellationToken.None);
 
-        result.ExpectedMonthlyUsd.Should().Be(Model2EmptyEnvelope);
+        result.ExpectedMonthlyUsd.Should().Be(DedicatedStampEnvelope);
         result.ExceedsAdvisoryThreshold.Should().BeFalse();
         Math.Abs(result.DriftFraction).Should().BeLessThan(DriftAdvisoryThreshold,
             "380 USD is 5% below the 400 USD envelope; well within the 20% advisory band");
@@ -140,30 +137,24 @@ public sealed class ArmCostEnvelopeCheckerTests
         result.Summary.Should().Contain("tenancyModel=Model2");
     }
 
-    // ---------- Tenancy-model branches ----------
+    // ---------- One envelope for every tenancy model (task 229) ----------
 
-    [Fact]
-    public void SelectExpectedEnvelope_Model2Dedicated_SelectsModel2Envelope()
+    [Theory]
+    [InlineData(TenancyModel.Model1)]
+    [InlineData(TenancyModel.Model2)]
+    public async Task CheckAsync_ExpectsTheDedicatedStampEnvelope_ForEveryTenancyModel(TenancyModel tenancyModel)
     {
-        var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope(TenancyModel.Model2).Should().Be(Model2EmptyEnvelope);
-    }
+        // Both models deploy one customer.bicep stamp into the customer's own subscription (D19, T228), so the
+        // subscription's cost is compared with the same envelope; Model 1 is no longer a marginal share of a shared
+        // platform.
+        var handler = ArmSdkTestFakes.NewHandler(_ =>
+            ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, CostBodies.QueryResultBody(10m)));
 
-    [Fact]
-    public void SelectExpectedEnvelope_Model1Shared_SelectsMarginalEnvelope()
-    {
-        var checker = NewChecker(ArmSdkTestFakes.NewHandler(_ =>
-            new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("") }));
-        checker.SelectExpectedEnvelope(TenancyModel.Model1).Should().Be(Model1MarginalEnvelope);
-    }
+        var result = await NewChecker(handler).CheckAsync(NewRequest(tenancyModel: tenancyModel), CancellationToken.None);
 
-    // Task 223 (D-12) — the pre-D-12 SelectExpectedEnvelope_UnknownTenancyModel_FallsBackToSharedFloor
-    // test was DELETED: SelectExpectedEnvelope now accepts a typed TenancyModel enum, and the enum's
-    // domain admits no "unknown" input. The pre-D-12 `_`-arm fallback to Model1SharedFloorEnvelopeUsd
-    // was retired along with the shared-tier "floor" concept per INCOMING-D12-D13-REMEDIATION §5 Item 2.
-    // Parse-or-reject at the edge (RunsEndpoints.ValidateTenancyProfilePair, H1/H2a/H2b/H12c/H13
-    // handler entries) gates unknown strings before they ever reach this checker.
+        result.ExpectedMonthlyUsd.Should().Be(DedicatedStampEnvelope);
+        result.Summary.Should().Contain($"tenancyModel={tenancyModel}");
+    }
 
     // ---------- Silent-fail defense (b): ARM errors propagate (never zero-cost silent Pass) ----------
 
@@ -234,11 +225,9 @@ public sealed class ArmCostEnvelopeCheckerTests
     private static ArmCostEnvelopeChecker NewChecker(FakeArmHttpMessageHandler handler)
     {
         var arm = ArmSdkTestFakes.NewArmClient(handler);
-        // Task 223 (D-12): Model1SharedFloorEnvelopeUsd deleted from H13AcceptanceOptions.
         var options = Options.Create(new H13AcceptanceOptions
         {
-            Model2EmptyEnvelopeUsd = Model2EmptyEnvelope,
-            Model1MarginalEnvelopeUsd = Model1MarginalEnvelope,
+            DedicatedStampEnvelopeUsd = DedicatedStampEnvelope,
             CostDriftAdvisoryThreshold = DriftAdvisoryThreshold,
         });
         return new ArmCostEnvelopeChecker(arm, options, NullLogger<ArmCostEnvelopeChecker>.Instance);

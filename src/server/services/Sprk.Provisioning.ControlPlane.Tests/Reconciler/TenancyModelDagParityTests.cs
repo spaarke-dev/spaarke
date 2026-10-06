@@ -137,7 +137,8 @@ public sealed class TenancyModelDagParityTests
     //                                         tenancyModel; both models take the unified per-customer creation
     //                                         path. Kept in inventory as a historical record.)
     //     - H12cRuntimeReferencesHandler     (switch Model1Shared / Model2Dedicated, ~line 286)
-    //     - ArmCostEnvelopeChecker (H0)      (SelectExpectedEnvelope by tenancyModel)
+    //     - ArmCostEnvelopeChecker (H13)     (RETIRED 2026-10-06 task 229 — one envelope for every model; the
+    //                                         per-model SelectExpectedEnvelope is gone)
     //     - AiSearchTenantFilterInvariantProbe (H13 sub-probe; Model1 branch)
     //     - ArmDeploymentRunner (H2a)        (template-key selection — the only selector since task 245b
     //                                         deleted FileBicepTemplateInspector; ArmTemplateInspector

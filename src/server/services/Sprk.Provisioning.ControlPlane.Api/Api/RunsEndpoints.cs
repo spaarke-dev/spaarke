@@ -115,6 +115,7 @@ using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Core.Models;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
+using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -1228,7 +1229,8 @@ public static class RunsEndpoints
     /// <summary>
     /// Task 245c: H11's identity preset + user list (<see cref="UserProvisioningIntake"/> — the code H11 itself
     /// runs), H14's Exchange scope group and "at least one Graph resource" (H14a / H14b's rules and codes), and
-    /// H4's Communication default mailbox. <c>null</c> when the values are usable.
+    /// H4's Communication default mailbox, and (task 229) H0's cost tier + estimate (<see cref="CostEnvelopeIntake"/>).
+    /// <c>null</c> when the values are usable.
     /// </summary>
     internal static (string ErrorCode, string Detail)? ValidateOperatorIntake(IDictionary<string, string> parameters)
     {
@@ -1263,6 +1265,14 @@ public static class RunsEndpoints
                 $"nonSecretParameters['{IntakeParameterCatalog.CommunicationDefaultMailbox}'] is required and must be " +
                 $"a mailbox address (local@domain.tld, at most {IntakeParameterCatalog.MaxMailboxAddressLength} characters) — " +
                 "H4 writes it to the customer vault as Communication-DefaultMailbox.");
+        }
+
+        // T229: H0's cost-envelope inputs, same rules as H0 (CostEnvelopeIntake) — required for every model.
+        parameters.TryGetValue(CostEnvelopeIntake.TierParameterKey, out var tier);
+        parameters.TryGetValue(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey, out var estimatedMonthlyUsd);
+        if (CostEnvelopeIntake.Validate(tier, estimatedMonthlyUsd) is CostEnvelopeIntakeOutcome.Invalid cost)
+        {
+            return (cost.RejectionCode, $"nonSecretParameters: {cost.Diagnostic}");
         }
 
         return null;
