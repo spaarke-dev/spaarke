@@ -707,7 +707,7 @@ public sealed class H0PreflightHandlerTests
 
         var failure = result.Should().BeOfType<HandlerResult.Failure>(
             "a dedicated stamp is never provisioned without a usable cost check (T229)").Subject;
-        failure.Class.Should().Be(FailureClass.Resumable, "the operator fixes the intake and resumes");
+        failure.Class.Should().Be(FailureClass.Resumable, "H0 refusals are Resumable; the remedy is a new run with a corrected intake");
         failure.RejectionCode.Should().Be(rejectionCode);
         probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue();
         enqueuer.Sent.Should().BeEmpty();
@@ -752,8 +752,8 @@ public sealed class H0PreflightHandlerTests
     [Fact]
     public async Task CostEnvelope_DisabledInOptions_SkipsGateEvenOnOverrun()
     {
-        // Options.CostEnvelopeAbortsPreflight = false → gate SKIPPED entirely, even when the run is over-budget or
-        // its inputs are unusable (POST /api/runs still requires them).
+        // Options.CostEnvelopeAbortsPreflight = false → gate SKIPPED entirely, even when the run is over-budget
+        // (POST /api/runs still requires the inputs).
         var repo = new FakeRepository(RunWithCost("Model2", "smb", "5000"), etag: "etag-comp10-disabled");
         var options = Options.Create(new H0Options { CostEnvelopeAbortsPreflight = false });
         var handler = CreateHandler(repo, new FakeEnqueuer(), AllPassProbes(), h0Options: options);
@@ -764,12 +764,37 @@ public sealed class H0PreflightHandlerTests
             "disabled gate MUST NOT block even a wildly-over-budget run");
     }
 
-    [Fact]
-    public void CostEnvelopeTiers_AreTheBuiltInCeilingTable_WithoutTheRetiredSharedTrialTier()
+    [Theory]
+    [InlineData("shared-trial", 430)]   // a leftover setting for the retired tier
+    [InlineData("SMB", 700)]            // tiers are exact case at intake, so this ceiling could never apply
+    [InlineData("smb", 0)]
+    [InlineData("enterprise", -1)]
+    public void H0Options_AConfiguredCeilingThatCanNeverApply_IsRefusedAtStartup(string tier, int ceiling)
     {
-        CostEnvelopeIntake.Tiers.Should().BeEquivalentTo(H0Options.DefaultCeilingsUsd.Keys);
-        CostEnvelopeIntake.Tiers.Should().BeEquivalentTo(new[] { "smb", "enterprise", "dedicated" },
-            "every stamp is dedicated since D-12; the shared-trial tier is retired (T229)");
+        var options = new H0Options
+        {
+            TierMonthlyCostCeilingsUsd = new Dictionary<string, decimal>(StringComparer.Ordinal) { [tier] = ceiling },
+        };
+
+        var validate = options.Validate;
+
+        validate.Should().Throw<InvalidOperationException>().WithMessage($"*TierMonthlyCostCeilingsUsd:{tier}*");
+    }
+
+    [Fact]
+    public void H0Options_CeilingsForAcceptedTiers_PassStartupValidation()
+    {
+        var options = new H0Options
+        {
+            TierMonthlyCostCeilingsUsd = new Dictionary<string, decimal>(StringComparer.Ordinal)
+            {
+                ["smb"] = 800m, ["enterprise"] = 3000m, ["dedicated"] = 6000m,
+            },
+        };
+
+        var validate = options.Validate;
+
+        validate.Should().NotThrow();
     }
 
     // ---------- helpers ----------

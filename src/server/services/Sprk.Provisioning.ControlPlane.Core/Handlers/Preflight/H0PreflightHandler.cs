@@ -447,10 +447,12 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             return null;
         }
 
+        // Intake is fixed at POST /api/runs, so the remedy is a NEW run with a corrected tier or estimate.
         var diagnostic =
-            $"Cost-envelope overrun: estimated ${estimatedMonthlyUsd:F2}/mo exceeds tier '{tier}' ceiling " +
-            $"${ceiling:F2}/mo (COMP-10). Choose the tier whose ceiling covers the stamp, or reduce the projected cost, " +
-            "and resume. Batch-mode operators fix the intake JSON; interactive operators re-invoke the skill.";
+            $"Cost-envelope overrun: estimated ${estimatedMonthlyUsd.ToString("F2", CultureInfo.InvariantCulture)}/mo " +
+            $"exceeds tier '{tier}' ceiling ${ceiling.ToString("F2", CultureInfo.InvariantCulture)}/mo (COMP-10). Start a " +
+            "new run whose intake carries the tier that covers the stamp, or a reduced projected cost (batch: fix the " +
+            "intake JSON; interactive: re-invoke the skill).";
         _logger.LogWarning(
             "H0 cost-envelope gate ABORT — estimated ${Estimated}/mo > tier '{Tier}' ceiling ${Ceiling}/mo " +
             "(runId={RunId} customerId={CustomerId} tenancyModel={TenancyModel} " +

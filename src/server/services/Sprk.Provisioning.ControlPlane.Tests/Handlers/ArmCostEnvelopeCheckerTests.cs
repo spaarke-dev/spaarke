@@ -140,6 +140,19 @@ public sealed class ArmCostEnvelopeCheckerTests
     // ---------- One envelope for every tenancy model (task 229) ----------
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(-400)]
+    public void Options_ANonPositiveEnvelope_IsRefusedAtStartup(int envelope)
+    {
+        // A non-positive envelope makes the drift fraction 0 — H13's cost check would always pass.
+        var options = new H13AcceptanceOptions { DedicatedStampEnvelopeUsd = envelope };
+
+        var validate = options.Validate;
+
+        validate.Should().Throw<InvalidOperationException>().WithMessage("*DedicatedStampEnvelopeUsd*");
+    }
+
+    [Theory]
     [InlineData(TenancyModel.Model1)]
     [InlineData(TenancyModel.Model2)]
     public async Task CheckAsync_ExpectsTheDedicatedStampEnvelope_ForEveryTenancyModel(TenancyModel tenancyModel)

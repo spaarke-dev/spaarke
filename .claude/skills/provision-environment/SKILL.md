@@ -43,7 +43,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 | Trap catalog | 7 traps T1-T7 (see design §4B) — each handler asserts its trap clear before reporting success |
 | Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests + verified at H13 acceptance |
 | Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
-| Cost envelope | Model 2 ≤ $400/mo baseline (NFR-04); Model 1 ≤ $430/mo per-customer marginal |
+| Cost envelope | One envelope per customer stamp, both models: ≤ $400/mo empty (NFR-04; ≈ $337 fixed at 2026-10-06 list prices — T229). H0 refuses an estimate above the tier ceiling (smb $700 / enterprise $2,500 / dedicated $5,000); H13 flags > 20% drift |
 | Handoff report path | `runs/{runId}.md` in operator's cwd (NOT under `.claude/`) |
 
 ---
@@ -606,8 +606,8 @@ if ($BatchIntakeFile) {
   $dataverseEnvUrl = $intake.dataverseEnvUrl    # T228 — REQUIRED: the Dataverse environment the operator created (PRQ-C-09)
   $region         = $intake.region              # optional platform region (default westus2)
   $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
-  $tier           = $intake.tier                # optional
-  $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # COMP-10 (SESSION 17) + Bucket A HIGH#8 (SESSION 18): consumed by Step 4.0 nonSecretParameters + H0 cost-envelope gate. Null in interactive mode → H0 log-only skips (unchanged interactive behavior).
+  $tier           = $intake.tier                # T229 — REQUIRED for every model: smb | enterprise | dedicated (Step 1b-ter)
+  $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # T229 — REQUIRED: projected monthly Azure spend of the stamp (USD); Step 2 + Step 4.0 + H0 cost-envelope gate
   $notes          = $intake.notes               # optional
   # T245c — operator intake H11 / H14 / H4 need (schema-required; POST /api/runs re-validates with the handlers' rules)
   $identityPreset              = $intake.identityPreset               # B2BGuest | NativeAccount (exact case)
@@ -638,15 +638,10 @@ if ($BatchIntakeFile) {
   $script:BatchOnFailedPolicy        = if ($intake.onFailedPolicy)        { $intake.onFailedPolicy }        else { 'abandon' }              # BAT-07 → Step 4b Failed
   $script:BatchOnQuarantinedPolicy   = if ($intake.onQuarantinedPolicy)   { $intake.onQuarantinedPolicy }   else { 'failFast' }             # BAT-07 → Step 4b Quarantined
   $script:BatchOnManualGatePolicy    = if ($intake.onManualGatePolicy)    { $intake.onManualGatePolicy }    else { 'waitAndExit' }          # BAT-08 → Step 5a-d
-  $script:BatchCostEnvelopePolicy    = if ($intake.costEnvelopePolicy)    { $intake.costEnvelopePolicy }    else { 'abortOnOverrun' }       # BAT-10 → Step 2 preflight + Step 4b H0 fail-fast
   $script:BatchPostmortemFile        = $intake.postmortemFile                                                                                # BAT-09 → Step 7b
 
-  # Model2 + costEnvelopePolicy=warnAndProceed is forbidden per schema description.
-  # (T223/T224 renamed the tenancyModel literals to Model1 | Model2 — the old 'Model2Dedicated' test here never matched.)
-  if ($tenancyModel -eq 'Model2' -and $script:BatchCostEnvelopePolicy -eq 'warnAndProceed') {
-    Write-Error "[skill] Batch intake HARD STOP: costEnvelopePolicy='warnAndProceed' is FORBIDDEN for Model2 (per intake.schema.json description; cost envelope MUST abort for prod / customer-owned subs). Change to 'abortOnOverrun' and rerun."
-    exit 1
-  }
+  # T229: there is no cost-overrun waiver (the former costEnvelopePolicy=warnAndProceed was the shared-trial tier's;
+  # every stamp is dedicated since D-12). An over-budget intake stops at Step 2 and, failing that, at H0.
 
   Write-Host "Batch intake loaded from $BatchIntakeFile (schema-validated + batch policies bound)."
 }
@@ -669,7 +664,6 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "tier": "dedicated",
   "estimatedMonthlyUsd": 900,
   "confirmationAcknowledgment": "proceed with provisioning",
-  "costEnvelopePolicy": "abortOnOverrun",
   "identityPreset": "B2BGuest",
   "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
   "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
@@ -678,7 +672,7 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
 }
 ```
 
-The `confirmationAcknowledgment` literal is REQUIRED for batch dispatch (intake.schema.json `const` + top-level `required[]` — Bucket A HIGH#2 SESSION 18); a missing/wrong value hard-stops Step 1.0 (line 515-517). `estimatedMonthlyUsd` + `costEnvelopePolicy` feed the COMP-10 H0 cost-envelope gate end-to-end (Bucket A HIGH#8 SESSION 18); omitting them causes H0 to log-only skip.
+The `confirmationAcknowledgment` literal is REQUIRED for batch dispatch (intake.schema.json `const` + top-level `required[]` — Bucket A HIGH#2 SESSION 18); a missing/wrong value hard-stops Step 1.0 (line 515-517). `tier` + `estimatedMonthlyUsd` are REQUIRED for every model (T229) — the schema, POST /api/runs and H0 all refuse a run without them; H0 refuses an estimate above the tier's ceiling, with no override.
 
 Interactive-mode operators skip this section entirely — proceed to 1a.
 
@@ -809,6 +803,28 @@ if ($dataverseEnvUrl -notmatch "^https://spaarke-$customerId(-[a-z]+)?\.crm[0-9]
   Write-Error "❌ dataverseEnvUrl must be https://spaarke-$customerId[-{environmentName}].crm[N].dynamics.com/ — the environment the operator created (PRQ-C-09)."
   exit 1
 }
+```
+
+#### 1b-ter. `tier` and `estimatedMonthlyUsd` (required for every model — T229)
+
+Every run deploys ONE dedicated stamp (`customer.bicep`) into the customer's own subscription — Model 1 paid by Spaarke,
+Model 2 by the customer — so the cost check applies to both models and has no override (the shared-trial tier and its
+`warnAndProceed` waiver are retired).
+
+- `estimatedMonthlyUsd` — the stamp's projected monthly Azure spend in USD (digits, optional `.`). An empty stamp costs
+  about **$340/month fixed** (2026-10-06 list prices, westus2: App Service S1 Linux $58, AI Search S1 $245, Managed Redis
+  B0 with high availability $23, Service Bus Standard $10); add the customer's expected OpenAI, Document Intelligence,
+  Content Safety, Cosmos DB, storage and log volume.
+- `tier` — the budget class whose monthly ceiling covers that estimate: `smb` ($700), `enterprise` ($2,500) or
+  `dedicated` ($5,000) (`H0Options.DefaultCeilingsUsd`; exact case).
+
+```powershell
+if (-not $script:SkipInteractiveIntake) {
+  $estimatedMonthlyUsd = Read-Host "Projected monthly Azure spend of the stamp in USD (empty stamp ≈ 340 + usage)"
+  $tier = Read-Host "Cost tier: smb (≤ 700) | enterprise (≤ 2500) | dedicated (≤ 5000)"
+}
+if ($tier -cnotin @('smb', 'enterprise', 'dedicated')) { Write-Error "❌ tier must be smb | enterprise | dedicated (exact case; T229)."; exit 1 }
+if ("$estimatedMonthlyUsd" -notmatch '^[0-9]+(\.[0-9]+)?$') { Write-Error "❌ estimatedMonthlyUsd must be a plain non-negative number of USD (e.g. 450)."; exit 1 }
 ```
 
 #### 1c. `tenancyModel` (required)
@@ -1140,7 +1156,7 @@ PREFLIGHT (H0) RESULT
   [PASS] SPE container-type headroom OK (7,442 of 10,000 remaining)
   [PASS] DNS pre-check: acme.spaarke.com not reserved
   [PASS] Spaarke tenant reachable (Model 1)
-  [PASS] Estimated cost: $412/mo (within $430 Model 1 marginal envelope)
+  [PASS] Estimated cost: $450/mo (within tier 'smb' ceiling $700/mo)
   [PASS] Estimated duration: 42 min (H1-H14, no lead-time gates)
 
 Preflight passed. Proceed to Step 3 (confirmation gate)? (yes/no)
@@ -1148,32 +1164,22 @@ Preflight passed. Proceed to Step 3 (confirmation gate)? (yes/no)
 
 **Note**: server-side preflight (H0 handler) will run automatically when Step 4 POSTs `/api/runs`; H0 is the FIRST handler in the L2 DAG per `DagAdvancer.cs`. There is no separate "preflight-only" run mode — that concept was a skill fiction. If the operator wants H0-only re-verification WITHOUT triggering H1+, the actual mechanism is `POST /api/runs/{runId}/preflight?customerId={cid}` per `RunsEndpoints.cs:188` on an EXISTING run (upgrade-mode use case).
 
-**Cost-envelope pre-check (BAT-10, SESSION 16)** — Step 2 computes an estimated cost impact locally (from tier + tenancyModel + region). H0's server-side check is the AUTHORITY; the client-side estimate here is a fast fail-close BEFORE Step 4 POST when the intake obviously exceeds the tier ceiling. `$script:BatchCostEnvelopePolicy` (bound at Step 1.0) drives the branch:
+**Cost-envelope pre-check (BAT-10; T229)** — the estimate is compared with the tier ceiling before Step 4 POSTs, in both
+modes. H0 applies the same rule server-side and is the authority; there is no override in either place (T229 retired the
+shared-trial tier and its `warnAndProceed` waiver — every stamp is dedicated). An overrun means choosing the tier that
+covers the stamp, or reducing what drives the estimate:
 
 ```powershell
-# Client-side envelope check (rough — H0 is the authority)
-$tierCap = switch ($tier) { 'shared-trial' { 430 } 'smb' { 700 } 'enterprise' { 2500 } 'dedicated' { 5000 } default { $null } }
-if ($tierCap -and $estimatedMonthlyUsd -gt $tierCap) {
-  if ($script:SkipInteractiveIntake) {
-    switch ($script:BatchCostEnvelopePolicy) {
-      'abortOnOverrun' {
-        $diag = @{ runId='pre-dispatch'; customerId=$customerId; estimated=$estimatedMonthlyUsd; cap=$tierCap; policy='abortOnOverrun' } | ConvertTo-Json
-        Set-Content -Path "runs/pre-dispatch-cost-overrun.json" -Value $diag
-        Write-Error "[skill] Batch HARD STOP (BAT-10, costEnvelopePolicy=abortOnOverrun): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Diagnostic: runs/pre-dispatch-cost-overrun.json"
-        exit 1
-      }
-      'warnAndProceed' {
-        # Already rejected for Model2 at Step 1.0 — reaching here means Model1
-        Write-Warning "[skill] Batch cost overrun ACKNOWLEDGED (BAT-10, warnAndProceed, Model 1 shared-trial only): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Proceeding per intake policy."
-        $script:CostWarningLogged = $true
-        Set-Content -Path "runs/pre-dispatch-cost-warning.json" -Value (@{estimated=$estimatedMonthlyUsd; cap=$tierCap; acknowledged='intake.costEnvelopePolicy=warnAndProceed'} | ConvertTo-Json)
-      }
-    }
-  } else {
-    Write-Warning "❌ Estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo."
-    $answer = Read-Host "Proceed anyway? (yes/no)"
-    if ($answer -ne 'yes') { Write-Error 'Aborted at Step 2 cost envelope prompt.'; exit 1 }
-  }
+# Client-side envelope check (H0 is the authority). These are the BUILT-IN ceilings (H0Options.DefaultCeilingsUsd); if the
+# L2 deployment configures H0__TierMonthlyCostCeilingsUsd__{tier}, change the table below to match — this check would
+# otherwise stop an estimate H0 accepts.
+$tierCap = switch -CaseSensitive ($tier) { 'smb' { 700 } 'enterprise' { 2500 } 'dedicated' { 5000 } default { $null } }
+if ($null -eq $tierCap) { Write-Error "[skill] Step 2 HARD STOP: tier '$tier' is not smb | enterprise | dedicated (Step 1b-ter)."; exit 1 }
+if ([decimal]$estimatedMonthlyUsd -gt $tierCap) {
+  $diag = @{ runId='pre-dispatch'; customerId=$customerId; estimated=$estimatedMonthlyUsd; cap=$tierCap; tier=$tier } | ConvertTo-Json
+  Set-Content -Path "runs/pre-dispatch-cost-overrun.json" -Value $diag
+  Write-Error "[skill] Step 2 HARD STOP (BAT-10): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Choose the tier that covers the stamp (Step 1b-ter) and rerun. Diagnostic: runs/pre-dispatch-cost-overrun.json"
+  exit 1
 }
 ```
 
@@ -1339,7 +1345,7 @@ RUN PLAN
     H14       Exchange mailbox roles scoped to the customer's group (T4)
 
   Estimated wall-clock: 42 min (no lead-time gates surfaced by H0)
-  Estimated cost impact: +$412/mo (Model 1 marginal, within envelope)
+  Estimated cost impact: $450/mo for the dedicated stamp (tier 'smb', ceiling $700/mo)
 
   Manual gates you MAY encounter mid-run:
     - Model 2 admin consent URL (H0.5) — customer admin clicks
@@ -1398,6 +1404,11 @@ if ([string]::IsNullOrWhiteSpace($subscriptionId) -or [string]::IsNullOrWhiteSpa
   Write-Error "[skill] Step 4.0 HARD STOP: intake must carry subscriptionId AND dataverseEnvUrl (Step 1b-bis; T228). L2 returns 400 subscription-id-required / dataverse-env-url-invalid otherwise. Correct the intake and rerun."
   exit 1
 }
+# --- T229: the cost tier + estimate — required for every model (L2 400s quota-cost-envelope-* otherwise) ---
+if ([string]::IsNullOrWhiteSpace($tier) -or $null -eq $estimatedMonthlyUsd) {
+  Write-Error "[skill] Step 4.0 HARD STOP: intake must carry tier AND estimatedMonthlyUsd (Step 1b-ter; T229)."
+  exit 1
+}
 $resolvedSubscriptionId = $subscriptionId
 
 # --- openAiRegion → openAiLocation mapping (Bicep param name is openAiLocation, intake field is openAiRegion) ---
@@ -1416,9 +1427,8 @@ $body = @{
     confirmationAcknowledgment  = $confirmationPhrase     # verbatim "proceed with provisioning"
     intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
     region                      = $region                 # primary platform region (e.g. westus2) — distinct from openAiLocation
-    tier                        = $tier                   # COMP-10 gate input (H0Options.GetCeilingUsd lookup key)
-    estimatedMonthlyUsd         = if ($null -ne $estimatedMonthlyUsd) { [string]$estimatedMonthlyUsd } else { $null }   # COMP-10 gate input; a STRING — nonSecretParameters is a string map, and a JSON number fails request binding (400 before CreateRun runs; found 2026-10-01 T245c review). null → H0 log-only skips
-    costEnvelopePolicy          = $script:BatchCostEnvelopePolicy  # COMP-10 gate policy (Bucket A HIGH#8 SESSION 18); default 'abortOnOverrun' in batch loader. Interactive mode leaves $script:BatchCostEnvelopePolicy null → H0 treats null as abortOnOverrun-equivalent per its default branch.
+    tier                        = $tier                   # T229 — required: smb | enterprise | dedicated (H0Options.GetCeilingUsd lookup key)
+    estimatedMonthlyUsd         = ([decimal]$estimatedMonthlyUsd).ToString([cultureinfo]::InvariantCulture)   # T229 — required; a STRING via [decimal], which never prints an exponent (a large JSON double would print '1E+15') — nonSecretParameters is a string map, and a JSON number fails request binding (400 before CreateRun runs; found 2026-10-01 T245c review)
     operatorUpn                 = $operatorUpn
     containerTypeId             = $containerTypeId        # Step 0.5b (spaarke-constants.yaml per_env_constants.$env) — H4b writes SharePointEmbedded__ContainerTypeId from it; H8 finds or creates the customer's container in it. Missing → both fail (T226, 2026-09-30: was read but never sent)
     # T245c (Step 1e-bis) — required; L2 refuses the run with the handler's own code when a rule is broken
@@ -1438,9 +1448,8 @@ $body = @{
     # onFailedPolicy / onQuarantinedPolicy / onManualGatePolicy / postmortemFile) — those are
     # BAT-01..09 control-flow knobs, NOT L2 payload. They control this skill's control flow at
     # Steps 0d/1a/1g/4b/5/7b and would be noise on the L2 audit record.
-    # NOTE (Bucket A HIGH#8 SESSION 18): costEnvelopePolicy is deliberately IN the payload — the
-    # server-side H0 cost-envelope gate needs it to branch abort-vs-warnAndProceed. Prior guidance
-    # to exclude it left COMP-10 fully un-wired end-to-end (H0 always hit the disabled/skip branch).
+    # costEnvelopePolicy is GONE (T229): it carried the shared-trial warnAndProceed waiver; L2 now
+    # refuses it as an unknown key.
   }
 } | ConvertTo-Json -Depth 5
 

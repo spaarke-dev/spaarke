@@ -7,6 +7,18 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Cost model for dedicated stamps: one rule set, every model, no waiver (T229)
+
+`customer-provisioning-orchestration-r1` T229 (G4, G13; D-12 — every customer gets a dedicated stamp).
+
+- **`.claude/constraints/provisioning.md`**: new binding section "Cost model — one dedicated stamp per run, both models":
+  no `shared-trial` tier / marginal / shared-floor envelope; `tier` + `estimatedMonthlyUsd` required for every model and
+  validated by `CostEnvelopeIntake` at POST /api/runs and in H0; no `costEnvelopePolicy` / `warnAndProceed`; H13 has one
+  `DedicatedStampEnvelopeUsd` ($400; $337.04 fixed at 2026-10-06 list prices), re-derived when `customer.bicep` SKUs change.
+- **`.claude/skills/provision-environment/SKILL.md`**: new Step 1b-ter (tier + estimate, with the empty-stamp floor as
+  guidance); batch loader drops `costEnvelopePolicy` and its Model 2 check; Step 2 BAT-10 overrun is a hard stop in both
+  modes (no interactive "Proceed anyway?"); Step 4.0 requires and sends both values, no `costEnvelopePolicy`.
+
 ###### 2026-10-06 — The customer's subscription and Dataverse environment are operator prerequisites (T228)
 
 `customer-provisioning-orchestration-r1` T228 (owner D4 / Q1; L2 identity = Owner per customer subscription, owner

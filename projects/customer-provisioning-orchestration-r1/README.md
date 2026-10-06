@@ -74,7 +74,7 @@ The project is considered **complete** when:
 - [ ] BFF publish size ≤ 60 MB compressed (net10 baseline 44.96 MB; combined Phase E/C/D delta < ~0.5 MB verified)
 - [ ] r3-era gates all green — analyzers-as-errors + god-class ratchet + 4 new ArchTests + config fail-fast + Graph-app-role parity ArchTest — on every r1 BFF PR
 - [ ] Version-compatibility matrix published at `docs/deployment/version-compatibility-matrix.md`; U-CB customer-comms templates authored
-- [ ] Cost envelope conforms per pricing model (§15 #14) — Model 2 ≤ $400/mo, Model 1 marginal ≤ $430/mo, shared floor ≤ $400/mo
+- [ ] Cost envelope conforms (§15 #14) — one envelope per dedicated stamp, both models: ≤ $400/mo empty (≈ $337 fixed at 2026-10-06 list prices; T229)
 
 ## Scope
 

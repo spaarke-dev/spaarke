@@ -6,9 +6,9 @@ namespace Sprk.Bff.Api.Services.Ai.Metering;
 /// <remarks>
 /// <para>
 /// Called PRE-call by <see cref="OpenAiClient"/> (before every OpenAI request that has token
-/// spend semantics). Model 1 (shared trial/SMB) tenants over their configured monthly USD budget
+/// spend semantics). Model 1 tenants (a dedicated stamp Spaarke pays for — D-12) over their configured monthly USD budget
 /// see the call short-circuited to <see cref="TenantBudgetExceededException"/> → 429 (per SC #13).
-/// Model 2 (dedicated stamp) tenants and unconfigured tenants pass through unchanged
+/// Model 2 tenants (a stamp the customer pays for) and unconfigured tenants pass through unchanged
 /// (observability-only via the existing <c>ai.metering.tokens</c> counter shipped by
 /// <c>spaarke-ai-architecture-redesign-r1</c> task 054).
 /// </para>

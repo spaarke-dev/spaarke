@@ -72,9 +72,11 @@ public static class CostEnvelopeIntake
                 $"'{EstimatedMonthlyUsdParameterKey}' is required — the projected monthly Azure spend of the stamp in USD " +
                 "(an empty stamp costs about $340/month before usage; see the deployment guide).");
         }
-        // Digits with an optional decimal point only — no sign (so never negative), no thousands separator, no
-        // exponent: the schema value is a JSON number the skill sends as an invariant string.
-        if (!decimal.TryParse(estimatedMonthlyUsd, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var estimate))
+        // Digits with an optional decimal point between digits only — no sign (so never negative), no thousands
+        // separator, no exponent, no whitespace, no bare leading/trailing '.': exactly the skill's
+        // ^[0-9]+(\.[0-9]+)?$ (Step 1b-ter), for a JSON number the skill sends as an invariant string.
+        if (estimatedMonthlyUsd.StartsWith('.') || estimatedMonthlyUsd.EndsWith('.')
+            || !decimal.TryParse(estimatedMonthlyUsd, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out var estimate))
         {
             return new CostEnvelopeIntakeOutcome.Invalid(InvalidEstimateRejectionCode,
                 $"'{EstimatedMonthlyUsdParameterKey}' value '{Echo(estimatedMonthlyUsd)}' is not a plain non-negative " +

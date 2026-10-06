@@ -107,7 +107,9 @@ public sealed class H13AcceptanceOptions
     /// high availability (2 × $0.016/h) $23.36 + Service Bus Standard base $10.00 = $337.04 fixed. Cosmos DB
     /// (serverless), Storage, Key Vault, Log Analytics / Application Insights, Azure OpenAI, Document Intelligence and
     /// Content Safety are consumption-billed and near zero while the stamp is empty; $400 leaves room for them.
-    /// Re-derive when customer.bicep's SKUs change. (Replaces Model1MarginalEnvelopeUsd — a "marginal share of a
+    /// Re-derive when customer.bicep's SKUs change. Note the drift check is two-sided (|drift| &gt; threshold): an empty
+    /// stamp's fixed cost is about 16 % below the envelope, and Cost Management lags by up to a day, so a stamp checked
+    /// on its first day can read far below — an advisory, not a fault (CostDriftFailsRun defaults to false). (Replaces Model1MarginalEnvelopeUsd — a "marginal share of a
     /// shared platform" that no longer exists — and Model2EmptyEnvelopeUsd.)
     /// </summary>
     public decimal DedicatedStampEnvelopeUsd { get; set; } = 400m;
@@ -157,6 +159,12 @@ public sealed class H13AcceptanceOptions
         if (string.IsNullOrWhiteSpace(TargetSlotName))
         {
             throw new InvalidOperationException("E2EAcceptance:TargetSlotName must not be blank (default: production).");
+        }
+        if (DedicatedStampEnvelopeUsd <= 0m)
+        {
+            // Task 229: a non-positive envelope makes the drift fraction 0, so H13's cost check would always pass.
+            throw new InvalidOperationException(
+                $"E2EAcceptance:DedicatedStampEnvelopeUsd must be a positive number of USD (got {DedicatedStampEnvelopeUsd}; default 400).");
         }
     }
 

@@ -4,7 +4,7 @@
     <title>Cost model for dedicated stamps: no shared-trial tier, the H0 cost envelope binds every model (tier + estimate required at intake, no warnAndProceed), one H13 envelope for an empty customer stamp re-derived from current prices</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T229 (G4, G13)</phase>
     <gate>after 228 (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>L2 API intake validation + H0/H13 code and options, intake schema, operator skill, binding docs; tests modified.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -92,5 +92,43 @@
     <trigger>A budget amount has to be chosen (e.g. a per-customer OpenAI cap) — that is the owner's number.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 40).
+    - New Core/Handlers/Preflight/CostEnvelopeIntake (static, UserProvisioningIntake pattern): tier ∈ smb | enterprise |
+      dedicated (= H0Options.DefaultCeilingsUsd keys, exact case) and estimatedMonthlyUsd = digits with an optional '.'
+      between digits (exactly the skill's ^[0-9]+(\.[0-9]+)?$). POST /api/runs (ValidateOperatorIntake) and H0 call it;
+      codes quota-cost-envelope-required-missing / -unknown-tier / -unparseable-estimate. Schema: both required, tier enum
+      without shared-trial, costEnvelopePolicy removed (now an unknown key → 400); catalog + HandlerRunInputs (required).
+    - H0: one path for every model — unusable input → Resumable refusal; over ceiling → quota-cost-overrun; no waiver.
+      Removed: costEnvelopePolicy / warnAndProceed constants + branch, RequireCostEnvelopeForModel2Dedicated, isModel2Dedicated,
+      shared-trial ceiling (−203 lines). H0Options.Validate() + ValidateOnStart: a configured ceiling for a tier intake
+      refuses (e.g. a leftover shared-trial setting) or a non-positive one fails the Worker at startup. Overrun message:
+      the remedy is a NEW run (intake is fixed at POST), invariant-culture amounts.
+    - H13: one H13AcceptanceOptions.DedicatedStampEnvelopeUsd = 400 for every model (SelectExpectedEnvelope removed);
+      re-derived from the Azure Retail Prices API 2026-10-06 (westus2, 730 h): App Service S1 Linux 58.40 + AI Search S1
+      245.28 + Managed Redis B0 HA 23.36 + Service Bus Standard 10.00 = 337.04 fixed; the rest consumption-billed.
+      Validate() refuses a non-positive envelope (would make the drift check always pass). Doc notes the two-sided drift.
+    - Skill: Step 1b-ter (prompts + validation, floor guidance), batch loader without costEnvelopePolicy, Step 2 overrun is a
+      hard stop in both modes (built-in ceilings; note to mirror any configured ceiling), Step 4.0 requires + sends both
+      ([decimal]→invariant string, no exponent), sample outputs without the $430 marginal envelope.
+    - Docs: guide §3.2 cost + new §3.2a, H0/H13 rows (H0 row also lost T228's stale "env-creation rate"), H13 criteria;
+      constraints new binding "Cost model" section; spec NFR-04 + §15 #14 (re-derived ✅); design §14 superseded note;
+      README; inventory row ✅; plan G4/G13 ✅ + new G37; CHANGELOG. BFF Services/Ai/Metering XML docs only (Model 1 =
+      Spaarke-paid dedicated stamp; corrected the false "H12c writes TenantBudget" claim) — no GenerateDocumentationFile,
+      IL identical, publish Δ 0 by construction, no test change needed (comment-only). ArchTest I2 waiver trigger reworded
+      (it named the retired shared-trial tier, so it could never fire). Load-test payloads gained T228's missing
+      subscriptionId / containerTypeId / dataverseEnvUrl (drift from T228) and T229's tier + estimate.
+    - AC4 wording: the retired names survive only as history text ("… is retired") and as test inputs proving refusal —
+      none is accepted or configured anywhere.
+    - Step 9.5: code-review 0 Critical — W1 (overrun said "resume" though intake is fixed) fixed; W2 skill $430 samples fixed;
+      W3 skill ceilings vs configured ones documented; W4 (pre-T229 runs re-preflighted) N/A — no live run exists yet; W5 I2
+      waiver fixed; S1-S5, S9-S13 fixed (new CostEnvelopeIntakeTests); S6/S7/S8 accepted (S8 documented). adr-check 0 high
+      violations — V1 tautological test replaced by validation tests; W1/W2 options validation added; W4 header fixed;
+      W3 (gate-off switch does not relax intake) accepted: POST /api/runs always requires the inputs so no run is ever
+      created without cost data — CostEnvelopeAbortsPreflight is a policy switch, not an ADR-018 capability flag;
+      W5/W6 BFF doc-only (see above); W7 → G37.
+    - Tests: ControlPlane 2208 / 0 failed (1 skip); ArchTests 831/831; Worker, Api, BFF, LoadTests 0 warnings.
+    - OWNER QUESTION (G37): nothing writes the BFF's TenantBudget:Tenants entry, so a Spaarke-paid Model 1 stamp has no
+      OpenAI spend cap — needs the owner's budget amount.
+  </notes>
 </task>

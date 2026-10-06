@@ -1373,7 +1373,7 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var (status, body, factory) = await PostT228RunAsync("Model1", p => p["costEnvelopePolicy"] = "warnAndProceed");
         using (factory)
         {
-            status.Should().Be(HttpStatusCode.BadRequest, "an overrun has no waiver for a dedicated stamp (T229)");
+            status.Should().Be(HttpStatusCode.BadRequest, "the waiver key is retired, so it is an unknown intake key (T229)");
             ReadProblemDetail(body).Should().Contain("costEnvelopePolicy");
             factory.Repository.CreatedRuns.Should().BeEmpty();
         }

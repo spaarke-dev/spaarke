@@ -145,7 +145,16 @@ public static class HandlersModule
         // retired shared-trial). Operator overrides via appsettings / env:
         //   "H0": { "CostEnvelopeAbortsPreflight": false }
         //   "H0__CostEnvelopeAbortsPreflight": "false"
-        services.Configure<H0Options>(configuration.GetSection(H0Options.SectionName));
+        // Task 229: validated when the host starts — a ceiling for a tier intake refuses (e.g. a leftover
+        // shared-trial setting) is a misconfiguration, not something to ignore (ADR-010 ValidateOnStart).
+        services.AddOptions<H0Options>()
+            .Bind(configuration.GetSection(H0Options.SectionName))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "H0Options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
         // H0 handler — Scoped per IProvisioningHandler contract + parity
         // with IHandlerEnqueuer's Scoped registration. Concrete-only: the

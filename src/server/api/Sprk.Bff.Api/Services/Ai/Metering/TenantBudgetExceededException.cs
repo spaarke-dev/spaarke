@@ -3,7 +3,7 @@ using Sprk.Bff.Api.Configuration;
 namespace Sprk.Bff.Api.Services.Ai.Metering;
 
 /// <summary>
-/// Thrown by <see cref="ITenantBudgetPolicy"/> when a Model 1 (shared trial/SMB) tenant exceeds
+/// Thrown by <see cref="ITenantBudgetPolicy"/> when a Model 1 tenant (Spaarke-paid dedicated stamp — D-12) exceeds
 /// its configured monthly USD budget for AI token spend (spec.md FR-13 §M1 + SC #13). Endpoints
 /// convert to 429 ProblemDetails via <see cref="TenantBudgetResults.AsTenantBudgetExceeded429"/>.
 /// </summary>

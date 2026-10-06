@@ -7,8 +7,9 @@
 //
 // PURPOSE:
 //   The SKILL.md Step 2 client-side cost-envelope check (BAT-10, Wave 6
-//   punchlist landing commit dc77381f8) reads `intake.costEnvelopePolicy` +
-//   `intake.tier` to fail-fast BEFORE POST /api/runs. That's a good first
+//   punchlist landing commit dc77381f8) reads `intake.tier` +
+//   `intake.estimatedMonthlyUsd` to fail-fast BEFORE POST /api/runs (task 229:
+//   POST /api/runs applies the same rules too). That's a good first
 //   line of defense — but a rogue direct-API caller (retry script bypassing
 //   the skill, ad-hoc curl, a future non-skill orchestrator) can enqueue a
 //   run without ever exercising the client check. Without a server-side
@@ -116,6 +117,30 @@ public sealed class H0Options
     /// asks for a tier <see cref="CostEnvelopeIntake"/> accepted, which is
     /// always in the built-in table).
     /// </summary>
+    /// <summary>
+    /// Startup validation (HandlersModule — ValidateOnStart; task 229). Every configured ceiling must belong to an
+    /// accepted tier and be positive: a ceiling for any other tier (e.g. a leftover <c>shared-trial</c> setting) can
+    /// never be used, because <see cref="CostEnvelopeIntake"/> refuses that tier, and silently ignoring it would hide
+    /// a misconfiguration. Throws <see cref="InvalidOperationException"/> naming the setting.
+    /// </summary>
+    public void Validate()
+    {
+        foreach (var (tier, ceiling) in TierMonthlyCostCeilingsUsd)
+        {
+            if (!CostEnvelopeIntake.Tiers.Contains(tier, StringComparer.Ordinal))
+            {
+                throw new InvalidOperationException(
+                    $"H0:TierMonthlyCostCeilingsUsd:{tier} is not an accepted tier ({string.Join(", ", CostEnvelopeIntake.Tiers)}; " +
+                    "exact case). The shared-trial tier is retired (task 229) — remove the setting.");
+            }
+            if (ceiling <= 0m)
+            {
+                throw new InvalidOperationException(
+                    $"H0:TierMonthlyCostCeilingsUsd:{tier} must be a positive number of USD (got {ceiling}).");
+            }
+        }
+    }
+
     public decimal? GetCeilingUsd(string tier)
     {
         if (string.IsNullOrWhiteSpace(tier))

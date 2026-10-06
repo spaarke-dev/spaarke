@@ -12,9 +12,9 @@ namespace Sprk.Bff.Api.Services.Ai.Metering;
 /// <see cref="Tenants"/> with <see cref="TenantBudgetEntry.TenancyMode"/> = <c>Model1Gated</c>.
 /// </para>
 /// <para>
-/// Written by the H12c runtime-references handler (Phase D / customer-provisioning-orchestration-r1
-/// task 072) when the customer's tenancy model is decided at provisioning time. Absent an entry,
-/// the tenant is not gated (Model 2 default).
+/// Intended to be written at provisioning time for Model 1 customers (task 077 follow-on); as of
+/// customer-provisioning-orchestration-r1 task 229 (2026-10-06) no handler writes it, so every
+/// stamp runs ungated until it is configured. Absent an entry, the tenant is not gated (Model 2 default).
 /// </para>
 /// </remarks>
 public sealed class TenantBudgetOptions
@@ -70,8 +70,8 @@ public enum TenantBudgetTenancyMode
     Model2Observation = 0,
 
     /// <summary>
-    /// Model 1 (shared trial/SMB tier — spec.md §3A). Over-budget attempts return HTTP 429 to
-    /// prevent one runaway tenant burning the shared platform OpenAI quota (SC #13 acceptance).
+    /// Model 1 (a dedicated stamp in Spaarke's tenant, paid by Spaarke — D-12). Over-budget attempts
+    /// return HTTP 429 so one customer cannot run up Spaarke's OpenAI bill unbounded (SC #13 acceptance).
     /// </summary>
     Model1Gated = 1,
 }

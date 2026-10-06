@@ -165,6 +165,13 @@ Full mechanic: `.claude/patterns/provisioning/run-context-contract.md`; evidence
 - **DAG**: H10 ← H3, H5 and H6 ← H10 — H6/H7 sign in as the BFF app registration, an application user only once H10 has registered it. H11 ← H10, H7.
 - **The L2 identity holds Owner on each customer subscription** (owner decision 2026-10-06 — customer.bicep writes role assignments): granted by the operator with `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep` at that subscription (PRQ-S-04). It is never deployed on the platform subscription, and L2 never grants itself access to a subscription.
 
+## Cost model — one dedicated stamp per run, both models (BINDING, task 229)
+
+- Every run deploys ONE dedicated stamp (`customer.bicep`) into the customer's own subscription — Model 1 paid by Spaarke, Model 2 by the customer. No cost concept may assume a shared platform: no `shared-trial` tier, no "marginal" or "shared floor" envelope, no per-model cost branch.
+- `tier` (smb | enterprise | dedicated = the keys of `H0Options.DefaultCeilingsUsd`) and `estimatedMonthlyUsd` are **required for every model**, validated by ONE rule set (`Handlers/Preflight/CostEnvelopeIntake`) at POST /api/runs and again by H0; the intake schema's `tier` enum equals that table (parity test).
+- H0 refuses an estimate above the tier ceiling (`quota-cost-overrun`, Resumable) with **no waiver** — `costEnvelopePolicy` / `warnAndProceed` are retired and refused as unknown keys. `H0Options.CostEnvelopeAbortsPreflight=false` is the only switch.
+- H13 compares the subscription's cost with ONE `H13AcceptanceOptions.DedicatedStampEnvelopeUsd` ($400; $337.04 fixed at 2026-10-06 list prices). Re-derive it (and the guide §3.2 breakdown) whenever `customer.bicep`'s SKUs change.
+
 ## SPE: container type per model, container per customer — app-only isolation is in code (BINDING, owner D28 / T227b)
 
 - One container type per model (`Spaarke Model 1`), one ROOT container per customer (per Dataverse environment) — H8's; secure-record containers (one per secure project / matter / work assignment — `ProvisionProjectEndpoint`) and any further business-unit container (SPE admin plane) are created by the BFF at runtime, bound to their business unit and marked — never by provisioning (T227g). H8 grants each stamp's UAMI application `full` and its BFF app registration delegated `full` on the registration, as the owning app.

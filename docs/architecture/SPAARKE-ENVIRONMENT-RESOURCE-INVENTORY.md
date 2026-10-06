@@ -249,7 +249,7 @@ they are defects, not options.
 | `sprk-{env}-shared-bff-uami` | none (caller stack deleted; `bff-runtime-rbac.bicep` names only the stamp UAMI) | T225a ✅ |
 | Shared BFF App Service `spaarke-bff-{env}` in `rg-spaarke-{env}` as a customer runtime | none in code: `bffAppServiceRg` / `bffAppServiceName` and the skill's `{bffAppServiceId}` token removed | T227a ✅ |
 | Shared BFF app registrations `Spaarke BFF - Trial 1` / `Spaarke BFF - Model 1` | none in code: `-CreateBffApp`, `bffApiAppId` / `bffProdBase`, SKILL Step 0.5c BFF checks and PRQ-C-05 removed | T227a ✅ |
-| H0 `shared-trial` cost tier; `Model1MarginalEnvelopeUsd` (marginal-on-shared-platform) | `H0Options`, `H13AcceptanceOptions` | T229 |
+| H0 `shared-trial` cost tier; `Model1MarginalEnvelopeUsd` (marginal-on-shared-platform) | none: tiers are smb / enterprise / dedicated, required for every model; H13 has one `DedicatedStampEnvelopeUsd` | T229 ✅ (2026-10-06) |
 | H13 I2 probe against a shared AI Search `tenantId`-filter template | `AiSearchTenantFilterInvariantProbe` Model 1 branch | ✅ T225b (2026-10-02) — one path on the stamp's own service |
 | Prompt Flow secrets (`PromptFlow-Endpoint`, `PromptFlow-Key`) | `manifest.yaml:502-528` | T226 (D5 — BFF readers removed 2026-08-21) |
 

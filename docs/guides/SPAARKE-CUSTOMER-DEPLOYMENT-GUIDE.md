@@ -232,6 +232,24 @@ pass anyway.**
 **Redis (Azure Managed Redis Balanced_B0, HA, Entra only)** · Storage · Key Vault · Service Bus · Document Intelligence ·
 **Content Safety (T246, Entra only)** · App Insights + Log Analytics · UAMI · Power BI workspace.
 
+**Cost (T229)**: one envelope per stamp in both models — Model 1 paid by Spaarke, Model 2 by the customer. An empty
+stamp's fixed cost at 2026-10-06 list prices (westus2, 730 h): App Service S1 Linux $58.40 + AI Search Standard S1 $245.28 +
+Managed Redis Balanced_B0 with high availability $23.36 + Service Bus Standard $10.00 = **$337.04/month**; Cosmos DB
+(serverless), Storage, Key Vault, Log Analytics / App Insights, Azure OpenAI, Document Intelligence and Content Safety are
+consumption-billed. H13 compares the subscription's cost with **$400/month** (`H13AcceptanceOptions.DedicatedStampEnvelopeUsd`,
+> 20 % drift flagged). Re-derive both numbers when `customer.bicep`'s SKUs change.
+
+#### 3.2a Cost envelope at intake (T229)
+
+The intake carries `tier` and `estimatedMonthlyUsd` for **every** model (schema, POST /api/runs and H0 apply the same
+rules — `CostEnvelopeIntake`). `estimatedMonthlyUsd` is the stamp's projected monthly Azure spend: the fixed cost above
+plus the customer's expected OpenAI, Document Intelligence, Content Safety, Cosmos DB, storage and log volume. `tier` is
+the budget class whose ceiling covers it — `smb` $700 · `enterprise` $2,500 · `dedicated` $5,000 per month
+(`H0Options.DefaultCeilingsUsd`; a deployment may change a tier's ceiling with `H0__TierMonthlyCostCeilingsUsd__{tier}`).
+H0 refuses an estimate above the ceiling (`quota-cost-overrun`, Resumable) — there is no override; the operator picks the
+tier that covers the stamp. The shared-trial tier and its `costEnvelopePolicy = warnAndProceed` waiver are retired (D-12):
+POST /api/runs refuses both.
+
 **Keyless (owner D13, T244)**: AI Search, Azure OpenAI, Document Intelligence, Content Safety (T246), Service Bus, Cosmos DB
 and (when enabled) SignalR have local (key/SAS) auth disabled, Storage has shared-key access disabled, and Redis has access keys
 disabled (T242). The BFF reaches every one with the stamp UAMI; L2 holds Search roles for H2b and the H13 probe. The
@@ -466,7 +484,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 
 | # | Handler | Purpose | Gate | Idempotency key |
 |---|---|---|---|---|
-| **H0** | Preflight + quota checks | Validate run params + Azure OpenAI TPM headroom + Dataverse env-creation rate + subscription vCPU + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
+| **H0** | Preflight + quota checks | Validate run params + **cost envelope** (§3.2a — `tier` + `estimatedMonthlyUsd`, every model; `quota-cost-envelope-*` / `quota-cost-overrun`, no override) + Azure OpenAI TPM headroom + subscription vCPU + SPE owner check (`SpeOwnerCredential`: the Worker has an owner entry for the run's container type, signs in as that owning app through its federated credential, and GETs the container type's registration). Resumable rejections: `spe-owner-not-configured` (no `containerTypeId` on the run, or no owner entry for it), `spe-owner-token-failed` (FIC token exchange failed, or Graph refused the owning-app token with 401/403 — e.g. missing consent), `spe-container-type-not-registered` (registration GET 404). No 24 h age gate | Quota headroom sufficient for +1 provision | `preflight-{customerId}-{paramHash}` |
 | **H0.5** | Consent-capture callback | (Model 2 only) Anonymous HMAC-verified `POST /api/onboarding/consent-callback`; captures customer admin `tid`; kicks pipeline | Re-consent semantics: no-op if run exists Ready/Running; restart from H0 if Failed/Cancelled | `consent-{customerId}-{tid}` |
 | **H1** | Subscription readiness | ARM verification the customer's subscription is reachable **in the run's tenant** and holds **no other customer's** `rg-spaarke-*` resource group (T228, ADR-027 — checked before H1 registers resource providers); Lighthouse delegation (`CustomerOwned` only) | `subready-subscription-not-dedicated` / `-unreachable` are Resumable, nothing written | `subready-{customerId}` |
 | **H2a** | Per-customer Bicep infra | Deploy the CI-published `customer.bicep` ARM template: RG, KV, Storage, Service Bus, Cosmos, Redis (per customer since D-12; Azure Managed Redis with access keys disabled since T242 — the BFF connects with the stamp UAMI via `Redis__Endpoint`), OpenAI, AI Search, Doc Intelligence, Content Safety (T246), App Insights + Log Analytics, optional SignalR — all keyless (T244: local auth / shared key disabled; L2 gets Search Service Contributor + Search Index Data Reader on the stamp search service). Structural checks (pinned model versions, no `SystemAssigned` KV-reference identity) run on the same template bytes | — | `infra-{customerId}-{bicepVer}` — `bicepVer` = content version of the deployed template |
@@ -483,7 +501,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
-| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope ≤ target | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
+| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope (one $400/month envelope for both models, §3.2) | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
 | **H14** | Post-deploy integrations | (a) Exchange mailbox access: the stamp UAMI gets the 4 `Application Mail.*` roles scoped to the customer's group (RBAC for Applications — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | H13 T4: every role held in scope, none outside | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
@@ -1095,7 +1113,7 @@ Three DAG-parallel sub-steps:
 - **All 7 §4B T1–T7 silent-fail traps cleared** (see §9)
 - `scripts/naming-conformance-check.ps1` exits 0
 - **All 5 §4D I1–I5 tenant-isolation invariants sample-verified** (see §8)
-- Cost envelope ≤ target per pricing model
+- Cost envelope: the subscription's month-to-date cost, extrapolated, within 20 % of $400/month (one envelope for both models — §3.2, T229)
 
 **`sprk_dataverseenvironment.Setup Status` transitions to `Ready` only if H13 exits 0.**
 
