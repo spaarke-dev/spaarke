@@ -1064,31 +1064,69 @@ public sealed class TodoGenerationService : IScheduledJob
         // IGenericEntityService surface rather than an unwrapped ServiceClient — same query, and Rules 2/4/5 become
         // testable at the module boundary (their Assigned-To precedence is pinned by TodoGenerationServiceTests).
 
-        var query = new QueryExpression("sprk_event")
+        // Task 097 round 10. The rule is for ASSIGNED events: sprk_assignedto — the column the To Do's "Assigned: X" person
+        // comes from (TaskScanRecord.AssignedToContactId) — must be set. Without it every open-work event qualified, and
+        // since new events default to Draft (open work, owner decision A) that was every event (spaarkedev1 2026-10-06:
+        // 69 candidates, 58 unassigned; the old Open-only query had 12 unassigned among 20).
+        var records = new List<TaskScanRecord>();
+        var page = 1;
+        string? pagingCookie = null;
+        while (true)
         {
-            ColumnSet = new ColumnSet("sprk_eventid", "sprk_eventname", AssignedToDefaults.AssignedToAttribute),
-            TopCount = 100
-        };
+            var query = new QueryExpression("sprk_event")
+            {
+                ColumnSet = new ColumnSet("sprk_eventid", "sprk_eventname", AssignedToDefaults.AssignedToAttribute),
+                // Paged, not TopCount-capped: a cap silently dropped every candidate past the 100th.
+                PageInfo = new PagingInfo { Count = AssignedTaskPageSize, PageNumber = page, PagingCookie = pagingCookie },
+            };
 
-        // OWNER DECISION A (task 097 round 9): the ONE "open work" predicate, EventStatusCode.IsOpenWork, selects the
-        // events — expressed exactly as Rules 1 and 3 express it (statuscode ne each NOT-open status), so Draft, Open,
-        // On Hold and Reassigned assigned events all get their "Assigned:" To Do. (Was statuscode eq Open only.)
-        foreach (var excluded in ExcludedFromGeneration)
-            query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, excluded);
+            // OWNER DECISION A (task 097 round 9): the ONE "open work" predicate, EventStatusCode.IsOpenWork, selects the
+            // events — expressed exactly as Rules 1 and 3 express it (statuscode ne each NOT-open status).
+            foreach (var excluded in ExcludedFromGeneration)
+                query.Criteria.AddCondition("statuscode", ConditionOperator.NotEqual, excluded);
+            query.Criteria.AddCondition(AssignedToDefaults.AssignedToAttribute, ConditionOperator.NotNull);
 
-        var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
+            // Deterministic order — the same as Rules 1 and 3 (DataverseWebApiService.BuildEventQueryUrl): due date
+            // ascending, newest first, then the id as the final tiebreak, so pages never overlap or skip rows.
+            query.AddOrder("sprk_duedate", OrderType.Ascending);
+            query.AddOrder("createdon", OrderType.Descending);
+            query.AddOrder("sprk_eventid", OrderType.Ascending);
 
-        return results.Entities.Select(e => new TaskScanRecord
-        {
-            Id = e.Id,
-            Subject = e.GetAttributeValue<string>("sprk_eventname") ?? string.Empty,
-            AssignedToContactId = e.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is { } assignee
-                && assignee.Id != Guid.Empty
-                ? assignee.Id
-                : null,
-        });
+            var results = await _dataverse!.RetrieveMultipleAsync(query, ct);
+            records.AddRange(results.Entities.Select(e => new TaskScanRecord
+            {
+                Id = e.Id,
+                Subject = e.GetAttributeValue<string>("sprk_eventname") ?? string.Empty,
+                AssignedToContactId = e.GetAttributeValue<EntityReference>(AssignedToDefaults.AssignedToAttribute) is { } assignee
+                    && assignee.Id != Guid.Empty
+                    ? assignee.Id
+                    : null,
+            }));
+
+            if (!results.MoreRecords)
+                break;
+
+            if (page >= MaxAssignedTaskPages)
+            {
+                // Never silent: a run that stops early says so; the next run continues from the same ordered set.
+                _logger.LogWarning(
+                    "TodoGeneration Rule 5: stopped after {Pages} pages ({Count} assigned events); more remain.",
+                    page, records.Count);
+                break;
+            }
+
+            page++;
+            pagingCookie = results.PagingCookie;
+        }
+
+        return records;
     }
 
+    /// <summary>Rule 5's page size.</summary>
+    internal const int AssignedTaskPageSize = 100;
+
+    /// <summary>Rule 5's safety bound on pages per run (logged when reached; 50 × 100 = 5000 events).</summary>
+    internal const int MaxAssignedTaskPages = 50;
     // ──────────────────────────────────────────────────────────────────────────
     // Test seam
     // ──────────────────────────────────────────────────────────────────────────

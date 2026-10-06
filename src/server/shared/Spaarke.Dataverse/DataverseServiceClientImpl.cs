@@ -501,7 +501,27 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// come from the target record. Resolver-lookup failures are non-fatal (they are for display); the
     /// entity-specific lookup that drives the Analyses subgrid is always staged.
     /// </summary>
-    private async Task PopulateAnalysisRegardingAsync(Entity analysis, AnalysisRegardingTarget target, CancellationToken ct)
+    private Task PopulateAnalysisRegardingAsync(Entity analysis, AnalysisRegardingTarget target, CancellationToken ct) =>
+        PopulateAnalysisRegardingAsync(
+            analysis,
+            target,
+            QueryRecordTypeRefAsync,
+            (entity, id, columns, token) => _serviceClient.RetrieveAsync(entity, id, new ColumnSet(columns), token),
+            _logger,
+            ct);
+
+    /// <summary>
+    /// The body of <see cref="PopulateAnalysisRegardingAsync(Entity, AnalysisRegardingTarget, CancellationToken)"/> with
+    /// its two Dataverse reads passed in (task 097 round 10), so the I/O path is testable without a live
+    /// <see cref="ServiceClient"/>.
+    /// </summary>
+    internal static async Task PopulateAnalysisRegardingAsync(
+        Entity analysis,
+        AnalysisRegardingTarget target,
+        Func<string, CancellationToken, Task<Entity?>> readRecordTypeRef,
+        Func<string, Guid, string[], CancellationToken, Task<Entity>> retrieve,
+        ILogger logger,
+        CancellationToken ct)
     {
         var entityLogicalName = target.EntityLogicalName;
 
@@ -513,54 +533,81 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 nameof(target));
         }
 
-        string? resolvedName = null;
-        string? resolvedNumber = null;
-        Guid? recordTypeRefId = null;
-        string? recordTypeRefName = null;
-
-        try
-        {
-            // The catalog row first: it names the reference-number column (task 097 round 9 — never a hard-coded map).
-            var recordTypeRef = await QueryRecordTypeRefAsync(entityLogicalName, ct);
-            var nameField = RegardingRecordType.GetPrimaryNameField(entityLogicalName);
-            var numberField = RegardingRecordType.RecordNumberFieldOf(recordTypeRef);
-            if (nameField is not null || numberField is not null)
-            {
-                try
-                {
-                    var columns = new List<string>(2);
-                    if (nameField is not null) columns.Add(nameField);
-                    if (numberField is not null) columns.Add(numberField);
-                    var record = await _serviceClient.RetrieveAsync(
-                        entityLogicalName, target.RecordId, new ColumnSet(columns.ToArray()), ct);
-                    if (nameField is not null) resolvedName = record.GetAttributeValue<string>(nameField);
-                    if (numberField is not null) resolvedNumber = record.GetAttributeValue<string>(numberField);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Regarding name/number retrieve failed for {Entity} {Id}", entityLogicalName, target.RecordId);
-                }
-            }
-
-            if (recordTypeRef is not null)
-            {
-                recordTypeRefId = recordTypeRef.Id;
-                recordTypeRefName = recordTypeRef.GetAttributeValue<string>("sprk_recorddisplayname");
-            }
-            else
-            {
-                _logger.LogWarning("No sprk_recordtype_ref found for {Entity}; sprk_regardingrecordtype left unset.", entityLogicalName);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Denormalized-value resolution is for display; a failure here must not fail the whole
-            // promotion. The stager below still writes the load-bearing entity-specific lookup.
-            _logger.LogWarning(ex, "Failed to resolve denormalized regarding values for analysis→{Entity} {Id}",
-                entityLogicalName, target.RecordId);
-        }
+        var (resolvedName, resolvedNumber, recordTypeRefId, recordTypeRefName) = await ResolveAnalysisRegardingValuesAsync(
+            entityLogicalName, target.RecordId, readRecordTypeRef, retrieve, logger, ct);
 
         StageAnalysisRegardingFields(analysis, target, resolvedName, resolvedNumber, recordTypeRefId, recordTypeRefName);
+    }
+
+    /// <summary>
+    /// The denormalized regarding values for an analysis target: the record's true name + reference number and the
+    /// <c>sprk_recordtype_ref</c> row. Every read is display-only and non-fatal, and each is guarded on its OWN
+    /// (task 097 round 10): a catalog fault costs the number and the record-type lookup, never the name; a catalog
+    /// that names a column the record lacks faults the combined read, so the name is read again on its own. The two
+    /// reads are passed in by the caller.
+    /// </summary>
+    private static async Task<(string? Name, string? Number, Guid? RecordTypeRefId, string? RecordTypeRefName)>
+        ResolveAnalysisRegardingValuesAsync(
+            string entityLogicalName,
+            Guid recordId,
+            Func<string, CancellationToken, Task<Entity?>> readRecordTypeRef,
+            Func<string, Guid, string[], CancellationToken, Task<Entity>> retrieve,
+            ILogger logger,
+            CancellationToken ct)
+    {
+        // The catalog row names the reference-number column (task 097 round 9 — never a hard-coded map).
+        Entity? recordTypeRef = null;
+        try
+        {
+            recordTypeRef = await readRecordTypeRef(entityLogicalName, ct);
+            if (recordTypeRef is null)
+                logger.LogWarning("No sprk_recordtype_ref found for {Entity}; sprk_regardingrecordtype left unset.", entityLogicalName);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "sprk_recordtype_ref read failed for {Entity}; the regarding number and record type are left unset.",
+                entityLogicalName);
+        }
+
+        var nameField = RegardingRecordType.GetPrimaryNameField(entityLogicalName);
+        var numberField = RegardingRecordType.RecordNumberFieldOf(recordTypeRef);
+        string? name = null;
+        string? number = null;
+        if (nameField is not null || numberField is not null)
+        {
+            try
+            {
+                var record = await retrieve(
+                    entityLogicalName, recordId, new[] { nameField, numberField }.OfType<string>().ToArray(), ct);
+                if (nameField is not null) name = record.GetAttributeValue<string>(nameField);
+                if (numberField is not null) number = record.GetAttributeValue<string>(numberField);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                if (nameField is not null && numberField is not null)
+                {
+                    logger.LogWarning(ex,
+                        "Name+number read failed for {Entity} {Id} (number column '{NumberField}'); retrying the name alone.",
+                        entityLogicalName, recordId, numberField);
+                    try
+                    {
+                        name = (await retrieve(entityLogicalName, recordId, new[] { nameField }, ct))
+                            .GetAttributeValue<string>(nameField);
+                    }
+                    catch (Exception retry) when (retry is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        logger.LogDebug(retry, "Regarding name retrieve failed for {Entity} {Id}", entityLogicalName, recordId);
+                    }
+                }
+                else
+                {
+                    logger.LogDebug(ex, "Regarding name/number retrieve failed for {Entity} {Id}", entityLogicalName, recordId);
+                }
+            }
+        }
+
+        return (name, number, recordTypeRef?.Id, recordTypeRef?.GetAttributeValue<string>("sprk_recorddisplayname"));
     }
 
     /// <summary>

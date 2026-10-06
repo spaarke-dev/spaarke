@@ -903,6 +903,24 @@ public static class EventEndpoints
             {
                 logger.LogWarning(ex,
                     "Regarding name/number read failed for {Entity}; keeping the request's name.", logicalName);
+
+                // Task 097 round 10: a catalog row can name a number column this environment lacks — the combined read
+                // then faults. Read the name again on its own so a bad number column never costs the server's name.
+                if (nameField is not null && numberField is not null)
+                {
+                    try
+                    {
+                        var nameOnly = await entities.RetrieveAsync(logicalName, regardingId, new[] { nameField }, ct);
+                        if (nameOnly.GetAttributeValue<string>(nameField) is { Length: > 0 } serverName)
+                        {
+                            name = serverName;
+                        }
+                    }
+                    catch (Exception retry) when (retry is not OperationCanceledException || !ct.IsCancellationRequested)
+                    {
+                        logger.LogDebug(retry, "Regarding name read failed for {Entity}; keeping the request's name.", logicalName);
+                    }
+                }
             }
         }
 

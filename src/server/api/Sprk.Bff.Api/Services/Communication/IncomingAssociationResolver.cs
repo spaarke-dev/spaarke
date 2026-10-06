@@ -767,31 +767,25 @@ public sealed class IncomingAssociationResolver
             // number (UAT R5 / task 132). Mirror the outbound denormalization exactly: name = name,
             // number = number.
             var nameField = GetPrimaryNameField(primaryEntityLogicalName);
+
             // Task 097 round 9: the number column comes from the type's sprk_recordtype_ref row (cached), the same
-            // source every regarding writer uses — no hard-coded per-entity map.
-            var numberField = (await ResolveRecordTypeRefAsync(primaryEntityLogicalName, ct))?.NumberField;
-            string? retrievedName = null;
-            string? retrievedNumber = null;
-            if (nameField is not null || numberField is not null)
+            // source every regarding writer uses — no hard-coded per-entity map. Round 10: the catalog read has its OWN
+            // guard — a fault (timeout, throttle) costs only the number (and the record-type lookup below); the name and
+            // URL are still written, exactly as before the catalog was consulted here.
+            (Guid Id, string DisplayName, string? NumberField)? recordTypeRef = null;
+            try
             {
-                try
-                {
-                    var columns = new List<string>(2);
-                    if (nameField is not null) columns.Add(nameField);
-                    if (numberField is not null) columns.Add(numberField);
-                    var record = await _genericEntityService.RetrieveAsync(
-                        primaryEntityLogicalName, primaryRef.Id, columns.ToArray(), ct);
-                    if (nameField is not null)
-                        retrievedName = record.GetAttributeValue<string>(nameField);
-                    if (numberField is not null)
-                        retrievedNumber = record.GetAttributeValue<string>(numberField);
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogDebug(ex, "Could not retrieve name/number for {Entity} {Id}",
-                        primaryEntityLogicalName, primaryRef.Id);
-                }
+                recordTypeRef = await ResolveRecordTypeRefAsync(primaryEntityLogicalName, ct);
             }
+            catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogWarning(ex,
+                    "sprk_recordtype_ref read failed for {Entity}; the regarding number and record type are left unset.",
+                    primaryEntityLogicalName);
+            }
+
+            var (retrievedName, retrievedNumber) = await ReadNameAndNumberAsync(
+                primaryEntityLogicalName, primaryRef.Id, nameField, recordTypeRef?.NumberField, ct);
 
             // Name: the record's actual primary name wins; fall back to the reference Name only when the
             // retrieve yielded nothing (never leave the field holding the record NUMBER).
@@ -805,8 +799,7 @@ public sealed class IncomingAssociationResolver
             // Set sprk_regardingrecordurl
             fields["sprk_regardingrecordurl"] = BuildRecordUrl(primaryEntityLogicalName, cleanId);
 
-            // Set sprk_regardingrecordtype (Lookup to sprk_recordtype_ref)
-            var recordTypeRef = await ResolveRecordTypeRefAsync(primaryEntityLogicalName, ct);
+            // Set sprk_regardingrecordtype (Lookup to sprk_recordtype_ref) — the row read above.
             if (recordTypeRef.HasValue)
             {
                 fields["sprk_regardingrecordtype"] = new EntityReference(
@@ -867,8 +860,51 @@ public sealed class IncomingAssociationResolver
             return entry;
         }
 
-        _recordTypeRefCache[entityLogicalName] = null;
+        // Round 10: a MISSING row is not cached — this resolver is a singleton with no TTL, so a cached miss would hide a
+        // row added later for the life of the process. Found rows are cached as before.
         return null;
+    }
+
+    /// <summary>
+    /// The target's primary name and reference number. Task 097 round 10: when the combined read FAULTS and a number
+    /// column was asked for (a catalog can name a column this environment does not have — the whole read then fails), the
+    /// name is read again on its own, so a bad number column never costs the name.
+    /// </summary>
+    private async Task<(string? Name, string? Number)> ReadNameAndNumberAsync(
+        string entityLogicalName, Guid recordId, string? nameField, string? numberField, CancellationToken ct)
+    {
+        if (nameField is null && numberField is null)
+            return (null, null);
+
+        try
+        {
+            var columns = new[] { nameField, numberField }.OfType<string>().ToArray();
+            var record = await _genericEntityService.RetrieveAsync(entityLogicalName, recordId, columns, ct);
+            return (nameField is null ? null : record.GetAttributeValue<string>(nameField),
+                numberField is null ? null : record.GetAttributeValue<string>(numberField));
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            if (numberField is null || nameField is null)
+            {
+                _logger.LogDebug(ex, "Could not retrieve name/number for {Entity} {Id}", entityLogicalName, recordId);
+                return (null, null);
+            }
+
+            _logger.LogWarning(ex,
+                "Name+number read failed for {Entity} {Id} (number column '{NumberField}'); retrying the name alone.",
+                entityLogicalName, recordId, numberField);
+            try
+            {
+                var record = await _genericEntityService.RetrieveAsync(entityLogicalName, recordId, new[] { nameField }, ct);
+                return (record.GetAttributeValue<string>(nameField), null);
+            }
+            catch (Exception retry) when (retry is not OperationCanceledException || !ct.IsCancellationRequested)
+            {
+                _logger.LogDebug(retry, "Could not retrieve the name for {Entity} {Id}", entityLogicalName, recordId);
+                return (null, null);
+            }
+        }
     }
 
     /// <summary>

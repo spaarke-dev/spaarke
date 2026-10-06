@@ -42,6 +42,7 @@ public class TodoGenerationOpenWorkTests
         _dataverse.Setup(d => d.RetrieveAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string entity, Guid id, string[] _, CancellationToken _) => new Entity(entity, id));
         StoreEventsForRules1And3(overdue: null, upcoming: null);
+        StoreEvents();
     }
 
     public static TheoryData<int, bool> EveryLiveStatus => new()
@@ -59,17 +60,75 @@ public class TodoGenerationOpenWorkTests
 
     // ── Rule 5: assigned tasks ────────────────────────────────────────────────────────────────────────────────
 
+    private static readonly Guid AssigneeContact = Guid.Parse("97097097-0010-4000-8000-0000000000c1");
+
     [Theory]
     [MemberData(nameof(EveryLiveStatus))]
     public async Task Rule5_AnAssignedEvent_GetsAnAssignedTodo_ExactlyWhenItIsOpenWork(int status, bool expected)
     {
-        StoreAssignedEvent(status);
+        StoreEvents(Event(EventId, "Review NDA", status, AssigneeContact));
 
         await CreateService().RunGenerationPassAsync(CancellationToken.None);
 
         _created.Any(t => ((string)t["sprk_name"]).StartsWith("Assigned:")).Should().Be(expected,
             $"{EventStatusCode.GetDisplayName(status)} {(expected ? "is" : "is not")} open work (owner decision A)");
         expected.Should().Be(EventStatusCode.IsOpenWork(status), "the expectation table IS the predicate");
+    }
+
+    // ── Round 10: Rule 5 is for ASSIGNED events (sprk_assignedto set), ordered, and paged ─────────────────────
+
+    [Theory]
+    [InlineData(1)]          // Draft — every new event's default
+    [InlineData(659490001)]  // Open
+    public async Task Rule5_AnUnassignedOpenWorkEvent_GetsNoTodo(int status)
+    {
+        StoreEvents(Event(EventId, "Unassigned filing", status, assignee: null));
+
+        await CreateService().RunGenerationPassAsync(CancellationToken.None);
+
+        _created.Should().NotContain(t => ((string)t["sprk_name"]).StartsWith("Assigned:"),
+            "the rule is for ASSIGNED events; an event nobody is assigned to has no one to remind");
+    }
+
+    [Theory]
+    [InlineData(1)]          // Draft
+    [InlineData(659490006)]  // On Hold
+    [InlineData(659490007)]  // Reassigned
+    public async Task Rule5_AnAssignedDraftOnHoldOrReassignedEvent_GetsOne(int status)
+    {
+        StoreEvents(Event(EventId, "Assigned filing", status, AssigneeContact));
+
+        await CreateService().RunGenerationPassAsync(CancellationToken.None);
+
+        _created.Should().ContainSingle(t => (string)t["sprk_name"] == "Assigned: Assigned filing");
+    }
+
+    [Fact]
+    public async Task Rule5_SendsADeterministicOrder_LikeRules1And3()
+    {
+        StoreEvents();
+
+        await CreateService().RunGenerationPassAsync(CancellationToken.None);
+
+        _assignedQueries.Should().NotBeEmpty();
+        _assignedQueries[0].Orders.Select(o => (o.AttributeName, o.OrderType)).Should().Equal(
+            ("sprk_duedate", OrderType.Ascending), ("createdon", OrderType.Descending), ("sprk_eventid", OrderType.Ascending));
+        _assignedQueries[0].TopCount.Should().BeNull("paged, never TopCount-capped");
+    }
+
+    [Fact]
+    public async Task Rule5_ReadsEveryPage_NotOnlyTheFirstHundred()
+    {
+        // 150 assigned open events: the former TopCount=100 silently dropped the last 50.
+        var events = Enumerable.Range(1, 150)
+            .Select(i => Event(Guid.NewGuid(), $"Task {i:000}", EventStatusCode.Open, AssigneeContact))
+            .ToArray();
+        StoreEvents(events);
+
+        await CreateService().RunGenerationPassAsync(CancellationToken.None);
+
+        _created.Count(t => ((string)t["sprk_name"]).StartsWith("Assigned:")).Should().Be(150);
+        _assignedQueries.Select(q => q.PageInfo.PageNumber).Should().Equal(1, 2);
     }
 
     // ── Rules 1 and 3: overdue and upcoming events ───────────────────────────────────────────────────────────
@@ -104,18 +163,41 @@ public class TodoGenerationOpenWorkTests
 
     // ── Fakes that evaluate the query, as Dataverse would ────────────────────────────────────────────────────
 
-    /// <summary>One sprk_event row with <paramref name="status"/>; the QueryExpression Rule 5 sends is evaluated on it.</summary>
-    private void StoreAssignedEvent(int status)
+    private readonly List<QueryExpression> _assignedQueries = new();
+
+    private static Entity Event(Guid id, string name, int status, Guid? assignee)
     {
-        var row = new Entity("sprk_event", EventId)
+        var row = new Entity("sprk_event", id)
         {
-            ["sprk_eventname"] = "Review NDA",
+            ["sprk_eventname"] = name,
             ["statuscode"] = new OptionSetValue(status),
             ["statecode"] = new OptionSetValue(EventStatusCode.GetStateCode(status)),
         };
+        if (assignee is { } a)
+            row["sprk_assignedto"] = new EntityReference("contact", a);
+        return row;
+    }
+
+    /// <summary>
+    /// sprk_event rows; the QueryExpression Rule 5 sends is evaluated on them and PAGED by its PageInfo, the way Dataverse
+    /// answers (MoreRecords while rows remain).
+    /// </summary>
+    private void StoreEvents(params Entity[] rows)
+    {
         _dataverse.Setup(d => d.RetrieveMultipleAsync(It.Is<QueryExpression>(q => q.EntityName == "sprk_event"), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
-                new EntityCollection(Matches(q.Criteria, row) ? new List<Entity> { row } : new List<Entity>()));
+            {
+                _assignedQueries.Add(q);
+                var matching = rows.Where(r => Matches(q.Criteria, r)).ToList();
+                var size = q.PageInfo?.Count > 0 ? q.PageInfo.Count : (q.TopCount ?? matching.Count);
+                var number = q.PageInfo?.PageNumber > 0 ? q.PageInfo.PageNumber : 1;
+                var pageRows = matching.Skip((number - 1) * size).Take(size).ToList();
+                return new EntityCollection(pageRows)
+                {
+                    MoreRecords = q.PageInfo is not null && matching.Count > number * size,
+                    PagingCookie = $"page{number}",
+                };
+            });
     }
 
     /// <summary>Rules 1 / 3: the positional app-only query, applying its <c>excludeStatusCodes</c> to the stored row.</summary>
@@ -136,10 +218,16 @@ public class TodoGenerationOpenWorkTests
             });
     }
 
-    /// <summary>Equal / NotEqual conditions on option-set columns, AND-ed (the only shapes the rules send).</summary>
+    /// <summary>Equal / NotEqual on option-set columns and Null / NotNull on any column, AND-ed (the shapes the rules send).</summary>
     private static bool Matches(FilterExpression filter, Entity row) =>
         filter.Conditions.All(c =>
         {
+            if (c.Operator is ConditionOperator.NotNull or ConditionOperator.Null)
+            {
+                var present = row.Contains(c.AttributeName) && row[c.AttributeName] is not null;
+                return c.Operator == ConditionOperator.NotNull ? present : !present;
+            }
+
             var actual = row.GetAttributeValue<OptionSetValue>(c.AttributeName)?.Value;
             var value = c.Values.Count == 1 ? Convert.ToInt32(c.Values[0]) : throw new NotSupportedException();
             return c.Operator switch

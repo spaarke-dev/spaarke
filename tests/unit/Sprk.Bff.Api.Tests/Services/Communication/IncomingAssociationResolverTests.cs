@@ -488,6 +488,196 @@ public class IncomingAssociationResolverTests
     }
 
     // =========================================================================
+    // Task 097 round 10: the regarding NUMBER column comes from the catalog (sprk_recordtype_ref), and a catalog
+    // fault / missing row / bad column never costs the name, URL or a later lookup.
+    // =========================================================================
+
+    [Theory]
+    [InlineData("sprk_regardingmatter", "sprk_matter", "sprk_mattername", "sprk_matternumber")]
+    [InlineData("sprk_regardingproject", "sprk_project", "sprk_projectname", "sprk_projectnumber")]
+    [InlineData("sprk_regardinginvoice", "sprk_invoice", "sprk_name", "sprk_invoicenumber")]
+    // Not in the pre-round-9 hard-coded map (matter/project/invoice only) — that map wrote NO number here.
+    [InlineData("sprk_regardingworkassignment", "sprk_workassignment", "sprk_name", "sprk_workassignmentnumber")]
+    public async Task ResolveAsync_WritesTheNumberFromTheColumnTheCatalogNames(
+        string regardingField, string entity, string nameField, string numberField)
+    {
+        var id = Guid.NewGuid();
+        var record = new DataverseEntity(entity, id) { [nameField] = "zz-097 record name", [numberField] = "NUM-0042" };
+        string[]? asked = null;
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync(entity, id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, _, cols, _) => asked = cols)
+            .ReturnsAsync(record);
+        _dataverseServiceMock
+            .Setup(d => d.QueryRecordTypeRefAsync(entity, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CatalogRow(entity, numberField));
+        var written = CaptureCommunicationUpdate();
+
+        await ResolverWith(new StubRegardingRung(regardingField, entity, id))
+            .ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        asked.Should().BeEquivalentTo(new[] { nameField, numberField });
+        written.Should().ContainSingle();
+        written[0]["sprk_regardingrecordname"].Should().Be("zz-097 record name");
+        written[0]["sprk_regardingrecordnumber"].Should().Be("NUM-0042");
+        written[0].Should().ContainKey("sprk_regardingrecordtype");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ACatalogRowThatNamesNoNumberColumn_WritesTheNameAndNoNumber()
+    {
+        var id = Guid.NewGuid();
+        string[]? asked = null;
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_workassignment", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, string[], CancellationToken>((_, _, cols, _) => asked = cols)
+            .ReturnsAsync(new DataverseEntity("sprk_workassignment", id) { ["sprk_name"] = "zz-097 assignment" });
+        _dataverseServiceMock
+            .Setup(d => d.QueryRecordTypeRefAsync("sprk_workassignment", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CatalogRow("sprk_workassignment", numberField: null));
+        var written = CaptureCommunicationUpdate();
+
+        await ResolverWith(new StubRegardingRung("sprk_regardingworkassignment", "sprk_workassignment", id))
+            .ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        asked.Should().BeEquivalentTo(new[] { "sprk_name" });
+        written.Should().ContainSingle();
+        written[0]["sprk_regardingrecordname"].Should().Be("zz-097 assignment");
+        written[0].Should().NotContainKey("sprk_regardingrecordnumber");
+        written[0].Should().ContainKey("sprk_regardingrecordtype");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ACatalogReadThatThrows_StillWritesTheNameAndUrl()
+    {
+        // Round 10 item 2: on dcdc83995 the (uncached) catalog read sat ahead of the name read inside ONE try, so a
+        // TimeoutException skipped the name, number AND URL writes.
+        var id = Guid.NewGuid();
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_matter", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_matter", id) { ["sprk_mattername"] = "zz-097 matter", ["sprk_matternumber"] = "M-1" });
+        _dataverseServiceMock
+            .Setup(d => d.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TimeoutException("catalog timed out"));
+        var written = CaptureCommunicationUpdate();
+
+        await ResolverWith(new StubRegardingRung("sprk_regardingmatter", "sprk_matter", id))
+            .ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        written.Should().ContainSingle();
+        written[0]["sprk_regardingrecordname"].Should().Be("zz-097 matter");
+        written[0]["sprk_regardingrecordid"].Should().Be(id.ToString("D"));
+        written[0].Should().ContainKey("sprk_regardingrecordurl");
+        written[0].Should().NotContainKey("sprk_regardingrecordnumber"); // the catalog names the column — unknown
+        written[0].Should().NotContainKey("sprk_regardingrecordtype");   // the catalog row IS the lookup target
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ACatalogNamingAColumnTheRecordLacks_StillWritesTheName()
+    {
+        // Round 10 item 6: a catalog that names a non-existent column makes the combined retrieve fault; the name is
+        // then read on its own.
+        var id = Guid.NewGuid();
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_matter", id,
+                It.Is<string[]>(cols => cols.Contains("sprk_nosuchnumber")), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("'sprk_matter' entity doesn't contain attribute with Name = 'sprk_nosuchnumber'"));
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_matter", id,
+                It.Is<string[]>(cols => cols.Length == 1 && cols[0] == "sprk_mattername"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_matter", id) { ["sprk_mattername"] = "zz-097 matter" });
+        _dataverseServiceMock
+            .Setup(d => d.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CatalogRow("sprk_matter", "sprk_nosuchnumber"));
+        var written = CaptureCommunicationUpdate();
+
+        await ResolverWith(new StubRegardingRung("sprk_regardingmatter", "sprk_matter", id, referenceName: "ref-name"))
+            .ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        written.Should().ContainSingle();
+        written[0]["sprk_regardingrecordname"].Should().Be("zz-097 matter"); // the record's name, not the reference Name
+        written[0].Should().NotContainKey("sprk_regardingrecordnumber");
+        written[0].Should().ContainKey("sprk_regardingrecordurl");
+        written[0].Should().ContainKey("sprk_regardingrecordtype");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AMissingCatalogRow_IsNotCached_AFoundRowIs()
+    {
+        // Round 10 item 5: the resolver is a singleton with no TTL — a cached miss would hide a row added later for the
+        // life of the process. Same resolver instance across three resolves: miss, then found, then cached.
+        var id = Guid.NewGuid();
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync("sprk_matter", id, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DataverseEntity("sprk_matter", id) { ["sprk_mattername"] = "zz-097 matter", ["sprk_matternumber"] = "M-1" });
+        _dataverseServiceMock
+            .SetupSequence(d => d.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DataverseEntity?)null)
+            .ReturnsAsync(CatalogRow("sprk_matter", "sprk_matternumber"));
+        var written = CaptureCommunicationUpdate();
+        var resolver = ResolverWith(new StubRegardingRung("sprk_regardingmatter", "sprk_matter", id));
+
+        for (var i = 0; i < 3; i++)
+            await resolver.ResolveAsync(TestCommunicationId, CreateEnvelope("filing", "clerk@court.gov"), new AssociationContext(), CancellationToken.None);
+
+        written.Should().HaveCount(3);
+        written[0].Should().NotContainKey("sprk_regardingrecordtype");
+        written[0].Should().NotContainKey("sprk_regardingrecordnumber");
+        written[1].Should().ContainKey("sprk_regardingrecordtype");   // the row added after the miss IS seen
+        written[1]["sprk_regardingrecordnumber"].Should().Be("M-1");
+        written[2].Should().ContainKey("sprk_regardingrecordtype");
+        _dataverseServiceMock.Verify(
+            d => d.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()), Times.Exactly(2)); // found row cached
+    }
+
+    private static DataverseEntity CatalogRow(string entity, string? numberField)
+    {
+        var row = new DataverseEntity("sprk_recordtype_ref", Guid.NewGuid()) { ["sprk_recorddisplayname"] = entity };
+        if (numberField is not null)
+            row["sprk_regardingrecordnumberfield"] = numberField;
+        return row;
+    }
+
+    private List<Dictionary<string, object>> CaptureCommunicationUpdate()
+    {
+        var written = new List<Dictionary<string, object>>();
+        _dataverseServiceMock
+            .Setup(d => d.UpdateAsync("sprk_communication", TestCommunicationId, It.IsAny<Dictionary<string, object>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, Guid, Dictionary<string, object>, CancellationToken>((_, _, fields, _) => written.Add(new(fields)))
+            .Returns(Task.CompletedTask);
+        return written;
+    }
+
+    // An operator can add invoice / work assignment to the core-writable set (AutoFileOptions.CoreWritableEntities, no
+    // redeploy) — then they auto-file and headline the denormalized Regarding, so their number column matters.
+    private IncomingAssociationResolver ResolverWith(IAssociationRung rung) => new(
+        new[] { rung },
+        _dataverseServiceMock.Object,
+        _dataverseServiceMock.Object,
+        AssociationTestSupport.Mapper(coreWritableEntities: new() { "sprk_matter", "sprk_project", "sprk_invoice", "sprk_workassignment" }),
+        Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
+        new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble(),
+        Mock.Of<ILogger<IncomingAssociationResolver>>());
+
+    private sealed class StubRegardingRung(string regardingField, string entity, Guid id, string? referenceName = null) : IAssociationRung
+    {
+        public RungKind Kind => RungKind.ExplicitReference;
+        public int Order => 0;
+        public Task<IReadOnlyList<RungMatch>> EvaluateAsync(
+            NormalizedMessage message, AssociationContext context, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<RungMatch>>(new[]
+            {
+                new RungMatch
+                {
+                    RegardingFieldName = regardingField,
+                    Target = new EntityReference(entity, id) { Name = referenceName },
+                    Confidence = 1.0,
+                    Provenance = $"explicit:caller-supplied:{entity}",
+                    Rung = RungKind.ExplicitReference,
+                },
+            });
+    }
+    // =========================================================================
     // P2 (FR-12 UAT): the denormalized PRIMARY Regarding is substantive-only (never a fallback)
     // =========================================================================
 

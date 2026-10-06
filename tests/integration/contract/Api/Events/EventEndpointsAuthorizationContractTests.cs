@@ -450,6 +450,33 @@ public class EventEndpointsAuthorizationContractTests
     }
 
     [Fact]
+    public async Task Create_ACatalogNamingAColumnTheRecordLacks_StillWritesTheServersName()
+    {
+        // Task 097 round 10: the combined name+number read faults on a column the record lacks; the name is read alone.
+        await using var host = await EventsAuthHost.StartAsync();
+        var matter = Guid.NewGuid();
+        host.Probe.Hold(CreateEventPrivilege);
+        host.Probe.Grant("sprk_matters", matter, AccessRights.AppendTo);
+        host.Entities.Setup(e => e.GetEntitySetNameAsync("sprk_matter", It.IsAny<CancellationToken>())).ReturnsAsync("sprk_matters");
+        host.RecordTypes.Setup(r => r.QueryRecordTypeRefAsync("sprk_matter", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_recordtype_ref", Guid.NewGuid()) { [RegardingRecordType.RecordNumberFieldColumn] = "sprk_nosuchnumber" });
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.Is<string[]>(c => c.Contains("sprk_nosuchnumber")), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("'sprk_matter' entity doesn't contain attribute with Name = 'sprk_nosuchnumber'"));
+        host.Entities.Setup(e => e.RetrieveAsync("sprk_matter", matter, It.Is<string[]>(c => c.Length == 1 && c[0] == "sprk_mattername"), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matter) { ["sprk_mattername"] = "Acme Holdings" });
+        var creates = host.CaptureCreates();
+
+        var response = await host.SendAsync(CreateRequest(new
+        {
+            subject = "Named", regardingRecordType = 1, regardingRecordId = matter, regardingRecordName = "MAT-100",
+        }));
+
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = creates.Should().ContainSingle().Subject;
+        created.RegardingRecordName.Should().Be("Acme Holdings");
+        created.RegardingRecordNumber.Should().BeNull();
+    }
+    [Fact]
     public async Task Create_ACatalogRowThatNamesNoNumberColumn_WritesNoNumber()
     {
         await using var host = await EventsAuthHost.StartAsync();
