@@ -1,5 +1,7 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-10-06 SESSION 39 END (by context-handoff, pre-/compact) — working tree CLEAN, everything pushed (HEAD = the checkpoint commit after `fd3ec01cd`). This session: **T227g ✅** (`ec804456e`) + **T228 ✅** (`fd3ec01cd`). Board #438: 188/206. **Next: T229 + T230** (Quick Recovery below).
+>
 > **Last Updated**: 2026-10-06 SESSION 39 — **T228 ✅** (subscription + Dataverse environment are operator prerequisites): intake requires subscriptionId + containerTypeId + dataverseEnvUrl for every model (DataverseEnvironmentUrlRule: spaarke-{customerId}[-{env}]); H1 refuses a subscription holding another customer's stamp; H5 adopts (creation code removed); DAG H10 ← H3,H5 / H6 ← +H10 / H11 ← H10,H7; Model 1 → customer template; L2 UAMI **Owner** per customer subscription (owner decision; operator applies controlplane-subscription-rbac.bicep — PRQ-S-04); prereqs v8. ControlPlane 2178/0, ArchTests 831/831. **Next: T229 (cost model for dedicated stamps) + T230 (H13 acceptance + keyless proof)** — create POMLs from plan §7 rows. **Owner items added**: remove the L2 UAMI's old Contributor assignment on the platform subscription (live; no longer deployed); G36 customer-subscriptions management group (ADR-027).
 >
 > **Last Updated**: 2026-10-06 SESSION 39 — **T227g ✅** (owner question on the Secure Record containers): H7 links the root business unit (`businessunit.sprk_containerid`) to H8's container (uac-r2 task 076's non-secure default — L2 never wrote it); script-created containers carry the `spaarkeCustomerId` marker; "one ROOT container per customer" (secure-record + further BU containers are the BFF's, at runtime); guide §7.11 + skill Step 6d require uac-r2's secure-record setup (its §7 checklist is the gate). ControlPlane 2191/0, ArchTests 831/831. **Next: T228** (Quick Recovery below).
@@ -40,15 +42,37 @@
 >
 > **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
-## 🎯 Quick Recovery (READ THIS FIRST — SESSION 38, 2026-10-06)
+## 🎯 Quick Recovery (READ THIS FIRST — SESSION 39, 2026-10-06)
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T228** — next in the plan order (no task POML yet: create it from the plan §7 T228 row with task-create, then task-execute). |
+| **Task** | **T229** (cost model for dedicated stamps — G4, G13) and **T230** (H13 acceptance for dedicated Model 1 — G5 — + keyless proof, D13). Neither has a POML yet. |
 | **Step** | 0 — not started. |
-| **Status** | pending. Owner items: W7; **dev rollout of T227d** — set `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (values in the 227d POML notes; live change, ask first). |
-| **Next Action** | Read `notes/model1-dedicated-remediation-plan.md` §7 T228 row (+ D4, Q1, G3): intake requires `subscriptionId` + Dataverse env name/URL for Model 1 (drop shared-sub auto-inject + ISH-02 exemption), H1 SpaarkeOwned on the per-customer sub, L2 UAMI RBAC per customer subscription (replace the fleet-sub `controlplane-subscription-rbac.bicep` assumption — part of the manual prereq), H5 verify/adopt never create, `ArmDeploymentRunner` Model 1 arm → `customer`, `prereqs.yaml` + skill intake + runbook, remove skill Step 1e Model 1 hard stop. Create `tasks/228-*.poml` with task-create, then task-execute. Fresh session recommended (this one ran T227d/e/f + a master merge). |
-| **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → ~~T246~~ ✅ (**T244 + T246 + T251 = hard prerequisites of T186**) → ~~T247~~ ✅ → T227 (a ✅ b ✅ c ✅ d ✅ e ✅ f ✅) → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
+| **Status** | pending. |
+| **Next Action** | Read `notes/model1-dedicated-remediation-plan.md` §7 rows T229 + T230 (lines ~208-209). T229: drop `shared-trial` (H0 tiers, intake.schema.json Model 1 example `tier: shared-trial`, the `warnAndProceed` "Model 1 shared-trial ONLY" text), H13 `Model1MarginalEnvelopeUsd` → dedicated-stamp envelope, intake `costEnvelopePolicy` text, `RequireCostEnvelopeForModel2De…`. T230: audit H13 verifiers for shared-platform assumptions + one real MI call per service. Write `tasks/229-*.poml` / `tasks/230-*.poml` (POML format: copy `tasks/228-…poml`), add TASK-INDEX rows, then task-execute each. Dependencies: both after 228 ✅. |
+| **Owner items (open)** | (1) W7. (2) Dev rollout of T227d — set `SharePointEmbedded__OwnedContainerIds` on spaarke-bff-dev before T227d reaches dev (live; ask first). (3) **NEW (T228)**: remove the L2 UAMI's old Contributor role assignment on the platform subscription — no longer deployed (live; ask first). (4) **NEW G36**: ADR-027 management group for customer subscriptions (tenant-level owner action; then a small task). |
+| **Order** | … → T227 (a–g ✅) → ~~T228~~ ✅ → **T229 + T230** → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c / T241 when the owner wants them. |
+
+### T228 outcome (SESSION 39)
+
+- Owner decision 2026-10-06: the L2 identity holds **Owner** on each customer subscription (constrained RBAC-Admin and operator-applies-RBAC were offered and rejected) — operator applies `infrastructure/bicep/modules/controlplane-subscription-rbac.bicep` at that subscription (PRQ-S-04); no longer deployed by `platform-controlplane.bicep`. Recorded as spec ADR Tensions path A.
+- POST /api/runs requires `subscriptionId` + `containerTypeId` (GUIDs, stored "D") + `dataverseEnvUrl` for every model; `Core/Models/DataverseEnvironmentUrlRule` — domain `spaarke-{customerId}[-{environmentName}]`, commercial cloud only, stored `https://{host}/`. Catalog lost `dataverseDisplayName` + H0 rate keys.
+- H1: `SubscriptionDedication` + `CheckSubscriptionDedicatedAsync` (ARM RG listing) before provider registration; codes `subready-subscription-not-dedicated` / `-listing-failed`.
+- H5 = `H5DataverseEnvAdoptionHandler` (folder `DataverseEnvCreation` kept): URL rule + WhoAmI as the Worker; `DataverseHealthProbeResult.AccessDenied` → `worker-not-app-user` (PRQ-C-09). BAP/pac creators, `IDataverseEnvCreator`, H0 `BapRestEnvironmentRateProbe`, `Test-DataverseEnvCreationRate.ps1` deleted.
+- DAG: H10 ← H3, H5; H6 ← H5, H3, H10; H11 ← H10, H7; H8 deliberately unchanged (Worker identity).
+- ArmDeploymentRunner Model 1 → `customer`. prereqs v8 (PRQ-S-00, PRQ-C-09 new; PRQ-S-04 Owner; PRQ-C-04 retired; all PRQ-S-* once_per_customer on `{stampSubscriptionId}`). Skill Step 1b-bis, 1e hard stop removed, Step 2.5 rebinds `$subId`, Step 4.0 sends `dataverseEnvUrl`.
+- Tests: ControlPlane 2178/0, ArchTests 831/831. Plan G3 + G19 ✅, G35 ✅ (T227g), G36 new.
+- T186 live unknowns added: H5 WhoAmI as the Worker in an operator-created env; H1 RG listing under Owner; H6 sign-in right after H10.
+
+### T227g outcome (SESSION 39)
+
+- Owner question ("Secure Record container?") → aligned: H8 makes ONE ROOT container; uac-r2 secure-record containers (and admin-plane BU containers) are the BFF's, bound + marked. Gaps closed: H7 links the root business unit's `sprk_containerid` to H8's container (never overwrites another → `root-business-unit-container-conflict`); PowerShell container scripts write the `spaarkeCustomerId` marker (`-CustomerId`, ArchTest); guide §7.11 + skill Step 6d require uac-r2's secure-record setup (its §7 checklist).
+
+### Rules learned (SESSION 39)
+
+- Before relying on a pac/az flag in a runbook, run its `--help` locally (found: `pac admin create` silently appends a digit to a taken domain; `create-environment` is not the command).
+- Python edit scripts: a string ending in `"` right before `"""` breaks; use `'''` for such blocks. Bash heredocs with apostrophes still fail — write scripts with the Write tool.
+- A prereq recipe's tokens must be resolvable at the step that runs its scope (validate.ps1 checks documentation only).
 
 ### T227f outcome (SESSION 38)
 
