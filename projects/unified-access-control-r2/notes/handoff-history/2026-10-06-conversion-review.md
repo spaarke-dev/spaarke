@@ -30,4 +30,49 @@ The items below could not be classified confidently as current or superseded. Li
 - L1714 / L1908 "B3: record the `section-break-flattened` acceptance in spaarkeai-compose-r8 — not yet done".
 - L1680 #974 Dataverse-side expiry guard — open/closed not re-checked.
 - Merge style: L604/L612/L660/L677 say "merge commit, keep the branch", but #1312/#1314 were squash-merged. Which is current?
-- Housekeeping: undeletable `wf_*` folders (L395, L623, L664); ~169 agent worktrees registered under `C:/code_files/spaarke/.claude/worktrees`; consumed worktrees `C:\wt4i`, `C:\wtD`, `C:\wtO`, `C:\wv*`/`C:\wvs*`.
+- Housekeeping (unchanged by the audit): undeletable `wf_*` folders (L395, L623, L664); ~169 agent worktrees registered under `C:/code_files/spaarke/.claude/worktrees`; consumed worktrees `C:\wt4i`, `C:\wtD`, `C:\wtO`, `C:\wv*`/`C:\wvs*`.
+
+---
+
+# Independent audit (2026-10-06, read-only, after the conversion)
+
+Verdict: the conversion is mostly safe to rely on. Nearly every standing rule, owner directive and trap is in the new files, memory, or a per-task note or POML. The gaps below are things that are still owed and are now only in the archive. Each was already buried deep in the old journal (lines 650–4,760), so recovery wasn't reaching it before either. Line numbers refer to the ARCHIVE.
+
+## Missing: still live, only in the archive
+1. **HIGH — 141 and 145 hand-offs to cpo-r1 never delivered** (L652, L616 "resend the peer message FIRST").
+   - What's missing: INCOMING-141 and INCOMING-145 are still only in our `notes/handoffs/`, marked "To deliver". Nothing in cpo-r1 (worktree, origin/master or #1094) mentions the workforce tenant list or H7b.
+   - Effect: every new customer environment gets an empty `WorkforceIdentity__CustomerTenantIds` (all workforce-customer identities denied) and no secure owner team or role (secure records refused).
+   - Action: deliver them (owner relays, or a GitHub comment on #1094). Add to current-task open follow-ups and a CLAUDE.md coordination bullet.
+2. **MEDIUM — `POST /api/v1/external-access/invite-and-grant` 500 never closed** (L930–943, L1187).
+   - Two 500 paths: onboard failed, or onboarded but grant failed. Nothing records a fix or a diagnosis.
+   - The owner's CIAM session goes through invites. Check status first.
+   - When reproducing, use an already-invited email: a fresh address sends a real invitation.
+3. **MEDIUM — live smoke checks promised and never run** (L1795–1797, L3090–3094).
+   - **098:** call `set-record-share-expiry`, then read back `sprk_expiresdate` and confirm the exact date (TimeZoneIndependent via `BulkUpdateAsync`).
+   - **R15:** create + read through `POST /api/v1/external/projects/{id}/documents`. The field names and the case-sensitive `sprk_Project@odata.bind` have never run against Dataverse. The owner said "before the external SPA deploys"; it deployed 2026-10-06, and gate 23 has since locked `sprk_graphdriveid`, which this route writes.
+   - Add both to the 099 gate or the owner screen-session list.
+4. **MEDIUM — regression test owed for the oid fix in the search authorization filters** (L3821–3835).
+   - `SemanticSearchAuthorizationFilter` / `RecordSearchAuthorizationFilter` and their handlers need a test with a real-shape principal: long-form `oid` plus a `NameIdentifier` that differs from it.
+   - A perturbation left 45 tests green. Add to `defer-issues.md` (090).
+5. **LOW — no `sprk_noaccessentry` table means every read is denied** (L2490). Provisioning must create the table with or before the deploy. Add to the cpo-r1 INCOMING note (item 1).
+6. **LOW — #969 residuals never disposed of** (L1712): `sdap-ci.yml:799` calls `listComments` unpaginated; the `createComment` branch may be broken; two redundant `continue-on-error` full-suite runs remain. Either a hand-off or an explicit "not ours".
+7. **LOW — client build traps for batch-5 UI tasks** (L2732, L3000, L2849, L3062).
+   - Build `@spaarke/sdap-client` (`dist`) before typechecking anything that depends on it.
+   - Run ui-components jest from inside the package (`--rootDir` from the root gives 232 false failures).
+   - `ApiError` has `statusCode` (not `status`) and no `detail`.
+   - An injected `authenticatedFetch` has two production behaviours: one throws, the other returns the raw response.
+   - Add to CLAUDE.md "Build, test and measurement".
+8. **LOW — bare 401 from `TypedResults.Unauthorized()`** (L4761): no ProblemDetails (ADR-019). Wrap-up candidate for a 090 note.
+
+Also: `notes/batch4-integration-steps.md` has unticked items that nothing points to: "One F3 check", the 6 external-SPA `tsc` errors, the 160 A5 note, and the CHANGELOG entries. Reconcile that file or link it from current-task.
+
+## Wrongly carried: stale or incorrect in the new files
+- **CLAUDE.md "Count TASK-INDEX by the ASCII `[open]`/`[done]` tokens":** now wrong. The 11 rows completed 2026-10-06 have ✅ but no token (003, 132, 133, 148, 149, 156, 158, 159, 160, 161, 167). Re-token those rows or qualify the rule.
+- **current-task "Completed today"** omits 161 (its ✅ is in TASK-INDEX).
+- **current-task "Work branch … Clean, 0 unpushed":** true but misleading. The branch is **309 commits behind origin/master** and lacks the batch-4 code (e.g. master removed `/healthz/dataverse/doc/{id}`). Merge master before building or doing task work here.
+- **Older CLAUDE.md lines, not from the conversion:**
+  - The NFR-05 gate names the `Secure Projects` BU, but task 121 renamed it `Secure Record`.
+  - "~44.96 MB" baseline: root §10 says measure against a fresh master build.
+
+## Cross-project item raised by the cpo-r1 audit (relevant here)
+`notes/task-165-admin-surfaces.md` §13.9(b) plans `Repair-SpeConfigSecretName.ps1 -MintClientSecret` on `bfac7f6e` (Spaarke SPE Model 1 Owner). cpo-r1's owner decisions D16 and T250 say there must be NO secret-based Model 1 config, and the app uses MI-FIC. Reconcile with cpo-r1 before running it.
