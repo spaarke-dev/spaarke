@@ -110,27 +110,14 @@ public class PlaybookService : IPlaybookService
     /// <inheritdoc />
     public async Task<PlaybookResponse> CreatePlaybookAsync(
         SavePlaybookRequest request,
-        Guid userId,
+        Guid ownerSystemUserId,
         CancellationToken cancellationToken = default)
     {
+        var payload = BuildCreatePayload(request, ownerSystemUserId);
+
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        _logger.LogInformation("Creating playbook: {Name}", request.Name);
-
-        // Create playbook entity
-        // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
-        var payload = new Dictionary<string, object?>
-        {
-            ["sprk_name"] = request.Name,
-            ["sprk_description"] = request.Description,
-            ["sprk_ispublic"] = request.IsPublic
-        };
-
-        // Add output type lookup if provided
-        if (request.OutputTypeId.HasValue)
-        {
-            payload["sprk_OutputTypeId@odata.bind"] = $"/sprk_aioutputtypes({request.OutputTypeId.Value})";
-        }
+        _logger.LogInformation("Creating playbook: {Name} (owner systemuser {OwnerSystemUserId})", request.Name, ownerSystemUserId);
 
         var response = await _httpClient.PostAsJsonAsync(EntitySetName, payload, JsonOptions, cancellationToken);
         response.EnsureSuccessStatusCode();
@@ -148,6 +135,47 @@ public class PlaybookService : IPlaybookService
         // Return the created playbook
         return await GetPlaybookAsync(playbookId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to retrieve created playbook");
+    }
+
+    /// <summary>
+    /// The create body for a new playbook row, OWNED by <paramref name="ownerSystemUserId"/> — the person who asked for
+    /// it, not the BFF application user the create runs as (gate D-G6-2).
+    /// </summary>
+    /// <remarks>
+    /// <para>Every playbook route that changes a playbook (PUT, share, unshare, canvas, nodes) is OwnerOnly: the caller's
+    /// systemuserid must equal <c>_ownerid_value</c> (task 164, owner round 12 item 6). A row left owned by the
+    /// application user therefore could never be edited, shared or unshared by the person who created it.</para>
+    /// <para>The owner is a USER, not a business-unit team (<c>RecordOwnershipResolver</c>
+    /// is for records filed under business records): OwnerOnly compares a systemuserid, so a team owner would lock the
+    /// row for everyone; and every live playbook is user-owned (task 164 note §3(e)).</para>
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="ownerSystemUserId"/> is empty — refused, never created
+    /// app-owned (ADR-003).</exception>
+    internal static Dictionary<string, object?> BuildCreatePayload(SavePlaybookRequest request, Guid ownerSystemUserId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (ownerSystemUserId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "A playbook is created for a person: the owner's systemuserid is required.", nameof(ownerSystemUserId));
+        }
+
+        // NOTE: sprk_istemplate removed until Dataverse schema is updated (causes 400 if column doesn't exist)
+        var payload = new Dictionary<string, object?>
+        {
+            ["sprk_name"] = request.Name,
+            ["sprk_description"] = request.Description,
+            ["sprk_ispublic"] = request.IsPublic,
+            ["ownerid@odata.bind"] = $"/systemusers({ownerSystemUserId})"
+        };
+
+        // Add output type lookup if provided
+        if (request.OutputTypeId.HasValue)
+        {
+            payload["sprk_OutputTypeId@odata.bind"] = $"/sprk_aioutputtypes({request.OutputTypeId.Value})";
+        }
+
+        return payload;
     }
 
     /// <inheritdoc />
@@ -489,6 +517,61 @@ public class PlaybookService : IPlaybookService
     // playbook-embeddings index jobs — their only callers. The sprk_indexstatus /
     // sprk_indexhash / sprk_lastindexedat Dataverse columns remain (read-only surface).
 
+    /// <summary>The columns a playbook LIST row carries (<see cref="MapToPlaybookSummary"/> reads exactly these).</summary>
+    private const string ListSelect =
+        "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon,sprk_playbookcapabilities";
+
+    /// <summary>
+    /// The largest window one list query reads. Dataverse returns at most 5000 rows per response when no page size is
+    /// requested, and it counts (<c>@odata.count</c>) at most 5000 — so a page beyond this window is simply empty.
+    /// </summary>
+    internal const int MaxListWindow = 5000;
+
+    /// <summary>
+    /// The ONE list query: the filtered, ordered collection with <c>$count=true</c>, reading rows up to the end of the
+    /// requested page (<paramref name="windowEnd"/>, capped at <see cref="MaxListWindow"/>).
+    /// </summary>
+    /// <remarks>
+    /// <para>Two forms Dataverse REFUSES, both verified read-only against dev 2026-10-06 (gate D-G6-1):
+    /// <c>{set}/$count?$filter=…</c> answers 400 "Could not find a property named '…' on type 'Edm.Int32'" — the
+    /// filter is applied to the count's integer result, not to the rows — and <c>$skip</c> answers 400 "Skip Clause is
+    /// not supported in CRM". So the total comes from <c>@odata.count</c> on the collection itself, and the page is cut
+    /// from the window by <see cref="ReadListPage"/>.</para>
+    /// </remarks>
+    internal static string BuildListQueryUrl(string filter, string orderBy, int windowEnd) =>
+        $"{EntitySetName}?$select={ListSelect}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}" +
+        $"&$top={Math.Clamp(windowEnd, 1, MaxListWindow)}&$count=true";
+
+    /// <summary>
+    /// Cuts the requested page out of a <see cref="BuildListQueryUrl"/> response: rows <paramref name="skip"/> to
+    /// <paramref name="skip"/> + <paramref name="pageSize"/>, and the total from <c>@odata.count</c>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The response carries no <c>value</c> array or no <c>@odata.count</c> —
+    /// never read as an empty list.</exception>
+    internal static (PlaybookSummary[] Items, int TotalCount) ReadListPage(string json, int skip, int pageSize)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+
+        if (!root.TryGetProperty("value", out var rows) || rows.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException("The Dataverse playbook list response carries no 'value' array.");
+        }
+
+        if (!root.TryGetProperty("@odata.count", out var count) || count.ValueKind != JsonValueKind.Number)
+        {
+            throw new InvalidOperationException("The Dataverse playbook list response carries no '@odata.count'.");
+        }
+
+        var items = rows.EnumerateArray()
+            .Skip(Math.Max(0, skip))
+            .Take(Math.Max(0, pageSize))
+            .Select(MapToPlaybookSummary)
+            .ToArray();
+
+        return (items, count.GetInt32());
+    }
+
     private async Task<PlaybookListResponse> ExecuteListQueryAsync(
         string filter,
         PlaybookQueryParameters query,
@@ -496,55 +579,20 @@ public class PlaybookService : IPlaybookService
         int skip,
         CancellationToken cancellationToken)
     {
-        // Get total count first.
-        // Missing-entity tolerance (e.g., fresh dev env without `sprk_analysisplaybook` table):
-        // Dataverse returns 404 or 400 with "Resource not found" / "Could not find a property
-        // named" — treat as empty list rather than throwing, so chat tool detection +
-        // capability resolution can proceed gracefully.
-        var countUrl = $"{EntitySetName}/$count?$filter={Uri.EscapeDataString(filter)}";
-        var countResponse = await _httpClient.GetAsync(countUrl, cancellationToken);
+        var url = BuildListQueryUrl(filter, GetOrderByClause(query.SortBy, query.SortDescending), skip + pageSize);
+        var response = await _httpClient.GetAsync(url, cancellationToken);
+        var body = await response.Content.ReadAsStringAsync(cancellationToken);
 
-        if (!countResponse.IsSuccessStatusCode)
+        if (!response.IsSuccessStatusCode)
         {
-            var countBody = await countResponse.Content.ReadAsStringAsync(cancellationToken);
-            if (IsMissingEntityResponse(countResponse.StatusCode, countBody))
+            // Missing-entity tolerance (a fresh environment without the playbook table) is the ONE failure read as an
+            // empty list. Every other failure — a refused query among them, which is what hid D-G6-1 for months —
+            // propagates, so the route answers its own error contract and the cause is in the log.
+            if (IsMissingEntityResponse(response.StatusCode, body))
             {
                 _logger.LogWarning(
                     "[PLAYBOOK] Dataverse table '{EntitySet}' is not provisioned in this environment " +
                     "({StatusCode}). Returning empty playbook list.",
-                    EntitySetName, countResponse.StatusCode);
-                return new PlaybookListResponse
-                {
-                    Items = [],
-                    TotalCount = 0,
-                    Page = query.Page,
-                    PageSize = pageSize
-                };
-            }
-            countResponse.EnsureSuccessStatusCode();
-        }
-
-        var totalCount = int.Parse(await countResponse.Content.ReadAsStringAsync(cancellationToken));
-
-        // Build order by
-        var orderBy = GetOrderByClause(query.SortBy, query.SortDescending);
-
-        // Get paginated results
-        // NOTE: OutputTypeId field removed - output types are N:N relationship, not lookup
-        // NOTE: sprk_istemplate removed until Dataverse schema is updated
-        var select = "sprk_analysisplaybookid,sprk_name,sprk_description,sprk_ispublic,_ownerid_value,modifiedon,sprk_playbookcapabilities";
-        var url = $"{EntitySetName}?$select={select}&$filter={Uri.EscapeDataString(filter)}&$orderby={orderBy}&$top={pageSize}&$skip={skip}";
-
-        var response = await _httpClient.GetAsync(url, cancellationToken);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            if (IsMissingEntityResponse(response.StatusCode, body))
-            {
-                _logger.LogWarning(
-                    "[PLAYBOOK] Dataverse query for '{EntitySet}' returned missing-entity " +
-                    "response ({StatusCode}). Returning empty playbook list.",
                     EntitySetName, response.StatusCode);
                 return new PlaybookListResponse
                 {
@@ -554,11 +602,14 @@ public class PlaybookService : IPlaybookService
                     PageSize = pageSize
                 };
             }
+
+            _logger.LogError(
+                "[PLAYBOOK] Dataverse refused the playbook list query: {StatusCode} - {Body}",
+                response.StatusCode, body.Length > 2000 ? body[..2000] : body);
             response.EnsureSuccessStatusCode();
         }
 
-        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(JsonOptions, cancellationToken);
-        var items = result?.Value?.Select(MapToPlaybookSummary).ToArray() ?? [];
+        var (items, totalCount) = ReadListPage(body, skip, pageSize);
 
         return new PlaybookListResponse
         {
@@ -570,25 +621,20 @@ public class PlaybookService : IPlaybookService
     }
 
     /// <summary>
-    /// Detects whether a non-success Dataverse response indicates the queried entity
-    /// (table) does not exist in this environment. Treated as a graceful "no results"
-    /// condition rather than an error so the chat pipeline and Daily Briefing can
-    /// degrade gracefully when fresh environments lack schema.
+    /// Whether a non-success Dataverse response means the playbook TABLE does not exist in this environment — the one
+    /// failure a list reads as "no results", so the chat pipeline and Daily Briefing degrade gracefully on fresh
+    /// environments that lack the schema.
     /// </summary>
-    internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body)
-    {
-        if (statusCode == System.Net.HttpStatusCode.NotFound)
-            return true;
-
-        if (statusCode == System.Net.HttpStatusCode.BadRequest && !string.IsNullOrEmpty(body))
-        {
-            return body.Contains("Resource not found for the segment", StringComparison.OrdinalIgnoreCase)
-                || body.Contains("Could not find a property named", StringComparison.OrdinalIgnoreCase)
-                || body.Contains("does not exist", StringComparison.OrdinalIgnoreCase);
-        }
-
-        return false;
-    }
+    /// <remarks>
+    /// Only Dataverse's own answer for an unknown entity set counts: 404 with "Resource not found for the segment
+    /// '<see cref="EntitySetName"/>'" (error 0x80060888, verified on dev 2026-10-06). A 400 is NEVER this: before
+    /// D-G6-1's fix the predicate also accepted 400 "Could not find a property named …", which is how a refused count
+    /// query turned every playbook list into an empty one with no error anywhere.
+    /// </remarks>
+    internal static bool IsMissingEntityResponse(System.Net.HttpStatusCode statusCode, string body) =>
+        statusCode == System.Net.HttpStatusCode.NotFound
+        && !string.IsNullOrEmpty(body)
+        && body.Contains($"Resource not found for the segment '{EntitySetName}'", StringComparison.OrdinalIgnoreCase);
 
     private static PlaybookSummary MapToPlaybookSummary(JsonElement element)
     {
@@ -599,10 +645,11 @@ public class PlaybookService : IPlaybookService
             Description = element.TryGetProperty("sprk_description", out var descProp) ? descProp.GetString() : null,
             // NOTE: OutputTypeId always null - output types are N:N relationship, not lookup
             OutputTypeId = null,
-            IsPublic = element.TryGetProperty("sprk_ispublic", out var publicProp) && publicProp.GetBoolean(),
-            IsTemplate = element.TryGetProperty("sprk_istemplate", out var templateProp) && templateProp.GetBoolean(),
-            OwnerId = element.TryGetProperty("_ownerid_value", out var ownerProp) ? ownerProp.GetGuid() : Guid.Empty,
-            ModifiedOn = element.TryGetProperty("modifiedon", out var modProp) ? modProp.GetDateTime() : DateTime.UtcNow
+            // A null column is "not set", never a throw: one row with an unset flag must not fail the whole list.
+            IsPublic = element.TryGetProperty("sprk_ispublic", out var publicProp) && publicProp.ValueKind == JsonValueKind.True,
+            IsTemplate = element.TryGetProperty("sprk_istemplate", out var templateProp) && templateProp.ValueKind == JsonValueKind.True,
+            OwnerId = element.TryGetProperty("_ownerid_value", out var ownerProp) && ownerProp.ValueKind == JsonValueKind.String ? ownerProp.GetGuid() : Guid.Empty,
+            ModifiedOn = element.TryGetProperty("modifiedon", out var modProp) && modProp.ValueKind == JsonValueKind.String ? modProp.GetDateTime() : DateTime.UtcNow
         };
     }
 
@@ -774,13 +821,13 @@ public class PlaybookService : IPlaybookService
     /// <inheritdoc />
     public async Task<PlaybookResponse> ClonePlaybookAsync(
         Guid sourcePlaybookId,
-        Guid userId,
+        Guid ownerSystemUserId,
         string? newName = null,
         CancellationToken cancellationToken = default)
     {
         await EnsureAuthenticatedAsync(cancellationToken);
 
-        _logger.LogInformation("Cloning playbook {SourceId} for user {UserId}", sourcePlaybookId, userId);
+        _logger.LogInformation("Cloning playbook {SourceId} for systemuser {OwnerSystemUserId}", sourcePlaybookId, ownerSystemUserId);
 
         // Get the source playbook with all relationships
         var source = await GetPlaybookAsync(sourcePlaybookId, cancellationToken)
@@ -807,7 +854,8 @@ public class PlaybookService : IPlaybookService
         };
 
         // Create the new playbook
-        var clonedPlaybook = await CreatePlaybookAsync(cloneRequest, userId, cancellationToken);
+        // The clone is the caller's own (same owner rule as a create — D-G6-2).
+        var clonedPlaybook = await CreatePlaybookAsync(cloneRequest, ownerSystemUserId, cancellationToken);
 
         _logger.LogInformation("Created clone {CloneId} from source {SourceId}", clonedPlaybook.Id, sourcePlaybookId);
 
