@@ -28,7 +28,7 @@ if (_appInsightsKey) {
 import { parseDataParams } from "@spaarke/ui-components/utils/parseDataParams";
 import { resolveRuntimeConfig, getAuthProvider } from "@spaarke/auth";
 import { DailyBriefingApp } from "@spaarke/daily-briefing-components/components";
-import { openPlaybookLibrary } from "@spaarke/daily-briefing-components/utils";
+import { browsePlaybooks } from "./browsePlaybooks";
 import { setRuntimeConfig } from "./config/runtimeConfig";
 import { ensureAuthInitialized } from "./services/authInit";
 
@@ -64,33 +64,11 @@ function Root() {
     );
   }, []);
 
-  /**
-   * R7 task 095 / FR-18 — "Browse Playbooks" overflow menu item on the
-   * DigestHeader. The standalone DailyBriefing code page provides the
-   * `Xrm.Navigation.navigateTo` thunk; the shared `@spaarke/daily-briefing-components`
-   * package stays Xrm-free per ADR-012.
-   *
-   * Mirrors task 094's chat-surface wiring: the existing `sprk_playbooklibrary`
-   * Code Page is the modal wrapper (target:2, 85%×85%). Once opened in browse
-   * mode, the Library Code Page lists every playbook + consumer mapping
-   * (PlaybookCardGrid consumer-chip extension from task 094) and launches
-   * through Path A.5 (`IConsumerRoutingService` → the BFF playbook-invocation boundary) per
-   * ADR-013 — no new BFF surface, no direct AnalysisOrchestrationService
-   * bypass.
-   *
-   * Failure mode: if `Xrm.Navigation` is unavailable (e.g., standalone
-   * dev/preview outside an MDA), the thunk logs a console warning and
-   * returns silently — the surface-level cue is left to host UX (Toaster
-   * would be a future enhancement).
-   */
-  // Shared opener (task 081 round 4, review F6): this called a DETACHED
-  // `navigateTo` (unbound `this`), which the real Xrm.Navigation rejects.
-  const handleBrowsePlaybooks = React.useCallback(() => openPlaybookLibrary("[DailyBriefing]"), []);
-
+  // "Browse Playbooks": see ./browsePlaybooks.ts (R7 task 095 / FR-18).
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
       <AppErrorBoundary surfaceName="Daily Briefing">
-        <DailyBriefingApp params={params} onBrowsePlaybooks={handleBrowsePlaybooks} />
+        <DailyBriefingApp params={params} onBrowsePlaybooks={browsePlaybooks} />
       </AppErrorBoundary>
     </FluentProvider>
   );

@@ -7,9 +7,21 @@
  * `Xrm.Navigation.navigateTo` depends on its receiver. The stub below rejects
  * an unbound call, as the platform does.
  */
-import * as fs from 'fs';
-import * as path from 'path';
+import * as React from 'react';
 import { openPlaybookLibrary } from '../src/utils/openPlaybookLibrary';
+import { browsePlaybooks } from '../../../../solutions/DailyBriefing/src/browsePlaybooks';
+
+jest.mock('../src/components/DailyBriefingApp', () => ({ DailyBriefingApp: () => null }));
+// eslint-disable-next-line import/first
+import { createDailyBriefingRegistration } from '../src/widgets/dailyBriefing.registration';
+
+function registrationBrowseHandler(): () => void {
+  const config = createDailyBriefingRegistration().factory({} as never);
+  const element = (
+    config as unknown as { renderContent: () => React.ReactElement<{ onBrowsePlaybooks: () => void }> }
+  ).renderContent();
+  return element.props.onBrowsePlaybooks;
+}
 
 function makeXrm() {
   const Navigation = {
@@ -56,14 +68,20 @@ describe('openPlaybookLibrary', () => {
     warn.mockRestore();
   });
 
-  it('both hosts delegate to it (no detached navigateTo copy left)', () => {
-    const repo = path.resolve(__dirname, '../../../..');
-    const codePage = fs.readFileSync(path.join(repo, 'solutions/DailyBriefing/src/main.tsx'), 'utf8');
-    const registration = fs.readFileSync(path.join(__dirname, '../src/widgets/dailyBriefing.registration.ts'), 'utf8');
-    for (const src of [codePage, registration]) {
-      expect(src).toMatch(/openPlaybookLibrary\(/);
-      expect(src).not.toMatch(/webresourceName:/);
-      expect(src).not.toMatch(/const navigateTo\b/);
-    }
+  // Behavioural (round 5, R4-8): each host's handler, invoked as the UI would
+  // invoke it, must call navigateTo bound to Navigation. The Code Page's handler
+  // is the module `main.tsx` passes as `onBrowsePlaybooks` (main.tsx itself
+  // cannot be imported under jest: import.meta.env).
+  it.each([
+    ['standalone Code Page (browsePlaybooks)', () => browsePlaybooks()],
+    ['embedded registration (onBrowsePlaybooks)', () => registrationBrowseHandler()()],
+  ])('%s calls Xrm.Navigation.navigateTo as a method', async (_host, invoke) => {
+    const xrm = makeXrm();
+    (window as unknown as { Xrm: unknown }).Xrm = xrm;
+    invoke();
+    expect(xrm.Navigation.navigateTo).toHaveBeenCalledTimes(1);
+    expect(xrm.Navigation.navigateTo.mock.contexts[0]).toBe(xrm.Navigation);
+    expect(xrm.Navigation.navigateTo.mock.calls[0][0]).toMatchObject({ webresourceName: 'sprk_playbooklibrary' });
+    await expect(xrm.Navigation.navigateTo.mock.results[0].value).resolves.toBeUndefined();
   });
 });
