@@ -4,7 +4,7 @@
     <title>Per-customer Azure AI Content Safety, keyless (plan G26) — a ContentSafety account in every stamp, its endpoint carried H2a → H4b to the BFF, no API key anywhere, and no hard-coded dev-endpoint fallback in the BFF</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T246 (gap G26; hard prerequisite of T186 per D22)</phase>
     <gate>startable now (T244 ✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies BFF startup (.cs, tag bff-api), stamp auth (tag auth), L2 handler outputs and tests; failure modes are a stamp BFF that sends customer prompt text to a foreign endpoint, or a BFF that refuses to boot.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -160,5 +160,69 @@
   </acceptance-criteria>
 
   <notes>
+    COMPLETED 2026-10-06 (session 38). Implementation commit 514a4638e. Template + code only — no live Azure change
+    (T186 deploys a stamp; T230 makes the stamp-side MI call).
+
+    FACTS (read-only, 2026-10-06): no `spaarke-contentsafety-dev` account exists (dev subscription Cognitive Services
+    accounts: spaarke-openai-dev [AIServices, eastus] + one unrelated). Dev BFF sets AiSafety__ContentSafety__Endpoint
+    = https://spaarke-openai-dev.cognitiveservices.azure.com/ (MI on) — unaffected. Demo BFF (Stopped, Production) has
+    no AiSafety setting → recorded on T242c + config/spaarke-resources.yaml. sprksharedprod-api Stopped/retired. Key
+    Vault spaarke-spekvcert holds no ContentSafety secret (live or soft-deleted).
+
+    DONE: content-safety.bicep keyless (disableLocalAuth true, custom subdomain, listKeys output removed) + Cognitive
+    Services User for the stamp UAMI; customer.bicep wires it (name sprk-{customer}-{env}-contentsafety, S0),
+    AiSafety__ContentSafety__Endpoint app setting, LOAD-BEARING output contentSafetyEndpoint. L2 chain copied from
+    T242 redisEndpoint: ArmDeploymentRunner.MapOutputs → BicepDeployOutputs.ContentSafetyEndpoint (required) → H2a
+    check + InterStepState.ContentSafetyEndpoint → PerEnvSourceCatalog from-h2a-output:content_safety_endpoint
+    (+ generator allow-list) → HandlerRunInputs H4b → manifest per_env_settings AiSafety__ContentSafety__Endpoint.
+    ContentSafety-ApiKey removed from the manifest (generated/* regenerated, -Verify OK) and from PinnedManifestGaps.
+    BFF AiSafetyModule: hard-coded dev fallback removed; endpoint required outside Development/Testing (startup
+    InvalidOperationException naming AiSafetyModule + the exempt environments); Development/Testing unset → no base
+    address → scans fail open via the services' existing catch; non-https rejected. Verify-ContentSafetyResource.ps1
+    keyless (Entra token) — RUN against dev: Prompt Shields 200, Groundedness 200 (eastus). Keyless ArchTest
+    CognitiveServices minimum 2 → 3.
+
+    DEVIATION (region, recorded): the POML constraint said contentSafetyLocation defaults to the stamp location. The
+    Microsoft region table (learn.microsoft.com/azure/ai-services/content-safety/region-availability, updated
+    2026-09-18) shows westus2 — the stamp default — has Prompt Shields but NO Groundedness Detection (US regions with
+    both: westus, eastus, eastus2, canadaeast). Following the stamp location would have made every groundedness check
+    fail open silently, so contentSafetyLocation defaults to westus (nearest to westus2), split-region like
+    openAiLocation. The module header's old "West US 2 required" note was wrong.
+
+    ADDED FROM REVIEW: ArmTemplateInspector rule R4 — H2a rejects, Resumable and before any ARM call
+    (template-outputs-missing), a resolved template that does not declare every output H2a requires
+    (ArmDeploymentRunner.RequiredOutputNames, pinned to MapOutputs by a source-scan test). Covers T242's redisEndpoint
+    too. Behavioural test: Testing + no endpoint → PromptShieldService.ScanAsync returns FailedOpen.
+
+    VERIFIED: ControlPlane.Tests 2122 passed / 0 failed / 1 skipped; ArchTests 363/363; BFF unit 14327 passed / 0
+    failed / 54 skipped (full run) + safety subset 84/0/1 after the last edits; catalog -Verify OK; customer.json =
+    fresh compile (semantic); bicep-e2e-dry-run Build PASS (8 warnings, all pre-existing lines). BFF §10: publish
+    Release, Compress-Archive Optimal, fresh short-path worktrees — master 23bdc5679 = 48,108,908 bytes (45.88 MB, 214
+    files) vs branch 514a4638e = 48,109,097 bytes (45.88 MB, 214 files): +189 bytes (~0.00 MB). CVE: `dotnet list
+    package --vulnerable --include-transitive` → no vulnerable packages; no package changes. Placement: design.md §17
+    T246 entry (existing module, no new surface).
+
+    ESCALATION TRIGGERS: (1) no other component needs a Content Safety key or endpoint — consumers are only
+    PromptShieldService + GroundednessCheckService via the named client (not fired). (2) kind ContentSafety accepts
+    disableLocalAuth + custom subdomain at 2024-10-01 (compiles; same API as openai.bicep) (not fired). (3) no test host
+    or deployed environment other than demo lacks the endpoint (dev sets it; shared-prod retired) (not fired; demo → T242c).
+
+    STEP 9.5: adr-check — V1 (exception message must name the exempt environments) FIXED; W2 placement FIXED (design.md
+    §17); W3 ValidateOnStart/options class — accepted, follows the T242 CacheModule startup-check precedent (throws at
+    host build); W4 Content Safety added to T230's MI-call list; W5 D13 "no flag day" vs boot check — governed by D22 +
+    plan row ("fail at boot when unset"), demo follow-on on T242c; W6 design.md/guide D-12 wording FIXED; W7 test
+    placement mirrors CacheModuleTests; W8 pre-T246 stamps keep a dead ApiKey KV ref — none exist; D-12 "shareable" is
+    permitted-not-required (no conflict; S0 has no fixed fee). code-review — 0 Critical; W1 FIXED (R4); W2 recorded
+    below; W3 FIXED (region default); W4 FIXED; W5 FIXED (script stderr/exit codes); W6 FIXED (justification); S1
+    FIXED; S2 kept (asserts the called URL); S7 FIXED (registry content_safety_endpoint; dev OpenAI region eastus).
+
+    FOLLOW-UPS (not T186 blockers unless noted): (a) worker upgrade with a run in flight whose H2a completed under the
+    old worker → H4b PerEnvInputMissing that resume cannot heal (re-run or patch InterStepState) — deploy the worker
+    with no run in flight (same for T242); (b) H2a's global-name pre-check does not cover Cognitive Services custom
+    subdomains (openai/docintel/contentsafety) — a collision quarantines mid-deploy; (c) Decommission-Customer.ps1 does
+    not purge soft-deleted Cognitive Services accounts (re-provisioning the same customerId/env fails until retention
+    ends); (d) H0 preflight could check the Content Safety region offers Groundedness; (e) upgrade runs of pre-T246
+    stamps would see the new app setting as what-if drift (no such stamps exist); (f) doc drift found: the retired dev
+    app `spe-api-dev-67e2xz` is still named in ~40 docs/skills (it no longer exists; dev BFF is spaarke-bff-dev).
   </notes>
 </task>

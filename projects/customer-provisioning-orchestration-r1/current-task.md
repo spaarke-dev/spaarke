@@ -1,6 +1,6 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-10-06 ~03:40 UTC SESSION 37 END (context-handoff) — PR #1311 MERGED (`c8b93b294`); **T244 ✅ COMPLETE** and pushed (`752b908e2` + master merge `7950c2d09`, no PR yet); S36 owner items done. Next task: **T246** (POML to author). Older header text below is history.
+> **Last Updated**: 2026-10-06 SESSION 38 (task-execute close) — **T246 ✅ COMPLETE** (`514a4638e` + close-out commit; no PR yet — T244 + T246 ride together). Next task: **T247** (POML to author). Older header text below is history.
 >
 > **Older header (SESSION 25 mid-session, preserved)**: This session (2026-09-29, resumed from SESSION 24 post-compact): (1) executed Task 222 = INCOMING §5 Item 1 (D-13) end-to-end — H3 shared-app-reg branch DELETED; H3 now provisions ONE Entra app-reg per customer, UNCONDITIONALLY, in both models per D-13; landed commit `1e586978f` (11 files, +812/-475 LOC); (2) Step 9.5 quality gates PASS (adr-check 0 violations + code-review 0 critical + 9 W1-W9 stale-doc fixes applied same-session per T220 precedent); (3) filed Task 223 = INCOMING §5 Item 2 (D-12) — one shared TenancyModel enum + parse-or-reject at the edge; POML at `tasks/223-item2-tenancy-model-enum-parse-or-reject.poml`; landed filing-only commit `1d9c49b7e` (POML + TASK-INDEX row + this file's pointer update); (4) BINDING sequence advances: Item 1 ✅ COMPLETE, Item 2 🔲 FILED (POML authored with 28-file scope + explicit escalation triggers, ready for fresh-session execution). **This handoff captures Task 222's landed state + Task 223's filed state + explicit next-session execution instructions.**
 
@@ -40,14 +40,31 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **T246** — Per-customer Azure AI Content Safety, keyless (G26). POML `tasks/246-per-customer-content-safety-keyless.poml` (authored S38). |
-| **Step** | 8 of 8: verify. Steps 1-7 DONE uncommitted (module keyless + UAMI role; customer.bicep wiring + customer.json; L2 ContentSafetyEndpoint chain + tests; manifest/generated; RunContextContractTests; BFF AiSafetyModule boot check + AiSafetyModuleTests; Verify-ContentSafetyResource.ps1 keyless; inventory/guide/provisioning.md/CHANGELOG/plan/T242c note). ControlPlane.Tests 2119/0/1; keyless ArchTests 11/11. Docs-drift sub-agent editing 4 docs (auth-AI-azure-resources, auth-azure-resources, AI-DEPLOYMENT-GUIDE, AI-ARCHITECTURE). Pending: BFF unit tests, publish size + CVE, e2e dry run, Step 9.5. |
-| **Status** | in-progress (FULL rigor). Open owner item unchanged: W7 — deploy the L2 Api template before its next L2 Api code deploy. |
-| **Next Action** | Follow POML steps 1→8. Facts (read-only, S38): dev BFF sets AiSafety__ContentSafety__Endpoint=spaarke-openai-dev (unaffected); fallback host spaarke-contentsafety-dev does NOT exist; demo BFF (stopped) has no AiSafety setting → T242c must set it; shared-prod app stopped/retired. Endpoint chain copies T242 redisEndpoint. |
+| **Task** | **T247** — Make OpenAI AutoRecompose real (G27) — POML NOT YET AUTHORED (author from plan §7 row T247: facts first, closed AC). T246 ✅ 2026-10-06. |
+| **Step** | Between tasks — T244 + T246 committed on the branch (no PR yet). |
+| **Status** | not-started (T247). Open owner item unchanged: W7 — deploy the L2 Api template before its next L2 Api code deploy. |
+| **Next Action** | Author `tasks/247-*.poml` from plan row T247 (customer.bicep param `openAiDeployments array`, default = openai.bicep pinned set, passed to the openAi module; ArmDeploymentRunner.BuildParametersPayload sends the recomposed set when the policy is AutoRecompose; ArmTemplateInspector R2 still checks pins on the template defaults; test that a dropped model is absent from the ARM payload). Then task-execute T247. Optional first: the `spe-api-dev-67e2xz` doc-drift sweep (T246 follow-up f). |
 | **Order** | ~~T248~~ → ~~T251~~ ✅ → ~~T242~~ ✅ → ~~T242b~~ ✅ → ~~T244~~ ✅ → T246 (**T244 + T246 + T251 = hard prerequisites of T186**) → T247 → T227 → T228 → T229 + T230 → T232 → T233 → T240 → T218 → T235 → T250 → 213.7/207/208/209 → T186. T242c (demo BFF refresh, owner-gated, not a T186 prerequisite) when the owner wants demo running. T241 (decommission) on owner go-ahead. |
 
 
-### Critical context for the next session (SESSION 37 handoff)
+### Critical context for the next session (SESSION 38 handoff)
+
+**Session 38 outcome (2026-10-06):** T246 ✅ — see its POML notes (facts, region deviation, Step 9.5 dispositions, follow-ups a–f).
+- Every stamp now gets its own keyless Content Safety account (`sprk-{customer}-{env}-contentsafety`, S0, UAMI = Cognitive Services User), endpoint H2a → InterStepState → H4b `AiSafety__ContentSafety__Endpoint`; `ContentSafety-ApiKey` gone from the manifest.
+- **Region**: `contentSafetyLocation` defaults to **westus** — westus2 (stamp default) has Prompt Shields but NO Groundedness Detection (Microsoft region table 2026-09-18; US regions with both: westus, eastus, eastus2, canadaeast).
+- **BFF**: refuses to start outside Development/Testing without `AiSafety__ContentSafety__Endpoint` (no dev fallback). Dev sets it (spaarke-openai-dev, eastus). **Demo lacks it → T242c must set it** (noted on T242c + config/spaarke-resources.yaml).
+- **H2a inspector R4**: a resolved template missing any required output (`ArmDeploymentRunner.RequiredOutputNames`) now fails Resumable `template-outputs-missing` before deploying.
+- Live (read-only) this session: `Verify-ContentSafetyResource.ps1` (now keyless) vs dev → Prompt Shields 200 + Groundedness 200 with an Entra token.
+- Publish size: master 23bdc5679 vs branch 514a4638e = +189 bytes (45.88 MB both, 214 files). CVE clean.
+
+**Rules learned this session:**
+- Check Microsoft's per-feature region table before defaulting a regional AI resource to the stamp location — "service available" ≠ "every feature available".
+- The scratchpad edit-script heredoc can fail on quoting (`unexpected EOF`); write the script with the Write tool, then run it.
+- `git worktree add <short-path> origin/master` after `git fetch` gives the fresh-master side; branch side = a worktree of the committed HEAD. Remove both afterwards.
+
+**Open items:** W7 (owner, unchanged). T230 now also covers the stamp Content Safety MI call. Follow-ups a–f in the T246 POML notes (worker upgrade with a run in flight; subdomain name pre-check; decommission purge of Cognitive Services accounts; H0 groundedness-region check; pre-T246 stamp drift; `spe-api-dev-67e2xz` named in ~40 docs/skills though the app no longer exists). Earlier open items from SESSION 37 (below) still apply except those closed above.
+
+### Critical context (SESSION 37 handoff — history)
 
 **Session 37 outcome (2026-10-06):**
 1. **PR #1311 merged** (`c8b93b294`, merge commit, branch kept) after every check was terminal (40 pass / 3 skip / Trivy neutral). The legacy `redis-key-rotation.yml` is gone from master (404) — the 2026-10-08 06:00 UTC deadline is cleared. Main checkout `C:/code_files/spaarke` fast-forwarded to `c8b93b294`. Note: master's legacy `Build & Test (Debug)` run `37370929844` on `2677d48c0` failed with "The hosted runner lost communication with the server" — GitHub infra, not code; prior master runs green.
