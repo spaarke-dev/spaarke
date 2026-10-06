@@ -246,6 +246,10 @@ export interface DataGridParentContext {
 export const FormModal: React.FC<any> = () => null;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const applyResolverFields: (...args: any[]) => any = () => ({});
+// unified-access-control-r2 task 147: the connections write handler (Spaarke.Communication.Components, which the
+// legal-workspace section registry pulls in) re-files a communication through the BFF instead of Xrm.WebApi.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const updateChildRecordViaBff: (...args: any[]) => Promise<void> = async () => undefined;
 
 // ---------------------------------------------------------------------------
 // spaarke-modal-system P7 task 090 (FR-11/FR-18): SubRowLink.tsx,
@@ -431,6 +435,7 @@ const _driftGuard = {
   DataGrid,
   FormModal,
   applyResolverFields,
+  updateChildRecordViaBff,
   OOB_MODAL_SIZES,
   // SECTION_METADATA_CATALOG deliberately EXCLUDED — see note below.
 } satisfies Partial<typeof import('@spaarke/ui-components')>;

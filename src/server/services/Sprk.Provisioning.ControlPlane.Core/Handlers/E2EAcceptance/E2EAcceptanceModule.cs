@@ -56,9 +56,16 @@ public static class E2EAcceptanceModule
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
 
-        services.Configure<H13AcceptanceOptions>(configuration.GetSection(ConfigSection));
+        services.AddOptions<H13AcceptanceOptions>()
+            .Bind(configuration.GetSection(ConfigSection))
+            .Validate(o =>
+            {
+                o.Validate();
+                return true;
+            }, "E2EAcceptance options failed validation — see inner exception (Validate throws).")
+            .ValidateOnStart();
 
-        // Production seam registrations. All 6 trap + 5 invariant probes are
+        // Production seam registrations. All 7 trap + 5 invariant probes are
         // real as of task 185 (Wave G-7 Batch G-7D) -- PlaceholderTrapVerifier
         // and PlaceholderInvariantVerifier are retained on disk UNREGISTERED
         // per this project's retirement convention.
@@ -70,15 +77,16 @@ public static class E2EAcceptanceModule
         // PlaceholderTrapVerifier's Resumable semantics for any future un-wired
         // kinds. Direct parity with the earlier IE2EInvariantVerifier composite
         // migration (Batch G-7A1 / task 174). Task 185 wires all 6 real trap
-        // probes below:
+        // probes below (task 238 adds the 7th, T7 CustomerIdentityT7Probe):
         //   - task 171 (T1) - KeyVaultReferenceIdentityT1Probe (ArmClient)
         //   - task 177 (T2) - DataverseAppUserPairT2Probe (IDataverseAppUserVerifier)
         //   - task 178 (T3) - GraphAppRoleParityT3Probe (IGraphAppRoleParityVerifier
         //                     + IGraphAppRolesRegistry + typed HttpClient)
         //   - task 180 (T4) - ExchangePolicyCountT4Probe (IExchangePolicyReadClient)
         //   - task 172 (T5) - T5SlotMiKvRbacTrapProbe (ArmClient)
-        //   - task 175 (T6) - T6SpeConfidentialClientTrapProbe (TokenCredential
-        //                     + IT6GraphAppOnlyProbe + H13AcceptanceOptions)
+        //   - task 175 (T6) - T6SpeConfidentialClientTrapProbe (IT6GraphAppOnlyProbe
+        //                     + SpeContainerOptions; task 248 — owning app via MI-FIC)
+        //   - task 238 (T7) - CustomerIdentityT7Probe (ArmClient)
         //
         // IE2EInvariantVerifier — Wave G-7 Batch G-7A1 composite migration
         // (task 174 coordinated with task 173). CompositeInvariantVerifier
@@ -125,12 +133,12 @@ public static class E2EAcceptanceModule
         services.AddSingleton<IE2EValidationRunner, E2EValidationRunner>();
         services.AddSingleton<IE2ETrapVerifier, CompositeTrapVerifier>();
         services.AddSingleton<IE2EInvariantVerifier, CompositeInvariantVerifier>();
-        // Task 185 (Wave G-7 Batch G-7D): 6 real ITrapProbe registrations for
+        // Task 185 (Wave G-7 Batch G-7D): 7 real ITrapProbe registrations (T7 added by task 238) for
         // the composite trap verifier. Order does not matter (composite
         // dispatches per Kind); each probe's own file header documents its
         // dependencies. IT6GraphAppOnlyProbe (registered below) is the
         // T6-specific Graph seam consumed by T6SpeConfidentialClientTrapProbe.
-        // ArmClient (T1 + T5) + TokenCredential (T6) come from the shared
+        // ArmClient (T1 + T5) + SpeConfidentialClientGraphFactory (T6, task 248) come from the shared
         // HandlersModule / Program.cs registrations; IDataverseAppUserVerifier
         // (T2) + IGraphAppRoleParityVerifier + IGraphAppRolesRegistry (T3)
         // come from H10's own module registration (line-parity with H10 wire);
@@ -151,37 +159,48 @@ public static class E2EAcceptanceModule
             sp.GetRequiredService<ILogger<GraphAppRoleParityT3Probe>>()));
         services.AddSingleton<ITrapProbe, ExchangePolicyCountT4Probe>();             // T4 (task 180)
         services.AddSingleton<ITrapProbe, T5SlotMiKvRbacTrapProbe>();                // T5 (task 172)
-        services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainerTypesListAppOnlyProbe>();
+        services.AddSingleton<IT6GraphAppOnlyProbe, GraphContainersListAppOnlyProbe>(); // task 248
         services.AddSingleton<ITrapProbe, T6SpeConfidentialClientTrapProbe>();       // T6 (task 175)
+        services.AddSingleton<ITrapProbe, CustomerIdentityT7Probe>();                // T7 (task 238, D-14 — ArmClient)
         // I1 adapter (task 173) — preserves task-170's real packaged-scripts
         // I1 check under the composite pattern by wrapping its internal-static
         // ProbeI1 in an IInvariantProbe (see PackagedScriptTenantLiteralInvariantProbe.cs
         // rationale). Without this adapter, the composite swap would silently
         // regress task-170's shipped Wave G-7 I1 real check to InfraFault.
         services.AddSingleton<IInvariantProbe, PackagedScriptTenantLiteralInvariantProbe>(); // I1 (task 170 IP; task 173 adapter)
-        // I2 (task 173) — real AI Search tenant-filter probe. Reads Model 1
-        // template artifact from Cosmos + issues a live /docs/search POST
-        // asserting `tenantId eq '{TenantId}'` is enforced server-side. See
-        // AiSearchTenantFilterInvariantProbe.cs file header for the honest
+        // I2 (task 173) — real AI Search tenant-filter probe. Issues a live
+        // /docs/search POST on each canonical index of the stamp's own AI
+        // Search service asserting `tenantId eq '{TenantId}'` is enforced
+        // server-side (task 225b retired the Model 1 template-artifact read).
+        // See AiSearchTenantFilterInvariantProbe.cs file header for the honest
         // can-vs-cannot-detect breakdown. Needs IHttpClientFactory (named
         // HttpClient below) + TokenCredential + AiSearchIndexOptions +
-        // ITenantFilterTemplateStore + ICanonicalIndexCatalog +
-        // IProvisioningRunRepository — all pre-registered by Program.cs or by
-        // task 045/124's H2b DI.
+        // ICanonicalIndexCatalog + IProvisioningRunRepository — all
+        // pre-registered by Program.cs or by task 045/124's H2b DI.
         services.AddHttpClient(AiSearchTenantFilterInvariantProbe.HttpClientName);
         services.AddSingleton<IInvariantProbe, AiSearchTenantFilterInvariantProbe>();   // I2 (task 173)
         services.AddSingleton<IInvariantProbe, CosmosPartitionKeyInvariantProbe>();     // I3 (task 174)
-        // I4 (task 176) — real BFF-diagnostic probe for
-        // ITenantContainerResolver-derived SPE container ids. Needs a NAMED
+        // I4 (task 204c B07 — Wave G-7 replacement of task 176, 2026-08-26).
+        // INDEPENDENT re-verification variant: reads DEPLOYED App Service
+        // config directly via ARM `Microsoft.Web/sites/{name}/config/appsettings/list`
+        // and classifies the `SharePointEmbedded__ContainerTypeId` value
+        // (`@Microsoft.KeyVault(...)` reference → Passed; canonical `b!` SPE
+        // container-id literal → Failed CATASTROPHIC; empty / non-KV-ref
+        // string → Failed). Task 204c dispatch directive: "do NOT trust
+        // RunStatus.HandlerReports; re-read the underlying Azure/Cosmos/
+        // Graph/SPE surface directly" — task 176's BFF-diagnostic pattern
+        // trusts the BFF's own self-report and cannot detect a compromised
+        // deploy whose BFF diagnostic echoes plausibly while the app-setting
+        // is hardcoded (§4D I4 CATASTROPHIC class). See probe file header
+        // § SILENT-FAIL AUDIT for the failure-mode delta. Needs a NAMED
         // HttpClient (registered below) + the shared UAMI-pinned
-        // TokenCredential (pre-registered by Worker Program.cs). See
-        // SpeContainerResolverInvariantProbe.cs file header for the honest
-        // fake-vs-live posture: authored + unit-tested against fake HTTP
-        // transport NOW; LIVE verification against a real deployed BFF
-        // diagnostic endpoint is deferred to Phase F rerun (task 186) per
-        // this task's POML escalation trigger.
-        services.AddHttpClient(SpeContainerResolverInvariantProbe.HttpClientName);
-        services.AddSingleton<IInvariantProbe, SpeContainerResolverInvariantProbe>();   // I4 (task 176)
+        // TokenCredential + IOptions<H13AcceptanceOptions>. Task 176's
+        // SpeContainerResolverInvariantProbe is retained on disk UNREGISTERED
+        // per Wave G-6 retirement convention (see its retirement banner);
+        // its BFF-diagnostic complementary coverage may be re-registered
+        // under a distinct InvariantKind post-186 if operator sign-off.
+        services.AddHttpClient(SpeContainerTenantDerivationInvariantProbe.HttpClientName);
+        services.AddSingleton<IInvariantProbe, SpeContainerTenantDerivationInvariantProbe>();   // I4 (task 204c B07; supersedes task 176)
         services.AddSingleton<IInvariantProbe, I5GraphTokenTenantScopeProbe>();         // I5 (task 179)
         // Task 182 (Phase C'' Wave G-7 Batch G-7A1): pure-C# port replaces the
         // NamingConformanceScriptRunner shell-out per DS-4 section 6 (this script

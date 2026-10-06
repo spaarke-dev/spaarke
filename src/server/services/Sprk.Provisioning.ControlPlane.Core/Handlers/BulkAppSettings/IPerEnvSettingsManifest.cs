@@ -9,8 +9,9 @@
 // contract.
 //
 // PURPOSE (per H4b):
-//   H4b BulkAppSettings handler resolves each per_env_settings entry from
-//   HandlerEnvelope.Parameters.NonSecret via the entry's `per_env_source`, then
+//   H4b BulkAppSettings handler resolves each per_env_settings entry through
+//   PerEnvSourceCatalog (typed InterStepState output or intake value — task
+//   245a) via the entry's `per_env_source`, then
 //   shells to the generated Configure-AppServiceSettings.generated.ps1 script
 //   which writes ALL settings (KV-refs + per-env literals) in ONE batched
 //   `az webapp config appsettings set --settings @settings` call → ONE App
@@ -28,7 +29,7 @@
 //   have a DIFFERENT contract (no vault target, no rotation, no ADR-028
 //   cleartext-never-in-handler rule — literals are cleartext BY DEFINITION),
 //   and widening KvSecretEntry to hold both flavors would corrupt the
-//   secrets-focused contract every other H4/H4-shared reader consumes.
+//   secrets-focused contract the H4 reader consumes.
 //
 // THREAD-SAFETY:
 //   Implementations MUST be thread-safe (Singleton lifetime). The manifest is
@@ -70,7 +71,7 @@ public interface IPerEnvSettingsManifest
 /// <param name="PerEnvSource">
 /// Parsed source: <see cref="PerEnvSettingSource.Literal"/> means the value
 /// comes from <see cref="LiteralValue"/>; every other kind means the value
-/// comes from <c>envelope.Parameters.NonSecret[<see cref="ParameterKey"/>]</c>.
+/// comes from the <see cref="PerEnvSourceCatalog"/> source named by <see cref="ParameterKey"/>.
 /// </param>
 /// <param name="LiteralValue">
 /// Populated iff <see cref="PerEnvSource"/> is <see cref="PerEnvSettingSource.Literal"/>.
@@ -78,7 +79,8 @@ public interface IPerEnvSettingsManifest
 /// </param>
 /// <param name="ParameterKey">
 /// Populated for every non-literal source (the key H4b looks up in
-/// <c>envelope.Parameters.NonSecret</c>). Null for literals.
+/// <see cref="PerEnvSourceCatalog.BySourceKey"/>; also the generated script parameter's base name).
+/// Null for literals.
 /// </param>
 /// <param name="Required">
 /// When true, a missing / empty resolved value = Resumable Failure BEFORE
@@ -106,10 +108,10 @@ public enum PerEnvSettingSource
     /// <summary>Value embedded verbatim in <see cref="PerEnvSettingEntry.LiteralValue"/>.</summary>
     Literal = 1,
 
-    /// <summary>Value comes from an upstream handler's InterStepState output (envelope.Parameters.NonSecret).</summary>
+    /// <summary>Value comes from an upstream handler's typed InterStepState output (PerEnvSourceCatalog).</summary>
     FromHandlerOutput = 2,
 
-    /// <summary>Value comes from an operator/API-supplied run parameter (envelope.Parameters.NonSecret).</summary>
+    /// <summary>Value comes from intake — an IntakeParameterCatalog key (run.Parameters.NonSecret) or the run's own customerId (run.CustomerId, task 238) — via PerEnvSourceCatalog.</summary>
     FromHandlerParameter = 3,
 }
 
@@ -121,8 +123,12 @@ public abstract record PerEnvSettingsManifestReadResult
 {
     private PerEnvSettingsManifestReadResult() { }
 
-    /// <summary>Manifest read OK — entries in canonical (alphabetical-by-Key) order.</summary>
-    public sealed record Success(IReadOnlyList<PerEnvSettingEntry> Entries) : PerEnvSettingsManifestReadResult;
+    /// <summary>
+    /// Manifest read OK — entries in canonical (alphabetical-by-Key) order. <paramref name="ContentVersion"/>
+    /// is the <see cref="ArtifactVersion"/> of the manifest text (task 245b) — the <c>secretsVer</c> of H4b's
+    /// idempotency key <c>appsettings-{env}-{secretsVer}</c>; the same manifest as H4's, so the same value.
+    /// </summary>
+    public sealed record Success(IReadOnlyList<PerEnvSettingEntry> Entries, string ContentVersion) : PerEnvSettingsManifestReadResult;
 
     /// <summary>Manifest read failed — operator-facing diagnostic.</summary>
     public sealed record Failure(string Diagnostic) : PerEnvSettingsManifestReadResult;

@@ -104,7 +104,6 @@ describe('SaveView — document change detection (task 094)', () => {
     expect(
       updater({
         savedDocument: null,
-        profileRegenerated: false,
         profileRefreshSignal: 0,
         contentChangedSinceSave: false,
       })

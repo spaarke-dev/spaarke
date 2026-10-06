@@ -6,29 +6,15 @@
 // consumes to populate the customer's Key Vault.
 //
 // SEAM JUSTIFICATION (ADR-010):
-//   ≥2 implementations exist from day 1:
-//     - Interim (wave C4): <see cref="StaticKvSecretManifest"/> — Null-placeholder
-//       returning the known-required §7.9 canonical entries hard-coded (Phase G
-//       naming enforcement) so H4 can ship + own T1/T5 trap verification
-//       BEFORE Phase H manifest generator lands.
-//     - Production (Phase H task 084): a real file-backed / manifest-generator
-//       impl loaded from `scripts/canonical-secret-catalog/manifest.yaml`
-//       (or the runtime-generated JSON). Swap the DI registration only — H4
-//       handler + tests remain unchanged (parity with H1's Null probe →
-//       real ARM probe transition and H12a's manifest reader shape).
-//   Interface earns its keep — no NIH. The Null-placeholder is the established
-//   pattern in this project (NullSubscriptionReadinessProbe task 043,
-//   NullDataverseEnvironmentRegistryClient task 042, NullAdminConsentVerifier
-//   task 046) documented in CLAUDE.md.
-//
-// PHASE H DEPENDENCY:
-//   Per POML dependencies list: task 080/084 (Phase H canonical secret-catalog
-//   manifest) is NOT YET SHIPPED. The dispatcher directive is EXPLICIT: "use
-//   the established Null-placeholder pattern; author IKvSecretManifest seam
-//   with a StaticKvSecretManifest interim impl that returns the known-required
-//   set (Dataverse-ClientSecret, BFF-API-ClientSecret, SPE-ContainerTypeId,
-//   etc. per spec §7.9 R1-R4 + tasks 018/019/020 canonical names). Real
-//   Phase H manifest impl swaps in later without touching H4."
+//   Production implementation: <see cref="FileKvSecretManifest"/>, reading the
+//   embedded `scripts/canonical-secret-catalog/manifest.yaml` (task 126).
+//   H4's tests substitute hand-built entry lists through this seam, so the
+//   handler's ordering, omit and BINDING-guard logic is tested without the
+//   real catalog. The interim StaticKvSecretManifest (wave C4 Null-placeholder,
+//   written before task 084 shipped the manifest) was deleted by T226
+//   (2026-09-30): it was no longer registered, and its hard-coded list had
+//   drifted from the catalog — reverting to it would have written keys the
+//   owner removed from the process.
 //
 // THREAD-SAFETY:
 //   Implementations MUST be thread-safe (Singleton lifetime). The manifest is
@@ -64,7 +50,7 @@ public interface IKvSecretManifest
 /// <param name="CanonicalName">
 /// Canonical secret name per §7.9 R1 (env-agnostic) + R2 (one canonical
 /// casing). Examples: <c>Dataverse-ClientSecret</c>, <c>BFF-API-ClientSecret</c>,
-/// <c>AiSearch--AdminKey</c>. Grep-visible across the codebase.
+/// <c>Redis-ConnectionString</c>. Grep-visible across the codebase.
 /// </param>
 /// <param name="Operation">
 /// What H4 must do with the entry — <see cref="KvSecretOperation.Upsert"/> is
@@ -78,21 +64,10 @@ public interface IKvSecretManifest
 /// (cleartext never traverses handler code — ADR-028 MUST rule); it delegates
 /// value resolution to the writer.
 /// </param>
-/// <param name="ServiceRef">
-/// Task 200 addition — populated ONLY for entries with
-/// <see cref="KvSecretValueSource.FromSharedService"/>. Format
-/// <c>&lt;type&gt;:&lt;az-resource-name&gt;</c> (e.g.
-/// <c>search:sprksharedprod-search</c>) mirrored verbatim from the canonical
-/// secret-catalog manifest's <c>service_ref:</c> field. Consumed by
-/// H4SharedKvSecretsPopulationHandler to build a
-/// <see cref="System.String"/>-parsed <c>SharedKvSecretSource</c> for the
-/// <c>ISourceServiceKeyExtractor</c>. NULL for every other value_source.
-/// </param>
 public sealed record KvSecretEntry(
     string CanonicalName,
     KvSecretOperation Operation,
-    KvSecretValueSource ValueSource,
-    string? ServiceRef = null);
+    KvSecretValueSource ValueSource);
 
 /// <summary>What H4 must do with a manifest entry.</summary>
 public enum KvSecretOperation
@@ -110,10 +85,10 @@ public enum KvSecretOperation
 /// </summary>
 public enum KvSecretValueSource
 {
-    /// <summary>Value already exists on ANOTHER Key Vault; writer resolves via UAMI + copies. Common for Bicep-emitted secrets (AiSearch--AdminKey, etc.).</summary>
+    /// <summary>Value already exists on ANOTHER Key Vault; writer resolves via UAMI + copies (e.g. <c>Dataverse-ClientSecret</c>, <c>BFF-API-ClientSecret</c>).</summary>
     FromExistingKvSecret = 1,
 
-    /// <summary>Value comes from a Bicep deploy output (H2a interStepState). Writer resolves via `az deployment group show` or the shared interStepState.</summary>
+    /// <summary>Value is written to the customer vault by <c>customer.bicep</c>'s kvSecrets module at H2a. The writer checks that it exists; H4 has no other source for it (see <see cref="KvSecretValueResolver"/>).</summary>
     FromBicepOutput = 2,
 
     /// <summary>Value from operator-supplied run parameters (<see cref="Models.RunParameters.Secrets"/>, structurally KV URI ref).</summary>
@@ -122,19 +97,38 @@ public enum KvSecretValueSource
     /// <summary>Value is generated in-place (webhook signing keys, random bytes, etc.).</summary>
     Generated = 4,
 
+    // 5 was FromSharedService (task 200 H4-shared) — retired T226 (2026-09-30); not reused.
+
     /// <summary>
-    /// Task 200 addition — value is EXTRACTED at run time from a source Azure
-    /// service (AI Search admin key, Cognitive Services Key1, Service Bus
-    /// RootManageSharedAccessKey, Storage account key1 composed connection
-    /// string, Redis primary-key composed connection string). Owned by
-    /// H4SharedKvSecretsPopulationHandler (task 200), NOT the per-tenant H4
-    /// handler — the sibling H4-shared flow reads the target vault, extracts
-    /// fresh source value, and rotates on drift. The per-tenant H4 handler
-    /// SKIPS these entries (they don't belong to per-tenant KVs).
-    /// Accompanying <see cref="KvSecretEntry.ServiceRef"/> carries the
-    /// <c>&lt;type&gt;:&lt;az-resource-name&gt;</c> lookup key.
+    /// T226 (2026-09-30) — value is a Spaarke topology constant carried on the run as a NON-SECRET
+    /// parameter (manifest <c>value_source: from-topology-constants</c>, introduced by task 214 for
+    /// <c>SPE-ContainerTypeId</c>, whose value comes from <c>spaarke-constants.yaml
+    /// per_env_constants.&lt;env&gt;.containerTypeId</c>). H4 supplies it via
+    /// <see cref="KvSecretWriteRequest.IntakeValues"/>.
     /// </summary>
-    FromSharedService = 5,
+    FromTopologyConstants = 6,
+
+    /// <summary>
+    /// Task 245a — a non-secret value taken from an INTAKE parameter (<c>IntakeParameterCatalog</c>,
+    /// manifest <c>value_source: from-intake-parameter</c>; e.g. <c>TenantId</c> ← intake <c>tenantId</c>).
+    /// H4 supplies it via <see cref="KvSecretWriteRequest.IntakeValues"/>. Before T245a such values were
+    /// <see cref="FromRunParameters"/>, i.e. a KV reference in <c>run.Parameters.Secrets</c> that nothing
+    /// ever supplied.
+    /// </summary>
+    FromIntakeParameter = 7,
+
+    /// <summary>
+    /// Task 245a — written into the customer vault by H3 (EntraAppReg) itself, when it creates the BFF app
+    /// registration (manifest <c>value_source: written-by-h3</c>; <c>BFF-API-ClientId</c>,
+    /// <c>BFF-API-Audience</c>). H3 runs AFTER H4 (it needs H4's vault RBAC bootstrap), so H4 neither
+    /// writes nor resolves these — it skips them. Before T245a H4 waited for a reference only H3 could
+    /// supply, after H4: a deadlock on every real run.
+    /// </summary>
+    WrittenByEntraAppReg = 8,
+
+    // 9 was FromPlatformVault (task 245b — Spaarke-shared vendor keys copied from the Spaarke platform
+    // vault) — removed by task 225b (owner D18, 2026-10-02) with its only entries, the Bing Search key
+    // (Bing Search v7 retired by Microsoft 2025-08-11) and the LlamaParse key (no production caller); not reused.
 }
 
 /// <summary>
@@ -146,8 +140,12 @@ public abstract record KvSecretManifestReadResult
 {
     private KvSecretManifestReadResult() { }
 
-    /// <summary>Manifest read OK — entries in canonical order.</summary>
-    public sealed record Success(IReadOnlyList<KvSecretEntry> Entries) : KvSecretManifestReadResult;
+    /// <summary>
+    /// Manifest read OK — entries in canonical order. <paramref name="ContentVersion"/> is the
+    /// <see cref="ArtifactVersion"/> of the manifest text (task 245b) — the <c>secretsVer</c> of H4's
+    /// idempotency key <c>kv-{customerId}-{secretsVer}</c>.
+    /// </summary>
+    public sealed record Success(IReadOnlyList<KvSecretEntry> Entries, string ContentVersion) : KvSecretManifestReadResult;
 
     /// <summary>Manifest read failed — operator-facing diagnostic.</summary>
     public sealed record Failure(string Diagnostic) : KvSecretManifestReadResult;

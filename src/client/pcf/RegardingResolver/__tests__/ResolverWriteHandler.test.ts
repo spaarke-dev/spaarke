@@ -129,6 +129,22 @@ const NARROW_NAV_PROPS: NavPropRow[] = [
   navRow('sprk_regardingrecordtype', 'sprk_recordtype_ref', 'RecordType'),
 ];
 
+/** A budget (an intermediate, task 169) whose root columns are typed `sprk_matter` / `sprk_project` lookups. */
+const BUDGET_1 = 'b0000001-0000-0000-0000-000000000001';
+const BUDGET_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_matter', 'sprk_matter', 'Matter'),
+  navRow('sprk_project', 'sprk_project', 'Project'),
+];
+
+/** A document whose `sprk_matter` and `sprk_relatedmatter` name DIFFERENT matters. */
+const DOC_AMBIGUOUS = 'd0000001-0000-0000-0000-000000000001';
+const DOCUMENT_NAV_PROPS: NavPropRow[] = [
+  navRow('sprk_matter', 'sprk_matter', 'Matter'),
+  navRow('sprk_relatedmatter', 'sprk_matter', 'RelatedMatter'),
+  navRow('sprk_project', 'sprk_project', 'Project'),
+  navRow('sprk_relatedproject', 'sprk_project', 'RelatedProject'),
+];
+
 /** An even narrower host with no communication lookup (SRFR-048 guard). */
 const EVENT_NAV_PROPS: NavPropRow[] = [
   navRow('sprk_regardingmatter', 'sprk_matter', 'Matter'),
@@ -157,6 +173,20 @@ function makeFetch(navPropsByEntity: Record<string, NavPropRow[]>): jest.Mock {
 }
 
 /**
+ * v1.6.0 (UAC-r2 task 147 r1): a saved child host is re-filed through the BFF (`refileThroughBff`), and a new host is
+ * checked for a secure parent (`isSecureRoot`). These pre-existing cases are about the payload, so the BFF re-file is
+ * wired to hand the payload to the same `updateRecord` mock they assert on, and no parent is secure. The BFF routing
+ * itself is pinned by the "v1.6.0" cases at the end of this file.
+ */
+function bffWired(webApi: { updateRecord: jest.Mock }) {
+  return {
+    refileThroughBff: (entity: string, id: string, payload: Record<string, unknown>) =>
+      webApi.updateRecord(entity, id, payload).then(() => undefined),
+    isSecureRoot: async () => false as boolean | null,
+  };
+}
+
+/**
  * A `retrieveMultipleRecords` fake covering the three query shapes the shared
  * service issues: the `sprk_recordtype_ref` catalog read, the target-record
  * field read, and the FR-26 core-ancestor read.
@@ -178,8 +208,10 @@ function makeWebApi(options?: { ancestors?: Record<string, Record<string, unknow
         // FR-26 rather than about SRFR-020/052.
         return { entities: [{ sprk_recordtype_refid: `rt-${entity}`, sprk_name: 'RT' }] };
       }
-      // FR-26 core-ancestor read — recognisable by its `_..._value` $select.
-      if (/\$select=_sprk_regarding/.test(query)) {
+      // FR-26 core-ancestor read — recognisable by its `_..._value` $select. Task 169:
+      // an intermediate's root columns may be typed (`_sprk_matter_value` on a budget,
+      // `_sprk_relatedmatter_value` on a document), not only `_sprk_regarding*_value`.
+      if (/\$select=_sprk_\w+_value/.test(query)) {
         const idMatch = /eq ([0-9a-f-]+)/i.exec(query);
         const id = (idMatch?.[1] ?? '').toLowerCase();
         const row = ancestors[id];
@@ -254,13 +286,13 @@ describe('ResolverWriteHandler', () => {
     const selection = { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'Smith v. Jones' };
 
     const r1 = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       selection,
       undefined,
       fetchImpl as unknown as typeof fetch
     );
     const r2 = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_communication', hostRecordId: MATTER_2 },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_communication', hostRecordId: MATTER_2 },
       selection,
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -277,7 +309,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'unknown_entity', recordId: 'x', recordName: 'y' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -297,7 +329,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
 
     await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -317,7 +349,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_event: EVENT_NAV_PROPS });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_event', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_event', hostRecordId: HOST_TODO },
       { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -350,7 +382,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'Re: discovery' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -378,7 +410,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_matter: FULL_NAV_PROPS });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -400,7 +432,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_ORPHAN, recordName: 'Orphan' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -410,6 +442,76 @@ describe('ResolverWriteHandler', () => {
     expect(result.ancestorStatus).toBe('no-ancestor');
     expect(result.ancestorStamps).toEqual([]);
     expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // FR-26 — intermediate targets (task 169: the client mirrors server task 156's
+  // IntermediateRootColumns, so a typed root on the target is stamped at save time)
+  // -------------------------------------------------------------------------
+
+  test('FR-26 SET — a budget target stamps the matter named by its typed sprk_matter lookup', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [BUDGET_1]: { _sprk_matter_value: MATTER_1, _sprk_project_value: null } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_budget: BUDGET_NAV_PROPS });
+
+    // Sweep integration (169 on top of 147): a SAVED to-do host re-files through the BFF — wired as 147 wired the
+    // sibling FR-26 tests (bffWired routes the re-file into the webApi double so the payload is asserted as before).
+    const result = await applyRegardingSelection(
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_budget', recordId: BUDGET_1, recordName: 'FY27 budget' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.ancestorStatus).toBe('derived');
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+    const [, , payload] = webApi.updateRecord.mock.calls[0];
+    expect(boundValue(payload, 'sprk_RegardingBudget')).toBe(`/sprk_budgets(${BUDGET_1})`);
+    expect(boundValue(payload, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+  });
+
+  test('NFR-01 — a document naming two different matters refuses the pick on an existing host', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [DOC_AMBIGUOUS]: { _sprk_matter_value: MATTER_1, _sprk_relatedmatter_value: MATTER_2 } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_document: DOCUMENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_document', recordId: DOC_AMBIGUOUS, recordName: 'Engagement letter' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(result.error).toMatch(/two different sprk_matter records/);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    expect(result.payload).toBeUndefined();
+  });
+
+  test('NFR-01 — a document naming two different matters stages nothing on a new host', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [DOC_AMBIGUOUS]: { _sprk_matter_value: MATTER_1, _sprk_relatedmatter_value: MATTER_2 } },
+    });
+    const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_document: DOCUMENT_NAV_PROPS });
+
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_document', recordId: DOC_AMBIGUOUS, recordName: 'Engagement letter' },
+      undefined,
+      fetchImpl as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.ancestorStatus).toBe('error');
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    // Nothing for the CREATE-mode presave bridge to stage.
+    expect(result.payload).toBeUndefined();
+    expect(result.ancestorStamps).toBeUndefined();
+    expect(result.clearLookups).toBeUndefined();
   });
 
   // -------------------------------------------------------------------------
@@ -427,7 +529,7 @@ describe('ResolverWriteHandler', () => {
       sprk_todo: FULL_NAV_PROPS,
       sprk_communication: FULL_NAV_PROPS,
     });
-    const ctx = { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO };
+    const ctx = { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO };
 
     // Parent under C1 (ancestor M1) …
     await applyRegardingSelection(
@@ -464,7 +566,7 @@ describe('ResolverWriteHandler', () => {
       sprk_communication: FULL_NAV_PROPS,
       sprk_project: FULL_NAV_PROPS,
     });
-    const ctx = { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO };
+    const ctx = { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO };
 
     await applyRegardingSelection(
       ctx,
@@ -496,7 +598,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_communication', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_communication', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -527,7 +629,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_narrowhost', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_narrowhost', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -548,7 +650,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS });
 
     const result = await clearRegarding(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       fetchImpl as unknown as typeof fetch
     );
 
@@ -574,7 +676,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_communication: FULL_NAV_PROPS });
 
     const result = await clearRegarding(
-      { webApi, hostEntity: 'sprk_communication', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_communication', hostRecordId: HOST_TODO },
       fetchImpl as unknown as typeof fetch
     );
 
@@ -588,7 +690,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_event: EVENT_NAV_PROPS });
 
     const result = await clearRegarding(
-      { webApi, hostEntity: 'sprk_event', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_event', hostRecordId: HOST_TODO },
       fetchImpl as unknown as typeof fetch
     );
 
@@ -612,7 +714,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: undefined },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -642,7 +744,7 @@ describe('ResolverWriteHandler', () => {
       sprk_todo: FULL_NAV_PROPS,
       sprk_communication: FULL_NAV_PROPS,
     });
-    const ctx = { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined };
+    const ctx = { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: undefined };
 
     await applyRegardingSelection(
       ctx,
@@ -676,7 +778,7 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({ sprk_todo: FULL_NAV_PROPS }); // sprk_communication → 404
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -704,7 +806,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -724,7 +826,7 @@ describe('ResolverWriteHandler', () => {
     });
 
     const result = await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C1' },
       undefined,
       fetchImpl as unknown as typeof fetch
@@ -759,7 +861,7 @@ describe('ResolverWriteHandler', () => {
     const restricted = resolveAllowedCatalog('sprk_matter,sprk_project');
 
     await applyRegardingSelection(
-      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { webApi, ...bffWired(webApi), hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
       { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'X' },
       restricted,
       fetchImpl as unknown as typeof fetch
@@ -782,5 +884,269 @@ describe('ResolverWriteHandler', () => {
     const fetchImpl = makeFetch({});
     const result = await discoverHostNavProps('sprk_communication', fetchImpl as unknown as typeof fetch);
     expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v1.6.0 — UAC-r2 task 147 r1 (owner round 28): saved child hosts re-file through the BFF; a NEW host is never filed
+// under a secure record before it is saved.
+// ---------------------------------------------------------------------------
+
+describe('v1.6.0 BFF re-file (task 147 r1)', () => {
+  test('a SAVED child host is re-filed through the BFF, never through webApi.updateRecord', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn().mockResolvedValue(undefined);
+    const result = await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_todo', hostRecordId: `{${HOST_TODO}}` },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    expect(refile).toHaveBeenCalledTimes(1);
+    const [entity, id, payload] = refile.mock.calls[0];
+    expect(entity).toBe('sprk_todo');
+    expect(id).toBe(HOST_TODO);
+    expect(payload).not.toHaveProperty('ownerid@odata.bind');
+  });
+
+  test('a SAVED child host with no BFF connection is REFUSED — nothing is written as the user', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not connected to the Spaarke service');
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  test('the BFF refusal message is the control error', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn().mockRejectedValue(new Error('A record this to-do is filed under was not found.'));
+    const result = await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('A record this to-do is filed under was not found.');
+  });
+
+  test('a CLEAR of a saved child host goes through the BFF too (a re-file out of its parent)', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn().mockResolvedValue(undefined);
+    const result = await clearRegarding(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_todo', hostRecordId: HOST_TODO },
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(refile).toHaveBeenCalledTimes(1);
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  test('a host that is not an ownership child (a contact) keeps webApi.updateRecord', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn();
+    await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'contact', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ contact: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(refile).not.toHaveBeenCalled();
+    expect(webApi.updateRecord).toHaveBeenCalledTimes(1);
+  });
+
+  test.each([
+    [true, 'filed under a secure record'],
+    [null, 'could not be checked'],
+  ])('a NEW host whose parent is secure (%s) is refused — nothing is staged for the form save', async (flag, text) => {
+    const webApi = makeWebApi();
+    const isSecureRoot = jest.fn().mockResolvedValue(flag);
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain(text);
+    expect(result.payload).toBeUndefined();
+  });
+
+  test('a NEW host whose parent is NOT secure is staged as before', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot: async () => false, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.payload).toBeDefined();
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  // r1c: a SAVED ownership-child host with no BFF re-file route (a document) is refused — its owner would not follow.
+  test('a SAVED ownership-child host with no BFF re-file route (sprk_document) is REFUSED — nothing is written', async () => {
+    const webApi = makeWebApi();
+    const refile = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, refileThroughBff: refile, hostEntity: 'sprk_document', hostRecordId: HOST_TODO },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_document: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('changes who owns it');
+    expect(refile).not.toHaveBeenCalled();
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+  });
+
+  // 147 x 169 (owner round 28 item 3): a NEW host under a budget is decided by the budget's OWN root, which task 169's
+  // derivation now reads — refused under a secure root, staged under an ordinary one, refused when the root cannot be
+  // derived (fail closed). Before 169 every budget was "unclassified" and refused outright.
+  test.each([
+    ['its root is secure', true, true],
+    ['its root is not secure', false, true],
+    ['its root cannot be derived (no metadata)', false, false],
+  ])('a NEW host filed under a budget whose %s', async (label, rootIsSecure, metadataAvailable) => {
+    // Metadata is cached per entity; this block has no reset of its own, so start from a cold cache.
+    _resetNavPropCacheForTests();
+    _resetSharedNavPropCache();
+    _resetRecordNumberFieldCacheForTests();
+    _resetDisplayNameFieldCacheForTests();
+    const webApi = makeWebApi({
+      ancestors: { [BUDGET_1]: { _sprk_matter_value: MATTER_1, _sprk_project_value: null } },
+    });
+    const isSecureRoot = jest.fn().mockResolvedValue(rootIsSecure);
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_budget', recordId: BUDGET_1, recordName: 'FY27 budget' },
+      undefined,
+      makeFetch(
+        metadataAvailable ? { sprk_todo: FULL_NAV_PROPS, sprk_budget: BUDGET_NAV_PROPS } : { sprk_todo: FULL_NAV_PROPS }
+      ) as unknown as typeof fetch
+    );
+
+    expect(webApi.updateRecord).not.toHaveBeenCalled();
+    if (!metadataAvailable) {
+      expect(result.success).toBe(false);
+      expect(result.payload).toBeUndefined();
+      expect(isSecureRoot).not.toHaveBeenCalled();
+    } else if (rootIsSecure) {
+      expect(result.success).toBe(false);
+      expect(result.payload).toBeUndefined();
+      expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+      expect(result.error).toContain('filed under a secure record');
+    } else {
+      expect(result.success).toBe(true);
+      expect(isSecureRoot).toHaveBeenCalledWith('sprk_matter', MATTER_1);
+      expect(boundValue(result.payload!, 'sprk_RegardingMatter')).toBe(`/sprk_matters(${MATTER_1})`);
+    }
+    void label;
+  });
+
+  // r1c: on a NEW host the form's own save creates the record OWNED BY THE USER, so the selection may ride it only when
+  // the target is decided NOT to be under a secure record.
+  test('a NEW host filed under a PARTY (contact) is staged — a party is never an ownership parent; no flag is read', async () => {
+    const webApi = makeWebApi();
+    const isSecureRoot = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'contact', recordId: MATTER_2, recordName: 'A person' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.payload).toBeDefined();
+    expect(isSecureRoot).not.toHaveBeenCalled();
+  });
+
+  // Sweep integration (169 on top of 147): this list also held 'a record outside the core taxonomy (unclassified: budget)'.
+  // Task 169 made the budget an INTERMEDIATE (its sprk_matter / sprk_project name its root), so no to-do catalog target
+  // is unclassified any more; the budget's NEW-host decision is pinned by the test that follows this one.
+  test.each([
+    ['a child with no core-ancestor stamp (no-ancestor)', 'sprk_communication', COMM_ORPHAN],
+  ])(
+    'a NEW host filed under %s is REFUSED — its secure ancestry cannot be seen here',
+    async (_label, entityType, id) => {
+      const webApi = makeWebApi();
+      const isSecureRoot = jest.fn().mockResolvedValue(false);
+      const result = await applyRegardingSelection(
+        { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+        { entityType, recordId: id, recordName: 'X' },
+        undefined,
+        makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('cannot be checked before it is saved');
+      expect(result.payload).toBeUndefined();
+      expect(webApi.updateRecord).not.toHaveBeenCalled();
+    }
+  );
+
+  test('a NEW host under a child whose ONLY ancestor is a service request (never secure) is staged', async () => {
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingservicerequest_value: MATTER_2 } },
+    });
+    const isSecureRoot = jest.fn();
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(isSecureRoot).not.toHaveBeenCalled();
+  });
+
+  test('a NEW host under a child whose derived ancestor is SECURE is refused, even when the host cannot stamp it', async () => {
+    // The host has no project column (NARROW-like): the ancestor is "unstampable" on the host, yet the record would still
+    // sit under the secure project through the target — so it is checked.
+    const webApi = makeWebApi({
+      ancestors: { [COMM_1]: { _sprk_regardingproject_value: MATTER_2 } },
+    });
+    const isSecureRoot = jest.fn().mockResolvedValue(true);
+    const hostWithoutProject = FULL_NAV_PROPS.filter(r => r.ReferencingAttribute !== 'sprk_regardingproject');
+    const result = await applyRegardingSelection(
+      { webApi, isSecureRoot, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_communication', recordId: COMM_1, recordName: 'C' },
+      undefined,
+      makeFetch({ sprk_todo: hostWithoutProject, sprk_communication: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(isSecureRoot).toHaveBeenCalledWith('sprk_project', MATTER_2);
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('filed under a secure record');
+  });
+
+  test('a NEW host with a root parent and no way to check it is refused (fail closed)', async () => {
+    const webApi = makeWebApi();
+    const result = await applyRegardingSelection(
+      { webApi, hostEntity: 'sprk_todo', hostRecordId: undefined },
+      { entityType: 'sprk_matter', recordId: MATTER_1, recordName: 'M' },
+      undefined,
+      makeFetch({ sprk_todo: FULL_NAV_PROPS }) as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
   });
 });

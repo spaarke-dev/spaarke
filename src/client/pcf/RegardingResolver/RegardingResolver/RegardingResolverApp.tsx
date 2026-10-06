@@ -302,6 +302,8 @@ import {
   type IRegardingSelection,
   type IResolverWriteContext,
 } from './handlers/ResolverWriteHandler';
+import { refileThroughBff, isSecureRootReader } from './handlers/bffWrites';
+import type { ISecureFlagReader } from './handlers/bffWrites';
 
 // ---------------------------------------------------------------------------
 // Build date embedded in the version footer per src/client/pcf/CLAUDE.md
@@ -309,7 +311,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-09-04';
+const BUILD_DATE = '2026-10-05';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -939,6 +941,10 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       webApi: context.webAPI as unknown as IResolverWriteContext['webApi'],
       hostEntity,
       hostRecordId: getHostRecordId(),
+      // v1.6.0 (UAC-r2 task 147 r1, owner round 28): a saved host is re-filed through the BFF (the owner follows the
+      // record it is filed under); a new host is never filed under a secure record before it is saved.
+      refileThroughBff,
+      isSecureRoot: isSecureRootReader(context.webAPI as unknown as ISecureFlagReader),
     }),
     [context.webAPI, hostEntity]
   );

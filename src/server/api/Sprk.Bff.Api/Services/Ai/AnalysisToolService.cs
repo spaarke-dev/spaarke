@@ -2,7 +2,6 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Azure.Core;
-using Json.Schema;
 
 namespace Sprk.Bff.Api.Services.Ai;
 
@@ -475,7 +474,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
     /// so the chat resolver (task 011) refuses to expose the tool to the LLM.</item>
     /// </list>
     /// <para>
-    /// This double-layer validation (write-time at the mapper + chat-session-start at the
+    /// This double-layer validation (write-time at the mapper + agent build, every chat turn, at the
     /// <c>ToolHandlerToAIFunctionAdapter</c>) is intentional: admins editing
     /// <c>sprk_analysistool</c> rows in Power Apps see warnings in BFF logs as soon as the
     /// tool is loaded, and the adapter throws a clear exception if a malformed schema ever
@@ -493,9 +492,11 @@ public class AnalysisToolService : DataverseHttpServiceBase
         }
 
         // Layer 1: well-formedness.
+        JsonValueKind rootKind;
         try
         {
-            using var _ = JsonDocument.Parse(rawValue);
+            using var doc = JsonDocument.Parse(rawValue);
+            rootKind = doc.RootElement.ValueKind;
         }
         catch (JsonException ex)
         {
@@ -514,8 +515,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
         // Layer 2: semantic JSON Schema validity (R6 audit item 1).
         try
         {
-            var node = JsonNode.Parse(rawValue);
-            if (node is null)
+            if (rootKind == JsonValueKind.Null)
             {
                 logger.LogWarning(
                     "[R6-audit-1] sprk_jsonschema for tool {ToolId} parsed to null JsonNode; " +
@@ -524,21 +524,15 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 return null;
             }
 
-            var metaResults = MetaSchemas.Draft202012.Evaluate(
-                node,
-                new EvaluationOptions
-                {
-                    OutputFormat = OutputFormat.List,
-                    ValidateAgainstMetaSchema = false  // we ARE the meta-schema evaluation
-                });
+            // Through the shared validator (issue #1295): JsonSchema.Net's Evaluate is not
+            // thread-safe on the static MetaSchemas.Draft202012 instance, so evaluation is
+            // serialized; the verdict is cached per exact text because this runs for every
+            // catalog row on every chat turn.
+            var metaResults = Draft202012MetaSchemaValidator.Evaluate(rawValue);
 
             if (!metaResults.IsValid)
             {
-                var firstErrors = metaResults.Details
-                    .Where(d => d.HasErrors && d.Errors is not null)
-                    .SelectMany(d => d.Errors!.Select(kv => $"{d.InstanceLocation}: {kv.Value}"))
-                    .Take(3)
-                    .ToArray();
+                var firstErrors = metaResults.Errors.Take(3).ToArray();
 
                 logger.LogWarning(
                     "[R6-audit-1] sprk_jsonschema for tool {ToolId} is well-formed JSON but is " +

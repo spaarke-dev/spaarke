@@ -198,4 +198,105 @@ internal static class RecordShareLevels
     /// the current mask that the new one lacks is lost.
     /// </summary>
     internal static bool WouldRemoveRights(int currentMask, int newMask) => (currentMask & ~newMask) != 0;
+
+    // ── Child mirrors (unified-access-control-r2 task 149, C10 part 2) ──────────────────────────────────────────────
+
+    /// <summary>
+    /// The rights a share on a secure ROOT may carry onto one of its children: Read, Write, Append, AppendTo and
+    /// Delete. Never Share, never Assign, never Create.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>No Share on a child</b> (task 149 escalation trigger 6; owner decision, round 11 item 4, 2026-10-03:
+    /// "ShareAccess is NOT mirrored onto children"). Collaborate and Full Access carry Share on the root (task 139), so a
+    /// sharee can pass the ROOT on. Mirrored onto a child, it would let them share one child with someone the root is not shared with, and
+    /// the reconcile would then revoke that share — a fight with a legitimate-looking user action. Sharing happens at the
+    /// root and fans out. Omitting it is narrower than the root, which "never wider than the parent" allows.</para>
+    /// <para><b>No Assign</b>: no level carries it, and a child's owner is the Secure team's (task 146). <b>No Create</b>:
+    /// it means nothing on a share of an existing row.</para>
+    /// </remarks>
+    internal const int ChildMirrorableMask = Read | Write | Append | AppendTo | Delete;
+
+    /// <summary>
+    /// What a principal holding <paramref name="rootMask"/> on a secure root holds on each of its children: the root's
+    /// rights restricted to <see cref="ChildMirrorableMask"/>. Never wider than the root, by construction.
+    /// </summary>
+    internal static int ChildMirrorMask(int rootMask) => rootMask & ChildMirrorableMask;
+
+    /// <summary>
+    /// The <c>AccessMask</c> literal for a mask built from <see cref="ChildMirrorableMask"/> bits, in the canonical
+    /// order. A bit outside the mirrorable set is refused rather than silently dropped.
+    /// </summary>
+    /// <exception cref="ArgumentOutOfRangeException">The mask carries a bit a child mirror never carries.</exception>
+    internal static RecordShareRights ChildMirrorRights(int mask)
+    {
+        if ((mask & ~ChildMirrorableMask) != 0)
+            throw new ArgumentOutOfRangeException(nameof(mask), mask, "A child mirror carries only Read, Write, Append, AppendTo and Delete.");
+
+        var names = LevelRights.Where(r => (mask & r.DataverseBit) != 0).Select(r => r.Name);
+        return new RecordShareRights(string.Join(",", names), mask);
+    }
+
+    /// <summary>
+    /// Every right a POA share row can carry, as the Web API <c>AccessMask</c> name and the bit Dataverse stores —
+    /// the level rights plus the two no level carries (Create, Assign). Same numbers as the constants above.
+    /// </summary>
+    private static readonly (string Name, int DataverseBit)[] AllShareRights =
+    {
+        ("ReadAccess", Read),
+        ("WriteAccess", Write),
+        ("AppendAccess", Append),
+        ("AppendToAccess", AppendTo),
+        ("CreateAccess", 32),
+        ("DeleteAccess", Delete),
+        ("ShareAccess", Share),
+        ("AssignAccess", 524288),
+    };
+
+    /// <summary>
+    /// The mask Dataverse stores for an <c>AccessMask</c> literal — so a caller can confirm a write by comparing the
+    /// stored mask with what it asked for, including a mask no level names (unified-access-control-r2 task 133: the
+    /// provisioning creator share, and the compensation that restores a share read before the call).
+    /// </summary>
+    /// <exception cref="ArgumentException">A name in the literal is not a Dataverse access right. An unknown name
+    /// never becomes a guessed bit.</exception>
+    internal static int MaskForRightsCsv(string accessRightsCsv)
+    {
+        var mask = 0;
+        foreach (var name in accessRightsCsv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var match = Array.FindIndex(AllShareRights, r => string.Equals(r.Name, name, StringComparison.Ordinal));
+            if (match < 0)
+                throw new ArgumentException($"'{name}' is not a Dataverse access right.", nameof(accessRightsCsv));
+
+            mask |= AllShareRights[match].DataverseBit;
+        }
+
+        return mask;
+    }
+
+    /// <summary>
+    /// The <c>AccessMask</c> literal that restores a share to exactly <paramref name="accessRightsMask"/> through
+    /// ModifyAccess — the inverse of <see cref="MaskForRightsCsv"/> (task 133: compensation puts a creator's share
+    /// back to the mask read before the call).
+    /// </summary>
+    /// <exception cref="ArgumentException">The mask carries a bit no access right names, or is zero (a zero mask is
+    /// a revoke, not a modify).</exception>
+    internal static string RightsCsvForMask(int accessRightsMask)
+    {
+        var names = new List<string>(AllShareRights.Length);
+        var covered = 0;
+        foreach (var (name, bit) in AllShareRights)
+        {
+            if ((accessRightsMask & bit) == 0)
+                continue;
+
+            names.Add(name);
+            covered |= bit;
+        }
+
+        if (accessRightsMask == 0 || covered != accessRightsMask)
+            throw new ArgumentException($"Mask {accessRightsMask} is not expressible as Dataverse access rights.", nameof(accessRightsMask));
+
+        return string.Join(",", names);
+    }
 }

@@ -1,0 +1,272 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="225b" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Converge Model 1 onto the dedicated code path — H2b / H12c shared-platform branches out, tenancy × profile pairing (G6), secret-free default (G21), Bing + LlamaParse keys out (D18), `Model1SharedDagParityTests` rename (G13)</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T225b (gaps G6, G13, G21; owner decisions D12-era D-12 + D18)</phase>
+    <gate>startable — T225a ✅ (b9fd48bbe); owner decisions D16–D19 recorded (6240f41d8)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs handlers, options, validation and tests across H2b, H12c, H4, the Api edge and the Worker; edits Bicep + the canonical secret catalog; credential-lifecycle constraints apply (G21).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting convergence touching 5 handlers/options sets, the Api edge, the secret catalog generator and Bicep (high blast radius), plus a credential-lifecycle default (G21) bound by BINDING KV rules.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (provision-environment skill prose) — main-session-only; file overlap with T249 (customer.json, controlplane-worker-app-service.bicep) and T248 (Worker Bicep module)</parallel-reason>
+    <tags>provisioning, l2-controlplane, provisioning-handler, bicep, testing, model1-dedicated, secret-catalog</tags>
+    <deps>225a</deps>
+  </metadata>
+
+  <prompt>
+    Make a Model 1 run use the same per-stamp resources as the dedicated code path: retire the H2b and H12c branches that
+    point Model 1 at a shared platform AI Search / OpenAI, pair Model 1 with the Spaarke-hosted dedicated profile at
+    intake, make new stamps secret-free by default, and remove the dead Bing / LlamaParse vendor keys from the customer
+    secret catalog. Leave ArmDeploymentRunner's Model 1 arm failing closed — T228 flips it together with per-customer
+    subscriptions.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer on the L2 provisioning control plane (.NET 10, Azure SDK, Bicep). Follow ADRs strictly;
+    apply the KV credential-lifecycle rules in .claude/constraints/provisioning.md literally.
+  </role>
+
+  <goal>
+    No control-plane code path, option, Bicep setting or seed script points a Model 1 run at a shared platform service;
+    `POST /api/runs` pairs `Model1` ↔ `spaarke-hosted-model2` and `Model2` ↔ `customer-owned-model2` only; H4 omits
+    `Dataverse-ClientSecret` + `BFF-API-ClientSecret` on a new stamp by default and their `PinnedManifestGaps` pins are
+    gone; the customer secret catalog has no `BingSearch-ApiKey` / `LlamaParse-ApiKey`; no file or class is named
+    `Model1Shared*`. Model 1 runs still fail closed at H2a (T228).
+  </goal>
+
+  <context>
+    <background>
+      D-12 (owner 2026-09-30) redefined Model 1 as a per-customer dedicated stamp. T225a deleted the shared-tier Bicep and
+      made ArmDeploymentRunner fail closed for Model 1. What is left of the shared tier is control-plane code: H2b creates
+      Model 1 indexes on `AiSearchIndexOptions.SharedPlatformSearchEndpoint` with a tenant-filter query template
+      (`IAiSearchTenantFilterTemplateProvisioner`); H12c points Model 1 runtime references at
+      `RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint` (seeded by `Seed-PlatformKeyVault.ps1` as
+      `AzureOpenAI-Endpoint`, emitted by the Worker Bicep as `RuntimeReferences__SharedPlatformOpenAiEndpoint`). The intake
+      validator still pairs Model 1 with the retired trial profile `spaarke-hosted-model1-trial`, although H3's
+      `GraphAppRegistrationProvisioner` and INCOMING §5 Item 3 already treat `spaarke-hosted-model2` as the Spaarke-hosted
+      dedicated (= Model 1) profile (G6). New stamps run MI-FIC (ADR-028 A4, E-3 closed) but
+      `KvSecretsPopulationOptions.RequireSecretFreeIdentity` defaults false and is set nowhere, so H4 would serve
+      `BFF-API-ClientSecret` (G21). Owner D18 (2026-10-02): Bing + LlamaParse keys leave customer stamps — Bing Search v7
+      was retired 2025-08-11, LlamaParse has no production caller, and no value exists in any vault.
+    </background>
+    <relevant-files>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/H2bAiSearchIndexHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/AiSearchIndexOptions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/AiSearchIndexRejectionCodes.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/IAiSearchTenantFilterTemplateProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/AiSearchTenantFilterTemplateProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSearchIndex/IAiSearchIndexProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/H12cRuntimeReferencesHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesOptions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesModule.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/RuntimeReferencesRejectionCodes.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Api/Api/RunsEndpoints.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/KvSecretsPopulationOptions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/FileKvSecretManifest.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/KvSecretValueResolver.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/SecretClientKvWriter.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/RunContextContractTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Reconciler/Model1SharedDagParityTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Api/RunsEndpointsTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H2bAiSearchIndexHandlerTests.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H12cRuntimeReferencesHandlerTests.cs</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (+ the generator and its generated outputs)</file>
+      <file>scripts/provisioning-prereqs/intake.schema.json</file>
+      <file>scripts/provisioning/Seed-PlatformKeyVault.ps1</file>
+      <file>infrastructure/bicep/modules/controlplane-worker-app-service.bicep</file>
+      <file>infrastructure/bicep/platform-controlplane.bicep (+ platform-controlplane.json, parameters/platform-controlplane-dev.bicepparam)</file>
+      <file>infrastructure/bicep/customer.bicep (+ customer.json — recompile only if the generated KV module changes)</file>
+      <file>.claude/skills/provision-environment/SKILL.md (Step 1c / 1e prose — main session)</file>
+      <file>docs/architecture/SPAARKE-ENVIRONMENT-RESOURCE-INVENTORY.md, docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, docs/guides/PROVISIONING-PREREQUISITES.md</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/run-context-dataflow-gap.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/provisioning/INDEX.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dedicated branch is the reference" location="H2bAiSearchIndexHandler.HandleModel2BranchAsync; H12cRuntimeReferencesHandler Model2 arm">
+        Model 1 converges onto the existing Model2 logic (endpoint from H2a output). Do not write a third branch.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <constraints>
+    <constraint source="ADR-027 (amended) + T225a adr-check F2">
+      Do NOT change `ArmDeploymentRunner`'s Model 1 arm — it keeps failing closed (`arm-template-unavailable`) until T228
+      brings per-customer subscriptions; T228 flips it. Do not remove the ISH-02 Model 1 subscription exemption (T228).
+    </constraint>
+    <constraint source=".claude/constraints/provisioning.md § KV credential lifecycle (BINDING)">
+      No live Key Vault write, delete or purge in this task. Never create, seed or restore `BFF-API-ClientSecret` (either
+      casing) or `Dataverse-ClientSecret` in a secret-free environment. In `Seed-PlatformKeyVault.ps1` change ONLY the
+      `AzureOpenAI-Endpoint` entry and the header/example count drift — do not touch the `Dataverse-ClientSecret`,
+      `BFF-API-ClientSecret`, `Sidecar-Shared-Secret`, `Exchange-Connect-Cert` or `Redis-ConnectionString` entries.
+      `SecretFreeIdentityRollback` semantics stay as they are.
+    </constraint>
+    <constraint source="owner D18 (2026-10-02)">
+      Remove `BingSearch-ApiKey` and `LlamaParse-ApiKey` from `scripts/canonical-secret-catalog/manifest.yaml` and
+      regenerate every generated output with the generator (never hand-edit generated files). If, after the removal, no
+      manifest entry uses `value_source: from-platform-vault`, remove that value source end to end: the resolver branch,
+      the H4 writer's vendor-key pre-write check, `KvSecretsPopulationOptions.PlatformVaultName` + its boot validation,
+      the manifest schema enum value, and the Worker Bicep `vendorKeysKeyVaultName` param + its
+      `KvSecretsPopulationOptions__PlatformVaultName` setting (a required boot option nothing reads is a failure mode).
+    </constraint>
+    <constraint source="plan G6 + INCOMING §5 Item 3">
+      Pairing after this task: `Model1` ↔ `spaarke-hosted-model2`; `Model2` ↔ `customer-owned-model2`. Every other pair is
+      refused with the existing invalid-pair error code; `spaarke-hosted-model1-trial` is retired from the known profile
+      set (refused as an unknown profile). Do NOT
+      rename the profile vocabulary (out of scope — record a one-line follow-up for T235 if you think it should be).
+      Record the change as an extension of the T245a ADR-020 row in spec.md ADR Tensions (same callers, same reasoning).
+    </constraint>
+    <constraint source="root CLAUDE.md §10 / project scope">
+      No change to `src/server/api/Sprk.Bff.Api` (the BFF's dead Bing v7 code is on the BFF follow-up list).
+      `controlplane-subscription-rbac.bicep` untouched (T228). `H0Options.RequireCostEnvelopeForModel2Dedicated` /
+      `isModel2Dedicated` are T229 — do not rename them here.
+    </constraint>
+    <constraint source="Sub-agent write boundary">
+      `.claude/**` edits (provision-environment skill prose, CHANGELOG, constraints/patterns if they name a removed option)
+      are made by the main session.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>`SharedPlatformSearchEndpoint`, the tenant-filter template provisioner or `SharedPlatformOpenAiEndpoint` has a consumer that is not the Model 1 branch → STOP and report before deleting it.</trigger>
+    <trigger>Making secret-free the default would change the behaviour of a run against an existing live environment (e.g. the prong-3 `spaarkedev1` exception, sunset 2026-11-23) → STOP; do not work around it with a new flag.</trigger>
+    <trigger>Removing the `from-platform-vault` value source would require a change outside the control plane, the catalog generator, its schema and the Worker Bicep (e.g. the BFF) → STOP; keep the mechanism, make `PlatformVaultName` optional, and record why.</trigger>
+    <trigger>The registry (`sprk_dataverseenvironment`) or any stored artifact carries profile values the new pairing would orphan → STOP and report.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="0">Confirm the branch is 0 behind origin/master (re-merge if not). `git grep -n` for `SharedPlatformSearchEndpoint`, `SharedPlatformOpenAiEndpoint`, `TenantFilterTemplate`, `spaarke-hosted-model1-trial`, `Model1Shared`, `BingSearch`, `LlamaParse`, `from-platform-vault`, `PlatformVaultName`, `vendorKeysKeyVaultName` → categorized hit list in the POML notes.</step>
+    <step order="1">H2b: route `TenancyModel.Model1` to the dedicated branch; delete `HandleModel1BranchAsync`, the shared endpoint option, the tenant-filter template provisioner (interface, implementation, DI, rejection codes) and their Worker/Bicep settings. Update H2b tests.</step>
+    <step order="2">H12c: same for the OpenAI endpoint; remove `SharedPlatformOpenAiEndpoint` from options, module, rejection codes, Worker Program, Bicep (module + platform-controlplane + recompiled JSON + dev bicepparam) and the `AzureOpenAI-Endpoint` entry of `Seed-PlatformKeyVault.ps1` (fix its "6 secrets" / "seed all 5" count drift). Update H12c tests.</step>
+    <step order="3">G6: validator pairing in `RunsEndpoints` + `KnownProfiles`; `intake.schema.json` allOf; RunsEndpointsTests + every fixture that pairs Model1 with the trial profile; spec.md ADR-020 row extension; skill Step 1c / 1e prose (main session).</step>
+    <step order="4">G21: secret-free by default for new stamps — `KvSecretsPopulationOptions.RequireSecretFreeIdentity` true by default AND set explicitly in the Worker Bicep; remove the `Dataverse-ClientSecret` / `BFF-API-ClientSecret` pins from `RunContextContractTests.PinnedManifestGaps`. Check the H2a `requireSecretFreeIdentity` intake key and `customer.bicep` param: if nothing consumes the Bicep param, remove both (and the ArmDeploymentRunner payload entry); if something does, default it true. Record the evidence.</step>
+    <step order="5">D18: manifest removal + regenerate (generator `-Verify` clean); the `from-platform-vault` removal per the constraint; recompile `customer.json` / `platform-controlplane.json` if their inputs changed (`az bicep build --outfile`, never `--stdout`).</step>
+    <step order="6">G13: rename `Model1SharedDagParityTests.cs` (file + class) to a name that states what it pins (e.g. `TenancyModelDagParityTests`).</step>
+    <step order="7">Docs: inventory, deployment guide, prerequisites guide / `prereqs.yaml` (+ `validate.ps1`), gap note — remove the shared-endpoint and vendor-key rows; `.claude` constraints/patterns that name a removed option (main session) + CHANGELOG.</step>
+    <step order="8">Verify: ControlPlane Api/Worker/Tests/LoadTests build 0 warnings 0 errors; ControlPlane.Tests — no failures beyond the 6 T221 baseline; ArchTests pass; `bicep-e2e-dry-run.ps1` PASS; prereqs `validate.ps1` OK; catalog `-Verify` OK; repeat the Step 0 grep → only historical records remain (list them).</step>
+    <step order="9">Step 9.5 quality gates (code-review + adr-check). Close: POML notes, TASK-INDEX `✅ [done]`, plan §4 G6/G13/G21 + §7 T225b, current-task.md; `scripts/check-task-status-drift.ps1`. Commit + push.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the ControlPlane solution projects and ArchTests</tool>
+    <tool name="az">`az bicep build --outfile` only</tool>
+    <tool name="pwsh">Catalog generator, prereqs validate.ps1, bicep-e2e-dry-run.ps1, check-task-status-drift.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">H2b / H12c / RunsEndpoints / KvSecretsPopulation / Worker Program changes; deleted tenant-filter template provisioner</output>
+    <output type="config">manifest.yaml + regenerated outputs; intake.schema.json; Worker + platform-controlplane Bicep (+ JSON); Seed-PlatformKeyVault.ps1</output>
+    <output type="test">Updated H2b, H12c, RunsEndpoints, H4, RunContextContract tests; renamed DAG parity test</output>
+    <output type="docs">inventory, deployment guide, prerequisites, gap note, spec ADR-020 row, plan §4/§7, skill prose, CHANGELOG</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Model 1 run, H2b creates indexes on the AI Search endpoint H2a produced, through the same code path as Model 2; given that output is absent, it fails with the same rejection code Model 2 uses. No `HandleModel1BranchAsync`, `SharedPlatformSearchEndpoint` or tenant-filter template provisioner remains in code, DI, Worker config or Bicep.</criterion>
+    <criterion testable="true">Given a Model 1 run, H12c's OpenAI runtime reference is the stamp's own endpoint; no `SharedPlatformOpenAiEndpoint` remains in code, Worker config, Bicep (incl. compiled JSON) or `Seed-PlatformKeyVault.ps1`.</criterion>
+    <criterion testable="true">`POST /api/runs` accepts `Model1`+`spaarke-hosted-model2` and `Model2`+`customer-owned-model2`; it refuses `Model1`+`customer-owned-model2` and `Model2`+`spaarke-hosted-model2` with the existing invalid-pair code, and `spaarke-hosted-model1-trial` (retired from the known profile set) with the existing unknown-profile code; `intake.schema.json` agrees (schema/endpoint parity test passes).</criterion>
+    <criterion testable="true">With default options, H4 writes neither `Dataverse-ClientSecret` nor `BFF-API-ClientSecret`; the Worker Bicep sets `KvSecretsPopulationOptions__RequireSecretFreeIdentity=true`; `PinnedManifestGaps` contains only the T246 and T227 pins; existing rollback tests pass unchanged.</criterion>
+    <criterion testable="true">The canonical secret catalog has no `BingSearch-ApiKey` or `LlamaParse-ApiKey`; generated files match the generator (`-Verify` OK); either the `from-platform-vault` mechanism and `PlatformVaultName` are gone end to end, or (escalation 3) the option is optional and the reason is recorded.</criterion>
+    <criterion testable="true">No file or type name in src/ contains `Model1Shared`.</criterion>
+    <criterion testable="true">`ArmDeploymentRunner`'s Model 1 arm still throws (its T2 test unchanged); `controlplane-subscription-rbac.bicep` and `src/server/api/Sprk.Bff.Api` unchanged; no live Key Vault operation performed.</criterion>
+    <criterion testable="true">ControlPlane projects build 0/0; ControlPlane.Tests has no failures beyond the 6 T221 baseline; ArchTests pass; `bicep-e2e-dry-run.ps1` PASS; prereqs `validate.ps1` OK.</criterion>
+    <criterion testable="true">Test scope: cover the changed contracts and the negative cases named in these criteria. Anything beyond that needs a one-line justification in the POML notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Filed 2026-10-02 from plan §7 T225b + owner D18. Scope change vs the plan row: the ArmDeploymentRunner Model 1 → `customer`
+    flip moved to T228 (flipping it before per-customer subscriptions exist would deploy a full stamp into a shared
+    subscription — T225a adr-check F2 / ADR-027).
+
+    COMPLETION (2026-10-02). Verified: ControlPlane Api / Worker / Tests / LoadTests build 0 warnings 0 errors;
+    ControlPlane.Tests 2124 pass / 6 fail (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip;
+    ArchTests 340/340; bicep-e2e-dry-run.ps1 OVERALL PASS; prereqs validate.ps1 OK (34 prereqs, manifest v5); catalog
+    -Verify OK; customer.json + platform-controlplane.json = fresh compiles (`--outfile`); Seed-PlatformKeyVault.ps1
+    binds all 10 parameters (Get-Command).
+
+    DONE: H2b + H13's I2 probe + H12c run one path for both models on the stamp's own AI Search / OpenAI (deleted:
+    HandleModel1BranchAsync, AiSearchIndexOptions.SharedPlatformSearchEndpoint, the Cosmos tenant-filter template store
+    + provisioner + tests, RuntimeReferencesOptions.SharedPlatformOpenAiEndpoint, its Worker Bicep KV ref +
+    azureOpenAiEndpointSecretName params, the Seed-PlatformKeyVault AzureOpenAI-Endpoint entry, 3 rejection codes:
+    shared-index-missing, tenant-filter-template-provision-failed, runtimerefs-missing-shared-platform-endpoint-
+    configuration — no documented consumer). G6 pairing (agent): Model1↔spaarke-hosted-model2, Model2↔customer-owned-
+    model2, trial profile retired (refused `tenancy-profile-invalid`); schema allOf pinned against the endpoint by a new
+    parity test. G13: TenancyModelDagParityTests. G21: KvSecretsPopulationOptions.RequireSecretFreeIdentity = true by
+    default + Worker Bicep sets it; SecretFreeIdentityOmitTargets = {BFF-API-ClientSecret, Dataverse-ClientSecret}
+    (owner-approved binding rule — resolution record decisions/adr-028-a4-integration-conflict-resolution.md lines
+    168/174: never CREATE either in a secret-free env; rule 2's hold protects the EXISTING copy from deletion only);
+    both PinnedManifestGaps removed; customer.bicep's dead requireSecretFreeIdentity param removed with its intake key,
+    H2a read, BicepDeployRequest field and runner payload entry (the param's own description said "removal paired with
+    the runner change (T225b)"). D18 (agent): BingSearch-ApiKey + LlamaParse-ApiKey + the from-platform-vault source
+    removed end to end (generator, C#, options, Worker Bicep `vendorKeysKeyVaultName`, tests; enum slot 9 tombstoned —
+    not persisted anywhere, adr-check verified); generated files regenerated.
+
+    ESCALATION TRIGGERS: (1) the tenant-filter template store had a 2nd consumer, H13's I2 probe — but it was the I2
+    probe's MODEL 1 branch, i.e. the same retired shared-tier logic, so the trigger (a consumer that is NOT the Model 1
+    branch) did not fire; converging it here instead of in T230 kept H13 from failing every Model 1 run (deviation:
+    pulled forward from T230; plan T230 row + G5 updated). (2) Secret-free default changes no live environment's runs:
+    H4 only ever writes NEW stamps' vaults; prong 3 is spaarkedev1 only. (3) from-platform-vault removal needed nothing
+    outside the control plane / catalog / Worker Bicep (BFF keeps its own Bing config — follow-up). (4) Profile values:
+    only the intake template carried the trial profile (updated); stored runs are never re-validated, and pre-T224 runs
+    carry "Model1Shared", already unparseable — so no resumable Model 1 run can hit the converged H2b path (adr-check W6).
+
+    QUALITY GATES (Step 9.5): code-review — C1 Critical FIXED (Seed-PlatformKeyVault.ps1: removing $AzureOpenAiEndpoint
+    left a stray [Parameter] attribute, the script would not bind; my earlier check only parsed it); W1 FIXED at source
+    (secret-free default ⇒ H4 always writes the A38a marker to registry column sprk_credentialmode, which does NOT exist
+    on spaarkedev1 — read-only check 2026-10-02: added to the idempotent Extend-DataverseEnvironmentSchema-v3.3.ps1 +
+    new prerequisite PRQ-E-14; LIVE creation awaits owner approval); W2 rollback scope documented on the option; W3/adr
+    W2 rollout order recorded below; W4 spec ADR-038 row renamed; W5 inventory/plan I2 rows; W6 pairing parity test
+    added; S1 replaced my H2a "removed field absent" test with a real check — every BuildParametersPayload key is
+    declared in customer.json (ArmTemplateInspectorTests); S2 explicit legacy options; S3 skill tenancy check case-
+    sensitive; S4 stale text (csproj, probe message, constraint); S5 no tenantFilterTemplates container exists in dev
+    Cosmos (read-only list: only `runs`); S7 test rename. adr-check — production code compliant; V1 = W4; skill now
+    hard-stops Model 1 until T228 (adr W1, ADR-027 path C); I2 probe header records it cannot see bleed between Model 1
+    customers (all carry Spaarke's tenantId — isolation is the per-stamp service); spec ADR-027 / B04 rows + a blank
+    line splitting the ADR Tensions table fixed; a new spec ADR-020 row (T225b extension of T245a) covers the intake
+    changes.
+
+    DEVIATIONS: ArmDeploymentRunnerTests T2 message pattern changed `*225b*228*` → `*task 228*` (the fail-closed message
+    now names only T228 — behaviour unchanged; criterion "T2 unchanged" met in substance). I2 probe convergence pulled
+    from T230. Deployment guide stale passages fixed in passing (H1 Lighthouse defect resolved, H3 T222 done, H2b uses
+    the SDK, Provision-Customer.ps1 example passed a -TenancyModel the script does not have).
+
+    ROLLOUT ORDER (W3): deploy a Worker built from this commit BEFORE the next publish of the `customer` ARM artifact —
+    an older Worker still sends `requireSecretFreeIdentity`, which the new template no longer declares (ARM rejects).
+    No run passes H0 today (G28), so nothing is exposed until then.
+
+    NOT APPLICABLE: BFF publish-size (no BFF binary change; H4b merely stops writing BingSearch__ApiKey /
+    LlamaParse__ApiKeySecretName — the BFF tolerates both absent).
+
+    FOLLOW-UPS (not done here): BFF dead Bing v7 code + appsettings.template.json BingSearch ref (BFF follow-up list);
+    design.md §4.1a still describes shared Model 1 (T235); intake.schema.json Model 1 example `tier: shared-trial` (T229);
+    requestedIndexes subset always quarantines because H2b verifies all 7 (pre-existing, code-review S8); AI Search
+    token sent to InterStepState.AiSearchEndpoint without a host check (pre-existing, S10 — candidate for T244);
+    TenancyModelDagParityTests' typeof(...).NotBeNull() assertion tests nothing (pre-existing — /test-diet at close).
+
+    Test-scope justification: H2b / I2 probe / H12c tests became theories over both models (happy path + missing
+    endpoint); Model 1 shared-branch tests deleted with the branch; G21/D18 test changes per the agents' reports; one
+    new parity test each for schema↔endpoint pairing and runner payload↔template parameters.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute; FULL rigor; Step 9.5 gates are mandatory.</protocol>
+  </execution>
+</task>

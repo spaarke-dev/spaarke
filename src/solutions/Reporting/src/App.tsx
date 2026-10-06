@@ -288,7 +288,6 @@ const ReportingShell: React.FC = () => {
           reports={reports}
           reportRef={reportRef}
           tokenLoading={tokenLoading || isRefreshing}
-          workspaceId={embedConfig?.workspaceId ?? null}
           onReportSelect={handleReportSelect}
           onModeChange={setReportMode}
           onRefresh={handleRefresh}

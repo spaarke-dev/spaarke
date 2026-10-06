@@ -221,6 +221,37 @@ const { accessLevel, canUpload, canDownload, canCreate, canUseAi, canInvite, isL
 
 **Important**: Client-side capability flags are UX only. Security is enforced server-side in the BFF via `ExternalCallerContext.GetEffectiveRights` (ViewOnly → Read; Collaborate → Read+Create+Write; FullAccess → +Delete).
 
+`canInvite` is **true for Collaborate and Full Access** (owner C4, task 140) and `grantableLevels(accessLevel)` lists the levels the caller may grant — every level at or below its own. Use the helpers; do not re-implement the check inline (ProjectPage used to carry its own FullAccess-only check).
+
+---
+
+## Granting Colleagues Access (Contacts tab — task 140)
+
+A contact with **Collaborate or Full Access** on a project sees **Invite User** and an **"Access you granted"** list on the Contacts tab. View Only sees neither.
+
+| Step | What happens |
+|---|---|
+| Invite User → email + level | `grantAccessAsContact({ recordType, recordId, granteeEmail, accessLevel })` → `POST /api/v1/external/contact-grants`. Only levels at or below the caller's are offered. The email is matched among the active colleagues of the caller's own organizations ONLY — nobody outside them is counted or disclosed. |
+| Success | "Access granted": the level written and the expiry. A **narrowed** notice when the server capped the level at the caller's own; an expiry notice when it cut the date back to the caller's own grant. |
+| Refusal | The server's ProblemDetails `detail` is shown **verbatim** (`problemMessage(err, fallback)` in `bff-client.ts`) — e.g. "… is not yet a member of your organization in this system; ask the record's team to add them", "… already has access … granted by someone else …". |
+| Access you granted | `listContactGrants(recordType, recordId)`; **Revoke** → `revokeContactGrant(accessRecordId)`. If the colleague still has access somebody else gave, the list says so. After any refused revoke the list is re-read, so a grant that is no longer yours (an internal user took it over while you were revoking — 409 `managed_elsewhere`, session 27 round 42 item 1) drops out of it instead of offering a Revoke that can no longer act. |
+
+**Rules the server enforces** (the SPA only mirrors them): colleagues of the caller's OWN organization only, an existing active contact (no new persons, no organization changes), never organization-wide, at or below the caller's level, 90 days by default and never beyond the caller's own grant, never changes a grant somebody else made — not even one an internal user takes over in the instant between the server's check and its write (that write is conditional on the row's version and fails with the same 409 `managed_elsewhere`). Full rule set and reason codes: [uac-access-control.md § Contact-Side Grant Access](../architecture/uac-access-control.md#contact-side-grant-access--contacts-granting-colleagues-task-140-owner-c4--q1--q2).
+
+Only ProjectPage has a Contacts tab today; the routes accept `matter` and `workassignment` too, so a future matter / work-assignment detail page wires the same dialog with its `recordType`.
+
+The external SPA never calls the internal Manage Access group (`/api/v1/external-access/*`) — a CIAM token cannot authenticate to it. `tests/ProjectPage.contactGrant.test.tsx` fails if any source file names it.
+
+### Tests and lint
+
+```bash
+npm install --legacy-peer-deps --no-audit --no-fund
+npm test        # vitest + Testing Library (jsdom) — renders ProjectPage's Contacts tab
+npm run lint    # eslint flat config (eslint.config.js), mirrors @spaarke/ui-components
+npm run typecheck  # tsc --noEmit over src (and the shared-library source it imports)
+npm run build
+```
+
 ---
 
 ## Routing

@@ -1,0 +1,604 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="222" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Item 1 (D-13) — delete H3 shared-app-registration branch; H3 provisions ONE app-reg per customer, unconditionally, in both models</title>
+    <phase>D-12/D-13 remediation — INCOMING-D12-D13-REMEDIATION.md §5 Item 1 (of 4); depends on STEP 1 (T220 ✅)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <completed>2026-09-29</completed>
+    <completion-notes>
+      SESSION 25 (2026-09-29) — Item 1 D-13 remediation LANDED. H3 now provisions
+      ONE Entra app registration per customer, UNCONDITIONALLY, in both models.
+      §5 Item 1 of INCOMING-D12-D13-REMEDIATION.md CLEARED.
+
+      **Files modified (8 total; +142 / -430 LOC)**:
+
+      Production code (5):
+      - `H3EntraAppRegHandler.cs` — deleted L272 branch on Model1Shared + `HandleModel1Async`
+        (was L406-470) + `BuildSharedKvUriReference` helper (was L556-557). Replaced
+        `if (Model1Shared) { HandleModel1Async } else { keyVaultName + UAMI checks +
+        HandleModel2Async }` with an unconditional per-customer creation flow. Added
+        TASK 222 REWRITE file-header section documenting the D-13 mechanism. Retired
+        the 2 shared-branch rollback-classification table rows. `Model1Shared` const at
+        L129 + `IsRecognizedTenancyModel` acceptance of it INTENTIONALLY PRESERVED per
+        POML constraint (i) — Item 2 (enum consolidation) is the atomic point to
+        remove the string literal.
+      - `EntraAppRegOptions.cs` — deleted `SharedBffAppRegistrationId` +
+        `SharedPlatformKeyVaultName` properties + the "Model 1" section header;
+        updated class-header retirement note.
+      - `IEntraAppRegProvisioner.cs` — deleted `VerifySharedAsync` interface method +
+        `EntraAppRegSharedVerifyRequest` record + `EntraAppRegSharedVerifyOutcome`
+        abstract record (with 3 nested Current/Drifted/Failure records); updated file
+        header with TASK 222 REWRITE section; updated `ProvisionAsync` XML doc +
+        `EntraAppRegOutputs.PendingKvWrites` XML doc + `FicVerificationState.NotApplicable`
+        XML doc + `EntraAppRegRequest` XML doc + `Profile` param XML doc (added Model 1
+        profile enumeration).
+      - `GraphAppRegistrationProvisioner.cs` — deleted `VerifySharedAsync` method (was
+        L262-340). Left one-line retirement comment at deletion site. `BuildTenantScopedGraphClient`,
+        `EscapeODataLiteral`, `SpaarkeTenantId` all retained (still used by
+        `ProvisionAsync` + FIC path per grep verification).
+      - `EntraAppRegRejectionCodes.cs` — marked `MissingSharedAppRegConfig` +
+        `SharedAppRegConfigurationDrift` as `[Obsolete(..., error: false)]` with
+        `&lt;remarks&gt;` retention rationale per the file-header STABILITY guidance
+        ("add new codes as needed and mark old ones @[Obsolete] on removal"). Value
+        strings preserved for external tool log/alerting historical stability.
+
+      Test code (3):
+      - `H3EntraAppRegHandlerTests.cs` — deleted 3 shared-path test methods
+        (`AcM1_1_Model1HappyPath_NoNewAppRegOrFic_NoKvWrites`,
+        `AcM1_2_MissingSharedAppRegConfig_FailsResumable_NoVerifyCall`,
+        `AcM1_3_SharedAppRegDrifted_FailsResumable`); removed 3 `VerifySharedCallCount
+        .Should().Be(0)` assertions from surviving Model 2 / I6 tests (the property
+        being asserted against is gone); removed `SharedAppId` + `SharedPlatformKv`
+        constants + `ExpectedSharedKvUriRef` static + one shared-KV round-trip
+        assertion in AcParse; removed `sharedAppId` + `sharedKv` params from
+        `BuildHandler` + the two property-setter lines in the options constructor;
+        stripped `_verifySharedOutcome` field + `VerifySharedCallCount` +
+        `LastVerifySharedRequest` properties + `SharedCurrent()` + `SharedDrifted()`
+        factories + `VerifySharedAsync` method from `FakeProvisioner`; added
+        RETIRED-2026-09-29 block to the COVERAGE MAP header.
+      - `A42FicReconciliationTests.cs` — deleted A42e test method
+        (`A42e_Model1_WithModel2ShapedParametersPresent_ProvisionerNeverCalled`, the I6
+        regression guard) — premise invalidated by D-13 since both models now create
+        FICs. Replaced with retirement comment block. Removed `_verifySharedOutcome`
+        field + constructor param + `SharedCurrent()` factory + `VerifySharedAsync`
+        method from local `FakeProvisioner`; removed `sharedAppId` + `sharedKv`
+        params from `BuildHandler`. Updated `FakeProvisioner` class docstring.
+      - `Model1SharedDagParityTests.cs` — comment-only update at L132-138: struck
+        H3EntraAppRegHandler from the "handlers with explicit Model1Shared branch"
+        inventory (post-T222 H3 is TenancyModel-agnostic in behavior). Test methods
+        UNCHANGED — DAG parity invariant still holds, actually strengthens post-T222.
+
+      **§6.5 disposition summary**:
+      - All fixes: Path C (pivot to comply) — code was written against the pre-D-13
+        world; D-13 is binding; code moves to comply. No Path A exception required.
+      - Rejection-code retention as `[Obsolete]`: not a violation, explicitly permitted
+        by the file-header STABILITY block; documented in `&lt;remarks&gt;` on each const.
+
+      **Escalations that fired + resolution**:
+      - **Escalation trigger 1 (grep expanded scope)**: preflight grep found 2 test
+        files not enumerated in POML's explicit 5-file list — `A42FicReconciliationTests.cs`
+        (`FakeProvisioner` implementing `IEntraAppRegProvisioner.VerifySharedAsync`)
+        + `Model1SharedDagParityTests.cs` (comment-only reference). Investigation
+        classified BOTH as in-scope IMPLICIT co-dependencies per POML constraint (e)
+        ("test-fixture setup methods that construct EntraAppRegSharedVerifyOutcome...
+        and any test-double implementations of IEntraAppRegProvisioner.VerifySharedAsync
+        that are ONLY used by shared-path tests"). A42's `FakeProvisioner.VerifySharedAsync`
+        becomes a compile error the moment Step 4 removes the interface member — this
+        IS the atomic co-dependency the POML anticipated, just under a file name the
+        POML author didn't grep. Model1SharedDagParityTests hit was inside a docstring;
+        no runtime impact. Documented + proceeded (not a hard escalation to owner —
+        constraint (e) + Step 1's own directive already contemplated it).
+
+      **Verification (all steps green)**:
+      - `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Api/` = 0 errors, 0 warnings
+      - `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Tests/` = 0 errors, 0 warnings
+      - `dotnet build src/server/api/Sprk.Bff.Api/` = 0 errors, 0 warnings
+      - `dotnet test tests/Spaarke.ArchTests/` = **326/326 PASS** (STEP 1 gate preserved; verified twice — Step 8 + Step 9.5 post-doc-fixes)
+      - `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` =
+        1904 pass / **23 fail** / 1 skip. All 23 failures verified to be in the EXACT
+        task-221 baseline categories: 17× FileKvSecretManifestTests (Class A —
+        A38a_DataverseClientSecret_ServedUnderEveryBranch [3 params] +
+        A38a_Q3PathARollback_ReIncludesAllThreeTargets +
+        A38a_SecretFreeFalse_Default_IncludesAllThreeTargets +
+        A38a_SecretFreeTrue_ExcludesThreeTargets_CountShrinksByExactlyThree +
+        ReadAsync_RealEmbeddedManifest_MapsValueSourceCorrectly [5 params] +
+        ReadAsync_RealEmbeddedManifest_{FromSharedServiceEntries_CarryServiceRef,
+        ContainsBothBindingNeverDeleteSecrets, EntriesSortedAlphabeticallyByCanonicalName,
+        EveryEntryIsUpsert, ReturnsPopulatedSuccess} + ReadAsync_CalledTwice_ReturnsSameEntryCount)
+        + 6× CustomerRunGuardModulePostConfigureTests (Class B —
+        {EnabledTrue_Throws_When_Both_Urls_Are_Absent, FallsBack_TargetDataverseUrl_To_RegistryAdminUrl,
+        Throws_When_TwoAdminUrls_Point_To_Different_Hosts, DefaultEnabled_IsTrue_WithNoCustomerRunGuardSection,
+        Passes_When_TwoAdminUrls_Match_CaseInsensitive, EnabledTrue_Succeeds_Without_ClientSecret_Or_TenantId_Or_ClientId}).
+        **ZERO T222-caused regressions** — every failure is in the task-221 pre-existing
+        baseline, no new failures introduced.
+      - Post-change grep for `SharedBffAppRegistrationId | SharedPlatformKeyVaultName |
+        EntraAppRegSharedVerifyRequest | EntraAppRegSharedVerifyOutcome | VerifySharedAsync
+        | HandleModel1Async | BuildSharedKvUriReference` across `src/` = **ZERO live code
+        hits**. Remaining hits: (a) `[Obsolete]`-marked rejection code const declarations
+        + `&lt;remarks&gt;` retention rationale; (b) retirement narrative comments in
+        modified file headers + test-double docstrings; (c) project docs (POML, TASK-INDEX,
+        current-task, D-13 handoff, INCOMING doc).
+
+      **Step 9.5 Quality Gates (UNCONDITIONAL per root CLAUDE.md §8 test-modifying override)**:
+      - **adr-check**: PASS. 0 violations. 3 LOW-confidence advisory warnings (all interim/cosmetic,
+        not merge-blocking): (1) `HandleModel2Async` name kept during Item 1 → Item 2 window
+        (explicitly documented + POML-permitted); (2) `FicVerificationState.NotApplicable`
+        semantic shifted to defensive-default (XML doc updated); (3) `EntraAppRegOptions.cs`
+        file-header retention pattern. Silent-violation sweep CLEAN. Task 222 is itself a
+        Path C compliance implementation of D-13.
+      - **code-review**: PASS. 0 critical. 9 in-scope warnings W1-W9 (all mechanical stale
+        doc/comment fixes contradicting the new unconditional flow) — **ALL APPLIED same
+        session** following T220 precedent. W10 (out-of-scope drift in
+        `GraphAdminConsentVerifier.cs:16-21` — "Model 1's shared app-reg" example
+        reference) deferred as a follow-up hygiene item; not blocking. Suggestions:
+        - S1 (COVERAGE MAP header marker for A42e retirement — cosmetic; noted for future)
+        - S2 (H3 header phrasing "Added X — RETIRED" — cosmetic; noted for future)
+        - S3 (add `[Theory]` covering both Model1Shared + Model2Dedicated on AC-M2-1
+          happy-path assertions to lock D-13 equivalence in code — MEDIUM value; EXCEEDS
+          POML's stated test-scope clause per acceptance-criteria closed-set rule; filed
+          as a candidate for a follow-up task if reviewer wants it)
+        - S4 (XML `&lt;remarks&gt;` on `HandleModel2Async` explaining the deferred rename
+          — the region comment at L403-407 covers it; low-value duplication skipped)
+        - S5 (`NotApplicable` unreachable-by-code producer-none-found test — over-scope,
+          filed for future).
+
+      **W1-W9 fixes applied**:
+      - W1: `H3EntraAppRegHandler.cs:136` KeyVaultNameParameterKey XML doc "Model 2 only" → "both models"
+      - W2: `H3EntraAppRegHandler.cs:374` "Model 1 has nothing to commit" → "empty pendingKvWrites is a legitimate no-op outcome"
+      - W3: `GraphAppRegistrationProvisioner.cs` L73 + L203 + L502 FIC "Model 2 only" comments → "both models post-task-222 per D-13"
+      - W4: `H3EntraAppRegHandler.cs:423-435` RequireSecretFreeIdentity comment + `IEntraAppRegProvisioner.cs:101-120` mirror — enumerate that EVERY newly-provisioned environment (both models post-D-13) is secret-free per constraint rule 1 (`.claude/constraints/provisioning.md`)
+      - W5: `EntraAppRegRejectionCodes.cs:74` MissingUamiObjectId XML doc "Model 2 branch" → "both tenancy models"
+      - W6: `IEntraAppRegProvisioner.cs:82` EntraAppRegRequest XML doc "Model 2" → "per-customer both models"; `Profile` param XML doc enumerates Model 1 profile (`spaarke-hosted-model1-trial`) + explicit issuer-tenant note
+      - W7: `EntraAppRegOptions.cs:44` RequiredSignInAudience XML doc "Model 2 (dedicated)" → "per-customer both models"
+      - W8: `EntraAppRegOptions.cs:58` section header "Model 2 FIC" → "FIC (both models post-task-222)"
+      - W9: `A42FicReconciliationTests.cs:265` A42c NotApplicable comment "Model 1 never runs the FIC path" → "no live producer post-task-222"
+
+      **Master-merge check (Step 10.6)**: `git fetch origin master` shows 2 new commits
+      (`cacf2f39b` re-actors/alls-green bump, `aa7426e6a` ci-cd shadow-window cutover).
+      Files touched: `.github/workflows/ci-router.yml`, `projects/ci-cd-unit-test-remediation-r1/**`
+      (5 files), `scripts/ci/shadow-window-status.ps1`. **ZERO overlap** with T222's 8
+      modified files. Safe to push without rebase.
+
+      **Next per BINDING sequence**: Item 2 (INCOMING §5 Item 2) — one shared `TenancyModel`
+      enum + parse-or-reject at the 9 branch sites documented in
+      `projects/unified-access-control-r2/notes/D-12-code-branch-inventory.md` (B1–B9,
+      4 silent defaults to close per H1/H2a/H2b/AiSearchTenantFilterInvariantProbe/
+      ArmCostEnvelopeChecker + the P-2 defect closure on H1's `CustomerOwnedTenancyValues`).
+      Also picks up: `HandleModel2Async` rename to `HandleAsync`; `Model1Shared` +
+      `Model2Dedicated` const removal from H3 (currently kept per POML constraint (i));
+      COVERAGE MAP inventory cleanup in `Model1SharedDagParityTests.cs`. W10
+      (`GraphAdminConsentVerifier.cs:16-21`) can fold into Item 2's cleanup.
+    </completion-notes>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production .cs (`src/server/services/Sprk.Provisioning.ControlPlane.Core/**` + `.Tests/**`); tags include `auth` + `provisioning`; deletion ordering matters (kill callers before removing methods to prevent compile cascade). Unconditional Step 9.5 code-review + adr-check per root CLAUDE.md §8 test-modifying override (touches `*Tests/**`).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified deletion scope with concrete file:line references from INCOMING §5 Item 1 + verified grep evidence; no architectural judgment required. High blast radius is contained by ordered deletion + prescriptive step mode.</model-tier-reason>
+    <effort>high</effort>
+    <tags>auth, provisioning, l2-controlplane, provisioning-handler, dataverse, testing, d-13, model-1-retirement</tags>
+    <deps>220</deps>
+  </metadata>
+
+  <goal>
+    Delete the H3EntraAppRegHandler shared-app-registration branch — the Model 1 code path that references
+    a pre-existing shared multitenant BFF app-reg and creates zero new objects — so that H3 provisions
+    ONE Entra app registration per customer, UNCONDITIONALLY, in both models. This closes the code-vs-D-13
+    contradiction called out on the first page of [INCOMING-D12-D13-REMEDIATION.md](../INCOMING-D12-D13-REMEDIATION.md):
+    "H3EntraAppRegHandler currently does the OPPOSITE for Model 1". Per D-13 (BINDING per owner, re-affirmed
+    2026-09-28): every customer gets their own Entra app registration for the BFF API, in both models —
+    Model 1 (Spaarke's tenant) + Model 2 (customer's tenant). One app-reg, one customer. No sharing.
+
+    Per INCOMING §5 Item 1 — the docs already say this: `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` H3 row already
+    documents the output as `appreg-{customerId}-{tenantId}`; the guide and the code have disagreed since
+    before D-13 existed. This task closes that gap.
+
+    OUT OF SCOPE (Item 2 will handle): the `Model1Shared` string literal itself — it remains a VALID
+    tenancy value post-Item-1 (RunsEndpointsTests, H1SubscriptionReadinessHandler, H2a/H2b/H12c stack
+    selection, ArmCostEnvelopeChecker still use it). Item 2 introduces the shared `TenancyModel` enum
+    with parse-or-reject and removes the string literal comparisons everywhere in one atomic change.
+    Item 1 ONLY removes H3's shared-app-reg BRANCH — it does NOT remove the tenancy literal.
+  </goal>
+
+  <knowledge>
+    <files>
+      <!-- BINDING context (must load before implementation) -->
+      <file>projects/customer-provisioning-orchestration-r1/INCOMING-D12-D13-REMEDIATION.md</file>
+      <file>projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+
+      <!-- Root binding rules -->
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+
+      <!-- ADRs -->
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+
+      <!-- Files to be modified (read-before-edit) -->
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegOptions.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/IEntraAppRegProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/EntraAppReg/H3EntraAppRegHandlerTests.cs</file>
+
+      <!-- Verification suites -->
+      <file>tests/Spaarke.ArchTests/CredentialGuardTests.cs</file>
+      <file>tests/Spaarke.ArchTests/CredentialCensusTests.cs</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/testing/unit-test-structure.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <constraints>
+    <constraint source="D-13 (BINDING, owner-decided 3×)">
+      Every customer gets their own Entra app registration for the BFF API, in both models. `SharedBffAppRegistrationId`
+      is a RETIRED artifact. This decision is CLOSED — do NOT re-litigate. See
+      `projects/unified-access-control-r2/notes/D-13-per-customer-bff-app-registration.md`. Per its §1: "One app
+      registration, one customer. No sharing."
+    </constraint>
+    <constraint source="D-13 §2 Dataverse ownership chain">
+      The BFF writes to Dataverse app-only (S2S), as an application user. The business unit a BFF-created record
+      lands in is fully determined by which application user wrote it → application user determined by app
+      registration → therefore per-customer app-reg is REQUIRED for per-customer BU placement. This is the
+      structural reason, not an optimization.
+    </constraint>
+    <constraint source="INCOMING §5 Item 1 (exact scope)">
+      Remove: (1) the L272 branch on Model1Shared → HandleModel1Async, (2) `HandleModel1Async` method body
+      (H3EntraAppRegHandler.cs:406-470), (3) `EntraAppRegOptions.SharedBffAppRegistrationId`, (4)
+      `EntraAppRegOptions.SharedPlatformKeyVaultName`, (5) `EntraAppRegSharedVerifyRequest` record, (6)
+      shared-path tests in `H3EntraAppRegHandlerTests.cs`. Result: H3 provisions ONE app-reg per customer,
+      unconditionally, in both models.
+    </constraint>
+    <constraint source="INCOMING §5 Item 1 IMPLICIT scope (grep-verified 2026-09-29)">
+      §5 Item 1's explicit list is INCOMPLETE — the shared-path types have additional producers/consumers that
+      must move atomically or compile breaks. FULL DELETION SET:
+      (a) H3EntraAppRegHandler.cs: L272 branch + L274 call + `HandleModel1Async` (L406-470) + `BuildSharedKvUriReference`
+          helper (L555-557 area) + `Model1Shared` local usage in `IsValidTenancyModel` (L546) — but see (i) below.
+      (b) EntraAppRegOptions.cs: `SharedBffAppRegistrationId` (L64) + `SharedPlatformKeyVaultName` (L67) + class-header
+          "NEW Model 1 fields (SharedBffAppRegistrationId/Audience/KeyVaultName)" note (L15).
+      (c) IEntraAppRegProvisioner.cs: `VerifySharedAsync` interface method (L57-58) + `EntraAppRegSharedVerifyRequest`
+          record (L134) + `EntraAppRegSharedVerifyOutcome` abstract record + 3 nested `Current`/`Drifted`/`Failure`
+          records (L136-149) + all interface XML-doc mentions of "MODEL 1" verification.
+      (d) GraphAppRegistrationProvisioner.cs: `VerifySharedAsync` method (L262 through end of method) + all
+          shared-app-reg helper methods it calls that are not shared with `ProvisionAsync`.
+      (e) H3EntraAppRegHandlerTests.cs: every test citing `HandleModel1Async`, `VerifySharedAsync`,
+          `SharedBffAppRegistrationId`, `SharedPlatformKeyVaultName`, `SharedAppRegConfigurationDrift`, or
+          `MissingSharedAppRegConfig` — enumerate by grep at execution time.
+      (f) EntraAppRegRejectionCodes.cs: `MissingSharedAppRegConfig` (L77-78) + `SharedAppRegConfigurationDrift`
+          (L80-81) — mark with `[Obsolete("Retired 2026-09-29 per D-13 — H3 shared-app-reg branch deleted. Value
+          kept for external-tool log/alerting historical stability per file-header STABILITY guidance.", error: false)]`
+          rather than delete. The file-header STABILITY block explicitly permits this pattern: "add new codes as
+          needed and mark old ones @[Obsolete] on removal". Historical operator UI filters + alerting rules keyed
+          on these string constants (they've been in the codebase since task 130 Wave G-3) must not silently break.
+      (g) FicVerificationState.NotApplicable (L217-218 in IEntraAppRegProvisioner.cs): XML-doc says "Model 1 — I6:
+          zero per-customer app-reg/FIC objects". After Item 1, Model 1 ALSO creates a FIC. UPDATE the XML-doc to
+          strike the Model 1 reference; KEEP the enum value as the defensive default (do NOT delete — enums are
+          contracts; a fresh use case may reintroduce the semantic).
+      (h) EntraAppRegOutputs.PendingKvWrites XML-doc (L182-187): "Empty for Model 1 (no writes — Model 1 only
+          REFERENCES pre-existing shared-vault entries, nothing to commit)." — UPDATE to strike the Model 1 clause;
+          both models now write.
+      (i) DO NOT DELETE the `Model1Shared` const at H3:129 or the `IsValidTenancyModel` acceptance of it (L546).
+          Post-Item-1, `Model1Shared` remains a VALID tenancy string — H3 accepts + routes it through the same
+          per-customer creation path as Model2Dedicated. Item 2 will introduce the shared TenancyModel enum + kill
+          the string literal comparisons everywhere in one atomic change. Removing `Model1Shared` acceptance here
+          would fail every Model 1 run in the interim.
+    </constraint>
+    <constraint source="root CLAUDE.md §6.5 (ADR Conflict Resolution Protocol)">
+      Path C (pivot to comply) applies to Item 1: the code was written against the pre-D-13 world; D-13 is now
+      binding; the code moves to comply. No Path A exception needed. If unexpected consumers surface (a new caller
+      of the shared-app-reg helpers introduced by a parallel worktree since master merge), STOP and escalate per
+      §6 rather than silently expanding scope.
+    </constraint>
+    <constraint source="root CLAUDE.md §8 test-modifying override">
+      Any task modifying `*Tests/**` requires UNCONDITIONAL FULL rigor + UNCONDITIONAL Step 9.5 quality gates
+      (code-review + adr-check). This task modifies `H3EntraAppRegHandlerTests.cs` → both gates run.
+    </constraint>
+    <constraint source="ADR-028 A4 secret-free identity">
+      Removing the shared-app-reg branch does NOT alter the ADR-028 A4 posture. The per-customer path already
+      threads `RequireSecretFreeIdentity = true` through `EntraAppRegRequest` (constructor default, see
+      IEntraAppRegProvisioner.cs L124-130) for both current Model 2 profiles. Model 1 post-Item-1 inherits that
+      same secure default — no new `.WithClientSecret(...)` sites, no new secret-mint paths. Verify via ArchTest
+      326/326 post-change (CredentialGuardTests + CredentialCensusTests). If a Model 1 profile is ever
+      introduced that requires a non-secret-free identity, it must pass `false` EXPLICITLY at the H3 call site
+      per the IEntraAppRegProvisioner.cs L118-123 "silent default of false is FORBIDDEN" rule.
+    </constraint>
+    <constraint source="ADR-038 §7 KEEP-path forcing-function discipline">
+      Deletions in `*Tests/**` may look like "weakening" the suite. They are NOT — the shared-path tests are
+      testing a code path that no longer exists (D-13 retires it). Deleting them is the correct disposition.
+      Do NOT scope-narrow or `[Skip]` them (that would leave lingering assertions on retired semantics). Delete
+      them cleanly + note the deletion in commit message. New per-customer-unconditional tests should NOT be
+      authored in this task — the existing `HandleModel2Async` test coverage plus the removed branch means the
+      remaining tests already exercise the unified path. Only file follow-up test tasks if the deletion audit
+      uncovers a genuine coverage gap (a shared-path test asserted something the unified path does NOT already
+      assert).
+    </constraint>
+    <constraint source="§4D Tenant Isolation invariants (design.md)">
+      Removing the shared-app-reg branch strengthens I1/I5 (§4D):
+      - I1 (no hardcoded default tenant): the shared-app-reg path always operated against `SpaarkeTenantId`
+        regardless of the customer's `tenantId`; removing it removes a code path where per-customer tenant
+        scoping was inert by construction.
+      - I5 (per-tenant Graph tokens): the shared verification called `BuildTenantScopedGraphClient(_options.SpaarkeTenantId)`
+        (see GraphAppRegistrationProvisioner.cs:277) — a Spaarke-tenant-scoped Graph token used to read another
+        tenant's app-reg configuration. Post-Item-1, every Graph call is per-customer-tenant-scoped by the
+        Model 2 code path. No I5 change needed on our end; the invariant simply becomes universally applied.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>
+      If grep for `SharedBffAppRegistrationId` OR `SharedPlatformKeyVaultName` OR `EntraAppRegSharedVerifyRequest`
+      OR `EntraAppRegSharedVerifyOutcome` OR `VerifySharedAsync` OR `HandleModel1Async` OR `BuildSharedKvUriReference`
+      returns a hit OUTSIDE these known sites: (H3EntraAppRegHandler.cs + EntraAppRegOptions.cs +
+      IEntraAppRegProvisioner.cs + GraphAppRegistrationProvisioner.cs + H3EntraAppRegHandlerTests.cs) —
+      STOP and escalate per root CLAUDE.md §6. Likely causes: (a) parallel worktree added a new caller since
+      master merge; (b) KV secret catalog manifest generator references these symbol names; (c) an integration
+      test fixture in another test project caches the shared-app-reg name. Do NOT silently expand scope — the
+      atomic change list is defined by §5 Item 1 + this POML's constraint (c) IMPLICIT scope note; anything else
+      requires owner input.
+    </trigger>
+    <trigger>
+      If `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Api/` fails with an error other than
+      the expected downstream cascade (removed member references) — STOP and escalate. The expected cascade
+      pattern is: test files or handler helpers that reference the removed types → resolved by their explicit
+      inclusion in the deletion set. An UNEXPECTED cascade (e.g., a Worker/Program.cs DI registration referring
+      to a shared-app-reg options binding path, or a KV secret name in `scripts/canonical-secret-catalog/manifest.yaml`
+      referencing a symbol we're removing) means the scope has to be widened OR the caller migrated separately.
+    </trigger>
+    <trigger>
+      If `dotnet test tests/Spaarke.ArchTests/` drops below 326/326 post-change — STOP. STEP 1 (T220) was
+      the gate that reached 326/326; any regression means Item 1 removed a symbol an ArchTest was asserting
+      on. Debug the specific ArchTest, do NOT bulk-modify tests. Escalate if root cause is a genuine
+      ArchTest semantic conflict with D-13 (in which case it's a §6.5 Path A/B/C decision, not a mechanical fix).
+    </trigger>
+    <trigger>
+      If a Sprk.Provisioning.ControlPlane.Tests regression appears that is NOT one of the 23 pre-existing
+      baseline failures documented in task 221 — STOP and escalate. Verify pre-existing via stash-and-compare
+      (`git stash push -u -m item1-baseline-check-{utc}`; run baseline; capture diff; `git stash apply <sha>`;
+      drop by tag). Any NEW failure caused by Item 1 must be diagnosed before proceeding, not deferred.
+    </trigger>
+    <trigger>
+      If a hit surfaces in ANY of these HOT locations, STOP and escalate — these indicate the scope crosses
+      into another owner's blast radius: (a) `.github/workflows/**` (build pipeline references), (b)
+      `infrastructure/bicep/**` (Bicep parameter references — Item 4's territory), (c)
+      `.claude/skills/provision-environment/**` (L3 operator skill contract change), (d) any file under
+      `projects/unified-access-control-r2/**` or `projects/auth-v*/**` (parallel-worktree hot-path per
+      projects/INDEX.md).
+    </trigger>
+  </escalation>
+
+  <justification>
+    <existing>H3EntraAppRegHandler.HandleModel2Async (per-customer creation path) at src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs:472-onwards. This is the code path Item 1 makes unconditional.</existing>
+    <extension>N/A — this task DELETES surface (the Model 1 shared branch), it does not add. The remaining per-customer path is the extension by unification.</extension>
+    <cost-of-doing-nothing>H3 stays in DIRECT contradiction to D-13. Every Model 1 customer's records land in the same shared BFF app-reg's Dataverse application user's business unit (D-13 §2 chain: app-reg → app user → BU → record ownership) — meaning cross-customer BU membership + a single credential compromise reaches every Model 1 customer's data. This is the failure D-12 exists to eliminate; D-13 is the specific structural change that closes it. Deferring Item 1 blocks Items 2-4, blocks task 186 (first live E2E dispatch), and leaves live code doing what D-13 forbids.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="prescriptive">
+    <step n="0" name="Preflight — verify STEP 1 gate + grep the deletion surface">
+      Run these BEFORE touching any file:
+      1. `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-build` — must be 326/326 (T220
+         baseline). If fewer, STOP and reconcile before starting.
+      2. `git grep -n "SharedBffAppRegistrationId\|SharedPlatformKeyVaultName\|EntraAppRegSharedVerifyRequest\|EntraAppRegSharedVerifyOutcome\|VerifySharedAsync\|HandleModel1Async\|BuildSharedKvUriReference"` —
+         capture the full list. Verify every hit lands in the known 5 files (H3EntraAppRegHandler.cs,
+         EntraAppRegOptions.cs, IEntraAppRegProvisioner.cs, GraphAppRegistrationProvisioner.cs, plus any
+         `*Tests/**` file). If ANY hit is elsewhere → ESCALATE per escalation trigger 1 before proceeding.
+      3. Save the grep output as a scratch file for the completion-notes evidence log.
+      4. Verify NO uncommitted work in the tree that could get mixed in: `git status` — must be clean.
+    </step>
+
+    <step n="1" name="Delete shared-path TESTS FIRST (kill callers before removing symbols)">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/EntraAppReg/H3EntraAppRegHandlerTests.cs`:
+      - Grep the file for `Model1Shared`, `VerifyShared`, `SharedBffAppRegistrationId`, `SharedPlatformKeyVaultName`,
+        `SharedAppRegConfigurationDrift`, `MissingSharedAppRegConfig`.
+      - For each `[Fact]` or `[Theory]` matching, decide: (a) is it testing the shared-app-reg branch behavior?
+        → DELETE the test method. (b) is it exercising the general handler with `tenancyModel = "Model1Shared"`
+        as a valid tenancy value but expecting per-customer semantics? → KEEP + verify it passes post-Item-1
+        (this SHOULD start passing where it was previously testing the shared no-op path).
+      - Also delete any test-fixture setup methods that construct `EntraAppRegSharedVerifyOutcome.Current`,
+        `Drifted`, or `Failure`, and any test-double implementations of `IEntraAppRegProvisioner.VerifySharedAsync`
+        that are ONLY used by shared-path tests. If a fake provisioner implements both `ProvisionAsync` and
+        `VerifySharedAsync` and other tests use it, delete only the `VerifySharedAsync` implementation and
+        remove the interface member post step 4 (interface removal is atomic with these deletions — the test
+        will not compile in between; that is expected).
+      - Commit checkpoint: DO NOT — this step compiles broken until step 4 lands. Continue immediately.
+    </step>
+
+    <step n="2" name="Delete H3EntraAppRegHandler.HandleModel1Async + L272 branch + BuildSharedKvUriReference helper">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs`:
+      1. Delete the L272 branch. The current code at ~L269-283:
+         ```
+         EntraAppRegOutputs outputs;
+         IReadOnlyList&lt;PendingKvSecretWrite&gt; pendingKvWrites;
+         if (string.Equals(tenancyModel, Model1Shared, StringComparison.Ordinal))
+         {
+             var model1Result = await HandleModel1Async(...);
+             ...
+         }
+         else
+         {
+             // ... Model 2 path
+         }
+         ```
+         Replace with the Model 2 body inlined unconditionally (as the "else" branch already contains):
+         ```
+         EntraAppRegOutputs outputs;
+         IReadOnlyList&lt;PendingKvSecretWrite&gt; pendingKvWrites;
+         if (!TryGetNonEmpty(parameters, KeyVaultNameParameterKey, out var keyVaultName))
+         {
+             // ... existing keyVaultName-missing failure
+         }
+         if (string.IsNullOrWhiteSpace(run.InterStepState.MiObjectId))
+         {
+             // ... existing UAMI-missing failure
+         }
+         var handleResult = await HandleModel2Async(...);
+         ...
+         ```
+         The Model 2 code below the current `else` block is copied verbatim (with the `else {` and matching `}`
+         removed and indentation reduced by one level). Verify by diff that the ONLY change to that block is
+         de-indent — no semantic changes.
+      2. Consider renaming `HandleModel2Async` → `HandleAsync` (private) OR keep the name for git-diff clarity.
+         RECOMMEND: keep the name `HandleModel2Async` for THIS commit — Item 2 (the enum consolidation) is the
+         cleaner point to rename since it also removes the "Model 2" concept from other sites. A rename here
+         would produce a large diff that obscures the Item 1 intent.
+      3. Delete the entire `HandleModel1Async` method (currently ~L406-470).
+      4. Delete the `BuildSharedKvUriReference` helper method (~L555-557 region — find via grep).
+      5. Delete any `using` directives at the top of the file that become unused (compiler will flag).
+      6. DO NOT delete the `Model1Shared` const at L129 (per constraint (i) — Item 2's job).
+      7. DO NOT delete `IsValidTenancyModel`'s acceptance of `Model1Shared` at L546 (per constraint (i)).
+    </step>
+
+    <step n="3" name="Delete shared-app-reg options from EntraAppRegOptions.cs">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegOptions.cs`:
+      1. Delete `SharedBffAppRegistrationId` property (L58-64).
+      2. Delete `SharedPlatformKeyVaultName` property (L66-67).
+      3. Delete the "---- Model 1 (shared multitenant BFF app-reg) ----" section-header comment (L56).
+      4. Update the class-header XML doc (L8-20 area): strike the "NEW Model 1 fields (SharedBffAppRegistrationId/
+         Audience/KeyVaultName)" bullet in the TASK 130 REWRITE block. Replace with a short retirement note:
+         "RETIRED 2026-09-29 (task 222 per D-13): Shared Model 1 app-reg fields removed. H3 provisions ONE
+         app-reg per customer, unconditionally, in both models."
+    </step>
+
+    <step n="4" name="Delete VerifySharedAsync + shared verify types from IEntraAppRegProvisioner.cs">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/IEntraAppRegProvisioner.cs`:
+      1. Delete the `VerifySharedAsync` interface method (L49-58).
+      2. Delete the `EntraAppRegSharedVerifyRequest` record (L132-134).
+      3. Delete the `EntraAppRegSharedVerifyOutcome` abstract record + `Current` + `Drifted` + `Failure` nested
+         records (L136-149).
+      4. Update the file-header XML doc (L11-19 area): strike the `VerifySharedAsync` bullet from the two-branch
+         summary. Replace the "Model 2 ONLY" / "Model 1 ONLY" split with a single-path description.
+      5. Update `ProvisionAsync` XML-doc if it says "MODEL 2 ONLY" → change to "Provisions the per-customer BFF
+         app-reg..." (both models now).
+      6. Update `EntraAppRegOutputs.PendingKvWrites` XML-doc (L181-187): strike the "Empty for Model 1 (no writes)"
+         clause.
+      7. Update `FicVerificationState.NotApplicable` XML-doc (L217-218): strike the "Model 1 — I6" reference.
+         Keep the enum value for defensive default.
+    </step>
+
+    <step n="5" name="Delete GraphAppRegistrationProvisioner.VerifySharedAsync method">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs`:
+      1. Grep for `VerifySharedAsync` inside this file — confirm it starts at L262 (the `public async Task&lt;EntraAppRegSharedVerifyOutcome&gt; VerifySharedAsync(...)` signature).
+      2. Delete the entire method body (from the `/// &lt;inheritdoc/&gt;` above the method through the closing `}`
+         of the method). Read the file first to identify the exact end line.
+      3. Delete any private helper methods that are ONLY called by `VerifySharedAsync` (not `ProvisionAsync` and
+         not `CommitPendingSecretsAsync`). Candidates: any helper referring to `SpaarkeTenantId` for a
+         Spaarke-tenant-scoped Graph client construction that has no other caller. Grep verification: for each
+         helper method the deleted `VerifySharedAsync` called, `git grep -n "MethodName" src/server/services/Sprk.Provisioning.ControlPlane.Core/` — if the only remaining hit is inside the same file (same class), and no other method in the file calls it, delete it.
+       4. Update the file-header XML doc if it mentions two-branch (`ProvisionAsync` + `VerifySharedAsync`) —
+         reduce to `ProvisionAsync` + `CommitPendingSecretsAsync`.
+    </step>
+
+    <step n="6" name="Mark rejection codes @Obsolete (external stability, do NOT delete)">
+      Edit `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs`:
+      1. Above `MissingSharedAppRegConfig` (L77-78), add:
+         ```
+         /// &lt;remarks&gt;
+         /// RETIRED 2026-09-29 (task 222 per D-13): shared-app-reg branch deleted from H3. This code is no longer
+         /// emitted by any live code path. VALUE PRESERVED per file-header STABILITY guidance ("add new codes as
+         /// needed and mark old ones @[Obsolete] on removal") — external operator UI filters / alerting rules /
+         /// log queries keyed on this constant since task 130 (Wave G-3) must not silently break.
+         /// &lt;/remarks&gt;
+         [System.Obsolete("Retired 2026-09-29 per D-13 (task 222) — H3 shared-app-reg branch deleted. Value kept for external-tool log/alerting historical stability. Do not reference from new code.", error: false)]
+         ```
+      2. Add the same `&lt;remarks&gt;` block + `[Obsolete]` above `SharedAppRegConfigurationDrift` (L80-81),
+         with the same rationale.
+      3. Do NOT delete the constants or change their string values.
+    </step>
+
+    <step n="7" name="Build + verify — cascade closure">
+      1. `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Api/Sprk.Provisioning.ControlPlane.Api.csproj`
+         must succeed with 0 errors. Warnings acceptable ONLY if they are the expected `[Obsolete]` warnings from
+         step 6 (which should not appear because no live code references those constants post-deletion).
+      2. `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Tests/Sprk.Provisioning.ControlPlane.Tests.csproj`
+         must succeed with 0 errors.
+      3. If ANY compile error appears that is NOT resolved by the step 1-6 deletions:
+         - If it's a test file referencing a deleted symbol: return to step 1, delete that test/setup too.
+         - If it's a NON-TEST caller: STOP + ESCALATE per escalation trigger 1.
+      4. `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed 0 errors (BFF should not depend on
+         ControlPlane internals; a build error here means an unexpected reference — ESCALATE).
+    </step>
+
+    <step n="8" name="Run test suites — no regressions">
+      1. `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj --no-build` — must be 326/326 PASS. Any
+         drop → escalation trigger 3.
+      2. `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/Sprk.Provisioning.ControlPlane.Tests.csproj --no-build`
+         — new failures must be EITHER (a) the 23 pre-existing baseline failures documented in task 221, OR (b)
+         genuine shared-path tests that were deliberately deleted in step 1 (in which case they should NOT
+         appear in the failure list — they're gone). Any OTHER failure → escalation trigger 4. Verify by
+         stash-and-compare against master if in doubt.
+      3. `dotnet test tests/Spaarke.Provisioning.ControlPlane.IntegrationTests/` — if this project exists and
+         has shared-app-reg integration tests, they also delete per the same rule as step 1. Grep first.
+    </step>
+
+    <step n="9" name="Grep sweep — verify NO surviving Shared* references">
+      Run the SAME grep as step 0:
+      `git grep -n "SharedBffAppRegistrationId\|SharedPlatformKeyVaultName\|EntraAppRegSharedVerifyRequest\|EntraAppRegSharedVerifyOutcome\|VerifySharedAsync\|HandleModel1Async\|BuildSharedKvUriReference"`
+      Expected result: ONLY hits are (a) `MissingSharedAppRegConfig` / `SharedAppRegConfigurationDrift` const
+      declarations in EntraAppRegRejectionCodes.cs (retained per step 6), (b) any historical git-log entries
+      referenced in comments, (c) the INCOMING doc / this POML / current-task.md / D-13 handoff (documentation
+      references, not code). If ANY OTHER hit remains — return to the appropriate step and remove it.
+    </step>
+
+    <step n="10" name="Update task metadata + commit + push">
+      1. Set `&lt;status&gt;` in this POML to `completed`. Add `&lt;completion-notes&gt;` block summarizing:
+         - Files modified with line counts (grep evidence from step 0 vs step 9)
+         - Test suite results (326/326 ArchTest + Sprk.Provisioning.ControlPlane.Tests deltas)
+         - Any escalations that fired + resolution
+         - Any deviation from POML step order (if a step was combined/split for atomicity)
+      2. Update `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md`: row 222 🔲 → ✅ with
+         one-line disposition summary.
+      3. Update `projects/customer-provisioning-orchestration-r1/current-task.md` Quick Recovery: Next Action =
+         "Item 2 (one shared TenancyModel enum + parse-or-reject at the edge — 9 branch sites, 4 silent defaults;
+         see INCOMING §5 Item 2 + notes/D-12-code-branch-inventory.md)".
+      4. Commit with message: `fix(provisioning): T222 Item 1 D-13 — delete H3 shared-app-reg branch (per-customer app-reg in both models)`
+         followed by full commit-body enumeration of removed symbols per step 1-6, ArchTest verification, and
+         reference to D-13 handoff.
+      5. Push to `origin/work/customer-provisioning-orchestration-r1`.
+    </step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion>H3 provisions ONE app-reg per customer, UNCONDITIONALLY, for BOTH `Model1Shared` and `Model2Dedicated` tenancy values (the string literals still exist — Item 2's job — but H3 routes both through the same per-customer creation code path).</criterion>
+    <criterion>`H3EntraAppRegHandler.HandleModel1Async` DOES NOT EXIST.</criterion>
+    <criterion>`H3EntraAppRegHandler.BuildSharedKvUriReference` DOES NOT EXIST.</criterion>
+    <criterion>`H3EntraAppRegHandler.HandleAsync` has NO `if (Model1Shared)` branch at ~L272 — a single unconditional per-customer creation code path.</criterion>
+    <criterion>`EntraAppRegOptions.SharedBffAppRegistrationId` DOES NOT EXIST as a property.</criterion>
+    <criterion>`EntraAppRegOptions.SharedPlatformKeyVaultName` DOES NOT EXIST as a property.</criterion>
+    <criterion>`EntraAppRegSharedVerifyRequest` record DOES NOT EXIST.</criterion>
+    <criterion>`EntraAppRegSharedVerifyOutcome` (and `Current`/`Drifted`/`Failure` nested) DO NOT EXIST.</criterion>
+    <criterion>`IEntraAppRegProvisioner.VerifySharedAsync` DOES NOT EXIST as an interface method.</criterion>
+    <criterion>`GraphAppRegistrationProvisioner.VerifySharedAsync` DOES NOT EXIST as a method.</criterion>
+    <criterion>`EntraAppRegRejectionCodes.MissingSharedAppRegConfig` STILL EXISTS as a `[Obsolete]`-decorated const with retention rationale in a `&lt;remarks&gt;` block.</criterion>
+    <criterion>`EntraAppRegRejectionCodes.SharedAppRegConfigurationDrift` STILL EXISTS as a `[Obsolete]`-decorated const with retention rationale in a `&lt;remarks&gt;` block.</criterion>
+    <criterion>`H3EntraAppRegHandlerTests.cs` contains NO test method whose subject-under-test is the shared-app-reg branch behavior. Tests that pass `tenancyModel = "Model1Shared"` to exercise per-customer creation semantics are allowed (they now exercise the unified path).</criterion>
+    <criterion>`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Api/` succeeds with 0 errors.</criterion>
+    <criterion>`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Tests/` succeeds with 0 errors.</criterion>
+    <criterion>`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with 0 errors.</criterion>
+    <criterion>`dotnet test tests/Spaarke.ArchTests/` = 326/326 PASS (STEP 1 gate preserved).</criterion>
+    <criterion>`dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` failure count = 23 baseline failures (task 221 domain — 17 FileKvSecretManifestTests + 6 CustomerRunGuardModulePostConfigureTests) MINUS any shared-path tests that lived in ControlPlane.Tests and were deleted, PLUS zero new failures caused by Item 1.</criterion>
+    <criterion>Post-change grep for `SharedBffAppRegistrationId|SharedPlatformKeyVaultName|EntraAppRegSharedVerifyRequest|EntraAppRegSharedVerifyOutcome|VerifySharedAsync|HandleModel1Async|BuildSharedKvUriReference` in the codebase returns ZERO code hits (only the two `[Obsolete]` const declarations in EntraAppRegRejectionCodes.cs + documentation references in INCOMING/D-13/current-task/this POML).</criterion>
+    <criterion>Commit message references D-13 handoff + INCOMING-D12-D13-REMEDIATION.md §5 Item 1 by name. TASK-INDEX row 222 marked ✅. current-task.md Quick Recovery Next Action = Item 2.</criterion>
+    <criterion>No new `.WithClientSecret(...)` sites on BFF identity introduced (ADR-028 A4 posture preserved — the per-customer path already threads `RequireSecretFreeIdentity = true` unconditionally; Model 1 inherits that default).</criterion>
+    <criterion>NO ArchTest weakening, `[Skip]`, or scope narrowing in this task (ADR-038 §7 KEEP-path forcing-function discipline). Deletions in `*Tests/**` are limited to test methods testing the retired shared-branch behavior.</criterion>
+  </acceptance-criteria>
+
+  <outputs>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegOptions.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/EntraAppRegRejectionCodes.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/IEntraAppRegProvisioner.cs</output>
+    <output type="file-modified">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/EntraAppReg/H3EntraAppRegHandlerTests.cs</output>
+    <output type="task-status">This POML → completed with completion-notes block.</output>
+    <output type="task-status">TASK-INDEX.md row 222 → ✅.</output>
+    <output type="task-status">current-task.md Quick Recovery Next Action → Item 2.</output>
+    <output type="commit">One commit on `work/customer-provisioning-orchestration-r1` with the fix(provisioning) T222 prefix.</output>
+  </outputs>
+</task>

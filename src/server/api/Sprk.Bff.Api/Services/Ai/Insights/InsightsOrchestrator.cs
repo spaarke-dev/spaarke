@@ -4,12 +4,14 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using ExecutorSideEffects = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorSideEffects;
 
 namespace Sprk.Bff.Api.Services.Ai.Insights;
 
@@ -102,6 +104,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IRagService _ragService;
     private readonly AssistantToolCallHandler _assistantHandler;
+    private readonly INodeService _nodeService;
     private readonly ILogger<InsightsOrchestrator> _logger;
 
     public InsightsOrchestrator(
@@ -113,6 +116,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
         IConsumerRoutingService consumerRouting,
         IRagService ragService,
         AssistantToolCallHandler assistantHandler,
+        INodeService nodeService,
         ILogger<InsightsOrchestrator> logger)
     {
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
@@ -123,6 +127,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _ragService = ragService ?? throw new ArgumentNullException(nameof(ragService));
         _assistantHandler = assistantHandler ?? throw new ArgumentNullException(nameof(assistantHandler));
+        _nodeService = nodeService ?? throw new ArgumentNullException(nameof(nodeService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -336,7 +341,11 @@ public sealed class InsightsOrchestrator : IInsightsAi
             Subject: request.Subject,
             Parameters: null,
             TenantId: request.TenantId,
-            AccessibleScopeHash: AssistantToolCallHandler.ComputeAccessibleScopeHash(request.TenantId, request.CallerOid));
+            AccessibleScopeHash: AssistantToolCallHandler.ComputeAccessibleScopeHash(request.TenantId, request.CallerOid))
+        {
+            // Task 163: same as the single-shot path — the route's established subject right travels with the run.
+            SubjectWriteAuthorized = request.SubjectWriteAuthorized,
+        };
 
         // Invoke single-shot AnswerQuestionAsync (cache-aware). FeatureDisabledException
         // propagates unchanged.
@@ -416,8 +425,8 @@ public sealed class InsightsOrchestrator : IInsightsAi
         // like resolveLiveFacts have configJson `"subject": "matter:{{matterId}}"` — without
         // this enrichment the literal "{{matterId}}" was passed to LiveFactResolver, which
         // rejected the request as InvalidConfiguration. Wave B5 SC-01 unblock.
-        IReadOnlyDictionary<string, string>? enrichedParameters = EnrichParametersFromSubject(
-            request.Parameters, request.Subject);
+        IReadOnlyDictionary<string, string>? enrichedParameters = BindServerOwnedParameters(
+            EnrichParametersFromSubject(request.Parameters, request.Subject), request.TenantId);
 
         var cacheRequest = new InsightsPlaybookExecutionRequest(
             PlaybookId: request.Question,
@@ -445,7 +454,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
                 var httpContext = _httpContextAccessor.HttpContext
                     ?? throw new InvalidOperationException(
                         "HTTP context is required for insights synthesis playbook execution.");
-                return _playbookOrchestration.ExecuteAsync(
+                var run = _playbookOrchestration.ExecuteAsync(
                     new PlaybookRunRequest
                     {
                         PlaybookId = request.Question,
@@ -460,6 +469,13 @@ public sealed class InsightsOrchestrator : IInsightsAi
                     },
                     httpContext,
                     ct);
+
+                // Task 163 (owner round 16 item 1): a run happens only on a cache MISS, and only a run can write.
+                // Unless the entry route established the caller's Write on the subject, a run that CAN write is
+                // refused before its first node.
+                return request.SubjectWriteAuthorized
+                    ? run
+                    : RunUnlessItCanWriteTheSubjectAsync(request.Question, request.Subject, run, ct);
             },
             cancellationToken);
 
@@ -1083,6 +1099,76 @@ public sealed class InsightsOrchestrator : IInsightsAi
             model: null,            // use configured SummarizeModel
             maxOutputTokens: 400,
             cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// Binds the SERVER-OWNED <c>tenantId</c> playbook parameter from the request's tenant — the route's token tenant
+    /// (unified-access-control-r2 task 163). The shared playbook-parameter policy (task 164, owner round 16 item 3)
+    /// refuses <c>tenantId</c> from an HTTP caller because "the server or the scheduler binds it"; this is that binding
+    /// for the Insights runs, which declare it required (<c>matter-health-single</c>'s AgentService thread key and the
+    /// <c>tenantId</c> of the envelope it persists; <c>predict-matter-cost</c>'s synthesis). Any value already present is
+    /// overwritten: a run's tenant is never a caller's choice. Returns a NEW dictionary.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> BindServerOwnedParameters(
+        IReadOnlyDictionary<string, string>? parameters, string tenantId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+
+        var bound = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (parameters is not null)
+        {
+            foreach (var (key, value) in parameters)
+            {
+                bound[key] = value;
+            }
+        }
+
+        bound["tenantId"] = tenantId;
+        return bound;
+    }
+
+    /// <summary>
+    /// The run guard (unified-access-control-r2 task 163; owner round 16 item 1, "Read suffices only for non-persisting
+    /// playbooks"): yields <paramref name="run"/> only when the playbook CANNOT write to its subject — the one rule,
+    /// <see cref="ExecutorSideEffects.CanWriteThroughParameter"/> on the parameter the subject is bound to (the key
+    /// <see cref="EnrichParametersFromSubject"/> derives: <c>matterId</c> / <c>projectId</c> / <c>invoiceId</c>), over
+    /// the SAME node source the engine dispatches from — and otherwise throws <see cref="SdapProblemException"/> with
+    /// <see cref="InsightsAgentRequest.SubjectWriteRequiredCode"/> before the run's first node. Reached only when the
+    /// entry route did NOT establish the caller's Write on the subject (<see cref="InsightsAgentRequest.SubjectWriteAuthorized"/>
+    /// false): an Assistant playbook run (<c>/api/insights/assistant/query</c>) that the router or the classifier picks
+    /// for a caller without Write, or an <c>/api/insights/ask</c> run whose playbook gained a writing node after the
+    /// route decided. An unreadable or empty node list (the Legacy run mode writes) is refused the same way (fail closed,
+    /// ADR-003). No rights query is made here — the route's filter decided the rights, as the caller.
+    /// </summary>
+    private async IAsyncEnumerable<PlaybookStreamEvent> RunUnlessItCanWriteTheSubjectAsync(
+        Guid playbookId,
+        string subject,
+        IAsyncEnumerable<PlaybookStreamEvent> run,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // The subject's parameter key, from the SAME mapping the run's enrichment uses (null for an unknown scheme,
+        // which binds no parameter the nodes could reach the subject through).
+        var subjectParameter = EnrichParametersFromSubject(null, subject)?.Keys.FirstOrDefault();
+
+        var nodes = await _nodeService.GetNodesAsync(playbookId, cancellationToken).ConfigureAwait(false);
+        if (nodes is null
+            || nodes.Length == 0
+            || (subjectParameter is not null && ExecutorSideEffects.CanWriteThroughParameter(nodes, subjectParameter)))
+        {
+            _logger.LogWarning(
+                "InsightsOrchestrator: playbook {PlaybookId} can write to its subject (or its node list is unreadable or empty) and the caller's Write on the subject was not established; the run is refused before its first node",
+                playbookId);
+            throw new SdapProblemException(
+                InsightsAgentRequest.SubjectWriteRequiredCode,
+                "Write on the subject is required",
+                "This playbook writes to its subject, and the caller's Write on the subject was not established.",
+                StatusCodes.Status404NotFound);
+        }
+
+        await foreach (var playbookEvent in run.WithCancellation(cancellationToken).ConfigureAwait(false))
+        {
+            yield return playbookEvent;
+        }
     }
 
     /// <summary>

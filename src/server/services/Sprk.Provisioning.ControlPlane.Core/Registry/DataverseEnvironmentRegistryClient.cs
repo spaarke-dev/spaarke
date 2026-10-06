@@ -132,6 +132,14 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     private const string SetupStatusColumn = "sprk_setupstatus";
     private const string CurrentRunIdColumn = "sprk_currentrunid";
 
+    // Row A38a (task 205a, 2026-08-25): positive secret-free migration marker
+    // state field. SINGLE-LINE-OF-TEXT column (written as a JSON string —
+    // unlike sprk_setupstatus's option-set integer). Schema prerequisite:
+    // column must exist on the admin env's sprk_dataverseenvironment table
+    // BEFORE any environment enables RequireSecretFreeIdentity; a missing
+    // column FAIL-LOUDs here as an HTTP 400 Failure naming the property.
+    private const string CredentialModeColumn = "sprk_credentialmode";
+
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly DataverseEnvironmentRegistryOptions _options;
     private readonly ILogger<DataverseEnvironmentRegistryClient> _logger;
@@ -212,6 +220,78 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
             }
 
             return ParseSnapshot(arr[0]);
+        }
+        finally
+        {
+            response.Dispose();
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(
+        string environmentId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentId);
+
+        // Non-GUID → null. No OData URI emitted (parity with
+        // UpdateSetupStatusAsync's GUID guard shape).
+        if (!Guid.TryParse(environmentId, out var envRowId))
+        {
+            _logger.LogWarning(
+                "DataverseEnvironmentRegistryClient LookupByEnvironmentIdAsync received a non-GUID environmentId='{EnvironmentId}' — returning null.",
+                environmentId);
+            return null;
+        }
+
+        var envUri = BuildEnvUri();
+        var token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+
+        // KeyLookup by row id via OData segment — no $filter needed.
+        var relative =
+            $"/api/data/v9.2/{_options.EntitySetName}({envRowId})?" +
+            $"$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
+            $"{SetupStatusColumn},{CurrentRunIdColumn}";
+        var requestUri = new Uri(envUri, relative);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        HttpResponseMessage response;
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Get, requestUri, token.Token);
+            response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient LookupByEnvironmentIdAsync infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            throw new InvalidOperationException(
+                $"Registry lookup infrastructure error: {ex.GetType().Name}: {ex.Message}", ex);
+        }
+
+        try
+        {
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"Registry lookup by environmentId returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 400)}");
+            }
+
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            // Row-id keyLookup returns the row inline (not under 'value').
+            return ParseSnapshot(doc.RootElement);
         }
         finally
         {
@@ -305,9 +385,299 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<RegistryUpdateOutcome> UpdateCredentialModeAsync(
+        RegistryCredentialModeUpdate update, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(update);
+        ArgumentException.ThrowIfNullOrWhiteSpace(update.EnvironmentId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(update.CredentialMode);
+
+        // GUID guard — parity with UpdateSetupStatusAsync (the id is
+        // interpolated into an OData URI segment).
+        if (!Guid.TryParse(update.EnvironmentId, out var envRowId))
+        {
+            return new RegistryUpdateOutcome.Failure(
+                $"EnvironmentId '{update.EnvironmentId}' is not a valid GUID — refusing to build an OData URI from it.");
+        }
+
+        var envUri = BuildEnvUri();
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient credential-mode token acquisition failed for env={EnvUrl}",
+                envUri);
+            return new RegistryUpdateOutcome.Failure(
+                $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        var relative = $"/api/data/v9.2/{_options.EntitySetName}({envRowId})";
+        var requestUri = new Uri(envUri, relative);
+        var bodyJson = BuildCredentialModePatchBody(update.CredentialMode);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Patch, requestUri, token.Token);
+            request.Headers.Add("Prefer", "return=minimal");
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "DataverseEnvironmentRegistryClient credential-mode PATCH ok: environmentId={EnvironmentId} " +
+                    "credentialMode={CredentialMode} customerId={CustomerId} runId={RunId}",
+                    envRowId, update.CredentialMode, update.CustomerIdForLog, update.RunIdForLog);
+                return new RegistryUpdateOutcome.Success();
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                return new RegistryUpdateOutcome.NotFound(
+                    $"PATCH {relative} returned 404 NotFound. Body: {Truncate(body, 400)}");
+            }
+
+            var errBody = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH {relative} ({CredentialModeColumn}) returned {(int)response.StatusCode} {response.StatusCode}. " +
+                $"Body: {Truncate(errBody, 400)}. If the body names '{CredentialModeColumn}' as an invalid " +
+                "property, the A38a schema prerequisite (single-line-of-text column on " +
+                "sprk_dataverseenvironment) has not been created on the admin env yet.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient credential-mode PATCH infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <inheritdoc/>
+    public async Task<RegistryUpdateOutcome> UpdateColumnsAsync(
+        string environmentId,
+        IReadOnlyDictionary<string, object?> columns,
+        string customerIdForLog,
+        string runIdForLog,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentId);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        // Empty dictionary → no-op Success. Caller decided nothing was worth
+        // writing; do NOT issue an empty-body PATCH (Dataverse would reject as
+        // 400 "at least one property required") — the caller's intent is clearer.
+        if (columns.Count == 0)
+        {
+            _logger.LogDebug(
+                "DataverseEnvironmentRegistryClient.UpdateColumnsAsync no-op (empty column set): " +
+                "environmentId={EnvironmentId} customerId={CustomerId} runId={RunId}",
+                environmentId, customerIdForLog, runIdForLog);
+            return new RegistryUpdateOutcome.Success();
+        }
+
+        // GUID guard — parity with UpdateSetupStatusAsync / UpdateCredentialModeAsync.
+        if (!Guid.TryParse(environmentId, out var envRowId))
+        {
+            return new RegistryUpdateOutcome.Failure(
+                $"EnvironmentId '{environmentId}' is not a valid GUID — refusing to build an OData URI from it.");
+        }
+
+        var envUri = BuildEnvUri();
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient columns-PATCH token acquisition failed for env={EnvUrl}",
+                envUri);
+            return new RegistryUpdateOutcome.Failure(
+                $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        var relative = $"/api/data/v9.2/{_options.EntitySetName}({envRowId})";
+        var requestUri = new Uri(envUri, relative);
+        var bodyJson = BuildColumnsPatchBody(columns);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Patch, requestUri, token.Token);
+            request.Headers.Add("Prefer", "return=minimal");
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "DataverseEnvironmentRegistryClient columns-PATCH ok: environmentId={EnvironmentId} " +
+                    "columnCount={ColumnCount} columnNames={ColumnNames} customerId={CustomerId} runId={RunId}",
+                    envRowId, columns.Count, string.Join(",", columns.Keys),
+                    customerIdForLog, runIdForLog);
+                return new RegistryUpdateOutcome.Success();
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                return new RegistryUpdateOutcome.NotFound(
+                    $"PATCH {relative} returned 404 NotFound. Body: {Truncate(body, 400)}");
+            }
+
+            var errBody = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH {relative} ({columns.Count} columns: {string.Join(",", columns.Keys)}) " +
+                $"returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(errBody, 400)}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient columns-PATCH infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
+
+    // REG-01 — arbitrary-columns PATCH body. Column NAMES are the dictionary
+    // keys (must be Dataverse lowercase logical names). VALUES are serialized
+    // per JSON type: strings → strings, DateTimeOffset → ISO 8601 UTC,
+    // bool → JSON bool, integer types → JSON number, null → JSON null (clears
+    // the column). Internal for pure-function test coverage.
+    /// <summary>
+    /// Bucket B MED#3 SESSION 18 (customer-provisioning-orchestration-r1 adversarial
+    /// e2e verify workflow wepdcb8we): I1 immutability allow-list. These three
+    /// columns are set once at placeholder-create (Step 1f) and NEVER re-written
+    /// per tenant-isolation invariant I1 (design.md §4D). Prior to this guard,
+    /// <see cref="UpdateColumnsAsync"/> accepted an arbitrary caller-supplied
+    /// dictionary with no server-side allow-list — a future handler that added
+    /// e.g. <c>columns["sprk_tenantid"] = run.Parameters.NonSecret["tenantId"]</c>
+    /// to a promoted-columns dictionary would silently rewrite the placeholder's
+    /// tenant id, breaking I1 with no audit trail. This block-list bakes the
+    /// invariant into code so a violation fails LOUDLY at build time (unit test)
+    /// or at runtime (InvalidOperationException surfaced as
+    /// <see cref="RegistryUpdateOutcome.Failure"/>) instead of being caught
+    /// only by operator discipline.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ImmutableColumnsBlockList = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        EnvironmentRowIdColumn,  // sprk_dataverseenvironmentid — row primary key, never mutable
+        CustomerIdColumn,        // sprk_customerid — set once at placeholder-create, alt-key
+        TenantIdColumn,          // sprk_tenantid — I1 tenant-isolation invariant, set once
+    };
+
+    internal static string BuildColumnsPatchBody(IReadOnlyDictionary<string, object?> columns)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var (name, value) in columns)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    throw new InvalidOperationException(
+                        "UpdateColumnsAsync received an entry with an empty column name.");
+                }
+                // Bucket B MED#3 SESSION 18 (adversarial e2e verify wepdcb8we):
+                // I1 immutability block-list. See ImmutableColumnsBlockList XML doc.
+                if (ImmutableColumnsBlockList.Contains(name))
+                {
+                    throw new InvalidOperationException(
+                        $"UpdateColumnsAsync received forbidden column '{name}'. Columns " +
+                        $"[{string.Join(", ", ImmutableColumnsBlockList)}] are I1-immutable per design.md §4D — " +
+                        "set once at placeholder-create (Step 1f) and NEVER re-writable. " +
+                        "This is a Bucket B MED#3 SESSION 18 guard baking I1 into code — " +
+                        "if you legitimately need to write one of these, the invariant is wrong, not this guard.");
+                }
+                switch (value)
+                {
+                    case null:
+                        writer.WriteNull(name);
+                        break;
+                    case string s:
+                        writer.WriteString(name, s);
+                        break;
+                    case bool b:
+                        writer.WriteBoolean(name, b);
+                        break;
+                    case DateTimeOffset dto:
+                        // ISO 8601 UTC (round-trip) — Dataverse DateTime columns
+                        // accept the format via OData v4.
+                        writer.WriteString(name, dto.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                        break;
+                    case DateTime dt:
+                        writer.WriteString(name, dt.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                        break;
+                    case int i:
+                        writer.WriteNumber(name, i);
+                        break;
+                    case long l:
+                        writer.WriteNumber(name, l);
+                        break;
+                    case double d:
+                        writer.WriteNumber(name, d);
+                        break;
+                    case decimal dec:
+                        writer.WriteNumber(name, dec);
+                        break;
+                    case Guid g:
+                        // Dataverse string-column columns holding a GUID want
+                        // canonical bare-lowercase (ADR-044). Callers can
+                        // pass a string if they need braces.
+                        writer.WriteString(name, g.ToString("D").ToLowerInvariant());
+                        break;
+                    default:
+                        // Fallback: use ToString() invariant. Callers should
+                        // convert to a supported primitive before calling
+                        // (this branch keeps a clear FAIL surface — a "System.Object"
+                        // string in the row indicates the caller passed
+                        // something unexpected).
+                        writer.WriteString(name, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+                        break;
+                }
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     private Uri BuildEnvUri()
     {
@@ -368,6 +738,24 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
             {
                 writer.WriteNull(CurrentRunIdColumn);
             }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    // Row A38a — credential-mode PATCH body. UNLIKE sprk_setupstatus (choice/
+    // option-set integer), sprk_credentialmode is a single-line-of-text
+    // column, so the value ships as a JSON STRING verbatim. Internal for
+    // pure-function test coverage (ADR-038 posture — no HttpMessageHandler
+    // mocks).
+    internal static string BuildCredentialModePatchBody(string credentialMode)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(credentialMode);
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString(CredentialModeColumn, credentialMode);
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());

@@ -92,6 +92,31 @@ public record QuickCreateRequest
     public Guid? MatterTypeId { get; init; }
 
     /// <summary>
+    /// <c>sprk_practicearea_ref</c> id for a Matter (task 100, owner UAT round 5 item 3). Sets the
+    /// <c>sprk_practicearea</c> lookup. Required by the pane's Matter form (owner decision B, like Matter Type), but
+    /// treated by the server exactly like <see cref="MatterTypeId"/>: a missing, empty or unknown id is never a
+    /// rejection — an unknown one is dropped with a warning. <b>Ignored for every other entity type.</b>
+    /// </summary>
+    public Guid? PracticeAreaId { get; init; }
+
+    /// <summary>
+    /// <c>sprk_projecttype_ref</c> id for a Project (task 100). Sets the <c>sprk_projecttype_ref</c> lookup. Optional;
+    /// an unknown id is dropped with a warning, never a rejection. <b>Ignored for every other entity type.</b>
+    /// </summary>
+    public Guid? ProjectTypeId { get; init; }
+
+    /// <summary>
+    /// The contact the new record is assigned to (task 100): <c>sprk_assignedtointernal</c> on a Matter or Project,
+    /// <c>sprk_assignedto1</c> ("Assigned To 1") on an Invoice. Optional (owner decision B). The caller must hold
+    /// <b>Read</b> on the contact — <c>QuickCreateSourceAccessFilter</c> refuses it otherwise, with one constant
+    /// 403 body whether the contact is unreadable or does not exist.
+    /// <para>Absent or <see cref="Guid.Empty"/> = the server's default: a Matter or Project names its MAKER's linked
+    /// contact (unified-access-control-r2 task 152), unless a field-mapping rule wrote one; an Invoice has no default
+    /// and is left unassigned.</para>
+    /// </summary>
+    public Guid? AssignedToContactId { get; init; }
+
+    /// <summary>
     /// Optional record context: the Dataverse entity <b>logical name</b> (e.g. <c>sprk_project</c>) of the record the
     /// new record is being created from — the Field Mapping Framework source (task 030). Must be supplied together
     /// with <see cref="SourceRecordId"/>. The caller must hold Read on it (<c>QuickCreateSourceAccessFilter</c>).
@@ -228,8 +253,10 @@ public static class QuickCreateFieldRequirements
             errors["sourceEntityType"] = ["sourceEntityType must be a Dataverse entity logical name"];
         }
 
-        // matterTypeId is deliberately NOT validated here: a missing, empty or unknown type is never a rejection
-        // (owner decision 2026-09-11) — the creation service creates without it and warns.
+        // matterTypeId / practiceAreaId / projectTypeId are deliberately NOT validated here: a missing, empty or
+        // unknown reference is never a rejection (owner decision 2026-09-11, extended to the task-100 lists) — the
+        // creation service creates without it and warns. assignedToContactId is authorized (Read) by
+        // QuickCreateSourceAccessFilter before this runs; Guid.Empty means "the server's default".
 
         return errors;
     }

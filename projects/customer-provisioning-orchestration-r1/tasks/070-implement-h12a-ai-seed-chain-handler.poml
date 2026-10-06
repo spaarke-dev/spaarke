@@ -4,7 +4,7 @@
     <title>Implement H12a AI seed chain handler — invokes manifest per single-AI-routing-surface end state</title>
     <phase>C' Config-Seed Manifest + H12/H14 Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','ai','dataverse'; implements a handler in the DAG whose failure blocks Setup Status = Ready. FR-15 acceptance scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

@@ -620,7 +620,8 @@ public static class JobsEndpoints
             Status: record.Status,
             ErrorMessage: record.ErrorMessage,
             ProcessedItems: record.ProcessedItems,
-            DurationMs: record.CompletedOn is null ? null : (long)record.Duration.TotalMilliseconds);
+            DurationMs: record.CompletedOn is null ? null : (long)record.Duration.TotalMilliseconds,
+            ResultJson: record.ResultJson);
     }
 
     /// <summary>

@@ -1,5 +1,7 @@
 # SprkChat Context Awareness R1
 
+> **Portfolio**: [Project #1145](https://github.com/spaarke-dev/spaarke/issues/1145) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Complete
 > **Created**: 2026-03-15
 > **Branch**: `work/ai-sprk-chat-context-awareness-r1`

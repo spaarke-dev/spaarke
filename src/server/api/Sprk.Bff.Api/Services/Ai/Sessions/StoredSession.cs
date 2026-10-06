@@ -230,6 +230,13 @@ public class StoredSession
     public string? DocumentId { get; set; }
 
     /// <summary>
+    /// The SPE drive id of <see cref="DocumentId"/> when that id is an SPE drive-item id (mirrors
+    /// <c>ChatSession.DocumentDriveId</c>; Compose Path B). Null otherwise and for documents that pre-date this field.
+    /// </summary>
+    [JsonPropertyName("documentDriveId")]
+    public string? DocumentDriveId { get; set; }
+
+    /// <summary>
     /// Additional document IDs (max 5) pinned to the conversation (mirrors
     /// <c>ChatSession.AdditionalDocumentIds</c>). Empty for sessions with no
     /// pinned documents or documents that pre-date this field.

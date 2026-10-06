@@ -4,7 +4,7 @@
     <title>Load-test L2 REST enqueue-and-return-202 + verify ≥30-min handler completes without HTTP timeout</title>
     <phase>C Wave C5 — L2 REST + Reconciler</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','integration-test','testing'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Also FR-22 + SC #20 acceptance-gate scope.</rigor-reason>
     <model-tier>sonnet</model-tier>

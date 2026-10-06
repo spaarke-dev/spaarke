@@ -181,6 +181,7 @@ function Get-SequenceState([hashtable]$T, [long[]]$InFormat) {
 }
 
 $IsDryRun = -not $Apply.IsPresent
+. (Join-Path $PSScriptRoot 'common/DataverseSolutionMembership.ps1')
 $gaps = [System.Collections.Generic.List[string]]::new()
 $metadataWritten = $false
 function Report([string]$State, [string]$What) {
@@ -321,18 +322,15 @@ foreach ($T in $Tables) {
     if (-not $solution) { Report 'FAIL' "solution '$SolutionUniqueName' not found"; continue }
     if ($solution.ismanaged) { Report 'INFO' "$SolutionUniqueName is managed here — the format and key travel with its import"; continue }
     # A table added with ALL its subcomponents (rootcomponentbehavior 0) already carries every column and key — the
-    # case for both tables in SpaarkeCore (dev, 2026-10-02). Only otherwise are the column and key added one by one.
-    $root = @((Invoke-DvGet "solutioncomponents?`$select=rootcomponentbehavior&`$filter=_solutionid_value eq $($solution.solutionid) and objectid eq $($entityMeta.MetadataId) and componenttype eq 1").value) | Select-Object -First 1
-    if ($root -and $root.rootcomponentbehavior -eq 0) {
-        Report 'OK' "$($T.Entity) is in $SolutionUniqueName with all subcomponents (carries the column and its key)"
-        continue
-    }
-    $inSolution = @((Get-AllPages "solutioncomponents?`$select=objectid&`$filter=_solutionid_value eq $($solution.solutionid)") | ForEach-Object { $_.objectid.ToString().ToLowerInvariant() })
-    $components = @(@{ Id = $attr.MetadataId; Type = 2; Label = "$($T.Entity).$($T.Column)" })
+    # case for both tables in SpaarkeCore (dev, 2026-10-02); the shared helper answers 'ViaTable' for them.
+    $membership = Get-DvSolutionMembership -Api $Api -Headers $headers -SolutionId $solution.solutionid
+    $components = @(@{ Id = $attr.MetadataId; Type = 2; Label = "$($T.Entity).$($T.Column)"; TableId = $entityMeta.MetadataId })
     $k = @((Invoke-DvGet "EntityDefinitions(LogicalName='$($T.Entity)')/Keys?`$select=MetadataId,KeyAttributes").value) | Where-Object { @($_.KeyAttributes) -join ',' -eq $T.Column } | Select-Object -First 1
-    if ($k) { $components += @{ Id = $k.MetadataId; Type = 14; Label = "key on $($T.Entity).$($T.Column)" } }
+    if ($k) { $components += @{ Id = $k.MetadataId; Type = 14; Label = "key on $($T.Entity).$($T.Column)"; TableId = $entityMeta.MetadataId } }
     foreach ($c in $components) {
-        if ($inSolution -contains $c.Id.ToString().ToLowerInvariant()) { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        $how = Test-DvInSolution -Membership $membership -ComponentId $c.Id -TableMetadataId $c['TableId']
+        if ($how -eq 'Direct') { Report 'OK' "$($c.Label) in $SolutionUniqueName"; continue }
+        if ($how -eq 'ViaTable') { Report 'OK' "$($c.Label) in $SolutionUniqueName (its table includes subcomponents)"; continue }
         if ($Verify) { Report 'MISSING' "$($c.Label) in $SolutionUniqueName"; continue }
         if ($IsDryRun) { Report 'WOULD' "add $($c.Label) to $SolutionUniqueName"; continue }
         Invoke-DvWrite POST 'AddSolutionComponent' @{ ComponentId = $c.Id; ComponentType = $c.Type; SolutionUniqueName = $SolutionUniqueName; AddRequiredComponents = $false } | Out-Null

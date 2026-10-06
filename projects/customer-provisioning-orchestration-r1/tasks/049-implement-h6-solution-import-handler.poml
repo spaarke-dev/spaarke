@@ -4,7 +4,7 @@
     <title>Implement H6 Solution Import Handler (Package Deployer, 8 solutions dependency-ordered)</title>
     <phase>C Wave C4 — Handler Implementations</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; modifies .cs files; long-running (5–15 min); imports 8 authoritative solutions with Tier dependency ordering.</rigor-reason>
     <model-tier>sonnet</model-tier>

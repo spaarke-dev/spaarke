@@ -33,4 +33,20 @@ public sealed record InsightsAgentRequest(
     string Subject,
     IReadOnlyDictionary<string, string>? Parameters,
     string TenantId,
-    string AccessibleScopeHash);
+    string AccessibleScopeHash)
+{
+    /// <summary>
+    /// The <c>SdapProblemException.Code</c> the facade throws when a run that CAN WRITE would execute for a caller whose
+    /// Write on the subject was not established (<see cref="SubjectWriteAuthorized"/> false). The route answers with its
+    /// own deny shape; nothing ran and nothing was written.
+    /// </summary>
+    public const string SubjectWriteRequiredCode = "insights.subject.write_required";
+
+    /// <summary>
+    /// True only when the ENTRY ROUTE's authorization filter established, as the caller, Write on the subject record
+    /// (unified-access-control-r2 task 163; owner round 16 item 1: "Read suffices only for non-persisting playbooks").
+    /// Default <c>false</c> — fail closed: the facade then refuses to run a playbook that can write
+    /// (<see cref="SubjectWriteRequiredCode"/>) and runs only non-persisting ones. Never derived from caller input.
+    /// </summary>
+    public bool SubjectWriteAuthorized { get; init; }
+}

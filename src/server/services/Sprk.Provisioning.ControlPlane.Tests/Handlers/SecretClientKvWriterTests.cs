@@ -15,7 +15,7 @@
 // guessed):
 //   - SecretClient.SetSecretAsync(name, value, ct) -> PUT /secrets/{name}
 //   - SecretClient.GetSecretAsync(name, null, ct)  -> GET /secrets/{name}/
-//     (trailing slash — matches KeyVaultCertBootstrapProbeTests.cs's own
+//     (trailing slash — matches the retired KeyVaultCertBootstrapProbeTests.cs's own
 //     ground-truthing note)
 //   - SecretClient.StartDeleteSecretAsync(name, ct) -> DELETE /secrets/{name};
 //     the returned DeleteSecretOperation.HasCompleted is FALSE on the initial
@@ -345,7 +345,7 @@ public sealed class SecretClientKvWriterTests
         }
     }
 
-    /// <summary>Minimal fake <see cref="TokenCredential"/> — this file's own copy per KeyVaultCertBootstrapProbeTests.cs's convention.</summary>
+    /// <summary>Minimal fake <see cref="TokenCredential"/> — this file's own copy (the retired KeyVaultCertBootstrapProbeTests.cs's convention).</summary>
     private sealed class FakeCredential : TokenCredential
     {
         public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)

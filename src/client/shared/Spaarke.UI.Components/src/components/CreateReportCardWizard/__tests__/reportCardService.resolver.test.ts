@@ -24,6 +24,8 @@
  * @see CreateInvoiceWizard/__tests__/invoiceService.resolver.test.ts (sibling reference shape)
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch } from '../../../__mocks__/bffChildWriteFake';
 import type { IDataService } from '../../../types/serviceInterfaces';
 import { ReportCardService, _resetReportCardServiceNavPropCacheForTests } from '../reportCardService';
 import { buildEmptyReportCardForm } from '../formTypes';
@@ -241,7 +243,11 @@ describe('ReportCardService.createReportCard', () => {
   describe('manifest fields', () => {
     it('writes sprk_name (trimmed), sprk_narrative, and sprk_duedate', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       const form = makeForm({
         name: '  Q3 Compliance Review  ',
@@ -261,7 +267,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('omits sprk_narrative and sprk_duedate when not supplied', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       await service.createReportCard(makeForm({ name: 'Minimal Report Card' }), null);
 
@@ -272,7 +282,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('NEVER sets sprk_reportcardnumber client-side (autonumber/server-side per manifest)', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       await service.createReportCard(makeForm({ name: 'X' }), null);
 
@@ -284,7 +298,11 @@ describe('ReportCardService.createReportCard', () => {
   describe('assigned-resource lookups (8 fields, manifest §)', () => {
     it('binds all 8 assigned-resource lookups using the real (asymmetric) schema field names when supplied', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       await service.createReportCard(
         makeForm({
@@ -315,7 +333,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('omits all 8 resource-lookup binds when none are supplied (all optional)', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       await service.createReportCard(makeForm({ name: 'X' }), null);
 
@@ -345,7 +367,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('writes the entity-specific lookup AND all 5 resolver fields for a Matter host', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), MATTER_ASSOCIATION);
 
@@ -362,7 +388,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('populates only ONE entity-specific regarding lookup (mutual exclusion) — Project NOT bound for a Matter host', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       await service.createReportCard(makeForm({ name: 'X' }), MATTER_ASSOCIATION);
 
@@ -373,7 +403,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('writes NO resolver fields when no association is supplied', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), null);
 
@@ -386,7 +420,11 @@ describe('ReportCardService.createReportCard', () => {
 
     it('graceful degradation (NFR-06): missing catalog row for Project still links + falls back on name, never throws', async () => {
       const ds = makeDataService();
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), {
         entityType: 'sprk_project',
@@ -407,7 +445,11 @@ describe('ReportCardService.createReportCard', () => {
     it('never throws — returns status "error" with a message when createRecord rejects', async () => {
       const ds = makeDataService();
       (ds.createRecord as jest.Mock).mockRejectedValueOnce(new Error('Dataverse unavailable'));
-      const service = new ReportCardService(ds, stubAuthenticatedFetch(), 'https://bff.example');
+      const service = new ReportCardService(
+        ds,
+        bffChildWriteFetch(ds, stubAuthenticatedFetch()),
+        'https://bff.example'
+      );
 
       const result = await service.createReportCard(makeForm({ name: 'X' }), null);
 

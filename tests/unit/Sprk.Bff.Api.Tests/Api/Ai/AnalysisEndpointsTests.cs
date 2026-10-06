@@ -59,27 +59,8 @@ public class AnalysisEndpointsTests
         requiredAttr.Should().BeEmpty("ActionId is optional when PlaybookId is provided");
     }
 
-    [Fact]
-    public void AnalysisSaveRequest_FileNameIsRequired()
-    {
-        // Assert
-        var attr = typeof(AnalysisSaveRequest)
-            .GetProperty(nameof(AnalysisSaveRequest.FileName))!
-            .GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.RequiredAttribute), false);
-
-        attr.Should().NotBeEmpty();
-    }
-
-    [Fact]
-    public void AnalysisSaveRequest_FileNameHasMaxLength()
-    {
-        // Assert
-        var attr = typeof(AnalysisSaveRequest)
-            .GetProperty(nameof(AnalysisSaveRequest.FileName))!
-            .GetCustomAttributes(typeof(System.ComponentModel.DataAnnotations.MaxLengthAttribute), false);
-
-        attr.Should().NotBeEmpty();
-    }
+    // unified-access-control-r2 task 162: the AnalysisSaveRequest attribute tests were DELETED with the model
+    // (POST /api/ai/analysis/{analysisId}/save had no caller and is not published — owner round 10 item 1).
 
     // ai-advanced-capabilities-analysis-hub-r1 task 062 (spec §13.5 / FR-20, 2026-07-29) —
     // AnalysisContinueRequest_MessageIsRequired was DELETED here: AnalysisContinueRequest.cs
@@ -255,40 +236,6 @@ public class AnalysisEndpointsTests
 
     #endregion
 
-    #region ExportResult Tests
-
-    [Fact]
-    public void ExportResult_CanIndicateSuccess()
-    {
-        // Arrange & Act
-        var result = new ExportResult
-        {
-            ExportType = ExportFormat.Email,
-            Success = true,
-            Details = new ExportDetails { Status = "Created", EmailActivityId = Guid.NewGuid() }
-        };
-
-        // Assert
-        result.Success.Should().BeTrue();
-        result.ExportType.Should().Be(ExportFormat.Email);
-        result.Details.Should().NotBeNull();
-    }
-
-    [Fact]
-    public void ExportResult_CanIndicateFailure()
-    {
-        // Arrange & Act
-        var result = new ExportResult
-        {
-            ExportType = ExportFormat.Teams,
-            Success = false,
-            Error = "Teams integration not configured"
-        };
-
-        // Assert
-        result.Success.Should().BeFalse();
-        result.Error.Should().Be("Teams integration not configured");
-    }
-
-    #endregion
+    // unified-access-control-r2 task 162: the ExportResult tests were DELETED with the model (POST
+    // /api/ai/analysis/{analysisId}/export had no caller and is not published — owner round 10 item 1).
 }

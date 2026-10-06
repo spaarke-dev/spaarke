@@ -92,7 +92,7 @@ public sealed class ComposeServiceLoadParaIdTests
         _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance,
         ComposeServiceCollaborators.Resolver(_dataverse.Object),
-        ComposeServiceCollaborators.Probe().Object);
+        ComposeServiceCollaborators.Probe().Object, ownership: new Sprk.Bff.Api.Tests.TestInfrastructure.RecordOwnershipResolverDouble());
 
     // 3 body paragraphs: one with an existing id, one without, one inside a table cell.
     private static byte[] FormattedDocx()

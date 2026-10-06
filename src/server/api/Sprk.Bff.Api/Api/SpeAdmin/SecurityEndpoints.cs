@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -19,7 +20,10 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 ///     Provides a quantified measure of the tenant's overall security posture.
 ///
 /// Authorization is inherited from the /api/spe route group (SpeAdminAuthorizationFilter +
-/// RequireAuthorization()), so no per-endpoint filter is added here.
+/// RequireAuthorization() + SpeAdminTenantScopeFilter), so no per-endpoint filter is added here. The group is marked
+/// platform-operator-only (<c>RequireSpeAdminPlatformOperator</c>, task 165 round 35 item 4; owner round 49 item 1): the data is
+/// tenant-wide, so only a root-unit admin of a Spaarke-operated environment (the SPE admin operator-environment deployment
+/// setting on <c>SpeAdminOptions</c>) reads it.
 /// </summary>
 /// <remarks>
 /// ADR-001: Minimal API — MapGroup() on the parent /api/spe group, static handler methods.
@@ -82,7 +86,14 @@ public static class SecurityEndpoints
     /// <returns>The route group for chaining.</returns>
     public static RouteGroupBuilder MapSecurityEndpoints(this RouteGroupBuilder group)
     {
+        // Platform operators only (unified-access-control-r2 task 165, owner round 35 item 4). Both routes call the Graph
+        // Security API app-only through the config's owning app, and Graph answers for the WHOLE Microsoft 365 tenant —
+        // in a shared Model 1 tenant every customer's alerts and score. The configId cannot narrow that, so the group
+        // filter refuses every caller unless this deployment is a Spaarke-operated environment AND the caller's own business
+        // unit is the root (owner round 49 item 1: under Model 1 every customer environment has a root admin), before anything
+        // else is read.
         var security = group.MapGroup("/security")
+            .RequireSpeAdminPlatformOperator()
             .WithTags("SpeAdmin.Security");
 
         // GET /api/spe/security/alerts?configId={id}

@@ -1,6 +1,8 @@
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -438,6 +440,45 @@ public class WorkforceEmailNoHijackTests
 
         result.DenyCode.Should().Be(ContactBindingDecision.DenyContactInactive);
         _store.Writes.Should().BeEmpty("deactivating a contact is how an operator removes a person");
+
+        // Task 137 (C5) verification of this rule: with an ACTIVE contact (B) sharing the caller's email, the oid match
+        // on the inactive contact ends the decision — the email path is never even read, so B can never be bound.
+        _store.Reads.Should().NotContain("email", "an oid bound to an inactive contact never falls through to the email path");
+        _store.Contacts[ContactB].Oid.Should().BeNull();
+        result.Principal.Should().BeNull("a deny carries no partial principal");
+    }
+
+    /// <summary>
+    /// Task 137 criterion 1 on the WORKFORCE plane, at the HTTP boundary: the real resolver's inactive-contact deny,
+    /// carried through the real <see cref="WorkforcePrincipalStrategy"/>, is a 403 ProblemDetails naming
+    /// <c>sdap.access.deny.contact_inactive</c> — not the generic <c>principal_not_resolved</c> — and the evaluator
+    /// is never asked to compose anything for the caller.
+    /// </summary>
+    [Fact]
+    public async Task AnOidOnlyOnAnInactiveContact_ThroughTheWorkforceStrategy_Is403WithTheContactInactiveCode()
+    {
+        _store.AddContact(ContactA, oid: Caller.ToString("D"), plane: IdentityPlaneMarker.Workforce, stateCode: 1);
+
+        // Strict + no setups: a denied caller must never reach the evaluator.
+        var evaluator = new Mock<IAccessibleRecordSetService>(MockBehavior.Strict);
+        var strategy = new WorkforcePrincipalStrategy(
+            Resolver(Binder(_store, _log)), evaluator.Object, NullLogger<WorkforcePrincipalStrategy>.Instance);
+        var http = new DefaultHttpContext
+        {
+            User = WorkforceUser(Caller, CustomerTenant, email: Email),
+            RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider(),
+        };
+        http.Response.Body = new MemoryStream();
+
+        var result = await strategy.ResolveAsync(http, CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        await result.Failure!.ExecuteAsync(http);
+        http.Response.StatusCode.Should().Be(StatusCodes.Status403Forbidden);
+        http.Response.Body.Position = 0;
+        var body = await new StreamReader(http.Response.Body).ReadToEndAsync();
+        body.Should().Contain("sdap.access.deny.contact_inactive");
+        body.Should().NotContain(WorkforcePrincipalResolver.DenyPrincipalNotResolved);
     }
 
     // ── The resolver carries the decision's own code ─────────────────────────────────────────────────

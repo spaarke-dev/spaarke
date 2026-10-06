@@ -54,7 +54,7 @@
  * @see projects/spaarkeai-word-add-in-r1/notes/088-save-tab-after-save.md
  */
 
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 
 /**
  * The Spaarke model-driven app's unique name, from the `SPAARKE_APP_NAME` build setting (task 088). An unset

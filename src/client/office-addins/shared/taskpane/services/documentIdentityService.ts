@@ -1,6 +1,6 @@
 import { apiClient, ApiClientError } from '@shared/services';
 import type { IHostAdapter } from '@shared/adapters/IHostAdapter';
-import { cleanGuid } from '../utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 import { ACCESS_SYSTEM_FAILURE_REASON_CODE } from '../utils/errorMessages';
 
 /**

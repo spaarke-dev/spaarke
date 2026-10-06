@@ -126,6 +126,7 @@ using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.AppService;
 using Azure.ResourceManager.Authorization;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
@@ -160,15 +161,21 @@ public sealed class T5SlotMiKvRbacTrapProbe : ITrapProbe
     internal const string DefaultStagingSlotName = "staging";
 
     private readonly ArmClient _armClient;
+    private readonly TimeSpan _timeout;
     private readonly ILogger<T5SlotMiKvRbacTrapProbe> _logger;
 
     public T5SlotMiKvRbacTrapProbe(
         ArmClient armClient,
+        IOptions<H13AcceptanceOptions> options,
         ILogger<T5SlotMiKvRbacTrapProbe> logger)
     {
         ArgumentNullException.ThrowIfNull(armClient);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         _armClient = armClient;
+        // H13AcceptanceOptions.TrapVerifierTimeout bounds the whole probe (both ARM phases) — task 238 applied it
+        // to the ARM probes, which previously ran unbounded beyond the SDK's own retry policy.
+        _timeout = options.Value.TrapVerifierTimeout;
         _logger = logger;
     }
 
@@ -231,19 +238,27 @@ public sealed class T5SlotMiKvRbacTrapProbe : ITrapProbe
         var siteResourceId = WebSiteResource.CreateResourceIdentifier(
             request.SubscriptionId, request.ResourceGroupName, request.AppServiceName);
         var siteResource = _armClient.GetWebSiteResource(siteResourceId);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_timeout);
 
         try
         {
-            var prodResponse = await siteResource.GetAsync(cancellationToken).ConfigureAwait(false);
+            var prodResponse = await siteResource.GetAsync(timeout.Token).ConfigureAwait(false);
             prodPrincipalId = NormalizePrincipalId(prodResponse.Value.Data.Identity?.PrincipalId);
 
             var stagingResponse = await siteResource
-                .GetWebSiteSlotAsync(stagingSlotName, cancellationToken).ConfigureAwait(false);
+                .GetWebSiteSlotAsync(stagingSlotName, timeout.Token).ConfigureAwait(false);
             stagingPrincipalId = NormalizePrincipalId(stagingResponse.Value.Data.Identity?.PrincipalId);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw; // Caller-driven cancellation propagates.
         }
         catch (OperationCanceledException)
         {
-            throw; // Caller-driven cancellation propagates.
+            return new TrapVerificationOutcome.InfraFault(Kind,
+                $"T5 verdict deferred: reading App Service '{request.AppServiceName}' slot identities exceeded the " +
+                $"trap probe timeout {_timeout}. Re-run H13 once ARM responds.");
         }
         catch (RequestFailedException ex)
         {
@@ -295,7 +310,7 @@ public sealed class T5SlotMiKvRbacTrapProbe : ITrapProbe
         try
         {
             var collection = _armClient.GetRoleAssignments(kvScope);
-            await foreach (var assignment in collection.GetAllAsync(cancellationToken: cancellationToken)
+            await foreach (var assignment in collection.GetAllAsync(cancellationToken: timeout.Token)
                 .ConfigureAwait(false))
             {
                 var data = assignment.Data;
@@ -310,9 +325,15 @@ public sealed class T5SlotMiKvRbacTrapProbe : ITrapProbe
                     PrincipalId: principalId));
             }
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return new TrapVerificationOutcome.InfraFault(Kind,
+                $"T5 verdict deferred: listing role assignments at KV scope '{kvScope}' exceeded the trap probe " +
+                $"timeout {_timeout}. Re-run H13 once ARM responds.");
         }
         catch (RequestFailedException ex)
         {

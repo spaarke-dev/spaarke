@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Documents;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -105,6 +106,8 @@ public static class DocumentVersionEndpoints
             HttpContext ctx,
             [FromServices] IDocumentDataverseService dataverseService,
             [FromServices] ISpeFileOperations speFileStore,
+            [FromServices] IGenericEntityService entityService,
+            [FromServices] ILogger<RelocatedVersionHistory> historyLogger,
             CancellationToken ct) =>
         {
             var (driveId, itemId) = await ResolveSpePointerAsync(documentId, dataverseService, ct);
@@ -115,9 +118,16 @@ public static class DocumentVersionEndpoints
                     () => speFileStore.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct),
                     "obo.versions.list");
 
-                return versions == null
-                    ? TypedResults.NotFound()
-                    : TypedResults.Ok(versions);
+                if (versions == null)
+                {
+                    return TypedResults.NotFound();
+                }
+
+                // unified-access-control-r2 task 166, owner round 45 item 1: a version a relocation REPLAYED into a moved
+                // file reports its ORIGINAL author and date (Graph cannot set them), so the history a user sees is
+                // unchanged. Presentation only — the caller was authorized for the document above.
+                return TypedResults.Ok(await RelocatedVersionHistory.WithOriginalAuthorshipAsync(
+                    entityService, Guid.Parse(documentId), itemId, versions, historyLogger, ct));
             }
             catch (UnauthorizedAccessException)
             {

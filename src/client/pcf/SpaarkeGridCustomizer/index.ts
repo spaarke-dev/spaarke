@@ -1,108 +1,65 @@
 /**
- * SpaarkeGridCustomizer - General-purpose Power Apps Grid Control Customizer
+ * SpaarkeGridCustomizer - General-purpose Power Apps grid control customizer
  *
- * Provides custom cell rendering capabilities for Power Apps Grid Control.
- * Extensible architecture allows entity-specific customizations to be registered.
+ * Set as a grid's "Customizer control" (`GridCustomizerControlFullName` =
+ * `sprk_Spaarke.Controls.SpaarkeGridCustomizer`). The grid instantiates it with an `EventName`;
+ * `init` answers by firing that event with the customizer (Microsoft Learn, "Customize the editable
+ * grid control"). The overrides are built in customizers/GridCustomizer.ts:
+ *  - Filing-column lock (unified-access-control-r2 task 168; owner round 25 item 8, widened by owner
+ *    round 38): the regarding filing columns (the four core-ancestor roots, the ADR-024 pair and the
+ *    non-root sprk_regarding* lookups, from config/regarding-filing-columns.json) are not editable
+ *    (editor cancelled, cell shown read-only). Set on the sprk_event and sprk_analysis home grids by
+ *    scripts/Set-SpaarkeGridCustomizerOnChildGrids.ps1.
+ *  - Regarding links: regarding name / id cells link to the parent record when the row names it.
  *
  * ADR Compliance:
+ * - ADR-006: a PCF (no web-resource grid handler)
  * - ADR-021: Fluent UI v9 with dark mode support
  * - ADR-022: React 16 APIs (platform-provided React)
  *
- * @version 1.0.0
+ * @version 1.1.1
  */
 
 import * as React from 'react';
-import { PAOneGridCustomizer, CellRendererOverrides, GetRendererParams } from './types/PAGridCustomizer';
-import { RegardingLinkRenderer } from './customizers/RegardingLinkRenderer';
+import { IInputs, IOutputs } from './generated/ManifestTypes';
+import { CUSTOMIZER_VERSION, createGridCustomizer } from './customizers/GridCustomizer';
 
-const CUSTOMIZER_VERSION = '1.0.0';
-
-/**
- * Registry of cell renderers by column logical name or pattern
- * Extensible: add new renderers here for additional customizations
- */
-const cellRendererRegistry: Record<string, React.FC<GetRendererParams>> = {
-  // Regarding Record columns - renders clickable links to parent records
-  sprk_regardingrecordname: RegardingLinkRenderer,
-  sprk_regardingrecordid: RegardingLinkRenderer,
-  // Add more column-specific renderers here as needed
-};
-
-/**
- * Pattern-based renderer lookup for columns matching naming conventions
- */
-function getRendererForColumn(columnName: string): React.FC<GetRendererParams> | null {
-  // Direct match first
-  const lowerName = columnName.toLowerCase();
-  if (cellRendererRegistry[lowerName]) {
-    return cellRendererRegistry[lowerName];
-  }
-
-  // Pattern matching for regarding-related columns
-  if (lowerName.includes('regarding') && (lowerName.includes('name') || lowerName.includes('id'))) {
-    return RegardingLinkRenderer;
-  }
-
-  return null;
+interface FactoryWithFireEvent {
+  fireEvent?: (eventName: string, payload: unknown) => void;
 }
 
 /**
- * Creates CellRendererOverrides based on registered renderers
+ * SpaarkeGridCustomizer - the customizer control the Power Apps grid instantiates.
  */
-function createCellRendererOverrides(): CellRendererOverrides {
-  return {
-    // Text columns - check for registered custom renderers
-    ['Text']: (props: GetRendererParams) => {
-      const columnName = props.columnInfo?.name || '';
-      const CustomRenderer = getRendererForColumn(columnName);
-
-      if (CustomRenderer) {
-        return React.createElement(CustomRenderer, props);
-      }
-
-      // Return null to use default renderer
-      return null;
-    },
-    // Lookup columns - for regarding lookups
-    ['Lookup']: (props: GetRendererParams) => {
-      const columnName = props.columnInfo?.name || '';
-      const CustomRenderer = getRendererForColumn(columnName);
-
-      if (CustomRenderer) {
-        return React.createElement(CustomRenderer, props);
-      }
-
-      return null;
-    },
-  };
-}
-
-/**
- * SpaarkeGridCustomizer - PAOneGridCustomizer implementation
- *
- * This is the main entry point that Power Apps Grid Control calls
- * to get custom cell renderers.
- */
-export class SpaarkeGridCustomizer implements PAOneGridCustomizer {
-  /**
-   * Returns the cell renderer overrides for the grid
-   */
-  public getRendererOverrides(): CellRendererOverrides {
-    if (typeof console !== 'undefined') {
-      console.log(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] Initializing cell renderer overrides`);
+export class SpaarkeGridCustomizer implements ComponentFramework.ReactControl<IInputs, IOutputs> {
+  public init(
+    context: ComponentFramework.Context<IInputs>,
+    _notifyOutputChanged: () => void,
+    _state: ComponentFramework.Dictionary
+  ): void {
+    const eventName = context.parameters.EventName?.raw;
+    if (!eventName) {
+      console.warn(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] no EventName: not running as a grid customizer`);
+      return;
     }
-    return createCellRendererOverrides();
+    const factory = (context as unknown as { factory?: FactoryWithFireEvent }).factory;
+    if (!factory || typeof factory.fireEvent !== 'function') {
+      console.error(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] context.factory.fireEvent is unavailable`);
+      return;
+    }
+    factory.fireEvent(eventName, createGridCustomizer());
+    console.log(`[SpaarkeGridCustomizer v${CUSTOMIZER_VERSION}] customizer registered (filing columns not editable)`);
   }
 
-  /**
-   * Returns the cell editor overrides (not implemented yet)
-   * Can be extended for inline editing customization
-   */
-  public getEditorOverrides(): null {
-    return null;
+  public updateView(_context: ComponentFramework.Context<IInputs>): React.ReactElement {
+    return React.createElement(React.Fragment);
+  }
+
+  public getOutputs(): IOutputs {
+    return {};
+  }
+
+  public destroy(): void {
+    // Nothing to release.
   }
 }
-
-// Export the customizer class as the default export
-// Power Apps Grid Control expects this pattern
-export default SpaarkeGridCustomizer;

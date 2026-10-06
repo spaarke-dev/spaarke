@@ -107,6 +107,13 @@ public static class AnalysisServicesModule
             configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
         services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
+        // unified-access-control-r2 task 166 f1-v1 (owner round 37 item 1) — the PublicContracts facade through which
+        // DocumentContainerRelocator (CRUD code, ADR-013) re-indexes a MOVED file and removes the old item's chunks.
+        // TRULY UNCONDITIONAL like the enqueuer it wraps: the relocator serves the unconditionally mapped
+        // POST /api/v1/documents/{id}/file (bff-extensions.md §F.1); with AI off NullRagService settles the delete step.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IRelocatedFileIndexing,
+                           Sprk.Bff.Api.Services.Ai.PublicContracts.RelocatedFileIndexing>();
+
         // FR-P1-03 (ai-architecture-redesign-r1 task 022) — Event-path BOUNDS infrastructure,
         // TRULY UNCONDITIONAL. These three registrations have NO AI dependencies:
         //  - EventRulesOptions: platform-setting bounds (daily cap, M4 threshold, opt-out TTL).
@@ -321,8 +328,8 @@ public static class AnalysisServicesModule
         // is BINDING per ADR-014 + NFR-16.
         //
         // §F.1 asymmetric-registration audit: UNCONDITIONAL registration. The consumers
-        // are (a) GET /api/workspace/state endpoint (task 052, unconditional mapping in
-        // R6 Pillar 6a) and (b) SprkChatAgentFactory per-turn snapshot (task 053). The
+        // are SprkChatAgentFactory's per-turn snapshot (task 053) and AssistantSuggestionService
+        // (GET /api/workspace/state, the third, was deleted by unified-access-control-r2 task 166). The
         // service has ZERO AI-internal constructor deps (cache + Cosmos + config + logger
         // only), so the asymmetric-registration anti-pattern does NOT apply — registration
         // is symmetric with endpoint mapping (both unconditional). No Null peer needed.
@@ -817,10 +824,10 @@ public static class AnalysisServicesModule
         // cluster residual — 2026-06-01). Phase 1c re-triage surfaced ChatWordExportEndpoints.ExportToWordAsync
         // injects the concrete DocxExportService unconditionally → metadata-gen abort when Analysis:Enabled=false.
         // See AddUnconditionalChatAndNotificationServices below.
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.DocxExportService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.PdfExportService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.IExportService, Sprk.Bff.Api.Services.Ai.Export.EmailExportService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Export.ExportServiceRegistry>();
+        // unified-access-control-r2 task 162 (owner round 10 item 1): the IExportService registrations (Docx, Pdf,
+        // Email) and ExportServiceRegistry were DELETED with their only consumer, POST /api/ai/analysis/{id}/export.
+        // DocxExportService stays registered as its concrete type (AddUnconditionalChatAndNotificationServices) for
+        // ChatWordExportEndpoints.
         // Extracted focused services from AnalysisOrchestrationService (ADR-010: constructor ≤10 params)
         services.AddScoped<AnalysisDocumentLoader>();
         services.AddScoped<AnalysisRagProcessor>();

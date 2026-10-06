@@ -4,10 +4,9 @@
 // L2 CONTROL-PLANE H2a Bicep infra-deploy handler (task 044, wave C4).
 //
 // PURPOSE:
-//   Provisions per-customer Azure resources (Cosmos + OpenAI + AI Search +
-//   Doc Intel + App Insights + optional SignalR) by wrapping the hardened
-//   scripts/Provision-Customer.ps1 (post-Phase B). Redis is EXPLICITLY NOT
-//   provisioned per Q-E FR-12 (per-env via scripts/Deploy-RedisCache.ps1).
+//   Provisions the per-customer Azure stamp by deploying the CI-precompiled
+//   customer.bicep ARM template (task 123 — Azure.ResourceManager, no shell).
+//   Redis is per-customer in both models since D-12 (2026-09-28).
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-04 (H2a):
@@ -19,18 +18,15 @@
 //       distinct rejection code (trap-T1-keyvault-reference-identity-mismatch)
 //       otherwise.
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-34 (upgrade
-//       mode): if run parameter `provisionedOn` is non-null, run `az deployment
-//       group what-if` first; default REJECT on drift + write drift report at
+//       mode): if run parameter `provisionedOn` is non-null, run an ARM
+//       what-if first; default REJECT on drift + write drift report at
 //       runNotes/drift-{customerId}-{timestamp}.md.
-//   - projects/customer-provisioning-orchestration-r1/spec.md §MUST rules:
-//       Redis MUST NOT be provisioned per-customer; H2a asserts template
-//       structural absence of a Redis module before deploy.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1a Model 1
 //       vs Model 2: TenancyModel drives stack selection.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4C rollback:
 //       Bicep partial-fail is Quarantine-required (orphaned resources).
 //   - ADR-020: openai.bicep model deployments MUST be pinned to specific
-//       versions; H2a asserts template structural absence of `latest`.
+//       versions; H2a checks the resolved template (ArmTemplateInspector).
 //   - ADR-027: subscription-per-customer isolation; H2a deploys to the target
 //       subscription only.
 //   - ADR-032: SignalR feature-gated via the `SignalREnabled` parameter — the
@@ -42,14 +38,13 @@
 //   ┌─────────────────────────────────────┬───────────────────────────┐
 //   │ Failure mode                        │ §4C class                 │
 //   ├─────────────────────────────────────┼───────────────────────────┤
-//   │ Missing tenantId / subscriptionId / │ Resumable                 │
-//   │ bicepVer (§4D I1 + structural)      │ (external precondition —  │
+//   │ Missing tenantId / subscriptionId   │ Resumable                 │
+//   │ (§4D I1 + structural)               │ (external precondition —  │
 //   │                                     │ operator fixes params +   │
 //   │                                     │ resumes)                  │
+//   │ ARM template unresolvable / corrupt │ Resumable (nothing        │
+//   │ (task 245b)                         │ deployed yet)             │
 //   │ Run not found in Cosmos partition   │ Resumable                 │
-//   │ Template contains Redis (spec MUST) │ QuarantineRequired        │
-//   │                                     │ (template drift — must    │
-//   │                                     │ not silently proceed)     │
 //   │ Model deployment unpinned (ADR-020) │ QuarantineRequired        │
 //   │ Upgrade-mode drift detected         │ QuarantineRequired        │
 //   │ (§14A.5 default Option B)           │ (accept-and-apply would   │
@@ -71,13 +66,15 @@
 //   Level 1 (Service Bus MessageId dedup): the H0 chain / future reconciler
 //           computes deterministic MessageId per (HandlerId, RunId, CustomerId,
 //           paramHash); SB duplicate-detection collapses re-enqueues.
-//   Level 2 (Redis IdempotencyService): NOT YET IMPLEMENTED in L2 (design.md
-//           §4.1 preamble; parity with H0 / H0.5).
+//   Level 2 (Redis dispatch idempotency): applied by the dispatcher before the
+//           handler runs (DispatchModule / DispatchIdempotencyService, task 105),
+//           not inside this handler.
 //   Level 3 (handler body durable dedup): this handler scans
 //           ProvisioningRun.CompletedPhases for (Phase=="H2a",
 //           IdempotencyKey==infra-{customerId}-{bicepVer}). Match ⇒ Success
-//           no-op. bicepVer is the git SHA of infrastructure/bicep/ (POML
-//           constraint) — NOT an attempt counter.
+//           no-op. bicepVer is the content version of the ARM template this
+//           invocation resolved (task 245b — ArtifactVersion of the downloaded
+//           bytes; same template ⇒ same key) — NOT an attempt counter.
 //
 // DOWNSTREAM ENQUEUE (Wave C4 note):
 //   H2a does NOT enqueue a specific successor (unlike H0 which explicitly
@@ -93,6 +90,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
@@ -110,14 +108,19 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the bicep-repo git SHA (feeds idempotency key).</summary>
-    public const string BicepVersionParameterKey = "bicepVer";
-
-    /// <summary>Non-secret parameter key carrying the target environment name (dev/staging/prod). Defaults to <c>prod</c> when absent.</summary>
-    public const string EnvironmentNameParameterKey = "environmentName";
-
     /// <summary>Non-secret parameter key carrying the target Azure region. Defaults to <c>westus2</c> when absent.</summary>
     public const string LocationParameterKey = "location";
+
+    /// <summary>
+    /// ISH-08 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+    /// 2026-08-27): non-secret parameter key carrying the Azure OpenAI region
+    /// override. When populated, this value overrides customer.bicep's
+    /// <c>openAiLocation</c> parameter default (currently <c>westus3</c>).
+    /// When absent, the Bicep parameter default wins — bit-identical to
+    /// pre-ISH-08 behavior. The intake schema's <c>openAiRegion</c> field
+    /// flows into this key via the skill Step 2 body-construction map.
+    /// </summary>
+    public const string OpenAiLocationParameterKey = "openAiLocation";
 
     /// <summary>Non-secret parameter key carrying the SignalR feature flag (ADR-032). Defaults to <c>false</c> when absent.</summary>
     public const string SignalREnabledParameterKey = "signalrEnabled";
@@ -132,9 +135,6 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// </summary>
     public const string ProvisionedOnParameterKey = "provisionedOn";
 
-    /// <summary>Default target environment when the parameter is absent.</summary>
-    private const string DefaultEnvironmentName = "prod";
-
     /// <summary>Default target Azure region when the parameter is absent (parity with <c>customer.bicep</c>).</summary>
     private const string DefaultLocation = "westus2";
 
@@ -142,7 +142,9 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     private readonly IBicepDeployRunner _runner;
     private readonly IArmKeyVaultRefProbe _armProbe;
     private readonly IUpgradeDriftDetector _driftDetector;
-    private readonly IBicepTemplateInspector _templateInspector;
+    private readonly ArmTemplateInspector _templateInspector;
+    private readonly IResourceNameAvailabilityProbe _nameAvailabilityProbe;
+    private readonly IOpenAiDeploymentSetRecomposer _openaiRecomposer;
     private readonly BicepInfraDeployOptions _options;
     private readonly ILogger<H2aBicepInfraDeployHandler> _logger;
 
@@ -158,7 +160,9 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         IBicepDeployRunner runner,
         IArmKeyVaultRefProbe armProbe,
         IUpgradeDriftDetector driftDetector,
-        IBicepTemplateInspector templateInspector,
+        ArmTemplateInspector templateInspector,
+        IResourceNameAvailabilityProbe nameAvailabilityProbe,
+        IOpenAiDeploymentSetRecomposer openaiRecomposer,
         IOptions<BicepInfraDeployOptions> options,
         ILogger<H2aBicepInfraDeployHandler> logger)
     {
@@ -167,6 +171,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(armProbe);
         ArgumentNullException.ThrowIfNull(driftDetector);
         ArgumentNullException.ThrowIfNull(templateInspector);
+        ArgumentNullException.ThrowIfNull(nameAvailabilityProbe);
+        ArgumentNullException.ThrowIfNull(openaiRecomposer);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -175,6 +181,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         _armProbe = armProbe;
         _driftDetector = driftDetector;
         _templateInspector = templateInspector;
+        _nameAvailabilityProbe = nameAvailabilityProbe;
+        _openaiRecomposer = openaiRecomposer;
         _options = options.Value;
         _logger = logger;
     }
@@ -242,85 +250,179 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                 BicepDeployRejectionCodes.MissingSubscriptionId, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        // (4) Bicep-version guard — feeds the idempotency key. Absence means
-        // level-3 dedup would collide across upgrades → refuse.
-        if (!TryGetNonEmpty(parameters, BicepVersionParameterKey, out var bicepVer))
+        // (4) EXEC-04 (pre-dispatch audit 2026-08-27, Wave 2 remediation) +
+        //     Task 223 (D-12, 2026-09-29): parse-or-reject at H2a's edge — null /
+        //     whitespace / wrong-case / unknown all fail here with the same
+        //     rejection code, before any template resolution or Azure API call.
+        //     A silent fallback to a default template is a tenancy-invariant
+        //     violation (§4D I1 no-silent-default).
+        if (!Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.TryParse(run.TenancyModel, out var tenancyModel))
         {
             var diagnostic =
-                "Run parameter 'bicepVer' is required by H2a (idempotency key: infra-{customerId}-{bicepVer}). " +
-                "bicepVer MUST be the git SHA of infrastructure/bicep/ per POML constraint / design.md §4.1 preamble.";
+                $"ProvisioningRun.TenancyModel '{run.TenancyModel ?? "(null)"}' is not a recognized TenancyModel " +
+                $"for customerId '{envelope.CustomerId}'. H2a MUST NOT silently default to a template — upstream " +
+                "(intake schema + L2 CreateRun endpoint) MUST populate TenancyModel with one of: " +
+                $"{Sprk.Provisioning.ControlPlane.Core.Models.TenancyModelParser.FormatExpectedValues()} before H2a dispatches.";
             return await FailAsync(run, etag, FailureClass.Resumable,
-                BicepDeployRejectionCodes.MissingBicepVersion, diagnostic, cancellationToken).ConfigureAwait(false);
+                BicepDeployRejectionCodes.MissingTenancyModel, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
-        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, bicepVer);
-
-        // (5) Level-3 idempotency: durable no-op on duplicate.
-        if (run.CompletedPhases.Any(cp =>
-                string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal)
-                && string.Equals(cp.IdempotencyKey, idempotencyKey, StringComparison.Ordinal)))
+        // (4.4) Task 245b: H2a deploys the stamp ONCE per run. A message for an H2a that already completed
+        //       in this run is a duplicate delivery (ADR-004 at-least-once) — a no-op, with no template
+        //       resolution at all: re-resolving the mutable "latest" pointer could fail on a blob outage (and
+        //       fail a run that has already moved on) or name a newer template and redeploy mid-run, after
+        //       downstream handlers consumed H2a's outputs and without the upgrade what-if. A newer template
+        //       reaches an existing stamp through an upgrade run (provisionedOn set → drift check first).
+        var completedH2a = run.CompletedPhases.LastOrDefault(cp =>
+            string.Equals(cp.Phase, HandlerIdentifier, StringComparison.Ordinal));
+        if (completedH2a is not null)
         {
             _logger.LogInformation(
-                "H2a idempotent no-op: runId={RunId} idempotencyKey={IdempotencyKey}",
-                envelope.RunId, idempotencyKey);
-            return new HandlerResult.Success(idempotencyKey);
+                "H2a idempotent no-op (already completed in this run): runId={RunId} idempotencyKey={IdempotencyKey}",
+                envelope.RunId, completedH2a.IdempotencyKey);
+            return new HandlerResult.Success(completedH2a.IdempotencyKey);
         }
 
+        // (4.5) Task 245b: resolve the ARM template ONCE. Its content version is the idempotency
+        //       key's bicepVer (formerly a run parameter nothing wrote — every real run stopped here),
+        //       and the inspector, the upgrade what-if and the deploy all use these same bytes.
+        ResolvedArmTemplate template;
+        try
+        {
+            template = await _runner.ResolveTemplateAsync(tenancyModel, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "H2a ARM template resolution failed: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            var diagnostic =
+                $"Could not resolve the ARM template for tenancy model '{tenancyModel}': {ex.GetType().Name}: {ex.Message}. " +
+                "H2a deploys the CI-published artifact named by BicepInfraDeployOptions:ArmManifestBlobName in " +
+                "BicepInfraDeployOptions:ProvisioningArtifactsContainerUri (publish-provisioning-arm-artifacts.yml). " +
+                "Nothing has been deployed; fix the artifact or the L2 identity's blob read access, then resume.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                BicepDeployRejectionCodes.ArmTemplateUnavailable, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        // (5) The key names the template content deployed (a duplicate delivery returned at 4.4).
+        var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, template.Version);
+
         // (6) Assemble the deploy request from run parameters + tenancy model.
-        var environmentName = TryGetNonEmpty(parameters, EnvironmentNameParameterKey, out var env)
-            ? env
-            : DefaultEnvironmentName;
+        var environmentName = IntakeParameterCatalog.ResolveEnvironmentName(parameters);
         var location = TryGetNonEmpty(parameters, LocationParameterKey, out var loc)
             ? loc
             : DefaultLocation;
         var signalrEnabled = TryGetNonEmpty(parameters, SignalREnabledParameterKey, out var signalRaw)
             && bool.TryParse(signalRaw, out var signalParsed)
             && signalParsed;
+        // ISH-08: optional OpenAI region override (see OpenAiLocationParameterKey doc).
+        // Absence => null => Bicep parameter default (westus3) wins.
+        var openAiLocation = TryGetNonEmpty(parameters, OpenAiLocationParameterKey, out var openAiLoc)
+            ? openAiLoc
+            : null;
 
         var request = new BicepDeployRequest(
             CustomerId: envelope.CustomerId,
             TenantId: tenantId,
             SubscriptionId: subscriptionId,
-            TenancyModel: string.IsNullOrWhiteSpace(run.TenancyModel) ? "Model2Dedicated" : run.TenancyModel,
-            BicepVersion: bicepVer,
+            // EXEC-04: guarded above (step 4) — TenancyModel is a recognized value here.
+            TenancyModel: run.TenancyModel,
+            Template: template,
             EnvironmentName: environmentName,
             Location: location,
-            SignalREnabled: signalrEnabled);
+            SignalREnabled: signalrEnabled,
+            OpenAiLocation: openAiLocation);
 
-        // (7) Structural pre-flight — Redis presence + model-version pin.
-        //     These are cheap file reads; fail fast before ARM traffic.
+        // (7) Structural pre-flight on the resolved template — model-version pin + Key Vault
+        //     reference identity. Pure JSON checks; fail fast before ARM traffic. Only Inspect is
+        //     guarded: a malformed template is Resumable; the Quarantine writes below are not re-labelled.
+        BicepTemplateInspectionResult inspection;
         try
         {
-            var inspection = await _templateInspector.InspectAsync(request, cancellationToken).ConfigureAwait(false);
-            if (inspection.ContainsRedisResource)
-            {
-                var diagnostic =
-                    $"Bicep template contains a Redis resource — violates spec MUST rule + Q-E FR-12 " +
-                    $"(Redis is per-environment via scripts/Deploy-RedisCache.ps1, NOT per-customer). " +
-                    $"Reference: {inspection.RedisReference}";
-                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                    BicepDeployRejectionCodes.RedisProvisioningForbidden, diagnostic, cancellationToken).ConfigureAwait(false);
-            }
-            if (inspection.HasUnpinnedModelDeployment)
-            {
-                var diagnostic =
-                    $"Bicep template contains an unpinned OpenAI model deployment — violates ADR-020 " +
-                    $"(pinned versions required: gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large 1). " +
-                    $"Reference: {inspection.UnpinnedModelReference}";
-                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                    BicepDeployRejectionCodes.ModelVersionNotPinned, diagnostic, cancellationToken).ConfigureAwait(false);
-            }
+            inspection = _templateInspector.Inspect(request);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "H2a template-inspector infrastructure fault: runId={RunId} customerId={CustomerId}",
+                "H2a template-inspector fault: runId={RunId} customerId={CustomerId}",
                 envelope.RunId, envelope.CustomerId);
             var diagnostic =
-                $"Template inspector infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                "Verify BicepInfraDeploy:BicepDirectory resolves to the infrastructure/bicep tree in the L2 publish output.";
+                $"Template inspector could not read ARM template '{template.ArmJsonBlobName}': " +
+                $"{ex.GetType().Name}: {ex.Message}. Re-publish the artifacts (publish-provisioning-arm-artifacts.yml) and resume.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BicepDeployRejectionCodes.BicepDeployFailed, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        {
+            if (inspection.HasUnpinnedModelDeployment)
+            {
+                var diagnostic =
+                    $"ARM template '{template.ArmJsonBlobName}' contains an unpinned OpenAI model deployment — " +
+                    "violates ADR-020 (every model deployment names a pinned version; see modules/openai.bicep). " +
+                    $"Reference: {inspection.UnpinnedModelReference}";
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    BicepDeployRejectionCodes.ModelVersionNotPinned, diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+            if (inspection.HasInvalidKvRefIdentity)
+            {
+                // HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+                var diagnostic =
+                    $"ARM template '{template.ArmJsonBlobName}' contains an invalid keyVaultReferenceIdentity assignment " +
+                    "(literal 'SystemAssigned') — violates ADR-028 + spec.md FR-33 T1 (Spaarke convention " +
+                    "is UAMI-scoped keyVaultReferenceIdentity; SystemAssigned combined with UAMI-only " +
+                    "identity silently breaks every @Microsoft.KeyVault(...) runtime resolution). " +
+                    $"Reference: {inspection.KvRefIdentityReference}. Deploying would leave the App " +
+                    "Service in a broken-but-Green state; QuarantineRequired.";
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    BicepDeployRejectionCodes.KvRefIdentityInvalid, diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // (7.5) HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10:
+        //       check globally-namespaced resource names for availability
+        //       BEFORE the ~20 min Bicep deploy tries to create them and
+        //       fails 90-180s in on a global collision (F10 verbatim: burned
+        //       16m35s on the SESSION 2 first deploy because a Service Bus
+        //       `-sb` suffix was already reserved globally). Runs AFTER the
+        //       inspector (per punchlist: "wire into H2aBicepInfraDeployHandler
+        //       after inspector but before runner") and BEFORE the upgrade-
+        //       drift branch since an upgrade run against existing resources
+        //       will NOT collide (the customer's own resources will report as
+        //       "unavailable — already owned by you", which the probe
+        //       correctly treats as a domain conflict; skip the check on
+        //       upgrade runs to avoid a false positive).
+        if (!TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out _))
+        {
+            try
+            {
+                var nameCheckRequest = new ResourceNameAvailabilityRequest(
+                    SubscriptionId: subscriptionId,
+                    Names: BuildGloballyNamespacedNameChecks(envelope.CustomerId, environmentName));
+                var nameResult = await _nameAvailabilityProbe
+                    .CheckAvailabilityAsync(nameCheckRequest, cancellationToken).ConfigureAwait(false);
+                if (nameResult is ResourceNameAvailabilityResult.Conflict conflict)
+                {
+                    var diagnostic =
+                        $"Globally-namespaced resource name collision: {conflict.Kind} name '{conflict.ConflictingName}' " +
+                        $"is unavailable ({conflict.Reason}). H2a fails fast per HANDLER-05 (F10 remediation) — " +
+                        "operator must rename the resource in the Bicep template (or wait for the current owner " +
+                        "to release the name) before re-running H2a. Sparing the 20 min deploy window a global-name " +
+                        "collision would otherwise burn.";
+                    return await FailAsync(run, etag, FailureClass.Resumable,
+                        BicepDeployRejectionCodes.ResourceNameTaken, diagnostic, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Infra fault (ARM SDK connection drop, etc.) — do NOT block
+                // the deploy on a probe-side outage; log + proceed. The Bicep
+                // deploy itself will surface real collisions if any exist.
+                _logger.LogWarning(ex,
+                    "H2a resource-name availability probe infra fault (proceeding): " +
+                    "runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+            }
         }
 
         // (8) Upgrade-mode branch: if `provisionedOn` is populated, run
@@ -353,9 +455,49 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                     envelope.RunId, envelope.CustomerId);
                 var diagnostic =
                     $"Upgrade drift detector infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
-                    "Verify az CLI is on PATH + the operator has 'Reader' RBAC on the target subscription.";
+                    "Verify the L2 identity has 'Reader' RBAC on the target subscription (ARM what-if).";
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BicepDeployRejectionCodes.UpgradeModeDrift, diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // (8.5) HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5:
+        //       OpenAI deployment-set auto-recompose. When configured to
+        //       AutoRecompose (opt-in), drop zero-TPM models from the deploy
+        //       set BEFORE the runner fires so a fresh-sub with only mini +
+        //       embedding TPM does not fail H2a on frontier-tier deploys.
+        //       Strict policy (default) skips the recomposer entirely,
+        //       matching pre-Wave-2 behavior. Any recomposer infra fault is
+        //       fail-safe — logged, then proceed with the full set.
+        if (_options.OpenAiDeploymentSetPolicy == OpenAiDeploymentSetPolicy.AutoRecompose)
+        {
+            try
+            {
+                var recomposeRequest = new OpenAiDeploymentSetRecomposeRequest(
+                    SubscriptionId: subscriptionId,
+                    Region: location,
+                    FullPinnedSet: PinnedModelCatalog.Models);
+                var recomposeResult = await _openaiRecomposer
+                    .RecomposeAsync(recomposeRequest, cancellationToken).ConfigureAwait(false);
+                if (recomposeResult.DroppedModelIds.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "H2a OpenAI deployment-set auto-recomposed: runId={RunId} customerId={CustomerId} " +
+                        "droppedModels={Dropped} preservedCount={PreservedCount} note={Note}",
+                        envelope.RunId, envelope.CustomerId,
+                        string.Join(",", recomposeResult.DroppedModelIds),
+                        recomposeResult.PreservedSet.Count,
+                        recomposeResult.OperatorNote);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Fail-safe — log + proceed with the full deploy set. The
+                // ARM deploy itself will surface real TPM-zero failures if any.
+                _logger.LogWarning(ex,
+                    "H2a OpenAI deployment-set recomposer infra fault (proceeding with full set): " +
+                    "runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
             }
         }
 
@@ -381,18 +523,31 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
 
         if (outcome is BicepDeployOutcome.Failure runnerFailure)
         {
+            // HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11:
+            // route CogSvc-soft-lock exhaustion to Resumable +
+            // CogSvcSoftLockPersistent (operator retries later once the
+            // concurrent CogSvc operation completes; NOT Quarantine because
+            // no partial state was committed — the whole ARM deploy rolls
+            // back on 409 RequestConflict).
+            if (runnerFailure.Diagnostic.StartsWith(
+                    ArmDeploymentRunner.CogSvcSoftLockDiagnosticPrefix, StringComparison.Ordinal))
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    BicepDeployRejectionCodes.CogSvcSoftLockPersistent, runnerFailure.Diagnostic, cancellationToken)
+                    .ConfigureAwait(false);
+            }
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 BicepDeployRejectionCodes.BicepDeployFailed, runnerFailure.Diagnostic, cancellationToken)
                 .ConfigureAwait(false);
         }
 
         var outputs = ((BicepDeployOutcome.Success)outcome).Outputs;
-        if (!AreOutputsComplete(outputs))
+        var missingOutputs = MissingOutputs(outputs);
+        if (missingOutputs.Count > 0)
         {
             var diagnostic =
-                $"Bicep deploy for '{envelope.CustomerId}' completed but returned incomplete outputs " +
-                "(one or more required fields blank: UAMI resource id / object id / client id / " +
-                "AppService name+staging slot / OpenAI+AISearch+Cosmos endpoints). " +
+                $"Bicep deploy for '{envelope.CustomerId}' completed but returned incomplete outputs — blank: " +
+                $"{string.Join(", ", missingOutputs)}. " +
                 "Verify infrastructure/bicep outputs surface all fields required by BicepDeployOutputs.";
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 BicepDeployRejectionCodes.BicepDeployOutputsIncomplete, diagnostic, cancellationToken).ConfigureAwait(false);
@@ -457,6 +612,47 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     }
 
     /// <summary>
+    /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27): builds the
+    /// list of (kind, name) tuples the resource-name availability probe
+    /// checks BEFORE the Bicep deploy fires. Names MUST mirror the
+    /// customer.bicep naming convention verbatim (any drift = false
+    /// positives / negatives):
+    ///   - Storage: <c>take(toLower(replace('sprk{customerId}{env}sa', '-', '')), 24)</c>
+    ///     (customer.bicep line 141)
+    ///   - Service Bus namespace: <c>spaarke-{customerId}-{env}-sbus</c>
+    ///     (customer.bicep <c>serviceBusName</c>; the <c>-sbus</c> suffix exists
+    ///     because F10 found Azure reserves names ending in <c>-sb</c>. Until task
+    ///     245a this check probed <c>sprk-{customerId}-{env}-sb</c> — a name the
+    ///     template never creates, so it verified nothing.)
+    /// Key Vault is omitted for now (see <see cref="ResourceNameKind.KeyVault"/>
+    /// enum comment — Azure.ResourceManager.KeyVault not currently a project
+    /// dependency). Exposed <c>internal</c> so unit tests can validate the
+    /// naming logic without invoking the handler.
+    /// </summary>
+    internal static IReadOnlyList<ResourceNameCheckEntry> BuildGloballyNamespacedNameChecks(
+        string customerId,
+        string environmentName)
+    {
+        var baseName = $"sprk{customerId}{environmentName}";
+        // Storage: lowercase + no hyphens + 24-char cap (customer.bicep line 141).
+        var storageName = TruncateTo(
+            $"{baseName}sa".ToLowerInvariant().Replace("-", string.Empty, StringComparison.Ordinal),
+            24);
+        // Service Bus namespace: exactly customer.bicep's serviceBusName
+        // ('spaarke-${customerId}-${environmentName}-sbus'); 50-char cap per ARM
+        // is well within the customerId (≤8) + env-name budget.
+        var sbName = $"spaarke-{customerId}-{environmentName}-sbus";
+        return new[]
+        {
+            new ResourceNameCheckEntry(ResourceNameKind.StorageAccount, storageName),
+            new ResourceNameCheckEntry(ResourceNameKind.ServiceBusNamespace, sbName),
+        };
+    }
+
+    private static string TruncateTo(string value, int max)
+        => value.Length <= max ? value : value.Substring(0, max);
+
+    /// <summary>
     /// Computes the deterministic H2a idempotency key:
     /// <c>infra-{customerId}-{bicepVer}</c>. Exposed internal so unit tests
     /// can construct expected keys without duplicating the format.
@@ -482,16 +678,34 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         return false;
     }
 
-    private static bool AreOutputsComplete(BicepDeployOutputs outputs)
-        => !string.IsNullOrWhiteSpace(outputs.ResourceGroupName)
-        && !string.IsNullOrWhiteSpace(outputs.UserAssignedIdentityResourceId)
-        && !string.IsNullOrWhiteSpace(outputs.UserAssignedIdentityObjectId)
-        && !string.IsNullOrWhiteSpace(outputs.UserAssignedIdentityClientId)
-        && !string.IsNullOrWhiteSpace(outputs.AppServiceName)
-        && !string.IsNullOrWhiteSpace(outputs.AppServiceStagingSlotName)
-        && !string.IsNullOrWhiteSpace(outputs.OpenAiEndpoint)
-        && !string.IsNullOrWhiteSpace(outputs.AiSearchEndpoint)
-        && !string.IsNullOrWhiteSpace(outputs.CosmosEndpoint);
+    /// <summary>
+    /// Names of the required <see cref="BicepDeployOutputs"/> string fields that are blank.
+    /// Empty list = complete. Every field here is persisted to InterStepState or used by the
+    /// T1 post-condition, so a blank one is a template/runner defect, not a transient fault.
+    /// </summary>
+    private static IReadOnlyList<string> MissingOutputs(BicepDeployOutputs outputs)
+    {
+        var missing = new List<string>();
+        void Check(string value, string name)
+        {
+            if (string.IsNullOrWhiteSpace(value)) missing.Add(name);
+        }
+
+        Check(outputs.ResourceGroupName, nameof(BicepDeployOutputs.ResourceGroupName));
+        Check(outputs.UserAssignedIdentityResourceId, nameof(BicepDeployOutputs.UserAssignedIdentityResourceId));
+        Check(outputs.UserAssignedIdentityObjectId, nameof(BicepDeployOutputs.UserAssignedIdentityObjectId));
+        Check(outputs.UserAssignedIdentityClientId, nameof(BicepDeployOutputs.UserAssignedIdentityClientId));
+        Check(outputs.AppServiceName, nameof(BicepDeployOutputs.AppServiceName));
+        Check(outputs.AppServiceStagingSlotName, nameof(BicepDeployOutputs.AppServiceStagingSlotName));
+        Check(outputs.OpenAiEndpoint, nameof(BicepDeployOutputs.OpenAiEndpoint));
+        Check(outputs.AiSearchEndpoint, nameof(BicepDeployOutputs.AiSearchEndpoint));
+        Check(outputs.CosmosEndpoint, nameof(BicepDeployOutputs.CosmosEndpoint));
+        Check(outputs.KeyVaultName, nameof(BicepDeployOutputs.KeyVaultName));
+        Check(outputs.KeyVaultUri, nameof(BicepDeployOutputs.KeyVaultUri));
+        Check(outputs.ServiceBusFullyQualifiedNamespace, nameof(BicepDeployOutputs.ServiceBusFullyQualifiedNamespace));
+        Check(outputs.RedisEndpoint, nameof(BicepDeployOutputs.RedisEndpoint));
+        return missing;
+    }
 
     private async Task<string> WriteDriftReportAsync(
         string customerId,
@@ -582,12 +796,24 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         });
         run.ErrorDetail = null;
 
-        // Populate interStepState (design.md §6.2) — one write per key.
+        // Populate interStepState (design.md §6.2) — one write per key. Every
+        // customer-stamp value a later handler needs is persisted HERE (task
+        // 245a, G25): before, RG / App Service / slot / KV / UAMI resource id
+        // were mapped from ARM and then dropped, and downstream handlers read
+        // them from run parameters nobody wrote.
         run.InterStepState.OpenAiEndpoint = outputs.OpenAiEndpoint;
         run.InterStepState.AiSearchEndpoint = outputs.AiSearchEndpoint;
         run.InterStepState.CosmosEndpoint = outputs.CosmosEndpoint;
         run.InterStepState.MiObjectId = outputs.UserAssignedIdentityObjectId;
         run.InterStepState.MiClientId = outputs.UserAssignedIdentityClientId;
+        run.InterStepState.ResourceGroupName = outputs.ResourceGroupName;
+        run.InterStepState.AppServiceName = outputs.AppServiceName;
+        run.InterStepState.AppServiceStagingSlotName = outputs.AppServiceStagingSlotName;
+        run.InterStepState.KeyVaultName = outputs.KeyVaultName;
+        run.InterStepState.KeyVaultUri = outputs.KeyVaultUri;
+        run.InterStepState.MiResourceId = outputs.UserAssignedIdentityResourceId;
+        run.InterStepState.ServiceBusFullyQualifiedNamespace = outputs.ServiceBusFullyQualifiedNamespace;
+        run.InterStepState.RedisEndpoint = outputs.RedisEndpoint;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)

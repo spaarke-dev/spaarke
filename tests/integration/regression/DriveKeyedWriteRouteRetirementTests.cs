@@ -78,10 +78,13 @@ namespace Sprk.Bff.Api.Tests;
 /// route: a 403 returned AFTER the delete was issued is not a denial. So the load-bearing assertion is
 /// <see cref="RetiredDriveKeyedWriteRoutes_AreAbsentFromTheEndpointTable"/>, which enumerates
 /// <c>EndpointDataSource</c> and proves no handler exists to reach the operation at all — unfakeable by
-/// any fixture or status-code mapping. The HTTP assertions add the behavioural half: 404 without a
-/// bearer proves absence rather than rejection (ASP.NET Core routes BEFORE it authorizes, so a route
-/// that EXISTS and carries RequireAuthorization answers 401, not 404), and 404 WITH a bearer proves the
-/// 404 is not itself an authentication artifact.</para>
+/// any fixture or status-code mapping. The HTTP assertions add the behavioural half: 404 WITH a bearer proves there is no handler for a signed-in caller to reach. (Until unified-access-control-r2
+/// task 167 f1 they also asserted 404 WITHOUT a bearer — ASP.NET Core routes before it authorizes, so an
+/// absent route answered an anonymous caller 404 and a present one 401. Owner round 14 item 2 gave the BFF an
+/// authorization FallbackPolicy (an authenticated user), which also challenges a request that matches NO
+/// endpoint, so an anonymous caller now gets 401 from an absent route too. Those assertions were removed rather
+/// than flipped: a 401 no longer distinguishes absent from present. The fallback itself is proven by
+/// <c>tests/integration/auth/UnifiedAccessControl/AuthorizationFallbackPolicyTests.cs</c>.)</para>
 /// </summary>
 [Trait("status", "repaired")]
 public class DriveKeyedWriteRouteRetirementTests : IClassFixture<CustomWebAppFactory>
@@ -109,10 +112,6 @@ public class DriveKeyedWriteRouteRetirementTests : IClassFixture<CustomWebAppFac
     {
         _factory = factory;
     }
-
-    // Deliberately NO Authorization header: routing precedes authorization, so an absent route
-    // answers 404 while a present one answers 401. See the class summary.
-    private HttpClient CreateAnonymousClient() => _factory.CreateClient();
 
     private HttpClient CreateAuthenticatedClient()
     {
@@ -227,22 +226,9 @@ public class DriveKeyedWriteRouteRetirementTests : IClassFixture<CustomWebAppFac
     }
 
     // =============================================================================================
-    // BEHAVIOURAL HALF — absence over HTTP, unauthenticated and authenticated
+    // BEHAVIOURAL HALF — absence over HTTP, for a signed-in caller (an anonymous caller now meets the
+    // authorization FallbackPolicy's 401 on an absent route too — see the class summary)
     // =============================================================================================
-
-    [Fact]
-    public async Task RetiredDriveKeyedUploadRoute_WithoutBearer_Returns404NotRouted()
-    {
-        using var content = new ByteArrayContent(new byte[] { 1, 2, 3 });
-
-        var response = await CreateAnonymousClient()
-            .PutAsync("/api/drives/b!test-drive/upload?fileName=f.txt", content);
-
-        response.StatusCode.Should().Be(
-            HttpStatusCode.NotFound,
-            "PUT /api/drives/{driveId}/upload was retired by task 083 — it wrote the request body into a "
-            + "caller-named drive as the managed identity. A 401 here means the route was re-added.");
-    }
 
     [Fact]
     public async Task RetiredDriveKeyedUploadRoute_WithValidBearer_Returns404AndNeverReachesTheWrite()
@@ -260,20 +246,6 @@ public class DriveKeyedWriteRouteRetirementTests : IClassFixture<CustomWebAppFac
             "an authenticated caller must not reach this retired write path either. Anything other than "
             + "404 — including 403 — means a handler exists again, and a 403 raised after the upload was "
             + "issued would not be a denial at all.");
-    }
-
-    [Fact]
-    public async Task RetiredDriveKeyedDeleteRoute_WithoutBearer_Returns404NotRouted()
-    {
-        var response = await CreateAnonymousClient()
-            .DeleteAsync("/api/drives/b!test-drive/items/test-item");
-
-        response.StatusCode.Should().Be(
-            HttpStatusCode.NotFound,
-            "DELETE /api/drives/{driveId}/items/{itemId} was retired by task 083. This is the DESTROY "
-            + "half, and the one whose caller path was actually reachable in code — it read driveId and "
-            + "itemId off form attributes and so depended on no deleted route. A 401 here means the "
-            + "route was re-added.");
     }
 
     [Fact]
@@ -301,27 +273,14 @@ public class DriveKeyedWriteRouteRetirementTests : IClassFixture<CustomWebAppFac
     /// absence assertion above into a vacuous pass. Task 060 proved this is not hypothetical: its
     /// positive controls caught two real defects.
     ///
-    /// <para>Both name <c>PUT /api/obo/me/files/{*path}</c> — the record-LESS OBO upload, which is
-    /// mapped, carries <c>RequireAuthorization()</c>, and accepts no container or drive parameter. It is
+    /// <para>It names <c>PUT /api/obo/me/files/{*path}</c> — the record-LESS OBO upload, which is
+    /// mapped, carries <c>RequireAuthorization()</c>, and accepts no container or drive parameter. (Its
+    /// anonymous twin, which asserted 401, was removed in task 167 f1: since the FallbackPolicy an absent route
+    /// answers an anonymous caller 401 as well.) It is
     /// the same control the sibling <c>MiContainerKeyedWriteRouteRetirementTests</c> uses, deliberately:
     /// a control route shared by both retirement guards has one place to be re-pointed if it is ever
     /// itself retired, rather than two that can drift apart.</para>
     /// </summary>
-    [Fact]
-    public async Task SurvivingOboUploadRoute_WithoutBearer_Returns401NotFound()
-    {
-        using var content = new ByteArrayContent(new byte[] { 1, 2, 3 });
-
-        var response = await CreateAnonymousClient()
-            .PutAsync("/api/obo/me/files/f.txt", content);
-
-        response.StatusCode.Should().Be(
-            HttpStatusCode.Unauthorized,
-            "PUT /api/obo/me/files/{*path} is mapped and requires authorization. If this returns 404 the "
-            + "route was removed — AND every absence assertion in this file has become vacuous, because "
-            + "a fixture that 404s everything would look identical.");
-    }
-
     [Fact]
     public async Task SurvivingOboUploadRoute_WithValidBearer_IsRoutedAndNot404()
     {

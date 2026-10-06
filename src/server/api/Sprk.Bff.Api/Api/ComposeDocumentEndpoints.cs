@@ -1,5 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Compose;
@@ -8,13 +10,23 @@ using static Sprk.Bff.Api.Api.ComposeEndpoints;
 namespace Sprk.Bff.Api.Api;
 
 /// <summary>
-/// Compose <b>persisted-document lifecycle</b> routes: open
-/// (<c>GET /documents/{documentSpeId}</c>), give an ephemeral drive-item its <c>sprk_document</c>
-/// identity (<c>.../promote</c>), and re-run the Document Profile (<c>.../refresh-profile</c>).
+/// Compose <b>persisted-document lifecycle</b> routes: open (<c>GET /documents/{documentSpeId}</c>) and
+/// re-run the Document Profile (<c>.../refresh-profile</c>).
 ///
 /// <para><b>Reason to change</b>: the identity + resume contract of a document that already lives in
 /// SPE — which session a reopen resumes, which record id a drive-item maps to, and what the open
 /// path seeds (change-detection subscription, profile).</para>
+///
+/// <para><b>RETIRED 2026-10-03 — <c>POST /documents/{documentSpeId}/promote</c></b> (unified-access-control-r2
+/// task 166, sweep finding S-63, owner round 10 item 1). It took the TENANT and SESSION from the request
+/// body, never resolved the caller, made no OBO read of the drive item, and handed both to
+/// <c>IComposeService.PromoteIfEphemeralAsync</c> — which looked the item up app-only (a drive-item → record
+/// id oracle), created a root-owned <c>sprk_document</c> app-only for ANY drive-item id (squatting the
+/// <c>sprk_graphitemid_uk</c> key), and rebound ANY (tenant, session) pair's document id with no owner check.
+/// It had NO client caller (every <c>/promote</c> call in <c>src/</c> is <c>/api/ai/analysis/promote</c>) and
+/// is in no published API description, so it was deleted rather than gated. The SERVICE method stays: the
+/// save path's first-save promotion uses it internally, behind <c>ComposeSaveEndpoints</c>' session-owner
+/// check. Absence is asserted by <c>tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs</c>.</para>
 /// </summary>
 internal static class ComposeDocumentEndpoints
 {
@@ -32,27 +44,28 @@ internal static class ComposeDocumentEndpoints
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status500InternalServerError);
 
-        // (4) POST /api/compose/documents/{documentSpeId}/promote — explicit promotion
-        group.MapPost("/documents/{documentSpeId}/promote", Promote)
-            .WithName("ComposePromoteDocument")
-            .WithSummary("Idempotently promote an ephemeral SPE drive-item to a sprk_document row (FR-06)")
-            .RequireRateLimiting("ai-context")
-            .Produces<PromoteComposeDocumentResponse>(StatusCodes.Status200OK)
-            .Produces(StatusCodes.Status400BadRequest)
-            .Produces(StatusCodes.Status401Unauthorized)
-            .Produces(StatusCodes.Status500InternalServerError);
+        // (4) POST /api/compose/documents/{documentSpeId}/promote — RETIRED by uac-r2 task 166 (see the class
+        // summary). Do not re-add it: create-on-save promotes internally behind the session-owner check.
 
         // G10 (FR-09, task 040): the manual "Refresh Profile" leg — re-run the Document Profile on demand.
         // Fire-and-forget best-effort (202): reuses IComposeService.RefreshProfileAsync → the SAME
         // DispatchBackgroundProfile pipeline the save-hook + reload re-trigger use (never a second trigger).
         // Under the authenticated group (OBO); no SPE/Graph type crosses the endpoint (ADR-007).
-        group.MapPost("/documents/{documentRecordId:guid}/refresh-profile", RefreshProfileAsync)
+        //
+        // uac-r2 task 166 r1 (amendment d family): the profile is PERSISTED app-only onto the sprk_document row
+        // the route names, so the caller must hold WRITE on that row — the route-level document filter decides,
+        // before the handler, on the exact id the handler consumes (the route parameter is named {documentId} so
+        // DocumentAuthorizationFilter reads it; the URL is unchanged). An unknown id and a forbidden one get the
+        // filter's one 403. The tenant is the caller's claim; the body's tenantId is obsolete and never read.
+        group.MapPost("/documents/{documentId:guid}/refresh-profile", RefreshProfileAsync)
             .WithName("ComposeRefreshProfile")
             .WithSummary("Re-run the Document Profile for a Compose document on demand (FR-09 / G10)")
+            .AddDocumentAuthorizationFilter("write")
             .RequireRateLimiting("ai-context")
             .Produces(StatusCodes.Status202Accepted)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status500InternalServerError);
 
         return group;
@@ -242,94 +255,60 @@ internal static class ComposeDocumentEndpoints
         }
     }
 
-    private static async Task<IResult> Promote(
-        string documentSpeId,
-        [FromBody] PromoteComposeDocumentBody body,
-        IComposeService composeService,
-        ILoggerFactory loggerFactory,
-        HttpContext httpContext,
-        CancellationToken ct)
-    {
-        var logger = loggerFactory.CreateLogger("ComposeEndpoints");
-
-        if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
-        if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required for the ephemeral→promoted rebind.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required for multi-tenant isolation.");
-
-        logger.LogInformation(
-            "Compose promote: tenant={TenantId} item={DocumentSpeId} session={SessionId} TraceId={TraceId}",
-            body.TenantId, documentSpeId, body.SessionId, httpContext.TraceIdentifier);
-
-        try
-        {
-            var request = new PromoteComposeDocumentRequest
-            {
-                DocumentSpeId = documentSpeId,
-                SessionId = body.SessionId,
-                TenantId = body.TenantId,
-                DisplayName = body.DisplayName,
-            };
-
-            var result = await composeService.PromoteIfEphemeralAsync(request, httpContext, ct).ConfigureAwait(false);
-
-            return Results.Ok(new PromoteComposeDocumentResponse(
-                DocumentSpeId: result.DocumentSpeId,
-                SessionId: result.SessionId,
-                DocumentRecordId: result.DocumentRecordId,
-                WasCreated: result.WasCreated,
-                CorrelationId: httpContext.TraceIdentifier));
-        }
-        catch (ArgumentException ex)
-        {
-            return BadRequest(ex.Message);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Compose promote: unexpected failure. TraceId={TraceId}", httpContext.TraceIdentifier);
-            return Results.Problem(
-                statusCode: StatusCodes.Status500InternalServerError,
-                title: "Internal Server Error",
-                detail: "An unexpected error occurred while promoting the document.");
-        }
-    }
-
     // G10 (FR-09, task 040): the manual "Refresh Profile" leg. Delegates to
     // IComposeService.RefreshProfileAsync → the SAME fire-and-forget DispatchBackgroundProfile pipeline the
     // save-hook + reload re-trigger use (never a second trigger). Best-effort 202 (the profile runs in the
     // background under OBO); a bad request 400s. No SPE/Graph type crosses the endpoint (ADR-007).
+    //
+    // uac-r2 task 166 r1: the caller's WRITE on the row was decided by the route's document filter before this runs.
+    // Two secondary ids used to arrive unauthorized in the body: the TENANT (now the caller's claim) and the SPE item
+    // whose "profiled eTag" stamp is written (a cache key that suppresses that item's reload re-trigger). The stamp is
+    // now written only for the item the AUTHORIZED row itself points at; any other item id in the body is ignored.
     private static async Task<IResult> RefreshProfileAsync(
-        Guid documentRecordId,
+        Guid documentId,
         [FromBody] RefreshProfileBody? body,
         IComposeService composeService,
+        IDocumentDataverseService documentService,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
         CancellationToken ct)
     {
         var logger = loggerFactory.CreateLogger("ComposeEndpoints");
 
-        if (documentRecordId == Guid.Empty) return BadRequest("documentRecordId is required in the route.");
-        if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
+        if (documentId == Guid.Empty) return BadRequest("documentId is required in the route.");
+
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "Tenant identity ('tid' claim) not found in authentication token.");
+        }
 
         try
         {
+            var stampSpeId = await ResolveAuthorizedStampItemAsync(
+                    documentService, documentId, body?.DocumentSpeId, body?.ETag, logger, httpContext, ct)
+                .ConfigureAwait(false);
+
             await composeService.RefreshProfileAsync(
                 new RefreshComposeProfileRequest
                 {
-                    DocumentRecordId = documentRecordId,
-                    TenantId = body.TenantId,
-                    DocumentSpeId = body.DocumentSpeId,
-                    ETag = body.ETag,
+                    DocumentRecordId = documentId,
+                    TenantId = tenantId,
+                    // Only the item the authorized row points at may be stamped; null skips the stamp.
+                    DocumentSpeId = stampSpeId,
+                    ETag = stampSpeId is null ? null : body?.ETag,
                 },
                 httpContext,
                 ct).ConfigureAwait(false);
 
             logger.LogInformation(
                 "Compose refresh-profile: document {DocumentRecordId} — profile re-dispatched (best-effort) TraceId={TraceId}",
-                documentRecordId, httpContext.TraceIdentifier);
+                documentId, httpContext.TraceIdentifier);
 
-            return Results.Accepted(value: new { documentRecordId, correlationId = httpContext.TraceIdentifier });
+            return Results.Accepted(value: new { documentRecordId = documentId, correlationId = httpContext.TraceIdentifier });
         }
         catch (ArgumentException ex)
         {
@@ -339,12 +318,60 @@ internal static class ComposeDocumentEndpoints
         {
             logger.LogError(ex,
                 "Compose refresh-profile: unexpected failure for document {DocumentRecordId} TraceId={TraceId}",
-                documentRecordId, httpContext.TraceIdentifier);
+                documentId, httpContext.TraceIdentifier);
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 detail: "An unexpected error occurred while refreshing the document profile.");
         }
+    }
+
+    /// <summary>
+    /// uac-r2 task 166 r1: the SPE item id whose "profiled eTag" stamp this refresh may write — the body's id when, and
+    /// only when, it is the item the AUTHORIZED <c>sprk_document</c> row points at (<c>sprk_graphitemid</c>, ordinal);
+    /// otherwise <see langword="null"/> (no stamp). The stamp is a best-effort optimisation (it spares one redundant
+    /// reload re-trigger), so a read fault or a mismatch skips it rather than failing the refresh.
+    /// </summary>
+    internal static async Task<string?> ResolveAuthorizedStampItemAsync(
+        IDocumentDataverseService documentService,
+        Guid documentId,
+        string? bodySpeId,
+        string? bodyETag,
+        ILogger logger,
+        HttpContext httpContext,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(bodySpeId) || string.IsNullOrWhiteSpace(bodyETag))
+        {
+            return null;
+        }
+
+        try
+        {
+            var row = await documentService.GetDocumentAsync(documentId.ToString("D"), ct).ConfigureAwait(false);
+            if (row is not null && string.Equals(row.GraphItemId, bodySpeId, StringComparison.Ordinal))
+            {
+                return bodySpeId;
+            }
+
+            logger.LogWarning(
+                "Compose refresh-profile: the body's SPE item is not the one document {DocumentRecordId} points at; the "
+                + "profiled-eTag stamp is SKIPPED (task 166). TraceId={TraceId}",
+                documentId, httpContext.TraceIdentifier);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex,
+                "Compose refresh-profile: could not read document {DocumentRecordId} to bind the stamp item; the "
+                + "profiled-eTag stamp is SKIPPED. TraceId={TraceId}",
+                documentId, httpContext.TraceIdentifier);
+        }
+
+        return null;
     }
 }
 
@@ -410,25 +437,14 @@ public sealed record LoadComposeDocumentResponse(
     // rejection. Sourced from ComposeSaveLimits.MaxDocumentBytes; optional/trailing (ADR-040 additive).
     [property: JsonPropertyName("maxDocumentBytes")] long? MaxDocumentBytes = null);
 
-/// <summary>Request body for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
-public sealed record PromoteComposeDocumentBody(
-    [property: JsonPropertyName("sessionId")] string SessionId,
-    [property: JsonPropertyName("tenantId")] string TenantId,
-    [property: JsonPropertyName("displayName")] string? DisplayName = null);
-
-/// <summary>Response shape for <c>POST /api/compose/documents/{id}/promote</c>.</summary>
-public sealed record PromoteComposeDocumentResponse(
-    [property: JsonPropertyName("documentSpeId")] string DocumentSpeId,
-    [property: JsonPropertyName("sessionId")] string SessionId,
-    [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId,
-    [property: JsonPropertyName("wasCreated")] bool WasCreated,
-    [property: JsonPropertyName("correlationId")] string CorrelationId);
-
-/// <summary>Request body for <c>POST /api/compose/documents/{documentRecordId}/refresh-profile</c>
-/// (FR-09 / G10). The <c>sprk_documentid</c> rides the route; the body carries the tenant + optional SPE
+/// <summary>Request body for <c>POST /api/compose/documents/{documentId}/refresh-profile</c>
+/// (FR-09 / G10). The <c>sprk_documentid</c> rides the route; the body carries an optional SPE
 /// pointer/eTag used only to stamp the profiled version so an immediate reopen does not redundantly
-/// re-trigger the storm-guarded reload leg.</summary>
+/// re-trigger the storm-guarded reload leg — honoured only for the item the authorized row points at
+/// (unified-access-control-r2 task 166 r1).</summary>
 public sealed record RefreshProfileBody(
-    [property: JsonPropertyName("tenantId")] string TenantId,
+    /// <summary>OBSOLETE — never read (unified-access-control-r2 task 166 r1). The tenant is the caller's
+    /// <c>tid</c> claim; this property stays only so the shipped client's payload binds.</summary>
+    [property: JsonPropertyName("tenantId")] string? TenantId = null,
     [property: JsonPropertyName("documentSpeId")] string? DocumentSpeId = null,
     [property: JsonPropertyName("eTag")] string? ETag = null);

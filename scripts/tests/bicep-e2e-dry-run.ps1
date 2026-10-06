@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Wave C2 Bicep integration test — static build + live what-if dry-run of the 4 Wave C2 stacks.
+    Wave C2 Bicep integration test — static build + live what-if dry-run of the 3 Wave C2 stacks.
 
 .DESCRIPTION
     Verifies the Wave C2 (tasks 027-033) Bicep composition is coherent by running:
@@ -9,13 +9,11 @@
         - customer.bicep            (task 027 — per-customer data resources + optional SignalR + UAMI param)
         - platform.bicep            (task 031 — env-scope shared: monitoring + platform KV)
         - platform-controlplane.bicep (task 033 — L2 orchestrator infra)
-        - stacks/model1-shared.bicep (task 032 — Model 1 trial-tier composition)  [KNOWN UNMIGRATED — see note]
 
       Tier 2 (if dev sub context) — Live dry-run with `az deployment sub what-if`:
         - customer.bicep against a synthetic customerId in dev
         - platform.bicep against dev
         - platform-controlplane.bicep against dev
-        - stacks/model1-shared.bicep DEFERRED until unmigrated caller fix lands
 
       Tier 3 (assertions) — Structural sanity on what-if JSON:
         - Enumerate resource additions
@@ -52,7 +50,7 @@
 
 .EXAMPLE
     pwsh scripts/tests/bicep-e2e-dry-run.ps1
-    # Tier 1 only: fast build check on all 4 stacks (no dev sub required)
+    # Tier 1 only: fast build check on all 3 stacks (no dev sub required)
 
 .EXAMPLE
     pwsh scripts/tests/bicep-e2e-dry-run.ps1 -Mode DryRun
@@ -76,13 +74,13 @@
                      bicep composition end-to-end is inherently shell-based. Placing this at
                      `scripts/tests/bicep-e2e-dry-run.ps1` follows the intent of `tests/integration/**`
                      while respecting ADR-038's C#-specific KEEP-path scope. NOT a violation.
-    Known gap      : stacks/model1-shared.bicep does NOT build clean as of 2026-08-17 — it is an unmigrated
-                     caller of the task-029 UAMI-only app-service.bicep module (still passes deprecated
-                     `keyVaultName` + `enableManagedIdentity` params + reads deprecated `appServicePrincipalId`
-                     output). Task-029 D1 explicitly deferred caller migration. Follow-on task recommended:
-                     "migrate stacks/model1-shared.bicep sharedBffApi module invocation to UAMI-only param
-                     signature". This script marks the build failure as EXPECTED_FAILURE (not RED) and
-                     documents it in the notes artifact.
+    Retired stack  : stacks/model1-shared.bicep (and model1-customer.bicep) were retired by task 225a
+                     (2026-10-01, D-12 — no shared Model 1 tier). This script carried it as EXPECTED_FAILURE
+                     plus an inverted assertion. The record behind that was wrong: the stack's caller was
+                     migrated on 2026-08-18 (6ff75702a) and it compiled and was deployed live on 2026-08-22 —
+                     it only LOOKED broken on Windows, where `az bicep build --stdout` crashed on non-ASCII
+                     output (fixed here: --outfile). Last present at 5de91f095; last modified 1bc049e4c.
+                     Both the deferral and the EXPECTED_FAILURE mechanism are gone: every stack must build.
     Known drift    : Bicep module file count on disk is 29 as of 2026-08-17 (design.md v3.2 says 25).
                      Wave 2 added: uami.bicep, controlplane-app-service.bicep, cosmos-provisioning.bicep,
                      app-service-slot.bicep, deployment-slot.bicep. This script reports the delta but does
@@ -98,7 +96,7 @@ param(
 
     [string]$Location = 'westus2',
 
-    [ValidatePattern('^[a-z0-9]{3,10}$')]
+    [ValidatePattern('^[a-z][a-z0-9]{2,7}$', Options = 'None')]  # the customerId standard (T237)
     [string]$TestCustomerId = 'itsttest',
 
     [ValidateSet('dev', 'staging', 'prod')]
@@ -125,7 +123,7 @@ if (-not $NotesOutputPath) {
 }
 
 # ============================================================================
-# WAVE C2 TARGET INVENTORY — the 4 stacks under test
+# WAVE C2 TARGET INVENTORY — the 3 stacks under test
 # ============================================================================
 
 $Stacks = @(
@@ -169,17 +167,6 @@ $Stacks = @(
             location        = $Location
         }
         Owner           = 'task 033'
-    },
-    @{
-        Name            = 'stacks/model1-shared'
-        RelPath         = 'stacks/model1-shared.bicep'
-        FullPath        = Join-Path $StacksDir 'model1-shared.bicep'
-        TargetScope     = 'subscription'
-        ExpectedBuild   = 'EXPECTED_FAILURE'      # task 029 D1 deferred caller migration
-        WhatIfEligible  = $false                  # can't what-if a broken template
-        WhatIfParams    = @{}
-        Owner           = 'task 032 (deferred fix)'
-        DeferralReason  = 'sharedBffApi module invocation still uses deprecated app-service.bicep params (keyVaultName + enableManagedIdentity) + reads deprecated appServicePrincipalId output. Task 029 D1 explicitly deferred caller migration. Follow-on task required.'
     }
 )
 
@@ -258,16 +245,20 @@ function Invoke-StackBuild {
         return
     }
 
-    # az bicep build writes ARM JSON to <stack>.json + prints warnings/errors to stderr
-    # We capture stderr and grep for "Error " vs "Warning " to distinguish.
+    # az bicep build writes ARM JSON + prints warnings/errors to stderr. We capture stderr and grep for
+    # "Error " vs "Warning " to distinguish. The JSON goes to a temp FILE, not --stdout: on Windows the
+    # az CLI writes a redirected stdout as cp1252 and crashes (UnicodeEncodeError, exit 1, no Bicep
+    # error line) on any non-ASCII character in the compiled template — customer.bicep's descriptions
+    # carry '→' and 'Δ', so the stack looked broken on every Windows run (found by task 225a).
     $stderrPath = New-TemporaryFile
+    $jsonPath = New-TemporaryFile
     try {
-        $null = az bicep build --file $Stack.FullPath --stdout 2>$stderrPath
+        $null = az bicep build --file $Stack.FullPath --outfile $jsonPath.FullName 2>$stderrPath
         $exitCode = $LASTEXITCODE
         $stderr = if (Test-Path $stderrPath) { Get-Content $stderrPath -Raw } else { '' }
     }
     finally {
-        Remove-Item $stderrPath -ErrorAction SilentlyContinue
+        Remove-Item $stderrPath, $jsonPath -ErrorAction SilentlyContinue
     }
 
     $errorLines = @()
@@ -290,11 +281,6 @@ function Invoke-StackBuild {
 
     if ($status -eq 'PASS') {
         Write-Host "  [OK] Build succeeded ($($warnLines.Count) warnings)" -ForegroundColor Green
-    }
-    elseif ($Stack.ExpectedBuild -eq 'EXPECTED_FAILURE') {
-        Write-Host "  [EXPECTED FAILURE] $($Stack.Name) build failed — deferred per task 029 D1" -ForegroundColor DarkYellow
-        Write-Host "     Reason: $($Stack.DeferralReason)" -ForegroundColor DarkYellow
-        foreach ($e in $errorLines) { Write-Host "       $e" -ForegroundColor DarkGray }
     }
     else {
         Write-Host "  [FAIL] Build failed (exit $exitCode)" -ForegroundColor Red
@@ -472,22 +458,8 @@ function Invoke-StructuralAssertions {
             -Detail 'Requires Mode=Full and successful what-if on platform-controlplane'
     }
 
-    # Assertion 7: No .github/workflows/** file touched by this test (constraint: ci-workflows=N per POML)
-    $workflowsDir = Join-Path $RepoRoot '.github' 'workflows'
-    $workflowsUnchanged = -not (git status --porcelain $workflowsDir 2>$null)
-    Add-Assertion `
-        -Name 'NoCiWorkflowsTouched' `
-        -Status $(if ($workflowsUnchanged) { 'PASS' } else { 'FAIL' }) `
-        -Detail 'Per POML constraint: this test MUST NOT edit .github/workflows/** (Phase H coordinated PR only)'
-
-    # Assertion 8: model1-shared.bicep unmigrated caller is a known follow-up (not a regression)
-    $m1BuildStatus = $Results.BuildResults['stacks/model1-shared'].Status
-    $expected = $Stacks | Where-Object { $_.Name -eq 'stacks/model1-shared' } | Select-Object -First 1
-    $matches = ($m1BuildStatus -eq 'FAIL' -and $expected.ExpectedBuild -eq 'EXPECTED_FAILURE')
-    Add-Assertion `
-        -Name 'Model1SharedDeferredCallerFix' `
-        -Status $(if ($matches) { 'PASS' } else { 'FAIL' }) `
-        -Detail "build=$m1BuildStatus ; expected=$($expected.ExpectedBuild) (task 029 D1 explicitly deferred caller migration)"
+    # (Assertion 7 `NoCiWorkflowsTouched` was removed by task 225a: it checked the working tree's
+    # `git status`, not the Bicep under test, so it failed whenever ANY workflow edit was uncommitted.)
 
     Write-Host ""
 }
@@ -523,7 +495,6 @@ function Write-NotesArtifact {
     foreach ($stack in $Stacks) {
         $r = $Results.BuildResults[$stack.Name]
         $emoji = if ($r.Status -eq 'PASS') { '[OK]' }
-                 elseif ($stack.ExpectedBuild -eq 'EXPECTED_FAILURE' -and $r.Status -eq 'FAIL') { '[EXPECTED-FAIL]' }
                  else { '[FAIL]' }
         [void]$sb.AppendLine("| $($stack.Name) | $($stack.Owner) | $($stack.ExpectedBuild) | $emoji $($r.Status) | $($r.Warnings.Count) | $($r.Errors.Count) |")
     }
@@ -539,10 +510,6 @@ function Write-NotesArtifact {
             foreach ($e in $r.Errors) { [void]$sb.AppendLine($e) }
             [void]$sb.AppendLine('```')
             [void]$sb.AppendLine('')
-            if ($stack.DeferralReason) {
-                [void]$sb.AppendLine("**Deferral rationale**: $($stack.DeferralReason)")
-                [void]$sb.AppendLine('')
-            }
         }
     }
 
@@ -594,20 +561,18 @@ function Write-NotesArtifact {
     [void]$sb.AppendLine('')
     [void]$sb.AppendLine('The following are NOT verified by this run and are recorded as follow-on work:')
     [void]$sb.AppendLine('')
-    [void]$sb.AppendLine('- **Model 2 dedicated per-customer full stack composition** (`stacks/model2-full.bicep`) — outside Wave C2 scope; task 029 D1 deferred caller migration. Follow-on task recommended: verify + migrate model2-full.bicep caller pattern (parallel to model1-shared fix).')
-    [void]$sb.AppendLine('- **Legacy Model 1 per-customer stack** (`stacks/model1-customer.bicep`) — superseded by `stacks/model1-shared.bicep`; verify at retirement time (Phase F).')
+    [void]$sb.AppendLine('- *(retired)* `stacks/model2-full.bicep` was deleted by task 249 (owner D19, 2026-10-02) — `customer.bicep` is the only customer-stamp template; `deploy-infrastructure.yml` now only validates.')
     [void]$sb.AppendLine('- **Real RBAC principalId GUID verification** — what-if reports role-assignment RESOURCES; actual principalId GUID match against a live UAMI is only observable post-apply. Verified separately in Phase F acceptance.')
     [void]$sb.AppendLine('- **CI wiring of this test** — deferred to Phase H coordinated PR per root CLAUDE.md §10 (`ci-workflows=Y` overlap with `ci-cd-unit-test-remediation-r1`).')
     [void]$sb.AppendLine('')
 
     # Final verdict
-    $tier1Fails = ($Results.BuildResults.Values | Where-Object {
-        $_.Status -eq 'FAIL' -and ($Stacks | Where-Object { $Results.BuildResults[$_.Name] -eq $_ }).ExpectedBuild -ne 'EXPECTED_FAILURE'
-    }).Count
+    # Every stack must build: FAIL and MISSING both count (task 225a — a deleted stack file used to
+    # report MISSING and still let the verdict PASS).
     $unexpectedFails = 0
     foreach ($stack in $Stacks) {
         $r = $Results.BuildResults[$stack.Name]
-        if ($r.Status -eq 'FAIL' -and $stack.ExpectedBuild -ne 'EXPECTED_FAILURE') { $unexpectedFails++ }
+        if ($r.Status -ne 'PASS') { $unexpectedFails++ }
     }
     $tier2Fails = 0
     if ($Mode -in @('DryRun', 'Full')) {
@@ -663,9 +628,8 @@ if ($Mode -eq 'Full') {
 
 # Record follow-ups regardless of mode (BEFORE writing artifact so they land in it)
 $sectionSign = [char]0x00A7  # § — force literal into strings without PS escape ambiguity
-[void]$Results.Followups.Add('Migrate stacks/model1-shared.bicep sharedBffApi module invocation to task-029 UAMI-only app-service.bicep param signature (currently passes deprecated keyVaultName + enableManagedIdentity; reads deprecated appServicePrincipalId output)')
 [void]$Results.Followups.Add("Reconcile design.md ${sectionSign}7 module count (v3.2 says 25; on-disk is $($Results.ModuleCount) after Wave 2 additions)")
-[void]$Results.Followups.Add("Coordinate Phase H CI-wiring PR to invoke this script in pull_request and nightly schedule workflows (root CLAUDE.md ${sectionSign}10 ci-workflows=Y overlap with ci-cd-unit-test-remediation-r1)")
+[void]$Results.Followups.Add("Wire this script into CI (pull_request + nightly) — not yet done")
 
 # Persist notes
 Write-NotesArtifact
@@ -681,7 +645,7 @@ if ($Results.Followups.Count -gt 0) {
 $unexpectedBuildFails = 0
 foreach ($stack in $Stacks) {
     $r = $Results.BuildResults[$stack.Name]
-    if ($r.Status -eq 'FAIL' -and $stack.ExpectedBuild -ne 'EXPECTED_FAILURE') { $unexpectedBuildFails++ }
+    if ($r.Status -ne 'PASS') { $unexpectedBuildFails++ }   # FAIL or MISSING
 }
 $whatIfFails = if ($Mode -in @('DryRun', 'Full')) {
     ($Results.WhatIfResults.Values | Where-Object { $_.Status -eq 'FAIL' }).Count

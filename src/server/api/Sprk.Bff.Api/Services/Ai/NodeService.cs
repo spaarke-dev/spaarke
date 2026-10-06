@@ -313,34 +313,6 @@ public class NodeService : INodeService
     }
 
     /// <inheritdoc />
-    public async Task ReorderNodesAsync(
-        Guid playbookId,
-        Guid[] nodeIds,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureAuthenticatedAsync(cancellationToken);
-
-        _logger.LogInformation("Reordering {Count} nodes in playbook {PlaybookId}", nodeIds.Length, playbookId);
-
-        for (var i = 0; i < nodeIds.Length; i++)
-        {
-            var nodeId = nodeIds[i];
-            var executionOrder = i + 1; // 1-based ordering
-
-            var url = $"{EntitySetName}({nodeId})";
-            var payload = new Dictionary<string, object?>
-            {
-                ["sprk_executionorder"] = executionOrder
-            };
-
-            var response = await _httpClient.PatchAsJsonAsync(url, payload, JsonOptions, cancellationToken);
-            response.EnsureSuccessStatusCode();
-        }
-
-        _logger.LogInformation("Reordered nodes in playbook {PlaybookId}", playbookId);
-    }
-
-    /// <inheritdoc />
     public async Task<PlaybookNodeDto> UpdateNodeScopesAsync(
         Guid nodeId,
         NodeScopesRequest scopes,

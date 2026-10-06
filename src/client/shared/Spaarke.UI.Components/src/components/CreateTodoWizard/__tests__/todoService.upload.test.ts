@@ -27,6 +27,8 @@
  * @see ../todoService.ts
  */
 
+// UAC-r2 task 147 r1: child creates go through the BFF; the fake answers its routes through the mock data service.
+import { bffChildWriteFetch, childWriteCalls, FAKE_BFF_BASE_URL } from '../../../__mocks__/bffChildWriteFake';
 import { TodoService, _resetTodoServiceNavPropCacheForTests } from '../todoService';
 import { EMPTY_TODO_FORM, type ICreateTodoFormState } from '../formTypes';
 import type { IUploadedFile } from '../../FileUpload/fileUploadTypes';
@@ -104,6 +106,10 @@ function makeAuthenticatedFetch(uploadOutcomes: Array<{ status: number; body: Re
     if (url.includes('/analyze')) {
       return { ok: true, status: 200, statusText: 'OK', json: async () => ({}) };
     }
+    if (url.includes('/api/v1/documents/') && url.endsWith('/file')) {
+      // The BFF attach (task 166 f1): it stamps the pointer server-side and echoes it.
+      return { ok: true, status: 200, statusText: 'OK', json: async () => ({ alreadyAttached: false }) };
+    }
     const outcome = uploadOutcomes[uploadCallIndex] ?? uploadOutcomes[uploadOutcomes.length - 1];
     uploadCallIndex++;
     return {
@@ -144,7 +150,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     const dataService = createMockDataService();
     const authenticatedFetch = makeAuthenticatedFetch([]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, undefined, []);
 
     expect(result.success).toBe(true);
@@ -161,7 +167,8 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     installGlobalFetchMockWithoutDocumentNavProps();
     const dataService = createMockDataService();
 
-    const service = new TodoService(dataService); // no authenticatedFetch / bffBaseUrl either
+    // UAC-r2 task 147 r1: the create itself goes through the BFF, so the host wires the connection.
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService), FAKE_BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES);
 
     expect(result.success).toBe(true);
@@ -179,7 +186,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     dataService.createRecord.mockResolvedValueOnce('todo-guid-123').mockResolvedValue('doc-guid-x');
     const authenticatedFetch = makeAuthenticatedFetch([UPLOAD_OK('brief.pdf', 'drive-item-1')]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')]);
 
     expect(result.success).toBe(true);
@@ -203,7 +210,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     dataService.createRecord.mockResolvedValueOnce('todo-guid-123').mockResolvedValue('doc-guid-x');
     const authenticatedFetch = makeAuthenticatedFetch([UPLOAD_OK('brief.pdf', 'drive-item-1')]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')]);
 
     expect(result.success).toBe(true);
@@ -218,11 +225,15 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     // targeting the sprk_todos entity set with the real todo id.
     expect(docPayload['sprk_RelatedToDo@odata.bind']).toBe('/sprk_todos(todo-guid-123)');
 
-    // Carries the upload result's identity fields.
-    expect(docPayload['sprk_graphitemid']).toBe('drive-item-1');
-    expect(docPayload['sprk_graphdriveid']).toBe('drive-1');
-    expect(docPayload['sprk_hasfile']).toBe(true);
+    // The upload result's identity goes to the BFF attach (task 166 f1) — the create payload never carries the
+    // SPE pointer, which is field-secured and written by the BFF only.
+    for (const column of ['sprk_graphitemid', 'sprk_graphdriveid', 'sprk_hasfile', 'sprk_filepath']) {
+      expect(column in docPayload).toBe(false);
+    }
     expect(docPayload['sprk_documentname']).toBe('brief.pdf');
+    const attach = authenticatedFetch.mock.calls.find(([url]: [string]) => url.endsWith('/api/v1/documents/doc-guid-x/file'));
+    expect(attach).toBeDefined();
+    expect(JSON.parse((attach as [string, RequestInit])[1].body as string)).toEqual({ driveId: 'drive-1', itemId: 'drive-item-1' });
   });
 
   it('withFiles_fallsBackToLiteralNavProp_whenDiscoveryReturnsNoEntries', async () => {
@@ -234,7 +245,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     dataService.createRecord.mockResolvedValueOnce('todo-guid-123').mockResolvedValue('doc-guid-x');
     const authenticatedFetch = makeAuthenticatedFetch([UPLOAD_OK('brief.pdf', 'drive-item-1')]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     await service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')]);
 
     const [, docPayload] = dataService.createRecord.mock.calls[1] as [string, Record<string, unknown>];
@@ -251,7 +262,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     dataService.createRecord.mockResolvedValueOnce('todo-guid-123');
     const authenticatedFetch = makeAuthenticatedFetch([UPLOAD_FAILED(500, 'Server error')]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')]);
 
     expect(result.success).toBe(true); // the to do itself was created
@@ -273,7 +284,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
     // outcome for a to-do whose owning business unit has no sprk_containerid set.
     const authenticatedFetch = makeAuthenticatedFetch([UPLOAD_FAILED(409, 'No storage container is configured')]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
 
     await expect(service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')])).resolves.toEqual(
       expect.objectContaining({
@@ -296,7 +307,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
       .mockRejectedValueOnce(new Error('Duplicate Record')); // sprk_document create fails
     const authenticatedFetch = makeAuthenticatedFetch([UPLOAD_OK('brief.pdf', 'drive-item-1')]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')]);
 
     expect(result.success).toBe(true);
@@ -319,7 +330,7 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
       UPLOAD_FAILED(403, 'forbidden'),
     ]);
 
-    const service = new TodoService(dataService, authenticatedFetch, BFF_BASE_URL);
+    const service = new TodoService(dataService, bffChildWriteFetch(dataService, authenticatedFetch), BFF_BASE_URL);
     const result = await service.createTodo(FORM_VALUES, undefined, [
       makeUploadedFile('good.pdf'),
       makeUploadedFile('bad.pdf'),
@@ -337,23 +348,20 @@ describe('TodoService.createTodo -- file upload + document link (ISS-027 / task 
   });
 
   // -----------------------------------------------------------------
-  // Graceful no-op: uploadedFiles supplied but this TodoService instance
-  // was never given authenticatedFetch/bffBaseUrl (e.g. the
-  // createTodoRegardingChild follow-on path)
+  // Fail closed (UAC-r2 task 147 r1): uploadedFiles supplied but this TodoService instance was never given
+  // authenticatedFetch/bffBaseUrl — the to-do itself is not created (the create goes through the BFF), so no
+  // upload is attempted either.
   // -----------------------------------------------------------------
 
-  it('uploadNotConfigured_warnsAndSkips_ratherThanThrowing_whenFilesSuppliedWithoutDeps', async () => {
+  it('notConnected_refusesTheCreate_andUploadsNothing_whenFilesSuppliedWithoutDeps', async () => {
     installGlobalFetchMockWithoutDocumentNavProps();
     const dataService = createMockDataService();
-    dataService.createRecord.mockResolvedValueOnce('todo-guid-123');
 
     const service = new TodoService(dataService); // no authenticatedFetch / bffBaseUrl
     const result = await service.createTodo(FORM_VALUES, undefined, [makeUploadedFile('brief.pdf')]);
 
-    expect(result.success).toBe(true);
-    expect(result.todoId).toBe('todo-guid-123');
-    expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining('upload is not configured')]));
-    // Only the sprk_todo create -- no attempt to create a document record.
-    expect(dataService.createRecord).toHaveBeenCalledTimes(1);
+    expect(result.success).toBe(false);
+    expect(result.errorMessage).toMatch(/not connected to the Spaarke service/i);
+    expect(dataService.createRecord).not.toHaveBeenCalled();
   });
 });

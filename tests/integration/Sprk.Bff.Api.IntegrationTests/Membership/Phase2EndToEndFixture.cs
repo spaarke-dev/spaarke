@@ -874,6 +874,23 @@ public sealed class SpyMembershipCacheInvalidator : IMembershipCacheInvalidator
         return Task.CompletedTask;
     }
 
+    /// <inheritdoc />
+    /// <remarks>Unified-access-control-r2 task 132's write-path eviction; no Phase 2 path calls it, so it is not recorded.</remarks>
+    public Task InvalidateUserAccessAsync(Guid systemUserId, string? correlationId, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <inheritdoc />
+    /// <remarks>Unified-access-control-r2 task 132's write-path eviction; no Phase 2 path calls it, so it is not recorded.</remarks>
+    public Task InvalidateRecordOwnerChangeAsync(
+        string entityLogicalName, string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        => Task.CompletedTask;
+
+    /// <inheritdoc />
+    /// <remarks>The share-change eviction DataverseWebApiService's share writes trigger (task 132); no Phase 2 path shares, so it is not recorded.</remarks>
+    public Task InvalidateRecordShareChangeAsync(
+        string entitySetName, Guid recordId, string? correlationId, CancellationToken ct)
+        => Task.CompletedTask;
+
     /// <summary>Reset between tests.</summary>
     public void Reset() => _invocations.Clear();
 }

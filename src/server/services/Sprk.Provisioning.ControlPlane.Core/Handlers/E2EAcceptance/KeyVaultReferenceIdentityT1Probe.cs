@@ -135,6 +135,7 @@ using Azure;
 using Azure.Core;
 using Azure.ResourceManager;
 using Azure.ResourceManager.AppService;
+using Microsoft.Extensions.Options;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
@@ -158,15 +159,21 @@ public sealed class KeyVaultReferenceIdentityT1Probe : ITrapProbe
     public TrapKind Kind => TrapKind.T1KeyVaultReferenceIdentity;
 
     private readonly ArmClient _armClient;
+    private readonly TimeSpan _timeout;
     private readonly ILogger<KeyVaultReferenceIdentityT1Probe> _logger;
 
     public KeyVaultReferenceIdentityT1Probe(
         ArmClient armClient,
+        IOptions<H13AcceptanceOptions> options,
         ILogger<KeyVaultReferenceIdentityT1Probe> logger)
     {
         ArgumentNullException.ThrowIfNull(armClient);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
         _armClient = armClient;
+        // H13AcceptanceOptions.TrapVerifierTimeout bounds every trap probe (task 238 applied it to the ARM probes,
+        // which previously ran unbounded beyond the SDK's own retry policy).
+        _timeout = options.Value.TrapVerifierTimeout;
         _logger = logger;
     }
 
@@ -229,22 +236,31 @@ public sealed class KeyVaultReferenceIdentityT1Probe : ITrapProbe
 
         try
         {
-            var prodResponse = await siteResource.GetAsync(cancellationToken).ConfigureAwait(false);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_timeout);
+
+            var prodResponse = await siteResource.GetAsync(timeout.Token).ConfigureAwait(false);
             prodSnapshot = BuildSnapshot(
                 slotLabel: "production",
                 keyVaultReferenceIdentity: prodResponse.Value.Data.KeyVaultReferenceIdentity,
                 userAssignedIdentityRids: ExtractUserAssignedIdentityRids(prodResponse.Value.Data.Identity));
 
             var stagingResponse = await siteResource
-                .GetWebSiteSlotAsync(stagingSlotName, cancellationToken).ConfigureAwait(false);
+                .GetWebSiteSlotAsync(stagingSlotName, timeout.Token).ConfigureAwait(false);
             stagingSnapshot = BuildSnapshot(
                 slotLabel: stagingSlotName,
                 keyVaultReferenceIdentity: stagingResponse.Value.Data.KeyVaultReferenceIdentity,
                 userAssignedIdentityRids: ExtractUserAssignedIdentityRids(stagingResponse.Value.Data.Identity));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw; // Caller-driven cancellation propagates.
+        }
+        catch (OperationCanceledException)
+        {
+            return new TrapVerificationOutcome.InfraFault(Kind,
+                $"T1 verdict deferred: reading App Service '{request.AppServiceName}' slot data exceeded the trap " +
+                $"probe timeout {_timeout}. Re-run H13 once ARM responds.");
         }
         catch (RequestFailedException ex)
         {

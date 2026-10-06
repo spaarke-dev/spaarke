@@ -1,0 +1,231 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="249" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>One customer-stamp template (owner D19) — delete `stacks/model2-full.bicep` + its parameter files, `deploy-infrastructure.yml` validates `customer.bicep`, and fix the five `customer.bicep` defects the comparison found</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T249 (owner decision D19, open item O5)</phase>
+    <gate>startable after T225b (file overlap: customer.json, controlplane-worker-app-service.bicep); must land before T242</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes Bicep stacks + parameter files, edits a CI workflow, edits customer.bicep (deployed by H2a) and ArmDeploymentRunner (.cs) + its tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified by the O5 comparison (file and line evidence below); the risk is completeness across Bicep, workflow, runner and docs, not judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ (azure-deploy skill, provisioning patterns, CHANGELOG) — main-session-only; file overlap with T225b and T248</parallel-reason>
+    <tags>provisioning, bicep, infrastructure, ci-workflows, l2-controlplane, testing, model1-dedicated</tags>
+    <deps>225b</deps>
+  </metadata>
+
+  <prompt>
+    Make `infrastructure/bicep/customer.bicep` the only customer-stamp template: delete `stacks/model2-full.bicep` and the
+    parameter files that only feed it, reduce `deploy-infrastructure.yml` to validating `customer.bicep`, and fix the
+    `customer.bicep` defects the 2026-10-02 comparison found, so T242 can change the Redis module without breaking CI.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer (Bicep, GitHub Actions, .NET 10 L2 control plane). Follow ADRs strictly.
+  </role>
+
+  <goal>
+    No file in the repo deploys or parameterizes `model2-full`; the infrastructure workflow lints and compiles
+    `customer.bicep` on PR/push and has no what-if or deploy stage; `customer.bicep` wires SignalR and the control-plane
+    role grant to real principals, logs Key Vault diagnostics, has no dead `platformKeyVaultName` input and produces no
+    per-deploy tag drift; docs that called `model2-full` current point at `customer.bicep`.
+  </goal>
+
+  <context>
+    <background>
+      Owner D19 (2026-10-02): `customer.bicep` (H2a) is the only customer-stamp template. The O5 comparison found that
+      `stacks/model2-full.bicep` deploys no live environment (`stacks/dev.bicepparam:14-19`: the dev env is hand-built and
+      not managed by it) and cannot deploy as written: customerIds over 8 chars in all three bicepparams (`m2f:35`), the
+      Azure-reserved `-sb` Service Bus suffix (`m2f:159`), no Cosmos (the BFF refuses to start without
+      `CosmosPersistence__Endpoint`), KV references to secrets nothing writes, no `AZURE_CLIENT_ID` pin, one shared
+      subscription (`deploy-infrastructure.yml:54-57`) contradicting amended ADR-027. `deploy-infrastructure.yml` compiles
+      every `stacks/*.bicep` on each PR, and `model2-full` passes `sku`/`capacity`/`subnetId`/`enableRdbPersistence` to
+      `modules/redis.bicep` (`m2f:139-147`) — so T242's Redis module replacement would break CI while it exists.
+      customer.bicep defects found by the same comparison: (1) SignalR receives `bffPrincipalId` (`customer.bicep:537`),
+      which H2a never passes, and `signalr.bicep:83` disables key auth → no BFF access when enabled; (2)
+      `controlPlaneUamiPrincipalId` is never passed (no match in src/), so the Website Contributor grant on the BFF app is
+      never created and PRQ-E-05's "emitted on every stamp" is false; (3) Key Vault diagnostic logging is not wired
+      (`:252-265`); (4) `platformKeyVaultName` is only echoed as an output (`:885`); (5) the default tags include
+      `utcNow()`, so every upgrade what-if shows a tag Modify.
+    </background>
+    <relevant-files>
+      <file>infrastructure/bicep/stacks/model2-full.bicep, stacks/model2-full.json (delete)</file>
+      <file>infrastructure/bicep/stacks/dev.bicepparam, staging.bicepparam, prod.bicepparam (delete)</file>
+      <file>infrastructure/bicep/parameters/model2-customer-template.bicepparam (delete)</file>
+      <file>infrastructure/bicep/customer-deployment.bicepparam (delete — verify its `using` target first)</file>
+      <file>.github/workflows/deploy-infrastructure.yml</file>
+      <file>infrastructure/bicep/customer.bicep (+ customer.json)</file>
+      <file>infrastructure/bicep/modules/signalr.bicep, modules/key-vault.bicep, modules/monitoring.bicep (read; edit only if wiring requires)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmDeploymentRunner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/ArmDeploymentRunnerTests.cs</file>
+      <file>scripts/tests/bicep-e2e-dry-run.ps1</file>
+      <file>scripts/provisioning-prereqs/prereqs.yaml (PRQ-E-05)</file>
+      <file>docs/architecture/INFRASTRUCTURE-PACKAGING-STRATEGY.md, docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md, docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md, docs/guides/AI-DEPLOYMENT-GUIDE.md, docs/guides/AI-MONITORING-DASHBOARD.md, infrastructure/README.md, provisioning-runs/_templates/handler-log.md</file>
+      <file>.claude/skills/azure-deploy/SKILL.md, .claude/patterns/provisioning/INDEX.md, .claude/CHANGELOG.md (main session)</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/notes/model1-dedicated-remediation-plan.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+    </files>
+    <patterns>
+      <pattern name="Upgrade what-if drift" location="T225a POML notes (bff-runtime-rbac CR-1); ArmWhatIfDriftDetector">
+        Any value that changes on every deploy (timestamps) or a rewritten deployed description shows as a Modify on an
+        existing stamp's upgrade what-if, which the drift detector rejects.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <constraints>
+    <constraint source="owner D19 (2026-10-02)">
+      Delete, do not repoint: `stacks/model2-full.{bicep,json}`, `stacks/{dev,staging,prod}.bicepparam`,
+      `parameters/model2-customer-template.bicepparam`, `customer-deployment.bicepparam` (confirm each file's `using`
+      target is `model2-full` first; a file that uses something else is reported, not deleted). Git history keeps them.
+    </constraint>
+    <constraint source="owner D19 + project CLAUDE.md (r1 owns its workflow changes since ci-cd-unit-test-remediation-r1 closed)">
+      `deploy-infrastructure.yml`: keep a validate job that lints all Bicep and compiles `customer.bicep`
+      (`az bicep build --outfile`); remove the what-if and deploy stages and the dispatch inputs that feed them. Customer
+      stamps deploy only through H2a.
+    </constraint>
+    <constraint source="ArmWhatIfDriftDetector / T225a CR-1">
+      Every `customer.bicep` change must leave an existing stamp's upgrade what-if free of spurious Modify operations:
+      do not rewrite deployed role-assignment descriptions; replace `utcNow()` tags with values that are stable for a given
+      customer + environment.
+    </constraint>
+    <constraint source="ADR-028 (MI for app-only outbound) + D13">
+      SignalR access is granted to the stamp UAMI (`uami.outputs.principalId`); never re-enable key auth. The control-plane
+      principal passed to `controlPlaneUamiPrincipalId` comes from the existing L2 principal Worker option (T245b) — do
+      not add a new option.
+    </constraint>
+    <constraint source="scope">
+      No feature from `model2-full` other than Key Vault diagnostic logging is ported (dashboard/alerts, VNet, autoscale,
+      AI Foundry stay out — D19). Redis untouched (T242). OpenAI deployments parameter untouched (T247). Content Safety
+      untouched (T246). `controlplane-subscription-rbac.bicep` untouched (T228). No change to `src/server/api/Sprk.Bff.Api`.
+    </constraint>
+  </constraints>
+
+  <escalation>
+    <trigger>Any file slated for deletion is referenced by a live deployment pipeline, another project's worktree, or a `using` target other than `model2-full` → STOP and report.</trigger>
+    <trigger>Removing `platformKeyVaultName` or changing the tags makes `ArmTemplateInspector`, `RunContextContractTests` or the what-if drift tests fail for a reason other than the intended change → STOP; do not loosen the test.</trigger>
+    <trigger>The L2 principal option from T245b is not available to `ArmDeploymentRunner` without a new DI dependency on an unrelated module → STOP and report the options.</trigger>
+  </escalation>
+
+  <steps mode="directional">
+    <step order="0">0 behind origin/master; `git grep -n "model2-full\|customer-deployment.bicepparam\|model2-customer-template"` → categorized hit list in notes.</step>
+    <step order="1">Delete the template + parameter files (after the `using` check).</step>
+    <step order="2">`deploy-infrastructure.yml` → validate-only; keep its PR/push triggers on `infrastructure/bicep/**`.</step>
+    <step order="3">`customer.bicep`: SignalR principal; `controlPlaneUamiPrincipalId` passed from `ArmDeploymentRunner.BuildParametersPayload`; Key Vault diagnostic setting to the stamp's Log Analytics; remove `platformKeyVaultName` (param + output) and its payload entry if any; stable tags. Recompile `customer.json` (`--outfile`).</step>
+    <step order="4">ArmDeploymentRunnerTests: the payload now carries `controlPlaneUamiPrincipalId`; a missing L2 principal fails the same way other required options do. PRQ-E-05 text corrected; `validate.ps1`.</step>
+    <step order="5">Docs and `.claude` references repointed to `customer.bicep` (main session for `.claude`), CHANGELOG entry; `bicep-e2e-dry-run.ps1` stack list/comments.</step>
+    <step order="6">Verify: every remaining Bicep compiles and checked-in JSON = fresh compile; `bicep-e2e-dry-run.ps1` PASS; ControlPlane builds 0/0; ControlPlane.Tests no failures beyond the 6 T221 baseline; ArchTests pass; actionlint/yaml check on the workflow if available.</step>
+    <step order="7">Step 9.5 gates. Close: POML notes, TASK-INDEX `✅ [done]`, plan §7 T249 + §3/§4 rows it settles, current-task.md, drift check. Commit + push.</step>
+  </steps>
+
+  <tools>
+    <tool name="az">`az bicep build --outfile` / `az bicep lint`</tool>
+    <tool name="dotnet">Build + test ControlPlane and ArchTests</tool>
+    <tool name="pwsh">bicep-e2e-dry-run.ps1, prereqs validate.ps1, check-task-status-drift.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="file-deleted">stacks/model2-full.{bicep,json}; stacks/{dev,staging,prod}.bicepparam; parameters/model2-customer-template.bicepparam; customer-deployment.bicepparam</output>
+    <output type="file-modified">deploy-infrastructure.yml; customer.bicep (+ customer.json); ArmDeploymentRunner.cs (+ tests); prereqs.yaml; docs; .claude skill/pattern/CHANGELOG</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`git grep model2-full` returns only historical records (dated notes, CHANGELOG, POMLs); none of the deleted files exist.</criterion>
+    <criterion testable="true">`deploy-infrastructure.yml` lints all Bicep and compiles `customer.bicep` on PR/push; it has no what-if job, no deploy job and no dispatch input naming a stack.</criterion>
+    <criterion testable="true">`customer.bicep`: SignalR's data-plane role targets the stamp UAMI principal; the Website Contributor grant is created whenever `controlPlaneUamiPrincipalId` is non-empty and `ArmDeploymentRunner` always sends it; Key Vault has a diagnostic setting to the stamp Log Analytics workspace; `platformKeyVaultName` no longer exists; no tag value is computed from the deploy time.</criterion>
+    <criterion testable="true">ArmDeploymentRunner tests: the payload contains `controlPlaneUamiPrincipalId` = the configured L2 principal; the Model 1 arm still fails closed (T2 unchanged).</criterion>
+    <criterion testable="true">Every remaining Bicep file compiles; each checked-in ARM JSON equals a fresh compile; `bicep-e2e-dry-run.ps1` PASS; prereqs `validate.ps1` OK with PRQ-E-05 describing what customer.bicep actually emits.</criterion>
+    <criterion testable="true">ControlPlane projects build 0/0; ControlPlane.Tests no failures beyond the 6 T221 baseline; ArchTests pass; Redis, OpenAI deployments, Content Safety, `controlplane-subscription-rbac.bicep` and the BFF unchanged.</criterion>
+    <criterion testable="true">Test scope: cover the changed runner payload contract and the negative case named above; anything beyond that needs a one-line justification in the POML notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Filed 2026-10-02 from plan §7 T249 / owner D19 (open item O5). Evidence: the O5 comparison (main-session record in
+    plan §2 D19). Dev/demo environments are hand-built and stay outside IaC until the D13 follow-on.
+
+    COMPLETION (2026-10-02). Verified: ControlPlane Api / Worker / Tests build 0 warnings 0 errors; ControlPlane.Tests
+    2127 pass / 6 fail (the T221 CustomerRunGuardModulePostConfigureTests baseline) / 1 skip; ArchTests 341/341;
+    customer.json, platform-controlplane.json and platform.json = fresh `az bicep build --outfile` compiles; every
+    `.bicep` lints (0 failures) and every `parameters/*.bicepparam` builds; bicep-e2e-dry-run.ps1 OVERALL PASS; prereqs
+    validate.ps1 OK (34 prereqs, manifest v5); catalog -Verify OK; Provision-Customer.ps1 binds (Get-Command).
+
+    DONE: stacks/model2-full.{bicep,json} + stacks/{dev,staging,prod}.bicepparam +
+    parameters/model2-customer-template.bicepparam + customer-deployment.bicepparam deleted (all `using` model2-full;
+    the deletions landed in checkpoint commit dcc15b560). deploy-infrastructure.yml → "Validate Bicep Infrastructure":
+    lint every .bicep, compile customer.bicep + stacks/*.bicep + parameters/*.bicepparam; no what-if, deploy, dispatch
+    inputs or OIDC (`permissions: contents: read`). customer.bicep: SignalR App Server → stamp UAMI; Key Vault diagnostics
+    → the stamp's Log Analytics workspace RESOURCE ID; `platformKeyVaultName` param + output removed; `createdDate:
+    utcNow()` tag removed. L2 principal → `controlPlaneUamiPrincipalId` (Website Contributor on the stamp BFF) for
+    Model 1 stamps. ~25 docs / comments repointed (docs agent + gate fixes).
+
+    OWNER DECISIONS taken during the task (AskUserQuestion 2026-10-02; plan §2 D20 + D21):
+    D20 — the L2 principal is ONE Worker option, `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`,
+    ValidateOnStart), shared by H2a and H4; it replaces KvSecretsPopulationOptions.ControlPlanePrincipalObjectId (T245b).
+    Background: escalation trigger #3 fired (H2a could reach H4's option only through H4's options class) and I added an
+    H2a-local option instead of stopping — the adr-check + code-review gates caught it; the owner chose the shared option.
+    D21 — H2a sends the principal for Model 1 only: a Model 2 stamp is in the customer's tenant (Lighthouse), where a role
+    assignment naming a Spaarke-tenant principal would fail the deployment; Model 2 keeps its pre-T249 behaviour (not sent).
+
+    QUALITY GATES (Step 9.5). code-review: C1 Critical FIXED — Key Vault diagnostics were given monitoring's
+    `logAnalyticsWorkspaceId` output (the workspace customerId GUID; every H2a deploy would have failed) → `logAnalyticsId`,
+    and key-vault.bicep's param description now says "ARM resource ID" (platform.json recompiled for the description);
+    W1 → D20; W2 FIXED (BicepInfraDeployOptions + the shared option ValidateOnStart; boot-test theory); W3 → D21; W4 FIXED
+    (Provision-Customer.ps1 stopped passing the removed parameter); W5 FIXED (runner theory captures the deployment PUT
+    body — Model 1 carries the configured principal, Model 2 does not; detector test captures the what-if body); S1 stale
+    parameter JSONs regenerated (and customer-template.bicepparam's placeholder customerId was 9 chars vs @maxLength(8) —
+    it never compiled); S2 inventory row; S3/S4/S9/S10/S11 comments + docs; S5 canonical GUID form; S6 workflow compiles
+    parameter files + WORKFLOWS.md no longer claims warnings fail; S8 test section header; S12 not done (matches the
+    file's pattern). adr-check: V1 = W4; V2 = W2; warnings 1→D20, 2/3 rollout + drift below, 4 below, 5 = S1, 6 inventory
+    fixed, 7 = S5, 8 = W5, 9/10 below. RE-REVIEW of the D20/D21 change (Opus, before commit): approve with warnings, no
+    Critical; W1/W2 (Model 2 Lighthouse roles unchecked; H4's vault grant is cross-tenant on Model 2 — predates T249) →
+    recorded on ControlPlaneIdentityOptions + FOLLOW-UPS; W3 = these notes (the POML constraint "do not add a new option"
+    and criterion "always sends it" are SUPERSEDED by D20/D21); S1 stale comments fixed; S2 rollout order in the guide;
+    S4 canonical GUID only on the Model 1 branch; S5 boot test reduced to one case; S6 PRQ-E-05 says Model 1; S3
+    (Validate-throws pattern hides later misconfigurations — pre-existing, 4 registrations) not changed.
+    Fix-at-discovery: the Seam test factory lacked two settings validated at Worker start since T142/T245b (the live-only
+    seam test could not boot) — added with the new ones.
+
+    DEVIATIONS: (1) AC "ArmDeploymentRunner always sends it" → Model 1 only (D21). (2) No separate L2-principal option on
+    BicepInfraDeployOptions (D20 shared option instead; the constraint "do not add a new option" is superseded by the
+    owner's choice). (3) `createdDate` tag dropped, not replaced (resource creation time is in ARM `systemData`). (4) The
+    workflow keeps its file name but is renamed "Validate Bicep Infrastructure" (job name `Validate Bicep` unchanged; the
+    master ruleset requires only `Router`). (5) customer.bicep's `bffPrincipalId` param (membership topic Sender/Receiver)
+    left as is — nothing passes it and the namespace-scoped Service Bus roles already cover the stamp UAMI.
+
+    ROLLOUT: deploy `platform-controlplane` (sets `ControlPlaneIdentity__PrincipalObjectId`) FIRST, then a Worker built
+    from this commit straight away — an older Worker refuses to start without KvSecretsPopulationOptions__
+    ControlPlanePrincipalObjectId, this one without the new name; queued messages wait (recorded in the deployment guide). Also still: Worker before the next `customer` ARM
+    artifact publish (T225b). One-time what-if drift: the first upgrade of a stamp deployed before T249 sees a tag-removal
+    Modify on every tagged resource (no such stamp exists — none passes H0 yet, G28).
+
+    Test-scope justification: runner theory (Model 1 sends / Model 2 omits, through DeployAsync with the configured option)
+    and one detector test (what-if payload = deploy payload) cover the changed payload contract; the boot test covers
+    the negative case (missing / non-GUID principal fails host start); H4's two Validate tests were retargeted to the
+    shared option. The literal-in/literal-out payload test and the runner's Validate theory were deleted (superseded).
+
+    FOLLOW-UPS (not done here): MODEL 2 (out of scope, owner 2026-09-30) — define + check the Lighthouse authorizations a
+    Model 2 stamp needs (H4b/H9 rely on them; H1 only checks a delegation exists) and resolve H4's cross-tenant Key Vault
+    grant (T245b) before Model 2 is brought back in scope. BFF comments still naming model2-full (CustomerOptions.cs, ConfigurationModule.cs,
+    SessionFileBlobStore.cs, appsettings.template.json) → T235. Dependabot `azure/cli` 2→3 PR will need a rebase on the
+    rewritten workflow. The now-unused `repo:…:pull_request` OIDC federated credential (GITHUB-ACTIONS-AZURE-OIDC-SETUP.md)
+    can be removed by an operator. infrastructure/README "Post-Deployment Steps" names scripts that do not exist.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load every file in knowledge/files before Step 1. Follow task-execute; FULL rigor; Step 9.5 gates are mandatory.</protocol>
+  </execution>
+</task>

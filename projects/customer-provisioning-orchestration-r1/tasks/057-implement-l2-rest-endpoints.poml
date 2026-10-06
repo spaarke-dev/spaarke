@@ -4,7 +4,7 @@
     <title>Implement L2 REST endpoints per §4.2 API surface (all 9 endpoints)</title>
     <phase>C Wave C5 — L2 REST + Reconciler</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include 'l2-controlplane','bff-api','auth'; modifies .cs files; implements the public control-plane surface consumed by L3 skill; FR-21 acceptance scope; PR-time /conflict-check obligated.</rigor-reason>
     <model-tier>opus</model-tier>

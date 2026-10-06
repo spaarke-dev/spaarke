@@ -15,11 +15,13 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 {
     private readonly HttpClient _client;
+    private readonly CustomWebAppFactory _factory;
     private readonly Guid _testPlaybookId = Guid.NewGuid();
     private readonly Guid _testNodeId = Guid.NewGuid();
 
     public NodeEndpointsTests(CustomWebAppFactory factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -33,6 +35,7 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert - endpoint exists (not 404)
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/ai/playbooks/{_testPlaybookId}/nodes");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -80,6 +83,7 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "POST", $"/api/ai/playbooks/{_testPlaybookId}/nodes");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     [Fact]
@@ -114,6 +118,7 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "GET", $"/api/ai/playbooks/{_testPlaybookId}/nodes/{_testNodeId}");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     #endregion
@@ -134,6 +139,7 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "PUT", $"/api/ai/playbooks/{_testPlaybookId}/nodes/{_testNodeId}");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     #endregion
@@ -148,26 +154,13 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "DELETE", $"/api/ai/playbooks/{_testPlaybookId}/nodes/{_testNodeId}");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     #endregion
 
-    #region Reorder Nodes
-
-    [Fact]
-    public async Task ReorderNodes_EndpointExists_AcceptsPut()
-    {
-        // Arrange
-        var request = new { NodeIds = new[] { Guid.NewGuid(), Guid.NewGuid() } };
-
-        // Act
-        var response = await _client.PutAsJsonAsync($"/api/ai/playbooks/{_testPlaybookId}/nodes/reorder", request);
-
-        // Assert
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
-    }
-
-    #endregion
+    // PUT /api/ai/playbooks/{id}/nodes/reorder was RETIRED by unified-access-control-r2 task 164 (owner round 10
+    // item 1); its absence is pinned by tests/integration/regression/AiPlaybookPromptRecordMatchRouteRetirementTests.cs.
 
     #region Update Node Scopes
 
@@ -186,6 +179,7 @@ public class NodeEndpointsTests : IClassFixture<CustomWebAppFactory>
 
         // Assert
         response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        EndpointTable.AssertMapped(_factory, "PUT", $"/api/ai/playbooks/{_testPlaybookId}/nodes/{_testNodeId}/scopes");  // the anonymous NotBe(404) above can no longer fail (FallbackPolicy, UAC-r2 task 167 f1)
     }
 
     #endregion

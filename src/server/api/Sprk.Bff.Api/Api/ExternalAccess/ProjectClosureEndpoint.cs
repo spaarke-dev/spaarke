@@ -2,6 +2,8 @@ using System.Text.Json;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
@@ -13,8 +15,21 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 /// Closing a project cascades revocation of all external access:
 ///   1. Deactivates all active sprk_externalrecordaccess records for the project —
 ///      contact grants AND organization grants
-///   2. Removes all external members from the SPE container (if containerId provided)
+///   2. Removes THOSE GRANTEES' permissions from the project's OWN SPE container — the container the
+///      SERVER derives from the project (never a client-supplied id), and only when the project is secure
 ///   3. Invalidates Redis participation cache for all affected Contacts
+///
+/// <para><b>Task 166 (route-authorization sweep finding S-39 + amendment (e)).</b> Two defects, one step.
+/// (1) The container was <c>CloseProjectRequest.ContainerId</c>, a free body string, while DelegationRuleFilter
+/// authorized only <c>ProjectId</c> — so a caller with Write on ANY project could name ANY container. The field is
+/// deleted (task 085 precedent) and the container is derived with
+/// <see cref="RecordContainerResolver.ResolveForRecordAsync(string, Guid, CancellationToken)"/>: ONLY a
+/// <c>ResolvedSecure</c> project's own container is touched; a non-secure project's derived container is the
+/// SHARED business-unit container and is never touched. (2) The removal was
+/// <c>RemoveAllExternalMembersAsync</c>, which deleted EVERY permission with a user identity — internal users'
+/// included. It now removes exactly the permissions of the grantees whose grants this closure revoked (contacts,
+/// and every active member of a revoked organization grant), through the same email-keyed
+/// <see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/> the single-grant revoke uses.</para>
 ///
 /// <para><b>The cascade never reports a success it did not achieve</b> (task 016, finding A-12, spec
 /// FR-15). If the grants cannot be enumerated, or any row cannot be deactivated, the response is a
@@ -27,18 +42,13 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///
 /// Follows ADR-001: Minimal API — no controllers.
 /// Follows ADR-008: Authorization applied at route group level in ExternalAccessEndpoints.
-/// Follows ADR-009: Redis cache invalidated for each affected Contact.
+/// Follows ADR-009: Redis cache invalidated for each affected Contact and organization member (task 137).
 /// </summary>
 public static class ProjectClosureEndpoint
 {
     private const string ExternalAccessEntitySet = "sprk_externalrecordaccesses";
-    // Cache key components for invalidation. BOUND to ExternalParticipationService (the read/store side,
-    // the single source of truth) so a version bump there stays in sync here automatically. Task 073 #7
-    // fix: the prior hard-coded `CacheVersion = 1` silently missed the v2/v3 stored key, so the
-    // cascade-revoke invalidation on project closure relied on the 60s TTL. Per-Contact participation
-    // cache — not an authz decision (ADR-009); tenant scope is derived from the caller's 'tid' claim.
-    private const string ExternalAccessResource = ExternalParticipationService.ExternalAccessResource;
-    private const int CacheVersion = ExternalParticipationService.CacheVersion;
+    // Cache invalidation (task 137): ExternalParticipationService.InvalidateGrantSetsAsync — the ONE routine,
+    // which owns the key, every tenant it can be cached under, and the organization → members expansion.
 
     /// <summary>
     /// Registers the close-project endpoint on the external-access management group.
@@ -50,7 +60,8 @@ public static class ProjectClosureEndpoint
             .WithSummary("Close a Secure Project and revoke all external access")
             .WithDescription(
                 "Deactivates all active sprk_externalrecordaccess records for the project, " +
-                "removes external members from the SPE container (if containerId provided), " +
+                "removes those grantees' permissions from the project's own SPE container (derived server-side; " +
+                "secure projects only — a client-supplied containerId is ignored), " +
                 "and invalidates the Redis participation cache for all affected Contacts.")
             .Produces<CloseProjectResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -64,10 +75,12 @@ public static class ProjectClosureEndpoint
     /// <summary>
     /// Handles POST /api/v1/external-access/close-project.
     /// </summary>
-    /// <param name="request">The close project request containing ProjectId and optional ContainerId.</param>
+    /// <param name="request">The close project request containing ProjectId.</param>
     /// <param name="dataverseClient">Dataverse Web API client for querying and updating records.</param>
-    /// <param name="speContainerMembership">SPE container membership service for removing external members.</param>
-    /// <param name="cache">Distributed Redis cache for invalidating Contact participation entries.</param>
+    /// <param name="speContainerMembership">SPE container membership service for removing the revoked grantees.</param>
+    /// <param name="participations">The grant-data service whose single invalidation routine clears every affected
+    /// contact's cached grant set — organization members included (task 137).</param>
+    /// <param name="containerResolver">Derives the project's own container (task 166) — never the request.</param>
     /// <param name="httpContext">The current HTTP context for trace ID logging.</param>
     /// <param name="logger">Logger for operation tracing.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -80,7 +93,8 @@ public static class ProjectClosureEndpoint
         CloseProjectRequest request,
         DataverseWebApiClient dataverseClient,
         SpeContainerMembershipService speContainerMembership,
-        ITenantCache cache,
+        ExternalParticipationService participations,
+        RecordContainerResolver containerResolver,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -95,8 +109,8 @@ public static class ProjectClosureEndpoint
         }
 
         logger.LogInformation(
-            "[CLOSE-PROJECT] Starting project closure: ProjectId={ProjectId}, ContainerId={ContainerId}, TraceId={TraceId}",
-            request.ProjectId, request.ContainerId, httpContext.TraceIdentifier);
+            "[CLOSE-PROJECT] Starting project closure: ProjectId={ProjectId}, TraceId={TraceId}",
+            request.ProjectId, httpContext.TraceIdentifier);
 
         // Step 1: Query all active sprk_externalrecordaccess records for the project.
         //
@@ -137,8 +151,8 @@ public static class ProjectClosureEndpoint
                 AffectedContactIds: []));
         }
 
-        // Organization grants carry no contact, so they contribute nothing to the per-contact cache
-        // invalidation below — see InvalidateContactCachesAsync for why that gap is bounded.
+        // Organization grants carry no contact; their organizations are expanded to every ACTIVE member by the
+        // cache invalidation in Step 4 (task 137). AffectedContactIds in the response stays the grants' own contacts.
         var affectedContactIds = activeRecords
             .Where(r => r.ContactId.HasValue)
             .Select(r => r.ContactId!.Value)
@@ -156,7 +170,7 @@ public static class ProjectClosureEndpoint
         var (revokedCount, failedCount) = await DeactivateAccessRecordsAsync(
             dataverseClient, activeRecords, logger, ct);
 
-        // Step 3: Remove all external members from the SPE container (if containerId provided).
+        // Step 3: Remove the revoked grantees' permissions from the project's OWN container.
         //
         // Guarded for the same reason enumeration is: container membership IS access, so a failure here
         // leaves external users able to reach the project's files. Letting it escape as an unhandled
@@ -164,51 +178,59 @@ public static class ProjectClosureEndpoint
         // useful thing to tell the operator. The failure is recorded and reported after Step 4, so cache
         // invalidation still happens.
         //
-        // ✅ REACHABLE AS OF TASK 017. When task 016 wrote this guard it could not fire:
-        // ListExternalMembersAsync caught every exception and returned [], so "0 removed" was
-        // indistinguishable from "Graph unreachable". Task 017 made both failure modes observable — a
-        // listing failure now propagates, and per-member failures come back in SpeBulkRemovalResult.Failed
-        // — so a container that was not cleared reports as such instead of hiding behind a 200.
+        // Task 166 (S-39 + amendment e): WHICH container is the SERVER's answer for THIS project — the
+        // body's ContainerId is gone — and WHO is removed is exactly this closure's revoked grantees, never
+        // every user permission (which stripped internal users too). See DeriveRecordOwnContainerAsync and
+        // RemoveRevokedGranteesAsync.
+        var (closureContainerId, containerCleared) = await DeriveRecordOwnContainerAsync(
+            containerResolver, "sprk_project", request.ProjectId, logger, ct);
+
         int speRemovedCount = 0;
-        bool containerCleared = true;
-        if (!string.IsNullOrWhiteSpace(request.ContainerId))
+        if (closureContainerId is not null)
         {
             try
             {
-                var removal = await speContainerMembership.RemoveAllExternalMembersAsync(
-                    request.ContainerId, ct);
+                var removal = await RemoveRevokedGranteesAsync(
+                    speContainerMembership, dataverseClient, closureContainerId, activeRecords, logger, ct);
 
                 speRemovedCount = removal.Removed;
-                containerCleared = removal.IsComplete;
+                containerCleared = removal.Complete;
 
-                if (removal.IsComplete)
+                if (removal.Complete)
                 {
                     logger.LogInformation(
-                        "[CLOSE-PROJECT] Removed {Count} external SPE members from container {ContainerId}",
-                        speRemovedCount, request.ContainerId);
+                        "[CLOSE-PROJECT] Removed {Count} revoked grantee permission(s) from project {ProjectId}'s " +
+                        "own container {ContainerId}; internal users' permissions were not touched.",
+                        speRemovedCount, request.ProjectId, closureContainerId);
                 }
                 else
                 {
                     logger.LogError(
-                        "[CLOSE-PROJECT] Container {ContainerId} NOT fully cleared: {Removed} removed, " +
-                        "{Failed} external members retain FILE access.",
-                        request.ContainerId, removal.Removed, removal.Failed);
+                        "[CLOSE-PROJECT] Container {ContainerId} NOT fully cleared of the revoked grantees: " +
+                        "{Removed} removed, {Unresolved} could not be confirmed removed and may retain FILE access.",
+                        closureContainerId, removal.Removed, removal.Unresolved);
                 }
             }
             catch (Exception ex)
             {
                 containerCleared = false;
                 logger.LogError(ex,
-                    "[CLOSE-PROJECT] Failed to clear external members from container {ContainerId}. " +
+                    "[CLOSE-PROJECT] Failed to clear the revoked grantees from container {ContainerId}. " +
                     "External users may retain FILE access even though {Revoked} grants were revoked.",
-                    request.ContainerId, revokedCount);
+                    closureContainerId, revokedCount);
             }
         }
 
-        // Step 4: Invalidate Redis cache for all affected Contacts. Runs unconditionally — it only ever
-        // removes access, so it is worth doing even when an earlier step failed.
-        var tenantId = ExtractTenantId(httpContext);
-        await InvalidateContactCachesAsync(cache, tenantId, affectedContactIds, logger, ct);
+        // Step 4: Invalidate the grant cache of every affected contact — the ONE routine (task 137). Runs
+        // unconditionally — it only ever removes access, so it is worth doing even when an earlier step failed.
+        // Organization grants expand to every ACTIVE member (they used to wait out the 60-second TTL), and every
+        // tenant a grant set can be cached under is cleared, the CIAM one included. Never throws.
+        var closedOrganizationIds = activeRecords
+            .Where(r => r.IsOrganizationGrant && r.OrganizationId.HasValue)
+            .Select(r => r.OrganizationId!.Value)
+            .Distinct()
+            .ToList();
+        await participations.InvalidateGrantSetsAsync(affectedContactIds, closedOrganizationIds, CancellationToken.None);
 
         // A row we could not deactivate is a participant who still has access. Reporting 200 here would
         // tell the operator the project is closed while it is not — the same false-success shape the
@@ -238,8 +260,8 @@ public static class ProjectClosureEndpoint
                 httpContext,
                 ClosureContainerNotClearedReason,
                 $"All {revokedCount} external grants for project {request.ProjectId} were revoked, but the " +
-                $"SPE container '{request.ContainerId}' could not be cleared of external members, who may " +
-                "retain file access. Retry the closure.",
+                "project's SPE container could not be determined or could not be cleared of those grantees, " +
+                "who may retain file access. Retry the closure.",
                 accessRecordsRevoked: revokedCount);
         }
 
@@ -281,6 +303,234 @@ public static class ProjectClosureEndpoint
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /// <summary>
+    /// Task 166 (S-39, and amendment (b) for <c>/revoke</c>): the container a closure or a revoke may touch,
+    /// derived by the SERVER from the authorized record — the project being closed, or the grant's root.
+    /// </summary>
+    /// <returns>
+    /// <c>(containerId, true)</c> — the project is SECURE and owns a container: that container, and only it, may
+    /// be cleaned. <c>(null, true)</c> — the project is NOT secure (<c>ResolvedFallback</c>: its derived container
+    /// is the SHARED business-unit container, and clearing grantees from it could remove access other records
+    /// rely on) or has no container (<c>Unresolved</c>): the container step is skipped and the closure is not
+    /// failed for it. <c>(null, false)</c> — the decision could not be made (<c>FailClosed</c>, a secure project
+    /// whose container is blank, a resolver <see cref="SdapProblemException"/> or any other fault): the closure
+    /// reports <see cref="ClosureContainerNotClearedReason"/>, because "we could not tell which container" is not
+    /// "nothing to clean".
+    /// </returns>
+    /// <remarks>
+    /// <para>The <see cref="DelegationRuleFilter"/> Write gate on the record has already run (close: the
+    /// <c>ProjectId</c>; revoke: the grant row's root), so the record named here is one the caller may act on; the
+    /// container follows from it by construction, and the client cannot name a different one (a sent
+    /// <c>containerId</c> is an unknown JSON member, ignored).</para>
+    /// <para><b>OWN container, never an ancestor's (task 166 r1).</b> This asks
+    /// <see cref="RecordContainerResolver.ResolveOwnContainerAsync"/>, not the content-placement question
+    /// <see cref="RecordContainerResolver.ResolveForRecordAsync(string, Guid, CancellationToken)"/>: since task 155 the
+    /// latter answers a NON-secure project or work assignment filed under a secure root with the ROOT's container,
+    /// and stripping this record's revoked grantees from there would remove permissions that a grant on the root
+    /// itself may still justify. A record that is not itself secure owns no isolated container, so its step is
+    /// skipped; a record whose secure flag is unreadable is "could not be determined".</para>
+    /// </remarks>
+    internal static async Task<(string? ContainerId, bool Decided)> DeriveRecordOwnContainerAsync(
+        RecordContainerResolver containerResolver,
+        string entityLogicalName,
+        Guid recordId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        ContainerDecision decision;
+        try
+        {
+            decision = await containerResolver.ResolveOwnContainerAsync(entityLogicalName, recordId, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "[CONTAINER-DERIVE] Could not derive {Entity} {RecordId}'s own container ({ErrorType}); the container "
+                + "step cannot run and will be reported as not cleared.",
+                entityLogicalName, recordId, ex is SdapProblemException problem ? problem.Code : ex.GetType().Name);
+            return (null, false);
+        }
+
+        switch (decision.Outcome)
+        {
+            case ContainerDecisionOutcome.ResolvedSecure when !string.IsNullOrWhiteSpace(decision.ContainerId):
+                return (decision.ContainerId, true);
+
+            case ContainerDecisionOutcome.ResolvedFallback:
+            case ContainerDecisionOutcome.Unresolved:
+                logger.LogInformation(
+                    "[CONTAINER-DERIVE] {Entity} {RecordId} is not a secure record with its own container (outcome "
+                    + "{Outcome}); the container step is SKIPPED — it owns no isolated container, and neither the "
+                    + "shared business-unit container nor a secure ancestor's container is ever swept on its behalf.",
+                    entityLogicalName, recordId, decision.Outcome);
+                return (null, true);
+
+            default:
+                // FailClosed (secure with no container, or an unreadable secure flag), or ResolvedSecure with a
+                // blank container id.
+                logger.LogError(
+                    "[CONTAINER-DERIVE] {Entity} {RecordId}'s container decision is {Outcome} (container id present: "
+                    + "{HasContainer}); the container step cannot run and will be reported as not cleared.",
+                    entityLogicalName, recordId, decision.Outcome, !string.IsNullOrWhiteSpace(decision.ContainerId));
+                return (null, false);
+        }
+    }
+
+    /// <summary>Outcome of <see cref="RemoveRevokedGranteesAsync"/>.</summary>
+    /// <param name="Removed">Permissions actually deleted.</param>
+    /// <param name="Unresolved">Grantees whose permission could not be CONFIRMED absent or removed.</param>
+    internal readonly record struct GranteeRemoval(int Removed, int Unresolved)
+    {
+        /// <summary>Every revoked grantee is confirmed to hold no permission on the container.</summary>
+        public bool Complete => Unresolved == 0;
+    }
+
+    /// <summary>
+    /// Task 166 (amendment e): removes from <paramref name="containerId"/> the permissions of EXACTLY the grantees
+    /// this closure revoked — each contact grant's contact, and every active member of each organization grant —
+    /// matched by the email key membership is written with, through ONE paged read
+    /// (<see cref="SpeContainerMembershipService.RemoveMembershipsAsync"/>, the single-grant revoke's mechanism).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why not <c>RemoveAllExternalMembersAsync</c> any more.</b> It deleted every permission carrying a
+    /// user identity, which on SPE is every individual grant — internal users included (the demo provisioning
+    /// path and the SPE admin console both add internal users). Closing a project must revoke external access, not
+    /// lock its own attorneys out of the files. The method had no other caller and was deleted.</para>
+    /// <para><b>Fail closed, per grantee.</b> A contact with no email, an email that could not be read, an
+    /// organization whose membership could not be enumerated or exceeds the sweep bound, and a per-permission
+    /// failure each count as UNRESOLVED — "we could not confirm they are gone" — so the closure reports
+    /// <see cref="ClosureContainerNotClearedReason"/> rather than a 200. "No permission found" on a FULLY enumerated
+    /// container is the healthy broker-only answer and is not a failure.</para>
+    /// </remarks>
+    internal static async Task<GranteeRemoval> RemoveRevokedGranteesAsync(
+        SpeContainerMembershipService speContainerMembership,
+        DataverseWebApiClient dataverseClient,
+        string containerId,
+        IReadOnlyList<ExternalAccessRecord> revokedRecords,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var unresolved = 0;
+        var contactIds = new HashSet<Guid>();
+
+        foreach (var record in revokedRecords)
+        {
+            if (record.ContactId is { } contactId)
+            {
+                contactIds.Add(contactId);
+                continue;
+            }
+
+            if (record.OrganizationId is not { } organizationId)
+            {
+                // An organization grant with no organization names nobody we can find. Unknown, not absent.
+                unresolved++;
+                continue;
+            }
+
+            OrganizationMemberSet members;
+            try
+            {
+                members = await ExternalOrganizationMembership.QueryActiveMembersAsync(dataverseClient, organizationId, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "[CLOSE-PROJECT] Could not enumerate the active members of organization {OrganizationId}; their "
+                    + "container permissions cannot be removed and may remain.", organizationId);
+                unresolved++;
+                continue;
+            }
+
+            if (members.ExceededBound)
+            {
+                logger.LogError(
+                    "[CLOSE-PROJECT] Organization {OrganizationId} has more than {Bound} active members; its members' "
+                    + "container permissions were NOT swept. Escalate for a bulk cleanup.",
+                    organizationId, ExternalOrganizationMembership.MaxMembersPerSweep);
+                unresolved++;
+                continue;
+            }
+
+            foreach (var memberId in members.ContactIds)
+            {
+                contactIds.Add(memberId);
+            }
+        }
+
+        var emails = new List<string>(contactIds.Count);
+        foreach (var contactId in contactIds)
+        {
+            string? email;
+            try
+            {
+                email = await RevokeExternalAccessEndpoint.ResolveContactEmailAsync(dataverseClient, contactId, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "[CLOSE-PROJECT] Could not read the email of contact {ContactId}; their container permission cannot "
+                    + "be matched and may remain.", contactId);
+                unresolved++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(email))
+            {
+                logger.LogWarning(
+                    "[CLOSE-PROJECT] Contact {ContactId} has no emailaddress1 — the key container membership is "
+                    + "written with — so any permission they hold cannot be matched.", contactId);
+                unresolved++;
+                continue;
+            }
+
+            emails.Add(email);
+        }
+
+        if (emails.Count == 0)
+        {
+            return new GranteeRemoval(0, unresolved);
+        }
+
+        var results = await speContainerMembership.RemoveMembershipsAsync(containerId, emails, ct).ConfigureAwait(false);
+
+        var removed = 0;
+        foreach (var email in emails.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (!results.TryGetValue(email, out var result))
+            {
+                unresolved++;
+                continue;
+            }
+
+            if (result.Success)
+            {
+                removed++;
+            }
+            else if (result.Error?.StartsWith(SpeContainerMembershipService.NoPermissionFoundError,
+                         StringComparison.OrdinalIgnoreCase) != true)
+            {
+                unresolved++;
+            }
+        }
+
+        return new GranteeRemoval(removed, unresolved);
+    }
 
     /// <summary>
     /// Builds the OData filter selecting a project's ACTIVE grant rows for cascade-revoke.
@@ -445,66 +695,6 @@ public static class ProjectClosureEndpoint
 
         return (revokedCount, failedCount);
     }
-
-    /// <summary>
-    /// Invalidates Redis participation cache entries for all affected Contacts.
-    /// Uses fire-and-forget per contact to avoid blocking the response on cache errors.
-    /// </summary>
-    /// <remarks>
-    /// <para><b>Organization grants are not eagerly invalidated.</b> The participation cache is keyed per
-    /// contact, and an organization grant names no contact — invalidating its members would require an
-    /// organization → members expansion that does not exist on this path today. Members therefore fall
-    /// back to the ADR-009 TTL (60s, <c>ExternalParticipationService.CacheTtl</c>) instead of clearing
-    /// immediately.</para>
-    ///
-    /// <para>That is a bounded, self-healing staleness window on a cache — not retained authorization: the
-    /// grant row itself is already inactive, so nothing re-populates the entry. Building the expansion
-    /// here would add a new query surface for a ≤60s window (CLAUDE.md §11), and closure is an
-    /// administrative action, not a hot path. Worth revisiting only if the TTL is ever raised.</para>
-    /// </remarks>
-    private static async Task InvalidateContactCachesAsync(
-        ITenantCache cache,
-        string? tenantId,
-        IReadOnlyList<Guid> contactIds,
-        ILogger logger,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            logger.LogWarning(
-                "[CLOSE-PROJECT] No tenant claim found — skipping cache invalidation for {Count} Contacts",
-                contactIds.Count);
-            return;
-        }
-
-        foreach (var contactId in contactIds)
-        {
-            try
-            {
-                await cache.RemoveAsync(
-                    tenantId, ExternalAccessResource, contactId.ToString(), CacheVersion,
-                    ct: ct);
-                logger.LogDebug(
-                    "[CLOSE-PROJECT] Invalidated Redis cache for Contact {ContactId}", contactId);
-            }
-            catch (Exception ex)
-            {
-                // Non-critical — stale cache will expire within 60s per ADR-009 TTL
-                logger.LogWarning(ex,
-                    "[CLOSE-PROJECT] Failed to invalidate Redis cache for Contact {ContactId}. " +
-                    "Cache will expire naturally (ADR-009 TTL: 60s).",
-                    contactId);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Extracts the Azure AD tenant ID ('tid' claim) from the authenticated HttpContext.
-    /// Returns null when no claim is present (in which case cache invalidation is skipped).
-    /// </summary>
-    private static string? ExtractTenantId(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
 
     // =========================================================================
     // Types

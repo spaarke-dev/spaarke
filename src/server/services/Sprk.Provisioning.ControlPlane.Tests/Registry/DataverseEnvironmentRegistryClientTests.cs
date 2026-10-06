@@ -229,7 +229,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         const string payload = """
         {
           "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           "sprk_setupstatus": 1,
           "sprk_currentrunid": "65109e91-5968-4300-933e-9e79dea4109c"
@@ -239,7 +239,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         var snapshot = DataverseEnvironmentRegistryClient.ParseSnapshot(doc.RootElement);
 
         snapshot.EnvironmentId.Should().Be("87d7b4a7-399b-f111-b8de-7ced8ddc4a05");
-        snapshot.CustomerId.Should().Be("trial-2026-08-18");
+        snapshot.CustomerId.Should().Be("trial18");
         snapshot.TenantId.Should().Be("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         snapshot.SetupStatus.Should().Be("InProgress");
         snapshot.CurrentRunId.Should().Be("65109e91-5968-4300-933e-9e79dea4109c");
@@ -257,7 +257,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         var payload = $$"""
         {
           "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           "sprk_setupstatus": {{optionSetValue}}
         }
@@ -277,7 +277,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         const string payload = """
         {
           "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           "sprk_setupstatus": 42
         }
@@ -295,7 +295,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         const string payload = """
         {
           "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
         }
         """;
@@ -311,7 +311,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         const string payload = """
         {
           "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           "sprk_setupstatus": 2
         }
@@ -327,7 +327,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
     {
         const string payload = """
         {
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_tenantid": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
           "sprk_setupstatus": 2
         }
@@ -344,7 +344,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
         const string payload = """
         {
           "sprk_dataverseenvironmentid": "87d7b4a7-399b-f111-b8de-7ced8ddc4a05",
-          "sprk_customerid": "trial-2026-08-18",
+          "sprk_customerid": "trial18",
           "sprk_setupstatus": 2
         }
         """;
@@ -368,7 +368,7 @@ public sealed class DataverseEnvironmentRegistryClientTests
             EnvironmentId: "not-a-guid",
             SetupStatus: "Ready",
             ClearCurrentRunId: true,
-            CustomerIdForLog: "trial-2026-08-18",
+            CustomerIdForLog: "trial18",
             RunIdForLog: "65109e91-5968-4300-933e-9e79dea4109c");
 
         var result = await client.UpdateSetupStatusAsync(update, CancellationToken.None);
@@ -561,11 +561,10 @@ public sealed class DataverseRegistrySetupStatusUpdaterSmokeTests
             NullLogger<DataverseRegistrySetupStatusUpdater>.Instance);
 
         var request = new RegistrySetupStatusUpdateRequest(
-            CustomerId: "smoke-canary",
+            CustomerId: "canary",
             RunId: $"smoke-run-{Guid.NewGuid():N}",
             TenantId: tenantId,
-            EnvironmentId: rowId,
-            RegistryDataverseUrl: adminEnvUrl);
+            EnvironmentId: rowId);
 
         var outcome = await updater.TransitionToReadyAsync(request, CancellationToken.None);
         outcome.Should().BeOfType<RegistrySetupStatusUpdateOutcome.Success>(

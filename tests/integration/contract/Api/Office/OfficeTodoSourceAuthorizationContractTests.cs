@@ -257,6 +257,95 @@ public class OfficeTodoSourceAuthorizationContractTests
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Created);
         factory.Probed.Should().BeEmpty("no record was named, so no access question was asked");
+        factory.PrivilegeQuestions.Should().Equal(new[] { "prvCreatesprk_Todo" },
+            "uac-r2 task 166: a standalone To Do is still a row the BFF creates app-only, so the TABLE privilege is "
+            + "asked even when no record is");
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // 7b. uac-r2 task 166 (amendment (c), owner round 12 item 9; owner G5): the To Do TABLE Create privilege.
+    // ---------------------------------------------------------------------------------------------
+
+    /// <summary>
+    /// The live privilege name (spaarkedev1 <c>privileges</c>, read-only 2026-10-03). A typo here would make the
+    /// probe ask about a privilege nobody holds — every To Do create would then 403.
+    /// </summary>
+    [Fact]
+    public void CreateTodoPrivilege_IsTheLiveDataversePrivilegeName()
+        => Sprk.Bff.Api.Api.Filters.TodoSourceAccessFilter.CreateTodoPrivilege.Should().Be("prvCreatesprk_Todo");
+
+    [Fact]
+    public async Task Post_Todo_WhenTheCallerLacksCreateOnSprkTodo_IsRefusedWithInsufficientPrivilege_AndCreatesNoRow()
+    {
+        using var factory = new TodoSourceAccessTestWebAppFactory { HoldsCreateTodo = false };
+        factory.GrantRead("sprk_matters", MatterId); // every SOURCE is readable — only the table privilege is missing
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "No create privilege",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = MatterId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("\"reasonCode\":\"insufficient_privilege\"")
+            .And.Contain("You do not have permission to create a To Do.")
+            .And.Contain("\"errorCode\":\"OFFICE_009\"");
+        body.Should().NotContain(MatterId.ToString(), "the table-privilege refusal names no record");
+        factory.CreatedEntities.Should().BeEmpty();
+        factory.PrivilegeQuestions.Should().Equal("prvCreatesprk_Todo");
+    }
+
+    [Fact]
+    public async Task Post_StandaloneTodo_WhenTheCallerLacksCreateOnSprkTodo_IsRefused_AndCreatesNoRow()
+    {
+        using var factory = new TodoSourceAccessTestWebAppFactory { HoldsCreateTodo = false };
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest { Name = "Standalone" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            "no source means no RECORD check — not no check: the row is still created");
+        factory.CreatedEntities.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Post_Todo_WhenThePrivilegeCheckThrows_FailsClosed_AndCreatesNoRow()
+    {
+        using var factory = new TodoSourceAccessTestWebAppFactory
+        {
+            PrivilegeFault = new HttpRequestException("RetrieveUserSetOfPrivilegesByNames unavailable"),
+        };
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest { Name = "Fault" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("\"reasonCode\":\"insufficient_privilege\"");
+        factory.CreatedEntities.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Post_Todo_AnUnreadableSourceIsRefusedFirst_AndThePrivilegeIsNeverAsked()
+    {
+        // The source refusal keeps its own single answer (the oracle-closing one); the privilege half runs only after
+        // every source passed, so it cannot be used to tell an unreadable source from a readable one.
+        using var factory = new TodoSourceAccessTestWebAppFactory { HoldsCreateTodo = false };
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsJsonAsync("/api/office/todo", new CreateTodoRequest
+        {
+            Name = "Unreadable source",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = MatterId,
+        });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("insufficient_privilege");
+        factory.PrivilegeQuestions.Should().BeEmpty();
+        factory.CreatedEntities.Should().BeEmpty();
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -326,6 +415,18 @@ public sealed class TodoSourceAccessTestWebAppFactory : OfficeTestWebAppFactory
     /// <summary>The caller holds Read on this record.</summary>
     public void GrantRead(string entitySet, Guid id) => _readable.Add((entitySet, id));
 
+    /// <summary>
+    /// Whether the caller holds <c>prvCreatesprk_Todo</c> (uac-r2 task 166, amendment (c)). Defaults to true so every
+    /// pre-existing source-authorization test keeps its meaning.
+    /// </summary>
+    public bool HoldsCreateTodo { get; set; } = true;
+
+    /// <summary>Set to make the privilege question throw (the fail-closed case).</summary>
+    public Exception? PrivilegeFault { get; set; }
+
+    /// <summary>Every table-privilege question the filter asked, in order.</summary>
+    public List<string> PrivilegeQuestions { get; } = new();
+
     /// <summary>The row exists as far as an APP-ONLY read is concerned (independent of caller rights).</summary>
     public void RowExists(string logicalName, Guid id) => _existingRows.Add((logicalName, id));
 
@@ -384,7 +485,7 @@ public sealed class TodoSourceAccessTestWebAppFactory : OfficeTestWebAppFactory
 
             // The access decision, modelled on Dataverse's own: deny by default, and "no such record" is
             // reported exactly the same way as "you may not see it" (see CallerRecordAccessProbe's remarks).
-            var probe = new GrantTableProbe(_readable, Probed);
+            var probe = new GrantTableProbe(_readable, Probed, this);
             services.RemoveAll<CallerRecordAccessProbe>();
             services.AddSingleton<CallerRecordAccessProbe>(probe);
         });
@@ -394,14 +495,34 @@ public sealed class TodoSourceAccessTestWebAppFactory : OfficeTestWebAppFactory
     {
         private readonly HashSet<(string, Guid)> _readable;
         private readonly List<(string, Guid)> _probed;
+        private readonly TodoSourceAccessTestWebAppFactory _owner;
 
-        public GrantTableProbe(HashSet<(string, Guid)> readable, List<(string, Guid)> probed)
+        public GrantTableProbe(
+            HashSet<(string, Guid)> readable, List<(string, Guid)> probed, TodoSourceAccessTestWebAppFactory owner)
             : base(new HttpClient(),
                    new ConfigurationBuilder().Build(),
                    NullLogger<CallerRecordAccessProbe>.Instance)
         {
             _readable = readable;
             _probed = probed;
+            _owner = owner;
+        }
+
+        /// <summary>uac-r2 task 166: the table Create-privilege seam, answered from the factory's switches.</summary>
+        public override Task<bool> CallerHoldsPrivilegeAsync(
+            string? callerBearerToken, string privilegeName, CancellationToken ct = default)
+        {
+            lock (_owner.PrivilegeQuestions)
+            {
+                _owner.PrivilegeQuestions.Add(privilegeName);
+            }
+
+            if (_owner.PrivilegeFault is not null)
+            {
+                return Task.FromException<bool>(_owner.PrivilegeFault);
+            }
+
+            return Task.FromResult(_owner.HoldsCreateTodo && privilegeName == "prvCreatesprk_Todo");
         }
 
         public override Task<Spaarke.Dataverse.AccessRights> GetCallerRightsAsync(

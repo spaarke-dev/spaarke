@@ -1,4 +1,12 @@
-export { AccessGrantModal, describeAccessPermission } from './AccessGrantModal';
+export {
+  AccessGrantModal,
+  describeAccessPermission,
+  // Task 142: Assigned-To suggestions + the residual read-time access notice (criterion 17).
+  describeResidualAccess,
+  buildRevokeNotice,
+  ASSIGNED_ACCESS_LEVEL,
+} from './AccessGrantModal';
+export type { IAssignedAccessEntry } from './AccessGrantModal';
 // Task 138: the host's fail-closed Access Permission + Secure → state mapping (pure, host supplies the integers).
 export { resolveAccessPermissionState } from './accessPermissionState';
 export type { IAccessPermissionValues } from './accessPermissionState';

@@ -1,4 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -61,6 +63,7 @@ public static class SearchItemsEndpoints
         [FromQuery] string? configId,
         [FromBody] SearchItemsRequest? request,
         SpeAdminGraphService graphService,
+        SpeAdminTenantScope tenantScope,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken ct)
@@ -122,9 +125,30 @@ public static class SearchItemsEndpoints
                 request.SkipToken,
                 ct);
 
+            // Task 165, owner round 20 item 2: an item hit is shown only when its CONTAINER is one the caller reaches
+            // (a scoped request's own containerId was already decided by SpeAdminTenantScopeFilter). A hit that names
+            // no container cannot be attributed and is dropped — for every caller, platform operators included (an
+            // unattributable hit is judged by no binding; round 35 item 2). Graph's total counts other customers' hits,
+            // so it is reported only to a platform operator from whose page nothing was removed and only when there is
+            // no further page (a later page may hold hits nobody here reaches); otherwise the page's count.
+            var trim = await tenantScope.TrimToReachableContainersAsync(
+                context.User,
+                config,
+                searchResult.Items.Select(item => item.ContainerId).OfType<string>(),
+                deleted: false,
+                ct);
+            if (trim is null)
+            {
+                return SpeAdminTenantScopeFilter.ScopeUnverifiable(context.TraceIdentifier);
+            }
+
+            var visible = searchResult.Items
+                .Where(item => item.ContainerId is { } owner && trim.Reachable.Contains(owner))
+                .ToList();
+
             // Map from service domain model to endpoint DTO (ADR-007: no Graph SDK types in public surface).
             var response = new SearchItemsResponse(
-                Items: searchResult.Items
+                Items: visible
                     .Select(item => new SearchItemDto(
                         Id: item.Id,
                         Name: item.Name,
@@ -136,7 +160,9 @@ public static class SearchItemsEndpoints
                         MimeType: item.MimeType))
                     .ToList(),
                 NextSkipToken: searchResult.NextSkipToken,
-                TotalCount: searchResult.TotalCount);
+                TotalCount: (int?)trim.ReportableGraphTotal(
+                                searchResult.TotalCount, searchResult.Items.Count, visible.Count, searchResult.NextSkipToken)
+                            ?? visible.Count);
 
             logger.LogInformation(
                 "SearchItems: query='{Query}', containerId={ContainerId}, results={Count}, hasNextPage={HasNext}, " +
@@ -212,12 +238,17 @@ public static class SearchItemsEndpoints
     /// Opaque pagination token from a prior <see cref="SearchItemsResponse.NextSkipToken"/>.
     /// Null for the first page.
     /// </param>
+    /// <remarks>
+    /// Implements <see cref="ISpeAdminContainerScopedRequest"/>: a request scoped to one container is authorized
+    /// against that container's business-unit binding by <c>SpeAdminTenantScopeFilter</c> before the handler runs
+    /// (task 165, owner round 20 item 2).
+    /// </remarks>
     public sealed record SearchItemsRequest(
         string Query,
         string? ContainerId,
         string? FileType,
         int? PageSize,
-        string? SkipToken);
+        string? SkipToken) : ISpeAdminContainerScopedRequest;
 
     /// <summary>
     /// Response from the POST /api/spe/search/items endpoint.

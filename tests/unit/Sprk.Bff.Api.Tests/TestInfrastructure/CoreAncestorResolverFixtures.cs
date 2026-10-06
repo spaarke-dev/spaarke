@@ -31,11 +31,22 @@ internal static class CoreAncestorResolverFixtures
     internal static readonly string[] AllCoreAncestorColumns =
         CoreAncestorResolver.CoreAncestorLookups.Select(c => c.LookupAttribute).ToArray();
 
+    /// <summary>
+    /// Every root column any intermediate can carry (task 156 — invoice / budget / document name their root through typed
+    /// <c>sprk_matter</c> / <c>sprk_project</c> / …), plus the four core-ancestor lookups.
+    /// </summary>
+    internal static readonly string[] AllRootColumns = AllCoreAncestorColumns
+        .Concat(CoreAncestorResolver.IntermediateRootColumns.Values.SelectMany(c => c.Select(x => x.Column)))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .ToArray();
+
     /// <summary>A resolver that derives nothing — no stamp is added to any payload.</summary>
     internal static CoreAncestorResolver Inert() => WithAncestors();
 
     /// <summary>
-    /// A resolver whose child targets carry the supplied ancestors.
+    /// A resolver whose child targets carry the supplied ancestors — each in the column THAT target names that root
+    /// type with (task 156: an invoice's matter is its typed <c>sprk_matter</c>, a communication's is
+    /// <c>sprk_regardingmatter</c>), so the derivation reads them exactly as it reads a live row.
     /// </summary>
     /// <param name="ancestors">Lookup attribute → ancestor record id, e.g. <c>("sprk_regardingmatter", matterId)</c>.</param>
     internal static CoreAncestorResolver WithAncestors(params (string LookupAttribute, Guid RecordId)[] ancestors)
@@ -52,7 +63,10 @@ internal static class CoreAncestorResolverFixtures
                     var entityType = CoreAncestorResolver.CoreAncestorLookups
                         .First(c => string.Equals(c.LookupAttribute, lookupAttribute, StringComparison.OrdinalIgnoreCase))
                         .EntityType;
-                    row[lookupAttribute] = new EntityReference(entityType, recordId);
+                    var column = CoreAncestorResolver.IntermediateRootColumns.TryGetValue(logicalName, out var roots)
+                        ? roots.FirstOrDefault(r => string.Equals(r.RootEntity, entityType, StringComparison.OrdinalIgnoreCase)).Column
+                        : null;
+                    row[column ?? lookupAttribute] = new EntityReference(entityType, recordId);
                 }
 
                 return row;
@@ -60,7 +74,7 @@ internal static class CoreAncestorResolverFixtures
 
         return new CoreAncestorResolver(
             entityService.Object,
-            ProbeReturning(AllCoreAncestorColumns),
+            ProbeReturning(AllRootColumns),
             NullLogger<CoreAncestorResolver>.Instance);
     }
 

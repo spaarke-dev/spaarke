@@ -22,10 +22,11 @@ namespace Sprk.Bff.Api.Services.Ai.Membership;
 /// <summary>
 /// Resolves a Dataverse <c>systemuserid</c> into a fully-populated
 /// <see cref="PersonIdentity"/>. Implementations cache results in Redis with a
-/// 10-minute TTL per ADR-009. Each of the six identity-type paths
+/// 2-minute TTL per ADR-009 (task 132; was 10). Each of the six identity-type paths
 /// (systemuser, contact, team, businessunit, account, organization) is resolved
 /// independently — failure on one path produces a <c>null</c> / empty value for
-/// that field, never an exception.
+/// that field, never an exception — and, since task 132, a FAILED path is recorded on the identity
+/// (internal <c>PersonIdentity.Faults</c>) and such an identity is never cached.
 /// </summary>
 public interface IIdentityNormalizationService
 {
@@ -41,7 +42,7 @@ public interface IIdentityNormalizationService
     /// <returns>
     /// A populated <see cref="PersonIdentity"/>. <see cref="PersonIdentity.SystemUserId"/>
     /// always equals the input parameter; other fields populate based on what
-    /// Dataverse returns. Cached for 10 minutes per ADR-009. <see cref="PersonIdentity.ContactId"/> comes from
+    /// Dataverse returns. Cached for 2 minutes per ADR-009 — unless a sub-read faulted (task 132). <see cref="PersonIdentity.ContactId"/> comes from
     /// the user's <c>sprk_primarycontact</c> link, else from the contact bound to the user's Entra oid
     /// (<c>contact.sprk_externalobjectid</c>) — never from an email.
     /// </returns>
@@ -49,7 +50,7 @@ public interface IIdentityNormalizationService
 
     /// <summary>
     /// Drops the cached identity for <paramref name="systemUserId"/> (current tenant), so a link written during
-    /// this request takes effect on this request instead of after the 10-minute TTL (task 141). Never throws
+    /// this request takes effect on this request instead of after the TTL (task 141). Never throws
     /// for a cache fault — the entry then expires on its own.
     /// </summary>
     Task InvalidateAsync(Guid systemUserId, CancellationToken ct);

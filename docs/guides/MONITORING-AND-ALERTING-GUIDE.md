@@ -1,6 +1,6 @@
 # Monitoring and Alerting Setup Guide
 
-> **Last Updated**: 2026-04-05
+> **Last Updated**: 2026-10-04 (analysis-export metrics and alert removed with the deleted export route, task 162)
 >
 > **Scope**: Spaarke production environment monitoring via Azure Application Insights, Log Analytics, and Azure Monitor alerts.
 >
@@ -155,14 +155,6 @@ If the count is zero after the API has received traffic, check:
 | Tool Duration | `customMetrics/ai.tool.duration` | Tool execution latency (ms) | P95 < 5000ms |
 | Tool Tokens | `customMetrics/ai.tool.tokens` | Tokens used by tools | Dynamic threshold |
 
-### Export Operations
-
-| Metric | Metric Name | Description | Healthy Range |
-|--------|-------------|-------------|---------------|
-| Export Requests | `customMetrics/ai.export.requests` | Export operations (DOCX, PDF, Email) | Baseline-dependent |
-| Export Duration | `customMetrics/ai.export.duration` | Export generation time (ms) | P95 < 10000ms |
-| Export File Size | `customMetrics/ai.export.file_size` | Average output file size (bytes) | < 10MB typical |
-
 ### Resilience and Caching
 
 | Metric | Metric Name | Description | Healthy Range |
@@ -189,7 +181,6 @@ All alerts are deployed via `infrastructure/bicep/modules/alerts.bicep`. The act
 | 4 | Tool Execution Failures | Warning (Sev 2) | Tool request count drops (dynamic) | Every 5 min | 15 min |
 | 5 | Cache Miss Spike | Warning (Sev 2) | Cache miss rate exceeds dynamic threshold | Every 5 min | 15 min |
 | 6 | High Token Usage | Warning (Sev 2) | Token usage exceeds dynamic threshold | Every 1 hr | 6 hr |
-| 7 | Export Failures | Warning (Sev 2) | Export request count drops (dynamic) | Every 5 min | 15 min |
 
 ### Alert Details
 
@@ -240,13 +231,9 @@ All alerts are deployed via `infrastructure/bicep/modules/alerts.bicep`. The act
 - **Auto-mitigate**: Yes
 - **Response**: Review token usage by customer and operation type. May indicate a runaway process or unexpected usage spike. Check Azure OpenAI cost dashboard for financial impact.
 
-#### 7. Export Failures (Warning)
-
-- **Metric**: `customMetrics/ai.export.requests`
-- **Threshold type**: Dynamic (High sensitivity, detects drops)
-- **Failing periods**: 3 of 4 evaluation periods
-- **Auto-mitigate**: Yes
-- **Response**: Check export handler logs for errors. Common causes: SharePoint Embedded storage issues, file format conversion failures, or Azure OpenAI unavailability.
+> The analysis-export metrics (`ai.export.*`) and the "Export Failures" alert were removed (2026-10-04) with the only
+> route that emitted them, `POST /api/ai/analysis/{id}/export` (deleted by unified-access-control-r2 task 162: no caller,
+> not in any published API description). `infrastructure/bicep/modules/alerts.bicep` no longer creates the alert.
 
 ### Configuring the Action Group
 
@@ -316,15 +303,14 @@ The production dashboard is deployed via `infrastructure/bicep/modules/dashboard
 
 ### Dashboard Layout
 
-The dashboard has 5 rows:
+The dashboard has 4 rows:
 
 | Row | Section | Charts |
 |-----|---------|--------|
 | 1 | **Overview** | Total AI Requests, Success vs Failure, Open Circuit Breakers, Total Tokens Used |
 | 2 | **RAG Performance** | RAG Search Latency, RAG Throughput, RAG Latency Breakdown (Embedding vs Search) |
 | 3 | **Tool Execution** | Tool Executions, Tool Execution Latency, Tool Token Usage |
-| 4 | **Export Operations** | Export Requests, Export Latency, Export File Size |
-| 5 | **Resilience & Cache** | Circuit Breaker State Transitions, Cache Hit/Miss, Cache Latency |
+| 4 | **Resilience & Cache** | Circuit Breaker State Transitions, Cache Hit/Miss, Cache Latency |
 
 ### Accessing the Dashboard
 
@@ -460,23 +446,6 @@ requests
 | project totalRequests, failedRequests, errorRate, avgLatencyMs, p95LatencyMs
 ```
 
-### Customer Document Operations
-
-```kql
-// Document operations by customer
-customMetrics
-| where timestamp > ago(24h)
-| where name in ("ai.export.requests", "ai.export.duration", "ai.export.file_size")
-| extend customerId = tostring(customDimensions.customerId)
-| where customerId == "demo"
-| summarize
-    exports = sumif(value, name == "ai.export.requests"),
-    avgDuration = avgif(value, name == "ai.export.duration"),
-    avgFileSize = avgif(value, name == "ai.export.file_size")
-  by bin(timestamp, 1h)
-| order by timestamp desc
-```
-
 ### Top Customers by Usage
 
 ```kql
@@ -580,8 +549,7 @@ Alert Fired
       ├─ RAG High Latency → Check AI Search, embedding model
       ├─ Tool Failures → Check tool handler logs
       ├─ Cache Miss Spike → Check Redis health
-      ├─ High Token Usage → Review customer usage patterns
-      └─ Export Failures → Check SPE storage, file conversion
+      └─ High Token Usage → Review customer usage patterns
 ```
 
 ### Initial Triage Steps

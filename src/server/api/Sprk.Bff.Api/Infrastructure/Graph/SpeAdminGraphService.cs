@@ -414,6 +414,28 @@ public sealed class SpeAdminGraphService
         }
     }
 
+    /// <summary>
+    /// A container was created but could not be bound to its owning business unit
+    /// (<see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp"/>; unified-access-control-r2 task 165,
+    /// owner round 20 item 1). The create path then soft-deletes it, so no container is left active unbound.
+    /// </summary>
+    public sealed class ContainerBindingException : Exception
+    {
+        /// <summary>The container that was created.</summary>
+        public string ContainerId { get; }
+
+        /// <summary>True when the unbound container was moved to the recycle bin; false when that also failed.</summary>
+        public bool Removed { get; }
+
+        public ContainerBindingException(string containerId, bool removed, Exception inner)
+            : base($"Container '{containerId}' was created but could not be bound to its owning business unit" +
+                   (removed ? "; it was moved to the recycle bin." : "; it could NOT be removed and is left unbound."), inner)
+        {
+            ContainerId = containerId;
+            Removed = removed;
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Paginated list response (ADR-007: no Graph SDK types in public API surface)
     // -------------------------------------------------------------------------
@@ -1131,16 +1153,28 @@ public sealed class SpeAdminGraphService
     /// <param name="displayName">Display name for the new container. Required; must not exceed 256 characters.</param>
     /// <param name="description">Optional description for the new container.</param>
     /// <param name="ct">Cancellation token.</param>
+    /// <param name="owningBusinessUnitId">
+    /// The business unit that owns the new container. It is stamped on the container before this returns
+    /// (<see cref="Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp"/>, owner round 20 item 1); a
+    /// container that cannot be stamped is soft-deleted and <see cref="ContainerBindingException"/> is thrown.
+    /// </param>
     /// <returns>A <see cref="SpeContainerSummary"/> representing the newly created container.</returns>
     /// <exception cref="InvalidOperationException">Thrown when Graph API returns null unexpectedly.</exception>
     /// <exception cref="ODataError">Thrown when Graph API returns an error response.</exception>
+    /// <exception cref="ContainerBindingException">The container was created but could not be bound.</exception>
     public async Task<SpeContainerSummary> CreateContainerAsync(
         GraphServiceClient graphClient,
         string containerTypeId,
         string displayName,
         string? description,
+        Guid owningBusinessUnitId,
         CancellationToken ct = default)
     {
+        if (owningBusinessUnitId == Guid.Empty)
+        {
+            throw new ArgumentException("A container is created only with its owning business unit.", nameof(owningBusinessUnitId));
+        }
+
         ArgumentNullException.ThrowIfNull(graphClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
@@ -1174,6 +1208,10 @@ public sealed class SpeAdminGraphService
         _logger.LogInformation(
             "SPE container created: Id={ContainerId}, DisplayName='{DisplayName}', ContainerTypeId={ContainerTypeId}",
             created.Id, created.DisplayName, containerTypeId);
+
+        // Owner round 20 item 1: the container carries its owning business unit from the moment it exists. A
+        // stamp that cannot be written AND read back removes the container again (ContainerBindingException).
+        await BindNewContainerAsync(graphClient, created.Id ?? string.Empty, owningBusinessUnitId, ct).ConfigureAwait(false);
 
         return new SpeContainerSummary(
             Id: created.Id ?? string.Empty,
@@ -1513,11 +1551,26 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<SpeContainerSummary> CreateContainerForConfigAsync(
-        ContainerTypeConfig config, string containerTypeId, string displayName, string? description, CancellationToken ct = default)
+        ContainerTypeConfig config, string containerTypeId, string displayName, string? description,
+        Guid owningBusinessUnitId, CancellationToken ct = default)
     {
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await CreateContainerAsync(client, containerTypeId, displayName, description, ct).ConfigureAwait(false); }
+        try { return await CreateContainerAsync(client, containerTypeId, displayName, description, owningBusinessUnitId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainer({containerTypeId})"); }
+    }
+
+    /// <summary>
+    /// The business-unit binding of <paramref name="containerId"/> (owner round 20 item 2), read with the config's
+    /// client from the active container (<paramref name="deleted"/> false) or from the recycle bin. Null when the
+    /// container does not exist there. A read fault throws <see cref="SpaarkeStorageException"/> — the caller must
+    /// refuse, never treat it as "unbound".
+    /// </summary>
+    public async Task<Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?> GetContainerBindingForConfigAsync(
+        ContainerTypeConfig config, string containerId, bool deleted, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await GetContainerBindingAsync(client, containerId, deleted, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerBinding({containerId})"); }
     }
 
     public async Task<SpeContainerSummary?> GetContainerForConfigAsync(
@@ -2491,45 +2544,7 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
-            // The SDK stores each custom property entry in CustomProperties.AdditionalData.
-            // Each entry value is a Kiota UntypedObject with "value" and "isSearchable" fields.
-            var customPropsAdditional = container.CustomProperties?.AdditionalData;
-            if (customPropsAdditional is null || customPropsAdditional.Count == 0)
-            {
-                _logger.LogInformation("Container {ContainerId} has no custom properties", containerId);
-                return Array.Empty<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>();
-            }
-
-            var result = new List<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>(customPropsAdditional.Count);
-
-            foreach (var kvp in customPropsAdditional)
-            {
-                var propName = kvp.Key;
-                var propValue = string.Empty;
-                var isSearchable = false;
-
-                // Kiota deserializes untyped JSON objects as UntypedObject nodes.
-                if (kvp.Value is Microsoft.Kiota.Abstractions.Serialization.UntypedObject untypedObj)
-                {
-                    var fields = untypedObj.GetValue();
-
-                    if (fields.TryGetValue("value", out var valNode) &&
-                        valNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString valStr)
-                    {
-                        propValue = valStr.GetValue() ?? string.Empty;
-                    }
-
-                    if (fields.TryGetValue("isSearchable", out var searchNode) &&
-                        searchNode is Microsoft.Kiota.Abstractions.Serialization.UntypedBoolean searchBool)
-                    {
-                        isSearchable = searchBool.GetValue();
-                    }
-                }
-
-                result.Add(new Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto(propName, propValue, isSearchable));
-            }
-
-            result.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
+            var result = ReadCustomProperties(container);
 
             _logger.LogInformation(
                 "Retrieved {Count} custom properties for container {ContainerId}", result.Count, containerId);
@@ -2541,6 +2556,202 @@ public sealed class SpeAdminGraphService
             _logger.LogInformation(
                 "Container {ContainerId} not found when reading custom properties (404)", containerId);
             return null;
+        }
+    }
+
+    /// <summary>
+    /// The custom properties Graph returned on <paramref name="container"/>, ordered by name (case-insensitive);
+    /// empty when it carries none.
+    /// </summary>
+    /// <remarks>
+    /// The SDK stores each custom property entry in <c>CustomProperties.AdditionalData</c>, each value a Kiota
+    /// <c>UntypedObject</c> with <c>value</c> and <c>isSearchable</c> fields.
+    /// </remarks>
+    private static IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> ReadCustomProperties(
+        Microsoft.Graph.Models.FileStorageContainer container)
+    {
+        var customPropsAdditional = container.CustomProperties?.AdditionalData;
+        if (customPropsAdditional is null || customPropsAdditional.Count == 0)
+        {
+            return Array.Empty<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>();
+        }
+
+        var result = new List<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>(customPropsAdditional.Count);
+
+        foreach (var kvp in customPropsAdditional)
+        {
+            var propName = kvp.Key;
+            var propValue = string.Empty;
+            var isSearchable = false;
+
+            // Kiota deserializes untyped JSON objects as UntypedObject nodes.
+            if (kvp.Value is Microsoft.Kiota.Abstractions.Serialization.UntypedObject untypedObj)
+            {
+                var fields = untypedObj.GetValue();
+
+                if (fields.TryGetValue("value", out var valNode) &&
+                    valNode is Microsoft.Kiota.Abstractions.Serialization.UntypedString valStr)
+                {
+                    propValue = valStr.GetValue() ?? string.Empty;
+                }
+
+                if (fields.TryGetValue("isSearchable", out var searchNode) &&
+                    searchNode is Microsoft.Kiota.Abstractions.Serialization.UntypedBoolean searchBool)
+                {
+                    isSearchable = searchBool.GetValue();
+                }
+            }
+
+            result.Add(new Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto(propName, propValue, isSearchable));
+        }
+
+        result.Sort((a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Name, b.Name));
+        return result;
+    }
+
+    // =========================================================================
+    // Container → business-unit binding (unified-access-control-r2 task 165, owner round 20)
+    // =========================================================================
+
+    /// <summary>The single-container projection a binding read asks for.</summary>
+    private static readonly string[] BindingSelect = { "id", "containerTypeId", "customProperties" };
+
+    /// <summary>
+    /// Reads <paramref name="containerId"/>'s business-unit binding: <c>GET /containers/{id}</c> (or
+    /// <c>/deletedContainers/{id}</c> when <paramref name="deleted"/>) with
+    /// <c>$select=id,containerTypeId,customProperties</c>. Null when Graph answers 404 (not there). Any other
+    /// failure throws — the caller refuses (ADR-003), never reads a fault as "unbound".
+    /// </summary>
+    /// <remarks>
+    /// One container per call, by design: on the containers COLLECTION Graph accepts <c>customProperties</c> in
+    /// <c>$select</c>, echoes it in <c>@odata.context</c>, and returns rows without it (measured read-only on dev
+    /// 2026-10-04, beta and v1.0) — a list read would report every container as unbound.
+    /// </remarks>
+    public async Task<Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?> GetContainerBindingAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        bool deleted,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        return await ExecuteWithRetryAsync(
+            () => ReadContainerBindingAsync(graphClient, containerId, deleted, ct), ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The binding read with no retry wrapper — shared with <see cref="ContainerOperations"/>, which stamps the
+    /// containers the product's own creation path makes.
+    /// </summary>
+    internal static async Task<Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead?> ReadContainerBindingAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        bool deleted,
+        CancellationToken ct)
+    {
+        try
+        {
+            var container = deleted
+                ? await graphClient.Storage.FileStorage.DeletedContainers[containerId]
+                    .GetAsync(config => config.QueryParameters.Select = BindingSelect, ct).ConfigureAwait(false)
+                : await graphClient.Storage.FileStorage.Containers[containerId]
+                    .GetAsync(config => config.QueryParameters.Select = BindingSelect, ct).ConfigureAwait(false);
+
+            if (container is null)
+            {
+                return null;
+            }
+
+            return new Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBindingRead(
+                ContainerId: container.Id ?? containerId,
+                ContainerTypeId: container.ContainerTypeId?.ToString(),
+                Binding: Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp.Read(ReadCustomProperties(container)));
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the business-unit stamp on <paramref name="containerId"/>: <c>PATCH /containers/{id}/customProperties</c>
+    /// with the property map as the body root (the shape proven live 2026-08-28; partial writes MERGE, so no other
+    /// property is touched). Throws on any failure.
+    /// </summary>
+    internal static async Task WriteBusinessUnitStampAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        Guid businessUnitId,
+        CancellationToken ct)
+    {
+        var stamp = Sprk.Bff.Api.Services.SpeAdmin.SpeContainerBusinessUnitStamp.ToProperty(businessUnitId);
+        var payload = JsonSerializer.Serialize(new Dictionary<string, object>
+        {
+            [stamp.Name] = new Dictionary<string, object> { ["value"] = stamp.Value, ["isSearchable"] = stamp.IsSearchable },
+        });
+
+        var url = $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+                  $"{Uri.EscapeDataString(containerId)}/customProperties";
+
+        using var _ = await SendGraphJsonAsync(graphClient, HttpMethod.Patch, url, payload, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stamps a container the BFF has just created, reads the stamp back, and — when either fails — soft-deletes the
+    /// container and throws <see cref="ContainerBindingException"/>, so no container is left active and unbound.
+    /// </summary>
+    private async Task BindNewContainerAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        Guid businessUnitId,
+        CancellationToken ct)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(containerId))
+            {
+                throw new InvalidOperationException("Graph created a container but reported no id.");
+            }
+
+            await ExecuteWithRetryAsync<object?>(async () =>
+            {
+                await WriteBusinessUnitStampAsync(graphClient, containerId, businessUnitId, ct).ConfigureAwait(false);
+                return null;
+            }, ct).ConfigureAwait(false);
+
+            var readBack = await GetContainerBindingAsync(graphClient, containerId, deleted: false, ct).ConfigureAwait(false);
+            if (readBack?.Binding.BusinessUnitId != businessUnitId)
+            {
+                throw new InvalidOperationException(
+                    "The business-unit stamp did not read back after the write — Graph accepted it but the container does not carry it.");
+            }
+
+            _logger.LogInformation(
+                "Container {ContainerId} bound to business unit {BusinessUnitId}", containerId, businessUnitId);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex,
+                "Container {ContainerId} was created but could not be bound to business unit {BusinessUnitId} — removing it.",
+                containerId, businessUnitId);
+
+            var removed = false;
+            if (!string.IsNullOrWhiteSpace(containerId))
+            {
+                try
+                {
+                    removed = await SoftDeleteContainerAsync(graphClient, containerId, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception deleteEx)
+                {
+                    _logger.LogCritical(deleteEx,
+                        "Container {ContainerId} is UNBOUND and could not be removed; no admin route reaches it until the " +
+                        "backfill binds it (-Bind) or an operator removes it.", containerId);
+                }
+            }
+
+            throw new ContainerBindingException(containerId, removed, ex);
         }
     }
 
@@ -7084,7 +7295,11 @@ public sealed class SpeAdminGraphService
                             Name: driveItem.Name ?? string.Empty,
                             Size: driveItem.Size,
                             LastModifiedDateTime: driveItem.LastModifiedDateTime,
-                            ContainerId: containerId,
+                            // The hit's OWN container. An SPE container's id IS its drive's id, so an unscoped search
+                            // reports each hit's container from parentReference.driveId — the per-container rule
+                            // (unified-access-control-r2 task 165, owner round 20 item 2) decides each hit by it. It
+                            // was null for every unscoped hit, which made "whose container is this?" unanswerable.
+                            ContainerId: containerId ?? driveItem.ParentReference?.DriveId,
                             ContainerName: null,
                             WebUrl: driveItem.WebUrl,
                             MimeType: driveItem.File?.MimeType));

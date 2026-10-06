@@ -66,7 +66,7 @@ public interface IDataverseEnvCreator
 /// per run from
 /// <see cref="Sprk.Provisioning.ControlPlane.Models.ProvisioningRun.Parameters"/>.
 /// </summary>
-/// <param name="CustomerId">Customer partition key (3-10 lowercase alphanumeric).</param>
+/// <param name="CustomerId">Customer partition key (customerId standard: 3-8 lowercase letters/digits, starts with a letter).</param>
 /// <param name="TenantId">
 /// Entra tenant id (§4D I1 — MUST be explicit, never default). Flows through
 /// to <c>pac admin create-environment -TenantId</c> so the pac CLI targets

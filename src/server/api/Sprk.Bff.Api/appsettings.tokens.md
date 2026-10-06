@@ -67,7 +67,6 @@ The template references these Key Vault secrets:
 | Secret Name | Description |
 |-------------|-------------|
 | `ServiceBus-ConnectionString` | Azure Service Bus connection string |
-| `Redis-ConnectionString` | Azure Redis connection string |
 | `Dataverse-ServiceUrl` | Dataverse environment URL |
 | `BFF-API-ClientSecret` | App registration client secret |
 | `ai-openai-endpoint` | Azure OpenAI endpoint URL |

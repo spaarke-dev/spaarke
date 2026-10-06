@@ -78,6 +78,7 @@ import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
 import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type ChipState } from './filterChips';
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
+import { useDataGridExternalHost } from './DataGridExternalHost';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';
 import { thinScrollbarStyle } from '../../theme/scrollbar';
 
@@ -245,7 +246,11 @@ export interface DataGridProps {
    * owns its OWN view switcher above the grid and the built-in one would duplicate it
    * (e.g. the reconciliation workspace's dedicated "Email Review views" selector —
    * email-communication-intelligence-r2 item 1, owner UAT 2026-08-19). Suppresses only
-   * the header-left picker; the command bar, filters, and grid are unaffected.
+   * the header-left picker; the command bar, filters, and grid are unaffected. With the picker off, the grid
+   * does not fetch the entity's sibling saved-query list either (unified-access-control-r2 task 157, F1).
+   *
+   * IGNORED inside the external SPA (`DataGridExternalHost`): there the picker is always off, whatever this
+   * prop says, and the saved-query list is never requested.
    */
   showViewSelector?: boolean;
 
@@ -776,10 +781,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     availableViewsAllowlist: availableViewsAllowlistOverride,
     theme = webLightTheme,
     onBack,
-    showViewSelector = true,
+    showViewSelector: showViewSelectorProp = true,
     externalViews,
     className,
   } = props;
+
+  // unified-access-control-r2 task 157 (owner round 4 item 7): inside the external SPA the picker is OFF and the
+  // saved-query list is never fetched, whatever the props say. The rule is enforced here, in the grid itself,
+  // so no prop, wrapper, clone, spread or import that reaches the grid can turn it back on. See
+  // DataGridExternalHost.tsx. Everywhere else `externalHost` is false and the prop behaves as before.
+  const externalHost = useDataGridExternalHost();
+  const showViewSelector = !externalHost && showViewSelectorProp;
 
   // Stable default: instantiate XrmDataverseClient once if no client passed.
   // XrmDataverseClient throws at first method call if Xrm context is unavailable
@@ -821,10 +833,29 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     (async () => {
       try {
         const configRecord = await fetchConfigRecord(dataverseClient, configId);
+        // Task 157: a savedquery-set source resolves its view by LISTING the entity's saved queries, which the
+        // external host never does. Refused (fail closed), not silently rendered empty.
+        if (externalHost && configRecord?.source?.type === 'savedquery-set') {
+          if (cancelled || !isMountedRef.current) return;
+          setLoadState({
+            configRecord,
+            savedQuery: null,
+            entityMetadata: null,
+            availableViews: [],
+            isLoading: false,
+            error: new Error(
+              `[DataGrid] configId=${configId} uses a savedquery-set source, which lists the entity's saved ` +
+                'queries. That is not available in the external SPA; use an inline or savedquery source.'
+            ),
+          });
+          return;
+        }
         // If the user has switched views via the ViewSelector, that id takes
-        // precedence over the configRecord's default savedQueryId.
-        const savedQuery: SavedQueryResult | null = activeSavedQueryId
-          ? await dataverseClient.retrieveSavedQuery(activeSavedQueryId).catch(() => null)
+        // precedence over the configRecord's default savedQueryId. The external
+        // host has no ViewSelector, so it never honours a picked view.
+        const pickedViewId = externalHost ? undefined : activeSavedQueryId;
+        const savedQuery: SavedQueryResult | null = pickedViewId
+          ? await dataverseClient.retrieveSavedQuery(pickedViewId).catch(() => null)
           : await resolveSource(dataverseClient, configRecord, undefined);
         const entityName =
           savedQuery?.entityName ??
@@ -848,9 +879,13 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         }
         // Fetch metadata + sibling saved views in parallel. View list is best-effort;
         // on failure we fall back to a single-view ViewSelector (just the active view).
+        // Task 157 (F1): the sibling list only feeds the ViewSelector, so it is NOT
+        // requested when the picker is off (always the case on the external host).
         const [entityMetadata, siblingViews] = await Promise.all([
           dataverseClient.retrieveEntityMetadata(entityName),
-          dataverseClient.retrieveSavedQueriesForEntity(entityName).catch(() => [] as SavedQuerySummary[]),
+          showViewSelector
+            ? dataverseClient.retrieveSavedQueriesForEntity(entityName).catch(() => [] as SavedQuerySummary[])
+            : Promise.resolve([] as SavedQuerySummary[]),
         ]);
         if (cancelled || !isMountedRef.current) return;
         // FR-05 (spaarke-dataset-grid-framework-r2): if the config record uses
@@ -903,6 +938,10 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     // (rare — factories typically compute this once — but keeps the closure
     // referentially correct).
     availableViewsAllowlistOverride,
+    // Task 157: the picker switch gates the sibling fetch, and the external host
+    // gates the picked view and the savedquery-set source.
+    showViewSelector,
+    externalHost,
   ]);
 
   // Once we have metadata, resolve the full configuration.

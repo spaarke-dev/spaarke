@@ -1,16 +1,12 @@
 // -----------------------------------------------------------------------------
 // IAiSearchIndexVerifier.cs
 //
-// L2 abstraction over the per-index invariant + presence verifier. Fills BOTH
-// verification roles per design.md §4.1a:
-//
-//   - Model 2 (post-deploy): after the provisioner runs, assert per-index
-//     invariants (required filterable + vector + forbidden-fields-absent)
-//     per scripts/ai-search/Deploy-AllIndexes.ps1 Invoke-PostDeployVerifier
-//     (spec.md FR-05 acceptance).
-//   - Model 1 (verify-only): assert the 7 canonical indexes ALREADY exist on
-//     the shared platform service — H2b MUST NOT re-create them; instead it
-//     verifies presence and provisions a per-tenant filter template.
+// L2 abstraction over the per-index invariant + presence verifier. After the
+// provisioner runs, it asserts per-index invariants (required filterable +
+// vector + forbidden-fields-absent) per scripts/ai-search/Deploy-AllIndexes.ps1
+// Invoke-PostDeployVerifier (spec.md FR-05 acceptance). Both tenancy models use
+// it the same way since task 225b (the Model 1 verify-only role on a shared
+// platform service is retired with D-12).
 //
 // PRODUCTION IMPL:
 //   <see cref="RestApiAiSearchIndexVerifier"/> calls the AI Search REST API
@@ -24,9 +20,9 @@
 //   <see cref="AiSearchIndexVerifyResult"/> outcomes.
 //
 // FAILURE MODES:
-//   - AnyMissing:    Model 1 → SharedIndexMissing; Model 2 → IndexProvisioningFailed
-//                    (script exited 0 but index absent = drift).
-//   - AnyInvariant:  IndexInvariantViolation for both branches.
+//   - AnyMissing:    IndexProvisioningFailed (provisioner succeeded but index
+//                    absent = drift).
+//   - AnyInvariant:  IndexInvariantViolation.
 //   - Infra fault:   MAY throw; handler classifies as Resumable per §4C.
 // -----------------------------------------------------------------------------
 
@@ -73,9 +69,8 @@ public abstract record AiSearchIndexVerifyResult
 
     /// <summary>
     /// One or more expected indexes are MISSING from the search endpoint.
-    /// <paramref name="MissingIndexNames"/> lists each. In Model 1 this maps
-    /// to <see cref="AiSearchIndexRejectionCodes.SharedIndexMissing"/>; in
-    /// Model 2 it maps to <see cref="AiSearchIndexRejectionCodes.IndexProvisioningFailed"/>
+    /// <paramref name="MissingIndexNames"/> lists each. H2b maps it to
+    /// <see cref="AiSearchIndexRejectionCodes.IndexProvisioningFailed"/>
     /// (post-provisioner drift).
     /// </summary>
     public sealed record Missing(ImmutableArray<string> MissingIndexNames) : AiSearchIndexVerifyResult;

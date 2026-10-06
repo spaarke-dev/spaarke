@@ -27,6 +27,18 @@
 //   dependency at provision time — DeployBffApiScriptRunner and
 //   DotnetR3GateVerifier's shell-outs are RETIRED (kept on disk unregistered).
 //
+// RUN CONTEXT (task 245a, G25 — see Models/InterStepState.cs):
+//   - Intake values, read from run.Parameters.NonSecret (written ONLY by
+//     intake at POST /api/runs): tenantId, subscriptionId, buildId
+//     (optional), healthCheckPath (optional).
+//   - H2a outputs, read from run.InterStepState: ResourceGroupName,
+//     AppServiceName, AppServiceStagingSlotName (optional — blank falls back
+//     to BffDeployOptions.DefaultStagingSlotName). These were previously
+//     read from NonSecret, where nothing ever wrote them.
+//   - Outputs (task 245b), written on success: InterStepState.BffApiUrl (the
+//     production slot URL it health-probed) and InterStepState.BffBuildId (the
+//     build it deployed) — read by H7, H13 and H14.
+//
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-12 (H9
 //     acceptance): blue-green slot swap + rollback on smoke-test failure +
@@ -59,10 +71,10 @@
 //   ┌───────────────────────────────────────────────┬───────────────────────────┐
 //   │ Failure mode                                  │ §4C class                 │
 //   ├───────────────────────────────────────────────┼───────────────────────────┤
-//   │ Missing tenantId/subscriptionId/              │ Resumable                 │
-//   │ resourceGroupName/appServiceName               │ (external precondition —  │
-//   │ (§4D I1 no-hardcoded-tenant)                  │ operator fixes params +   │
-//   │                                               │ resumes)                  │
+//   │ Missing tenantId/subscriptionId (intake run   │ Resumable                 │
+//   │ parameters, §4D I1 no-hardcoded-tenant) OR    │ (external precondition —  │
+//   │ resourceGroupName/appServiceName (H2a's       │ operator fixes params /   │
+//   │ InterStepState output — task 245a, G25)       │ re-runs H2a + resumes)    │
 //   │ Run not found in Cosmos partition             │ Resumable                 │
 //   │ spaarkedev1 hardcode detected in script       │ QuarantineRequired        │
 //   │ (Gap 2 assertion — script REGRESSION is a     │ (script regression must   │
@@ -182,12 +194,6 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target subscription id (ADR-027 D4).</summary>
     public const string SubscriptionIdParameterKey = "subscriptionId";
 
-    /// <summary>Non-secret parameter key carrying the App Service resource group name.</summary>
-    public const string ResourceGroupNameParameterKey = "resourceGroupName";
-
-    /// <summary>Non-secret parameter key carrying the BFF App Service name (production slot binds to <c>https://{name}.azurewebsites.net</c>).</summary>
-    public const string AppServiceNameParameterKey = "appServiceName";
-
     /// <summary>
     /// Non-secret parameter key carrying the desired BFF CI build number —
     /// feeds the idempotency key <c>bff-{customerId}-{buildId}</c>. OPTIONAL
@@ -197,9 +203,6 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
     /// pointer — H9 has no verified gate data for any other build).
     /// </summary>
     public const string BuildIdParameterKey = "buildId";
-
-    /// <summary>Non-secret parameter key carrying the staging slot name. Optional — defaults to <see cref="BffDeployOptions.DefaultStagingSlotName"/>.</summary>
-    public const string StagingSlotNameParameterKey = "stagingSlotName";
 
     /// <summary>Non-secret parameter key carrying the /health probe path. Optional — defaults to <see cref="BffDeployOptions.DefaultHealthCheckPath"/>.</summary>
     public const string HealthCheckPathParameterKey = "healthCheckPath";
@@ -306,9 +309,15 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
         var run = read.Run;
         var etag = read.ETag;
         var parameters = run.Parameters.NonSecret;
+        var interStepState = run.InterStepState;
 
-        // (2) Parameter guards — every field H9 needs must be non-empty
-        //     BEFORE any external side effect (§4C Resumable classification).
+        // (2) Input guards — every field H9 needs must be non-empty BEFORE
+        //     any external side effect (§4C Resumable classification).
+        //     Intake values (tenantId, subscriptionId, buildId,
+        //     healthCheckPath) come from run.Parameters.NonSecret; H2a's
+        //     outputs (resource group, App Service, staging slot) come from
+        //     run.InterStepState (task 245a, G25 — NonSecret is written only
+        //     by intake, so reading them there always failed).
         //     buildId is now OPTIONAL (task 132, DS-4 §5 item 1) — resolved
         //     from the manifest below if the run parameter is absent.
         if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var tenantId))
@@ -326,26 +335,36 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
                 "Run parameter 'subscriptionId' is required by H9 (ADR-027 D4 — App Service lives in the customer sub).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, ResourceGroupNameParameterKey, out var resourceGroupName))
+        var resourceGroupName = interStepState.ResourceGroupName;
+        if (string.IsNullOrWhiteSpace(resourceGroupName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BffDeployRejectionCodes.MissingResourceGroupName,
-                "Run parameter 'resourceGroupName' is required by H9 (ARM targeting for deploy + swap ops).",
+                "InterStepState.ResourceGroupName is required by H9 (ARM targeting for deploy + swap ops) and is " +
+                "H2a's output. H2a must complete before H9 — if it already has, it did not record the value " +
+                "(a defect to fix, not a retry).",
                 cancellationToken).ConfigureAwait(false);
         }
-        if (!TryGetNonEmpty(parameters, AppServiceNameParameterKey, out var appServiceName))
+        var appServiceName = interStepState.AppServiceName;
+        if (string.IsNullOrWhiteSpace(appServiceName))
         {
             return await FailAsync(run, etag, FailureClass.Resumable,
                 BffDeployRejectionCodes.MissingAppServiceName,
-                "Run parameter 'appServiceName' is required by H9 (BFF App Service name — deploy + swap targeting).",
+                "InterStepState.AppServiceName is required by H9 (BFF App Service name — deploy + swap targeting) and is " +
+                "H2a's output. H2a must complete before H9 — if it already has, it did not record the value " +
+                "(a defect to fix, not a retry).",
                 cancellationToken).ConfigureAwait(false);
         }
 
         var hasRequestedBuildId = TryGetNonEmpty(parameters, BuildIdParameterKey, out var requestedBuildIdRaw);
         var requestedBuildId = hasRequestedBuildId ? requestedBuildIdRaw : null;
 
-        var stagingSlotName = TryGetNonEmpty(parameters, StagingSlotNameParameterKey, out var slotRaw)
-            ? slotRaw : _options.DefaultStagingSlotName;
+        // Staging slot: H2a's output; blank (e.g. a run whose H2a predates
+        // the field) falls back to the configured default.
+        var stagingSlotRaw = interStepState.AppServiceStagingSlotName;
+        var stagingSlotName = string.IsNullOrWhiteSpace(stagingSlotRaw)
+            ? _options.DefaultStagingSlotName
+            : stagingSlotRaw;
         var healthCheckPath = TryGetNonEmpty(parameters, HealthCheckPathParameterKey, out var pathRaw)
             ? pathRaw : _options.DefaultHealthCheckPath;
 
@@ -771,6 +790,12 @@ public sealed class H9BffDeployHandler : IProvisioningHandler
             "healthProbeAttempts={Attempts} nfr01Summary={Nfr01Summary}",
             envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds,
             probeSuccess.AttemptsUsed, sizeReport.Summary);
+
+        // Task 245b: publish what H7 (sprk_BffApiBaseUrl), H13 (health/E2E target + registry
+        // sprk_bffversion + its idempotency key) and H14 (webhook receiver base) need — the URL just
+        // probed and the build just deployed.
+        run.InterStepState.BffApiUrl = productionUrl;
+        run.InterStepState.BffBuildId = manifest.BuildId;
 
         return await MarkCompleteAsync(run, etag, idempotencyKey, envelope, sizeReport, cancellationToken)
             .ConfigureAwait(false);

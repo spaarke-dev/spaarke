@@ -570,6 +570,11 @@ public class InsightsAssistantEndpointTestFixture : WebApplicationFactory<Progra
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
 
+            // Task 163: the route now asks Dataverse, as the caller, for Read on the subject before the facade
+            // runs. These tests cover the authorized caller (deny paths: InsightsRouteAuthorizationContractTests).
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(Sprk.Bff.Api.Tests.Api.Ai.CallerAccessSeam.ReaderOfEverything());
+
             services.RemoveAll<IHostedService>();
 
             var dataverseMock = new Mock<IDataverseService>();

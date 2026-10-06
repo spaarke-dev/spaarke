@@ -7,6 +7,221 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-05 — bff-deploy route verification and smoke check; FAILURE-MODES AP-15 (unified-access-control-r2 tasks 140, 166, 167)
+
+`.claude/skills/bff-deploy/SKILL.md`: §9c's smoke check moves from the retired anonymous `/healthz/dataverse/doc/{id}` to
+`/healthz/dataverse` (task 166). Route registration is now proved with a SIGNED-IN request — since task 167's authorization
+FallbackPolicy an anonymous request answers 401 whether or not the route exists — in Step 3, Manual Quick Deploy step 3 and the
+troubleshooting table, which also gains a row for 429 from `/healthz` / `/ping` (the "health-probe" rate limit).
+`.claude/FAILURE-MODES.md` gains AP-15: TimeZoneIndependent DateOnly columns arrive from the Web API as timestamps (task 140).
+
+###### 2026-10-04 — Route-sweep integration: knowledge indexing pointer removed; communications filter pointer (unified-access-control-r2 tasks 161, 163)
+
+`.claude/skills/add-reference-to-index/SKILL.md` "Related" no longer points at `ReferenceIndexingService.cs`: task 163
+deleted it together with `/api/admin/knowledge/*`, so the scripts the skill lists are the only indexing path.
+`.claude/patterns/api/endpoint-filters.md` lists `CommunicationRecordAuthorizationFilter` (task 161) as a second
+per-record filter to read: one `CommunicationRecordRoute` value per route fixes the id source, the right and the deny
+answer.
+
+###### 2026-10-04 — ADR-034 Amendment A4: Assigned-To access is materialized as removable grants (unified-access-control-r2 task 142)
+
+`.claude/adr/ADR-034-user-record-membership.md` gains the A4 call-out, four MUST bullets and two MUST NOT bullets.
+The access-conferring registry gets a second, **write-time** consumer. Every registry-listed Contact- or
+Organization-typed "Assigned *" column on a project, matter or work assignment gives the named subject
+**Collaborate** as an explicit, removable grant, or a POA share for a linked internal user. ONE invariant owner
+does this, `AssignedAccessMaterializer`, with three triggers: L1 inline, the sync route and an L4 job. Provenance
+lives in the `sprk_assignedaccess` ledger. It never lowers existing access, and an operator's removal sticks
+(`Declined`). The record's Restricted / Secure / Limited policy and the No Access list apply before any write, and
+nothing is written when an input cannot be read (ADR-003). The read-time standing-grant and organization-expansion
+terms are kept (owner A2 reversed).
+
+Line 41's claim that the Q4 `sprk_assigned*` fields have no BFF writers is corrected (142's writer census). The
+owner accepted the amendment under §6.5 path B in round 11, 2026-10-03. The spec's FR-32 and MUST NOT list and
+design §7 now name the one exception. Full rules: `docs/adr/ADR-034-user-record-membership.md` § "Amendment A4".
+
+
+###### 2026-10-05 — Redis key-rotation tooling removed (T242b, owner)
+
+`customer-provisioning-orchestration-r1` T242b.
+
+- **`.claude/skills/ci-cd/SKILL.md`**: the `redis-key-rotation.yml` row is removed. The workflow,
+  `scripts/Rotate-RedisKey.ps1` and the missed-rotation alert are deleted: every Spaarke Redis is Azure Managed
+  Redis with access keys disabled (ADR-009 as amended by T242), so there is nothing to rotate; the tooling
+  wrote a Redis key to Key Vault, which ADR-009 forbids; and every scheduled run had failed since 2026-07-01.
+
+---
+###### 2026-10-05 — ADR-009: the latency alert is the average BFF-observed call latency (T242b, owner §6.5 Path B)
+
+`customer-provisioning-orchestration-r1` T242b Step 9.5 review.
+
+- **`.claude/adr/ADR-009-redis-caching.md`** (+ full `docs/adr/ADR-009-caching-redis-first.md`): operational alert (b) was
+  "P95 >100ms / 5min". It is now "average BFF-observed cache call latency per operation
+  (`cache.redis_call_duration_ms`) >100ms / 5min". The histogram reaches App Insights pre-aggregated
+  (sum/count/min/max), so a true P95 cannot be computed there, and the old alert queried `cache.redis_p95_ms`, which
+  nothing emits, so it never fired. `infrastructure/bicep/alerts.bicep` implements the new rule.
+
+---
+###### 2026-10-05 — Redis key rotation: dev retired, quarterly schedule removed (T242b)
+
+`customer-provisioning-orchestration-r1` T242b (owner decision 2026-10-05).
+
+- **`.claude/skills/ci-cd/SKILL.md`**: the `redis-key-rotation.yml` row now reads "manual only". The workflow's
+  quarterly crons were removed because every scheduled run had failed (no staging/prod cache, service principal
+  or secrets exist), and dev has no key since the dev cache became Azure Managed Redis, Entra only.
+
+---
+###### 2026-10-04 — PCF deploy procedures verify the REAL build result; `pcf-scripts` exits 0 on a failed build
+
+**What was wrong.** `pcf-scripts build` (and so `npm run build:prod` in every PCF) **exits 0 when the webpack
+build fails**: its `taskRunner.js` logs `[build] Failed:` and `[pcf-1033] [Error] An error occurred compiling or
+bundling the control.` and returns without rethrowing. Deploy procedures that ran the build and went on to "copy
+`bundle.js`, pack, import" could ship the PREVIOUS bundle still in `out/`. Found 2026-10-04 by
+`spaarke-ontology-platform-r1` (tasks 092 / 093b): the new nightly CI workflow reported 17 of 18 PCFs passing when
+9 had failed.
+
+**What changed** (one rule, judged from the OUTPUT: fail on a non-zero exit, `[build] Failed`, `compiled with N
+error(s)` or `[pcf-1033]`, after stripping ANSI colour; pass only on `[build] Succeeded`; anything else is a failure.
+Same rule as `.github/workflows/pcf-build-prod-nightly.yml`, PR #1285):
+- New `scripts/PcfBuildResult.psm1` (the rule) and `scripts/Invoke-PcfBuildProd.ps1` (build one PCF, exit 1 on a
+  failed build). Proven against a real failing build (VisualHost: npm exit 0, script exit 1) and a real passing one,
+  plus fake builds in Windows PowerShell 5.1 and pwsh 7.
+- `pcf-deploy` and `dataverse-deploy` SKILL.md: every build step runs the script **from the PCF folder**
+  (`pwsh -File ../../../../scripts/Invoke-PcfBuildProd.ps1 -PcfPath .`) and stops on a non-zero exit; MUST rules
+  say why. `pcf-deploy` Step 3's copy paths now match its working folder (they were `../out/...`), and its
+  Manual Quick Deploy no longer uses dev-mode `npm run build`.
+- `.claude/commands/dataverse-deploy.md`: its "Quick Dev Deploy" was `npm run build:prod` + `pac pcf push`, which
+  contradicts `pcf-deploy`'s NEVER rule (push rebuilds in development mode). Now the verified build + pack + import.
+- `task-execute` and `project-pipeline` SKILL.md: wave build verification and the PCF checklist judge PCF builds
+  with the script; task-execute's checklist no longer suggests `pac pcf push`.
+- `script-aware`, `project-pipeline`, `task-execute`: the example PCF script was `Deploy-PCFWebResources.ps1`,
+  deleted below (`script-aware` had also documented a `-ControlName` parameter it never had).
+- `docs/guides/PCF-DEPLOYMENT-GUIDE.md` said **"NEVER use `npm run build:prod` — pcf-scripts only has `build`"**,
+  the AP-1 error `pcf-deploy` was corrected for in May. Corrected, plus a troubleshooting row for "build succeeded
+  but the deployed control is unchanged".
+- `src/client/pcf/{MatterHeader,RecordHeader}/Solution/pack.ps1` (which rebuild before packing) judge the build with
+  the module.
+- `scripts/Build-AllClientComponents.ps1` Step 4 (the release build's PCF step, run by `Deploy-Release.ps1` Phase 1)
+  now builds **each PCF on its own in production mode**, mirroring the nightly workflow: every git-tracked
+  `src/client/pcf/<name>/package.json` with a `build:prod` script gets `npm install` + `npm run build:prod`, is judged
+  by the module, and is its own summary row (`PCF/<name>`); zero PCFs discovered is a FAILED row. It used to run ONE
+  aggregate dev-mode `npm run build` at `src/client/pcf`, which never worked from a clean checkout (TS5083, then out of
+  memory) and whose `out/` nothing consumed. Step 1 now builds `Spaarke.Events.Components` and
+  `Spaarke.SmartTodo.Components` AFTER `Spaarke.UI.Components` (both depend on it; before, a clean checkout failed
+  Step 1 and never reached Step 4). `ThemeEnforcer` gained the `build:prod` script every other PCF has. The script is
+  now ASCII-only, so Windows PowerShell 5.1 parses it too (12 non-ASCII dashes/arrows in a BOM-less file gave 10 parse
+  errors). Verified with #1123 merged: 14/14 shared libs + 19/19 PCFs pass.
+- `master-deploy` SKILL.md: F-2's "until diagnosed" follow-up was stale (F-2 itself records the 2026-06-11 fix); now
+  points at this PR's clean-checkout fixes as well, and notes that a full run takes over an hour.
+- `scripts/Deploy-PCFWebResources.ps1` **deleted** and dropped from `Deploy-AllWebResources.ps1`: it only ever pushed
+  `UniversalQuickCreate`, deleted 2026-06-22 by `pcf-orphan-cleanup-r1`, from a hard-coded path that no longer exists.
+
+---
+###### 2026-10-04 — Redis: Azure Managed Redis, Microsoft Entra only (T242, owner D12/D13); ADR-009 amended
+
+`customer-provisioning-orchestration-r1` T242 (§6.5 Path B — owner decisions D12/D13 amend ADR-009 §2/§3).
+
+- **`.claude/adr/ADR-009-redis-caching.md`** (+ full `docs/adr/ADR-009-caching-redis-first.md`): product = Azure
+  Managed Redis (`Microsoft.Cache/redisEnterprise`); SKU table B0 (dev/demo non-HA, staging + customer stamps HA);
+  authentication = the app's user-assigned managed identity only (access keys disabled, access-policy assignment,
+  `Redis__Endpoint` plain setting, RESP3). Replaces the Basic/Standard/Premium SKU table and the "connection string in
+  Key Vault" MUST; the 2026-09-28 "Standard per customer" wording is marked superseded.
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Stamp Redis — Azure Managed Redis, Microsoft Entra
+  only" (module shape, no key/secret/connection-string setting, BFF + Worker refuse a connection string outside
+  Development/Testing, H1 registers `Microsoft.Cache`).
+- **`.claude/constraints/azure-deployment.md`**: the `ConnectionStrings__Redis` KV-reference row → `Redis__Endpoint`
+  (plain host:10000).
+- **`.claude/patterns/caching/distributed-cache.md` + `INDEX.md`**: `CacheModule` mode selection; keys disabled; the
+  INDEX line that still said `AbortOnConnectFail = false` corrected to `true`.
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `Redis-ConnectionString` no longer an example
+  of a from-bicep-output secret.
+
+---
+###### 2026-10-04 — provisioning: Exchange sidecar holds no credential; H14a on RBAC for Applications (T251, D24–D26)
+
+`customer-provisioning-orchestration-r1` T251 (gap G30, owner decisions D24, D25, D26).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "Exchange mailbox access — RBAC for Applications,
+  sidecar holds no credential" — H14a grants only the stamp's managed identity the four `Application Mail.*` /
+  `MailboxSettings.Read` roles scoped to the customer's group (never ApplicationAccessPolicy, never the BFF app); never a
+  mailbox role in Entra (H10 grants `GetEntraGranted()`, T3 fails otherwise); the Worker signs in as
+  `Spaarke Exchange Admin` via its UAMI's federated credential and passes the token to the sidecar (no secret,
+  certificate or Entra directory role on that app; narrowed Exchange role); a `sitecontainers` variable names an app
+  setting, never a literal. Two more bullets added after the live spike: the sidecar connects with the tenant's
+  **initial domain**, never the tenant GUID (with a GUID, every Exchange write fails "doesn't have write permission to
+  target DC"); and a group-scoped assignment reads back as `RecipientWriteScope = Group` + `CustomResourceScope =
+  <group Name>`, so scope is matched on those fields.
+- **`.claude/agent-memory/researcher/`**: `exo-apponly-dc-write-error-2026-10-04.md` (new, confirmed live) and the
+  RBAC-for-apps note's open question answered.
+- **`.claude/skills/provision-environment/SKILL.md`**: `exchangePolicyScopeGroupId` row (direct members only), the H14
+  plan line and the T3/T4 report lines reworded for RBAC for Applications.
+- **`.claude/agent-memory/researcher/`**: two findings files (EXO identity, RBAC-for-Applications design) moved from
+  the project folder the agent wrote them to, and indexed.
+
+###### 2026-10-03 — provisioning: L2 signs in as the SPE owning app with MI-FIC, not a certificate (T248, D16)
+
+`customer-provisioning-orchestration-r1` T248 (gap G28, owner decision D16).
+
+- **`.claude/constraints/provisioning.md`**: new BINDING section "SPE owning app — MI-FIC, nothing stored" — L2 acts
+  as a container type's owning app only through the Worker UAMI's federated identity credential; never a certificate,
+  secret or Key Vault read for it; a rejected FIC token is an owner decision (A4's Key Vault certificate), never a
+  secret; Worker config `{ContainerTypeId, OwnerAppId}`; H0's three `spe-*` codes; the registration PUT is
+  create-or-replace; no secret-based `sprk_specontainertypeconfig` for Model 1 until T250; never delete
+  `rg-spaarke-shared-prod` or its Syntex billing account.
+- **`.claude/skills/provision-environment/SKILL.md`**: Step 0.5b note names the owner entry and H0's three codes
+  (was: certificate vault/secret + `SpeCertBootstrap`); Step 0.5c treats the container-type GET's 403 to the operator's
+  Azure CLI token as expected (not consented for container-type reads — observed 2026-10-03) and defers to H0 instead
+  of hard-stopping; check (5) flagged stale until T227 (per-customer BFF grants, D-13); T6 report line reworded.
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md`** E-1: informational note — a managed identity can act as a
+  same-tenant owning app via MI-FIC (verified by T248); L2 needs no E-1 secret; the BFF side is T250. No rule change.
+- The mechanism: `SpeConfidentialClientGraphFactory` (now an instance class, credential cached per tenant + owner) gets owning-app tokens from
+  `WorkerDataverseCredentialFactory.CreateManagedIdentityFederatedCredential` — the one place the Worker mints the UAMI
+  assertion; `KeyVaultCertBootstrapProbe` and its 24 h gate are replaced by `SpeOwnerCredentialProbe`; H13's T6 lists
+  the run's container app-only as the owner (the old app-only `containerTypes` GET is documented 403). Verified live
+  from the dev Worker identity (FIC token `appidacr` 2; registration + containers GET 200).
+
+---
+###### 2026-10-04 — portfolio board hygiene: Type backfill, 156 missing projects registered, new `/project-spend-update` skill
+
+Triggered by investigating why `unified-access-control-r2` spent ~$4,490 over 3 days via 27
+self-authored Workflow-tool runs — a Claude Code judgment call, not a per-run user request. That
+investigation surfaced the portfolio board (Project #2) was itself unreliable: 39 items with no `Type`
+set (invisible to Type-filtered views), and 156 of 205 local `projects/` folders (32% of the then-active
+registry) with no board presence at all.
+
+- **`project-defer-issue-tracking`**: fixed the root cause — `gh issue create --project` added items to
+  the board but never set `Type`. Skill now sets it immediately after creation (`defer→Idea`,
+  `issue→Bug`). Backfilled the 39 existing untyped items by hand.
+- **156 missing projects registered** as `[Project]:` board issues (existence + `Type`/`Status` only —
+  not a full `/devops-project-register` pass; Epic linkage, Task Count, and Start Date were deliberately
+  left for later enrichment). Board now has 207 `Type=Project` items, 1:1 with local folders.
+- **Local README portfolio pointers backfilled** for all 156 (+1 manual test case) — `devops-project-sync`
+  Step 0 requires that pointer block to find a project's Issue #, so without this, any future task work
+  on those projects would have silently failed the sync precondition. 35 projects had no `README.md` at
+  all (created minimal ones); 119 got the pointer inserted after the title; 3 had a stale `Portfolio: TBD`
+  placeholder replaced.
+- **New `/project-spend-update` skill** + `scripts/ai-cost/{get-project-cost,update-board-spend}.py`:
+  manually-triggered (NOT wired into `task-execute` or `devops-project-sync`) refresh of three new board
+  fields — `AI Spend (est.)`, `AI Calls`, `AI Spend As Of` — estimated from local Claude Code transcripts
+  at list API pricing. Deliberately decoupled from task completion: the heaviest-spending pattern
+  (Workflow-tool batches) doesn't reliably route through `task-execute` Step 9.6, so a hook-tied refresh
+  would under-cover exactly the work most worth tracking. No attempt to separate metered-API from
+  subscription/Max-plan usage (owner direction: keep it simple, reconcile against the actual invoice
+  manually at the portfolio level).
+- `devops-portfolio-status` now notes the spend field may be stale and points at `AI Spend As Of` +
+  `/project-spend-update` rather than implying it's always current.
+
+GitHub Projects v2 has no `CURRENCY` field type (confirmed via `gh project field-create --help`) — `AI
+Spend (est.)` is a plain `NUMBER`, left as-is per owner decision (not worth the churn of a rename).
+
+**Still open** (tracked for a follow-up review, not done here): spot-check the `Active`/`Completed`
+Status heuristic guessed for the 156; triage the ~29 legacy pre-2026-taxonomy items now typed `Idea`
+(a few look like dead test artifacts, e.g. `#416 "New test Idea"`, that may want closing instead);
+decide whether to merge [PR #1283](https://github.com/spaarke-dev/spaarke/pull/1283).
+
+PR: #1283. See `projects` memory note `project_portfolio-board-hygiene-and-ai-cost-tracking.md` for full
+continuity context.
+
+---
 ###### 2026-10-03 — ADR-012: stale `CommandRegistry` example removed (C-19)
 
 `.claude/adr/ADR-012-shared-components.md` cited `CommandRegistry` in the present tense as an example of a shared
@@ -43,6 +258,241 @@ the full ADR ("not a substitute for WP-1 owners"). Origin: task 076's interim `M
 (write-path invariant I-11) is owned by Dataverse autonumber; the owner chose "A now, B as its own task" and
 approved the wording 2026-10-03. Record: `projects/spaarkeai-word-add-in-r1/notes/087-adr-002-amendment.md`.
 
+---
+###### 2026-10-02 — provisioning: Document Intelligence via managed identity; stamps run the AI platform (T243, D22)
+
+`customer-provisioning-orchestration-r1` T243 (owner D13, G17, G29).
+
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: the `from-bicep-output` example no longer
+  lists `DocumentIntelligence-ApiKey` (retired by T243).
+- The mechanism: the BFF's `TextExtractorService` accepts the API key OR the injected managed identity ("key if
+  configured, else MI") and reports a rejected credential plainly; the catalog stops issuing the Document
+  Intelligence key and gains the per-env literal `DocumentIntelligence__Enabled=true` — no stamp had ever set the
+  BFF's AI master switch, so stamps ran with `NullTextExtractor` and analysis off. Owner D22: T244 + T246 are hard
+  prerequisites of T186.
+
+---
+###### 2026-10-02 — provisioning: one customer-stamp template (T249, D19)
+
+`customer-provisioning-orchestration-r1` T249 (owner decision D19).
+
+- **`.claude/skills/azure-deploy/SKILL.md`**: `customer.bicep` is the only customer-stamp template (H2a); the
+  `model2-full` half of the stamp row and the "routine infrastructure update via `deploy-infrastructure.yml`" path are
+  gone — that workflow ("Validate Bicep Infrastructure") now only lints and compiles; the `gh workflow run` example is
+  relabelled as on-demand validation.
+- **`.claude/skills/ci-cd/SKILL.md`**: `deploy-infrastructure.yml` described as validate-only (no what-if / deploy).
+- **`.claude/patterns/provisioning/INDEX.md`**: `stacks/` holds only standalone stacks.
+- The mechanism: `stacks/model2-full.{bicep,json}` + its 5 parameter files deleted; the workflow lost its what-if,
+  deploy, dispatch inputs and OIDC (it now also compiles `parameters/*.bicepparam`); `customer.bicep` wires SignalR
+  to the stamp UAMI, receives the L2 principal on **Model 1** stamps (Website Contributor on the stamp BFF — a Model 2
+  stamp is reached through Lighthouse; owner decision), logs Key Vault diagnostics to the workspace resource id, and
+  drops `platformKeyVaultName` + the drifting `createdDate: utcNow()` tag. The L2 principal is ONE Worker option,
+  `ControlPlaneIdentityOptions` (`ControlPlaneIdentity__PrincipalObjectId`, ValidateOnStart), shared by H2a and H4 —
+  it replaces `KvSecretsPopulationOptions.ControlPlanePrincipalObjectId` (owner decision).
+
+---
+###### 2026-10-02 — provisioning: Model 1 on the dedicated code path; secret-free default (T225b)
+
+`customer-provisioning-orchestration-r1` T225b (owner decisions D-12, D18).
+
+- **`.claude/skills/provision-environment/SKILL.md`**: Steps 0c / 1.0 / 1c / 1e / 1g / 3 / 4.0 describe the 1:1
+  pairing L2 now enforces — `Model1` ↔ `spaarke-hosted-model2`, `Model2` ↔ `customer-owned-model2`;
+  `spaarke-hosted-model1-trial` is refused as an unknown profile. The Step 1e PowerShell checks the pair and runs
+  the retired-profile stop first and then hard-stops `Model1` until T228 (no per-customer subscription yet — ADR-027;
+  T228 removes the stop).
+- **`.claude/constraints/provisioning.md`** §KV credential lifecycle: secret-free is the H4 default; H4 omits
+  `BFF-API-ClientSecret` and `Dataverse-ClientSecret` on every new stamp (rule 2's hold covers the existing copy);
+  the run-context bullet no longer lists a platform vault among L2-owned values. New prerequisite `PRQ-E-14`
+  (registry `sprk_credentialmode` column — the H4 secret-free marker needs it).
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `from-platform-vault` retired with
+  `BingSearch-ApiKey` / `LlamaParse-ApiKey` (D18); `from-existing-kv` entries never reached on a new stamp.
+- The mechanism: H2b, H13's I2 probe and H12c use the stamp's own AI Search / OpenAI for both models (the shared
+  endpoints, the Cosmos tenant-filter template store and the `AzureOpenAI-Endpoint` seed entry are deleted);
+  customer.bicep's dead `requireSecretFreeIdentity` parameter chain is removed.
+
+---
+###### 2026-10-02 — provisioning: Model 1 shared-tier Bicep retired (T225a, D-12)
+
+`customer-provisioning-orchestration-r1` T225a.
+
+- **`.claude/patterns/provisioning/{INDEX,openai-quota-region-composition,operator-rbac-bootstrap,keyvault-reference-identity-invariant}.md`**:
+  no longer point at the deleted `stacks/model1-shared.bicep` / `model1-shared-l2-rbac.bicep`. The OpenAI pattern
+  points at `customer.bicep`'s `openAiLocation` + `openai.bicep`'s `deployments` default; the two recovery recipes
+  use stamp placeholders (`{stampSubscriptionId}`, `rg-spaarke-{customerId}-{env}`, …) instead of the retired shared
+  subscription and names — the original incident is named once, as history.
+- **`.claude/skills/azure-deploy/SKILL.md`**: the Model 1 Shared row records the deletion; the customer-stamp row names
+  both full-stamp templates (`customer.bicep` via H2a, `model2-full.bicep` via `deploy-infrastructure.yml`) and flags
+  that they are not reconciled (T235).
+- **`.claude/skills/provision-environment/SKILL.md`**: roadmap item 3 parameterizes the OpenAI deployment set in
+  `customer.bicep` (it named the deleted stack).
+- The mechanism: the Model 1 shared stacks, the shared RBAC module and the four parameter files bound to them are
+  deleted; the ARM-artifact workflow publishes only `customer`; `ArmDeploymentRunner` fails closed for Model 1 until
+  T225b + T228; `bicep-e2e-dry-run.ps1` builds to a file (Windows `--stdout` crash) and has no EXPECTED_FAILURE mask.
+
+---
+###### 2026-10-01 — provisioning: operator intake validated at the edge with the handlers' own rules (T245c, G25 closed)
+
+`customer-provisioning-orchestration-r1` T245c.
+
+- **`.claude/constraints/provisioning.md`** + **`.claude/patterns/provisioning/run-context-contract.md`**: new rule — an
+  intake value a handler has rules for is validated at `POST /api/runs` with the same rules: shared code where the
+  rule is non-trivial (`UserProvisioningIntake` serves both H11 and the endpoint), the handler's own rejection code
+  where it has one. The prerequisite-registry sentence no longer names a `tenancyModel` field that does not exist.
+- **`/provision-environment` SKILL.md**: new **Step 1e-bis** (before 1f, so a bad value stops the skill before the
+  registry placeholder is written) collects `identityPreset`, the user list (NativeAccount: names; B2BGuest: email),
+  the Exchange scope group (prerequisite `PRQ-C-08` — created by the stamp tenant's Exchange admin; the skill never
+  creates it), the Graph subscription resources and the Communication default mailbox; batch mode hard-stops on any of
+  them. Step 1.0 refuses a batch intake file git would track (it carries personal data — owner decision D15;
+  `runs/*-intake.json` is git-ignored). Step 4.0 sends the values (`usersJson` = `ConvertTo-Json -InputObject
+  @($users)` — `-AsArray` double-nests; `@($null).Count` is 1, so `$users` is normalised first), sends
+  `estimatedMonthlyUsd` as a string (a JSON number fails binding against the string map), and posts with
+  `charset=utf-8`. Also fixed: the handler catalog row and the Step 3 plan said Model 2 skips H11 — nothing skips it.
+- **`.claude/patterns/provisioning/manifest-driven-secret-catalog.md`**: `Communication-DefaultMailbox` is
+  `from-intake-parameter`; only `ContentSafety-ApiKey` (T246) is left on the writer-less run-parameter channel.
+- The mechanism: five intake keys required; H11's diagnostics and the Graph collaborators' logs identify users by
+  position / Entra object id, never by name, email or UPN; `POST /api/runs` releases the I5 run guard when the run-store
+  write fails; `RunContextContractTests`' known-gap list is empty and its catalog-member map derived by reflection.
+
+---
+###### 2026-10-01 — provisioning: values L2 owns are configuration or computed, never run parameters (T245b, G25)
+
+`customer-provisioning-orchestration-r1` T245b.
+
+- **`.claude/constraints/provisioning.md`**: new rule — a value L2 owns (its own principal, a platform vault, the SPE
+  owning-app credential) is a validated Worker option (`AddOptions().Bind().Validate().ValidateOnStart()`), never a run
+  parameter; an idempotency version is computed from the artifact the handler applies (`Handlers/ArtifactVersion.cs`),
+  never supplied.
+- **`.claude/patterns/provisioning/run-context-contract.md`**: pointer — such values are not `HandlerRunInputs` entries.
+- **`/provision-environment` SKILL.md**: Step 6a's operator registry fallback now derives every promoted column from
+  the run record (`interStepState.resourceGroupName` / `appServiceName` / `keyVaultName` / `bffBuildId`, the
+  `importedSolutions` fingerprint, the run id as cache-bust token) — the same sources H13 uses. Before, `$rgName`,
+  `$kvName`, `$deployedBffVersion`, `$cacheBustToken` … were used but never assigned, and two comments named
+  InterStepState properties that never existed. Step 0.5b notes the Worker's SPE owner-entry prerequisite.
+- The mechanism: `bicepVer` / `indexVer` / `secretsVer` are SHA-256 of the deployed ARM template / the applied index
+  schemas / the embedded manifest; `SpeContainerOptions.ContainerTypeOwners`, `KvSecretsPopulationOptions`
+  (`ControlPlanePrincipalObjectId`, `PlatformVaultName`) and `E2EAcceptance:ProvisioningScriptsDirectory` fail Worker
+  startup when invalid; H9 publishes `InterStepState.BffApiUrl` / `BffBuildId`. 13 keys left `IntakeParameterCatalog`.
+
+---
+###### 2026-10-01 — silent-fail trap T7: `Customer__Id` on both BFF slots (T238, D-14)
+
+`customer-provisioning-orchestration-r1` T238 (INCOMING-CUSTOMER-RUNTIME-IDENTITY §1.1–§1.2).
+
+- **Root `CLAUDE.md`** customer-provisioning pointer row: trap catalog T1–T6 → **T1–T7**; and its stale
+  "Model 1 (shared trial/SMB)" description corrected — both models are dedicated per-customer stamps since D-12
+  (2026-09-30), the shared tier is retired.
+- **`/provision-environment` SKILL.md**: trap catalog row + handoff "Traps verified" list gain T7.
+- The mechanism: H4b writes `Customer__Id` = the run's customerId (verbatim) to BOTH App Service slots
+  (manifest `per_env_settings`, source `from-intake-parameter:customer_id`); H13 trap T7
+  (`CustomerIdentityT7Probe`) reads both slots' app settings from ARM and quarantines the run on a missing,
+  blank or different value (`h13-trap-T7-customer-identity`).
+
+---
+###### 2026-10-01 — `check-task-status-drift.ps1` reads the layout task-create prescribes
+
+`customer-provisioning-orchestration-r1` (T245a follow-up, owner-directed).
+
+- The checker (gating step for `task-execute` Step 10 and `push-to-github` Step 1.65) only parsed rows with the
+  marker and a three-digit id in the FIRST cell (`| ✅ 001 |`). The layout `task-create` Step 5 prescribes —
+  id first, status in a later cell (`| 001 | Title | … | 🔲 [open] |`) — parsed as nothing: repo-wide ~100 project
+  indexes reported `UNPARSEABLE`, and this project 1 of 186 rows, so the gate was red for a parser reason on every
+  push. Now: id-first rows read their status from the cell holding the `[token]` (else the glyph); ids may carry
+  `.N` / letter suffixes (`081.5`, `245a`); `| **001** | … |` rows (marker `**`, no status) read the later status
+  cell; POML ids with an alphabetic prefix (`ENV-001`) pair with the bare index id; `complete` counts as done.
+  Rows that parsed before parse identically. `-All`: unpaired 886 → 1,162 (2,438 before the prefix pairing),
+  disagreements 74 → 1,540 — real stale statuses that were invisible; 25 projects now read fully clean.
+
+---
+###### 2026-10-01 — provisioning run-context contract: every handler input has one producer (T245a, G25)
+
+`customer-provisioning-orchestration-r1` T245a.
+
+- **`.claude/constraints/provisioning.md`** — new BINDING section "Run-context contract": `run.Parameters.NonSecret`
+  holds intake values only (`IntakeParameterCatalog`, enforced at `POST /api/runs`); a value one handler produces for
+  another goes in a `[ProducedBy]` `InterStepState` property; every handler input is declared in
+  `Reconciler/HandlerRunInputs.cs`; `RunContextContractTests` enforces it (DAG ancestry + source scan). Background:
+  a real run could not get past H0 — ~20 required inputs had no producer and unit tests seeded them by hand.
+- **New pattern** `.claude/patterns/provisioning/run-context-contract.md` (+ INDEX row); `handler-registration-
+  completeness.md` gains step 5b (declare the new handler's inputs).
+- After the quality gates: the contract scan is a Roslyn syntax walk (aliases, `?.`/`!.`, strings and `nameof` handled;
+  declared inputs must also be READ); `run.Parameters.Secrets` has no writer and only H4 may read it; H4's manifest
+  sources are checked against `customer.bicep`'s `kvSecretValues` — all three now in the constraint and the pattern.
+- **`manifest-driven-secret-catalog.md`** — `value_source` table gains `from-intake-parameter` / `written-by-h3`;
+  `from-run-parameter` / `from-existing-kv` marked writer-less (every entry a pinned gap); the closed `per_env_source`
+  set (`PerEnvSourceCatalog`, mirrored in the generator) and the `IntakeValues` rename.
+- **`/provision-environment` SKILL.md** — real defects fixed: Step 1.0 and Step 4.0 compared `tenancyModel` to
+  `'Model2Dedicated'`, which never matches since T223/T224 (`Model1` | `Model2`), so the Model 2 subscription hard stop
+  and the `warnAndProceed` ban were dead; the Step 4.0 comment claiming L2 "ignores unknown keys" now documents the
+  closed intake set (400 `intake-unknown-key` with `acceptedKeys`); Step 1c literals and examples corrected; Step 5
+  notes that H3 now gates H4b / H6 / H8 / H9.
+
+---
+###### 2026-09-30 — `ci-cd` + `azure-deploy` skills describe the workflows that exist (plan G24)
+
+`customer-provisioning-orchestration-r1` SESSION 28 (owner: fix drift at discovery).
+
+- **`ci-cd`**: the "Primary CI Pipeline" section described `sdap-ci.yml` as the gate; it is now the CI Router
+  (`ci-router.yml` → Tier 1 blocking + Tier 2 advisory), and `Router` is the **only** required status check on
+  master (verified 2026-09-30 with `gh api repos/spaarke-dev/spaarke/rules/branches/master`). The "Supporting
+  Workflows" table listed four files that do not exist (`build-only.yml`, `dotnet.yml`, `test.yml`,
+  `auto-add-to-project.yml`); it now lists the eleven reporting/scheduled/publishing workflows that do. Merge steps,
+  diagram, troubleshooting job names, `gh run list --workflow=` and the secrets note follow. `deploy-infrastructure.yml`
+  is no longer described as auto-deploying on push (push/PR = validate + what-if; deploy = manual dispatch + approval).
+- **`azure-deploy`**: removed the deleted `deploy-platform.yml` / `deploy-slot-swap.yml` rows; corrected
+  `deploy-bff-api.yml` (dispatch only — never on merge) and `deploy-office-addins.yml` (auto on push) triggers.
+- Same pass outside `.claude/`: `docs/procedures/ci-cd-workflow.md` rewritten against all 23 workflow files; stale
+  references fixed in `docs/architecture/ci-cd-architecture.md`, `docs/guides/GITHUB-ENVIRONMENT-PROTECTION.md`,
+  `docs/procedures/{DEPENDENCY-MANAGEMENT,testing-and-code-quality}.md`, `config/coverlet-nightly.runsettings`,
+  `scripts/Deploy-Platform.ps1`; `workflows-validate.yml` / `ci-router.yml` header comments no longer claim
+  "required check" / "shadow mode".
+
+---
+###### 2026-09-30 — `/provision-environment` enforces the customerId standard and records the display name (T237)
+
+`customer-provisioning-orchestration-r1` T237 (owner D10, adopting unified-access-control-r2 D-14).
+
+- **Step 1a** now validates `customerId` against the standard `^[a-z][a-z0-9]{2,7}$` (case-sensitive, `\z`-anchored;
+  re-prompt in interactive mode, hard stop in batch), refuses the reserved ids `platform` / `shared` / `byok`
+  (they name non-customer resource groups — the BFF already refuses them), and tells the operator to abbreviate long
+  names once (`northwind` → `nwind`). It used to describe a kebab-case 3–32-character id with no check at all.
+- **New Step 1a-bis `displayName`** — the customer's full name, written to `sprk_name` on the registry placeholder so
+  the id ↔ name decision is recorded once. `intake.schema.json` gained the matching optional property.
+- 🔴 **Step 1f fix**: `$tenancyModelMap` was still keyed `Model1Shared` / `Model2Dedicated`, so after T224 renamed the
+  values the lookup returned `$null` and every placeholder row would have been written without `sprk_tenancymodel`.
+  Keys are now `Model1` / `Model2`, and a missing mapping stops the step.
+- Examples use compliant ids (`acme`, not `trial-acme-2026-08-18`). The Step 1c/1e tenancy and profile prose is still
+  pre-T224; that is recorded under plan gap G6 for T225b.
+- **Step 1.0 batch validation** now runs `npx -p ajv-cli@5 -p ajv-formats@3 ajv validate --spec=draft2020 -c ajv-formats`
+  (same as the `provisioning-prereqs-validate` CI step, which was failing on every run without the formats plugin).
+  The old `--strict false` silently skipped `format: uuid`, so a malformed `tenantId` passed batch validation.
+
+---
+###### 2026-09-30 — provisioning docs follow T226: H4-shared retired, secret-catalog pattern rewritten
+
+`customer-provisioning-orchestration-r1` T226 retired the H4-shared handler (it copied keys from the
+`sprksharedprod-*` services into a shared vault — a cross-customer isolation break under the dedicated-stamp
+model) and the `from-shared-service` value source. The procedure surface still described both.
+
+- **`patterns/provisioning/manifest-driven-secret-catalog.md` — rewritten against the code.** The previous
+  version documented a `source: { type }` field the manifest has never had (the field is `value_source`), said
+  the generator emits deployment-guide sections (it emits four `generated/` artifacts), and pointed at a test
+  project that does not exist. It now lists the closed `value_source` set and its writers, the owner D13
+  keyless-first rule, the literal-string hazard of an unresolvable KV reference, and the places a new
+  `value_source` must change (task 214 changed none of the four code places, so every H4 run failed
+  `ManifestReadFailed`).
+- **`patterns/provisioning/handler-registration-completeness.md` — corrected against the code.** It described
+  `AddKeyedTransient`, `ExecuteAsync`, `HandlerResult.Failed`, lower-case ids and a "3-file dance"; the code uses
+  `AddKeyedScoped` factory forwarders, `HandleAsync`, `Success`/`Failure(FailureClass, …)`, `"H4"`-style ids, and
+  a new handler also needs `Dispatchable` + a `DagAdvancer.HandlerDependencies` entry (the HANDLER-01 failure).
+  Dispatchable count 21 → 20.
+- **`constraints/provisioning.md`** — same handler-contract corrections; H4-shared removed as a drift-detection
+  handler; the non-existent `HandlerIdempotencyTests` reference replaced; test path corrected.
+- **`skills/provision-environment/SKILL.md`** — 🔴 **Step 4.0 now sends `containerTypeId`**: Step 0.5b read it but
+  the run payload omitted it, so every run would fail H4's `SPE-ContainerTypeId` write and H8. Step 0.5b skips
+  `status: retired` prerequisites (they used to run an empty recipe and report a pass). Handler catalog, DAG
+  ordering and `subscriptionId` consumers no longer list H4-shared.
+
+---
 ###### 2026-10-02 — root `CLAUDE.md` §1.1: product names vs engineering identifiers (spaarke-ontology-platform-r1)
 
 **SpaarkeAi is now called the Spaarke Console.** Added a §1.1 naming table so the rename does **not** require
@@ -54,6 +504,7 @@ declare `SpaarkeAi = Y`** and would inherit the merge conflicts. Same split alre
 ~~ledger~~ → Decision Record. Naming authority stays
 `projects/spaarke-ontology-platform-r1/notes/ontology-component-model.md` §3.
 
+---
 ###### 2026-09-30 — `office-addins-deploy`: two manifest eras (spaarkeai-word-add-in-r1 task 078)
 
 The skill's "Manifest Upload After Deploy" told operators to download `outlook/manifest.xml` — a path that
@@ -62,6 +513,7 @@ into once). Rewritten into two eras: the LIVE XML add-ins (both hosts) and the n
 + Word in ONE app, CI artifact `spaarke-addin-unified-package`, uploaded as App type "Teams app", tested first as a
 `-TEST` zip assigned to "Just me"). Rollout: `projects/spaarkeai-word-add-in-r1/notes/078-manifest-decision.md`.
 
+---
 ###### 2026-09-28 — five ADRs amended for D-12: no shared Model 1 tier (owner-approved)
 
 Owner chose "amend all five" after the D-12 doc sweep found 51 BLOCKING files (recorded: 13). CLAUDE.md

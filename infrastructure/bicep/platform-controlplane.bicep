@@ -165,8 +165,6 @@ param adminDataverseEnvironmentUrl string
 @description('Name of the platform Key Vault secret holding the shared BFF app-registration client secret (canonical name "BFF-API-ClientSecret" -- BINDING never-delete per scripts/canonical-secret-catalog/manifest.yaml). Passed through to modules/controlplane-worker-app-service.bicep as the EnvVarValues__ClientSecret KV-reference source (task 142, Wave G-4 -- H7 credential provisioning). REQUIRED: EnvVarValuesOptions.Validate() fails fast at Worker boot (NFR-05) if the resolved secret value is missing. Same secret name every environment resolves (the shared multitenant BFF app-reg is Spaarke-tenant-scoped per spec.md §9.1 v3, not per-customer), so a stable default is safe here (contrast with adminDataverseEnvironmentUrl above, which is deliberately env-specific with no default).')
 param bffApiClientSecretName string = 'BFF-API-ClientSecret'
 
-@description('Name of the platform Key Vault secret holding the shared-platform Azure OpenAI resource endpoint (canonical name "AzureOpenAI-Endpoint" per scripts/canonical-secret-catalog/manifest.yaml -- the SAME secret the .Api site already resolves as AzureOpenAI__Endpoint / DocumentIntelligence__OpenAiEndpoint). Passed through to modules/controlplane-worker-app-service.bicep as the RuntimeReferences__SharedPlatformOpenAiEndpoint KV-reference source (task 153, Wave G-5 -- H12c credential-config confirmation). CONDITIONALLY required: only H12c\'s Model1Shared branch consults it; RuntimeReferencesOptions.Validate() does NOT fail-fast at boot on this being unset (contrast with adminDataverseEnvironmentUrl / bffApiClientSecretName above, both of which every run needs).')
-param azureOpenAiEndpointSecretName string = 'AzureOpenAI-Endpoint'
 
 @description('Principal ID of the GitHub Actions OIDC service principal for CI artifact publishing (Wave G-8 Batch 2). When provided, grants Storage Blob Data Contributor on the provisioning-artifacts storage account (tasks 116/117 upload compiled ARM JSON / BFF zips / solution zips) and AcrPush on the platform ACR (task 115 sidecar image push). Empty (default) skips BOTH grants -- supply once the CI OIDC app-reg principal is known for this environment.')
 param githubActionsOidcPrincipalId string = ''
@@ -177,12 +175,22 @@ param acrImageTag string = 'mcr.microsoft.com/appsvc/staticsite:latest'
 @description('ACR authentication mode for the sidecar sitecontainer pull, threaded through to modules/controlplane-worker-app-service.bicep (Wave G-8 Batch 2 / audit defect #11). Default is COMPUTED from acrImageTag so the default parameter pair stays coherent: the public MCR placeholder needs Anonymous; any other (platform-ACR) image defaults to UserAssigned, backed by the AcrPull grant this stack now makes on the platform ACR (defect #4). Override explicitly if needed.')
 param sidecarAuthType string = startsWith(acrImageTag, 'mcr.microsoft.com/') ? 'Anonymous' : 'UserAssigned'
 
-@description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Threaded through to modules/controlplane-worker-app-service.bicep as the EXCHANGE_CONNECT_APP_ID sitecontainer environment variable (customer-provisioning-orchestration-r1 Wave H-3 fix-at-discovery 2026-08-21 — the worker module declared this param with default \'\' but the platform stack never plumbed it, so the sidecar always got an empty value and exited 1 at Listener.ps1 startup fail-fast). All-zero GUID default lets the sidecar START without a real EXO app-reg (Verify-Sidecar-Live.ps1 explicitly accommodates this: "all-zero GUIDs reach sidecar but Set-ExchangeApplicationAccessPolicy.ps1 rejects at Connect-ExchangeOnline before any real Exchange mutation"). Override with the real EXO connect app-reg client ID once H3 Entra app-reg handler output supplies it at customer/platform onboarding.')
-param exchangeConnectAppId string = '00000000-0000-0000-0000-000000000000'
+@description('Client id of the \'Spaarke Exchange Admin\' app registration the Worker signs in as for H14a (task 251, owner D24) -- through its federated identity credential that trusts the control-plane UAMI; no certificate, no secret. Threaded to modules/controlplane-worker-app-service.bicep (IntegrationWiring__ExchangeAdminAppId). Empty: the Worker and its sidecar start, and H14a reports "not configured" on first use -- never a placeholder value. Created by docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (Exchange admin app).')
+param exchangeAdminAppId string = ''
+
+@description('Endpoint (host:port) of the per-environment Azure Managed Redis (spaarke-bff-redis-{env}; modules/redis.bicep output `redisEndpoint`, deployed with parameters/redis-{env}.bicepparam). Threaded to modules/controlplane-worker-app-service.bicep as Redis__Endpoint -- the Worker authenticates with the control-plane UAMI (access keys are disabled, task 242 / owner D12-D13), so that UAMI must be in the cache\'s access-policy list. Required: the Worker refuses to start without it outside Development/Testing.')
+@minLength(1)
+param redisEndpoint string
+
+@description('SPE container types this L2 deployment provisions into, each with its owning app ([{ containerTypeId, ownerAppId }]) — threaded to modules/controlplane-worker-app-service.bicep (speContainerTypeOwners; see its description). Task 245b; task 248 — L2 signs in as the owning app through its federated credential trusting the Worker UAMI, so no certificate is configured. Empty (default) until the topology runbook has created a container type + owning app.')
+param speContainerTypeOwners array = []
 
 
-@description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded through to modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled. Default false per ADR-032 null-object kill-switch -- flip true once customerRunGuardTenantId is supplied; the guard authenticates as the bound L2 UAMI (no client secret) since 2026-08-27, and CustomerRunGuardOptions.Validate() then fails fast at Worker boot on any missing field. spec.md §4D I5 / FR-32 requires this true in production.')
+@description('Kill-switch for the CustomerRunGuard (customer-provisioning-orchestration-r1 task 203b, punch list row A27). Threaded to BOTH modules/controlplane-app-service.bicep and modules/controlplane-worker-app-service.bicep as CustomerRunGuard__Enabled (the Api acquires the lock, the Worker releases it, so they MUST agree). Default false per ADR-032 null-object kill-switch -- flip true once the L2 UAMI is a Dataverse Application User on the admin environment; the guard authenticates as that UAMI (no client secret) and reads its Dataverse URL from DataverseEnvironmentRegistry:AdminEnvironmentUrl (REG-05), and CustomerRunGuardOptions.Validate() then fails fast at host start. customerRunGuardTenantId is diagnostics-only. spec.md §4D I5 / FR-32 requires this true in production.')
 param customerRunGuardEnabled bool = false
+
+@description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25; restored by task 245b -- the 2026-09-28 master merge had dropped it): secret-free identity mode for the L2 Worker. Threaded through to modules/controlplane-worker-app-service.bicep -- when TRUE the BFF-API-ClientSecret KV-reference app settings are OMITTED (never a sentinel, auth-v4 SS9.1) and the FR-39 ordered-credential chain settings are emitted instead; H7/H6 then authenticate via the Worker UAMI federated assertion. Default FALSE preserves current behavior for prong-3 unmigrated environments (SS6.5 resolution record).')
+param requireSecretFreeIdentity bool = false
 
 @description('Tenant ID for JWT bearer authority validation on the L2 REST API. Empty defaults to subscription tenant ID (single-issuer per spec.md §4.2 - the control plane is Spaarke-internal, never customer-tenant).')
 param jwtTenantId string = ''
@@ -422,6 +430,9 @@ module appService 'modules/controlplane-app-service.bicep' = {
     // DS-5 C5.1: MI-only FQNS + queue name, NOT a KV-ref connection string.
     serviceBusNamespaceName: effectiveServiceBusNamespaceName
     serviceBusQueueName: 'sprk-provisioning-jobs'
+    // Task 242b: the Api host needs the registry URL (REG-07) and the SAME guard switch as the Worker.
+    adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
+    customerRunGuardEnabled: customerRunGuardEnabled
     appInsightsConnectionString: monitoring.outputs.connectionString
     tags: tags
   }
@@ -452,7 +463,6 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     cosmosDatabaseName: cosmos.outputs.databaseName
     cosmosRunsContainerName: cosmos.outputs.containerName
     keyVaultName: keyVault.outputs.keyVaultName
-    keyVaultUri: keyVault.outputs.keyVaultUri
     // DS-5 C5.1 follow-on fix (task 110): MI-only FQNS + queue name, NOT a
     // KV-ref connection string -- same fix shape as .Api above, applied to
     // .Worker (task 101 added this module after DS-5 was authored, carrying
@@ -462,7 +472,6 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     serviceBusQueueName: 'sprk-provisioning-jobs'
     adminDataverseEnvironmentUrl: adminDataverseEnvironmentUrl
     bffApiClientSecretName: bffApiClientSecretName
-    azureOpenAiEndpointSecretName: azureOpenAiEndpointSecretName
     // Wave G-8 Batch 2 (audit defect #11): sidecar image + pull-auth plumbed
     // from top-level params (previously the worker module's defaults were
     // unreachable from this stack). The sitecontainer's UserAssigned
@@ -470,11 +479,14 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // module's concern (Batch 3).
     acrImageTag: acrImageTag
     sidecarAuthType: sidecarAuthType
-    // Wave H-3 fix-at-discovery 2026-08-21: worker module always had this
-    // param but nothing plumbed it here; empty value caused sidecar Listener.ps1
-    // fail-fast (exit 1) → App Service killed whole site startup. See top-level
-    // exchangeConnectAppId param description for full rationale.
-    exchangeConnectAppId: exchangeConnectAppId
+    // Task 251: the Exchange admin app the Worker signs in as (H14a / H13 T4).
+    exchangeAdminAppId: exchangeAdminAppId
+    // Task 242b: the per-environment Managed Redis the Worker signs in to with its UAMI.
+    redisEndpoint: redisEndpoint
+    // Task 245b (G25): L2's own principal (H4 grants it Secrets Officer on each customer vault —
+    // owner-approved 2026-10-01) + the SPE owning-app credentials per container type.
+    controlPlanePrincipalId: uami.outputs.principalId
+    speContainerTypeOwners: speContainerTypeOwners
     // A27 (customer-provisioning-orchestration-r1 task 203b, punch list row A27
     // / r1-gap-analysis c5-6): CustomerRunGuard I5 same-customer serialization
     // guard config. Same shared BFF app-reg identity H6/H7/H4 use -- reuses
@@ -483,6 +495,9 @@ module workerAppService 'modules/controlplane-worker-app-service.bicep' = {
     // per ADR-032 null-object kill-switch (see worker module param docstring).
     customerRunGuardTenantId: effectiveJwtTenantId
     customerRunGuardEnabled: customerRunGuardEnabled
+    // A44.5 (task 205i; restored by task 245b): secret-free identity mode -- omits the
+    // BFF-API-ClientSecret KV-refs + emits the FR-39 chain settings instead.
+    requireSecretFreeIdentity: requireSecretFreeIdentity
     // Wave G-8 Batch 2 (audit defects #5/#7 hand-off): container-scoped blob
     // URI of the provisioning-artifacts store (module 9 below). Batch 3's
     // worker module emits it as the three

@@ -1,5 +1,7 @@
 # Spaarke Scheduled Jobs Migration
 
+> **Portfolio**: [Project #1176](https://github.com/spaarke-dev/spaarke/issues/1176) · [Board #2](https://github.com/users/spaarke-dev/projects/2) — _auto-registered 2026-10-04 (existence only; Epic/Task Count/Start Date not yet set)_
+
 > **Status**: Design (scaffolded — not yet planned)
 > **Created**: 2026-06-22
 > **Predecessor**: [`spaarke-platform-foundations-r3`](../spaarke-platform-foundations-r3/) (delivered the framework + 2 reference consumers)

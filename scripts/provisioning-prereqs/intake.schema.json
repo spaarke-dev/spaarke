@@ -1,0 +1,293 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://spaarke.com/schemas/provisioning-intake.schema.json",
+  "title": "Spaarke Provisioning Intake",
+  "description": "Batch-mode intake schema for /provision-environment skill Step 1 (`--batch <path.json>`). Authored by customer-provisioning-orchestration-r1 task 203c per punch-list row A03. Consumed by the skill's Step 1.0 batch-mode path (validated with ajv-cli or equivalent Draft 2020-12 validator BEFORE POST /api/runs). Section 1f (environmentId auto-create) still runs when `environmentId` is omitted / null.",
+  "type": "object",
+  "required": [
+    "customerId",
+    "tenantId",
+    "tenancyModel",
+    "controlPlaneEnv",
+    "profile",
+    "confirmationAcknowledgment",
+    "identityPreset",
+    "users",
+    "exchangePolicyScopeGroupId",
+    "communicationDefaultMailbox"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "customerId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]{2,7}$",
+      "not": { "enum": ["platform", "shared", "byok"] },
+      "description": "The customerId standard: 3-8 lowercase letters and digits, starting with a letter (docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § 'The customerId standard'). No hyphens. Abbreviate longer customer names here, once (northwind -> nwind), and put the full name in displayName. Reserved (they name non-customer resource groups): platform, shared, byok. The same rule is enforced at POST /api/runs (CustomerIdStandard) and in skill Step 1a."
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "pattern": "\\S",
+      "description": "The customer's full name (e.g. 'Northwind Traders'). Written to sprk_dataverseenvironment.sprk_name next to sprk_customerid, so the id-to-name decision is recorded once on the registry row and never re-derived. Optional; defaults to customerId."
+    },
+    "tenantId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Customer Entra tenant ID (Model 2) or Spaarke tenant ID (Model 1). NEVER default — enforces §4D I1 (FR-28) tenant-isolation invariant."
+    },
+    "subscriptionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Target Azure subscription id. REQUIRED for Model2 (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1 MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2 allOf below."
+    },
+    "tenancyModel": {
+      "type": "string",
+      "enum": ["Model1", "Model2"],
+      "description": "Model1 = Spaarke-hosted dedicated stamp in Spaarke's tenant (owner decision D-12; profile spaarke-hosted-model2); Model2 = dedicated stamp in the customer's own tenant + subscription with the admin-consent flow (profile customer-owned-model2). The shared trial/SMB tier is retired."
+    },
+    "controlPlaneEnv": {
+      "type": "string",
+      "enum": ["dev", "demo", "prod"],
+      "description": "ISH-12 (SESSION 18 rename from `environment` → `controlPlaneEnv`): session-level L2 control-plane deployment tier — determines which L2 API base (`api://spaarke.com/provisioning-controlplane-{controlPlaneEnv}`) + which Bicep parameter file. NOT the L2 profile enum below, and NOT the customer Dataverse environment (see `environmentId` which is the `sprk_dataverseenvironment` record GUID). Rename disambiguates the two prior senses of `environment` (control-plane deployment tier vs Dataverse env instance)."
+    },
+    "profile": {
+      "type": "string",
+      "enum": ["spaarke-hosted-model2", "customer-owned-model2"],
+      "description": "L2 API profile enum — MUST match L2 accepted values EXACTLY (per DS-5 c6-1). Any drift = L2 400. Pairing (allOf below): Model1 ↔ spaarke-hosted-model2, Model2 ↔ customer-owned-model2 (the profile names predate the D-12 renumbering). spaarke-hosted-model1-trial is retired (D-12) and refused by POST /api/runs as an unknown profile."
+    },
+    "environmentId": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "sprk_dataverseenvironment record GUID. Omit or null → skill Step 1f auto-creates the placeholder via Dataverse MCP (primary) or `pac data create` (fallback)."
+    },
+    "region": {
+      "type": "string",
+      "description": "Azure region for platform resources. Canonical Spaarke strategy: westus2 for platform, westus3 for OpenAI (per user-memory reference_azure_fresh_sub_regional_gotchas). Optional — inferred from tenancyModel default when omitted.",
+      "examples": ["westus2", "westus3", "eastus2"]
+    },
+    "openAiRegion": {
+      "type": "string",
+      "description": "Azure region for Azure OpenAI deployment. Defaults to westus3 per canonical Spaarke strategy (westus2 platform + westus3 OpenAI, see operator memory reference_azure_fresh_sub_regional_gotchas). Consumed by customer.bicep openAiLocation param. Override only when data-residency or single-region compliance requires it (co-location typically saves 5-15 dollars per month trial egress but adds ~15-25ms per AI call, negligible vs inference time). Cross-referenced with PRQ-E-13 preflight (scripts/provisioning-prereqs/prereqs.yaml) which verifies pinned model:version pairs are available + non-Deprecated in the chosen region BEFORE dispatch.",
+      "examples": ["westus3", "westus2", "eastus2"]
+    },
+    "tier": {
+      "type": "string",
+      "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
+      "description": "Cost-envelope tier hint for H0 preflight cost-envelope check. Optional."
+    },
+    "estimatedMonthlyUsd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "COMP-10 (SESSION 17): projected monthly Azure spend in USD for the target stamp. Consumed by H0 preflight cost-envelope gate. When present + tier is set + gate is enabled (H0Options.CostEnvelopeAbortsPreflight=true, default), H0 fails Resumable with rejection code 'quota-cost-overrun' if this value exceeds the tier ceiling AND costEnvelopePolicy is not 'warnAndProceed'. Optional; missing/blank is a LOG-ONLY skip (server-side gate does not fail-close on plumbing gaps — SKILL.md Step 2 BAT-10 is the client-side authoritative check). Default tier ceilings: shared-trial=$430, smb=$700, enterprise=$2500, dedicated=$5000/mo (mirror SKILL Step 2 BAT-10)."
+    },
+    "skipExternalPrereqs": {
+      "type": "boolean",
+      "default": false,
+      "description": "Opt-in bypass of Step 0.5 (prereqs.yaml iteration). Use ONLY when operator has manually verified every once_per_tenant + once_per_subscription + once_per_env prereq per docs/guides/PROVISIONING-PREREQUISITES.md. Documented in lessons-learned.md when set true."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Free-form intake notes archived to provisioning-runs/{customerId}-{runId}/intake.md. Optional."
+    },
+    "confirmationAcknowledgment": {
+      "type": "string",
+      "const": "proceed with provisioning",
+      "description": "REQUIRED for batch dispatch. Literal attestation phrase — batch equivalent of the interactive Step 3 confirmation gate. Per wave-0-adr-note-2026-08-27.md Decision 3 (BAT-03): NFR-11 auditability preserved via two-layer evidence — (1) operator TYPED the phrase into the intake file (typing = intent expression); (2) SHA-256 hash of the intake JSON is captured in the L2 audit record + Step 7 postmortem. Interactive mode still requires stdin-typed phrase per skill Step 3 (unchanged). Any value other than the exact literal MUST cause the skill to HARD STOP before POST /api/runs."
+    },
+    "mcpDisconnectPolicy": {
+      "type": "string",
+      "enum": ["failFast", "proceedWithFallback"],
+      "default": "failFast",
+      "description": "Batch policy for skill Step 0d Dataverse MCP disconnect (BAT-04). `failFast` → exit non-zero with runs/{runId}-mcp-disconnect.json diagnostic. `proceedWithFallback` → use `pac data` + raw Web API PS fallback path (Fallback Matrix F1). Ignored in interactive mode (operator answers yes/no prompt)."
+    },
+    "acknowledgeUpgradeMode": {
+      "type": "boolean",
+      "default": false,
+      "description": "Batch acknowledgement that customerId may have prior runs (BAT-05). If Step 1a upgrade probe finds a `sprk_dataverseenvironment` row with `sprk_provisionedon != null` AND this flag is false → HARD STOP with runs/{runId}-upgrade-required.json. Set true only when operator has consciously chosen upgrade-mode semantics per §14A upgrade model. Ignored in interactive mode (operator answers upgrade-confirmation prompt)."
+    },
+    "onFailedPolicy": {
+      "type": "string",
+      "enum": ["autoResumeOnce", "abandon"],
+      "default": "abandon",
+      "description": "Batch policy for skill Step 4b Failed row (BAT-07). `autoResumeOnce` → POST /api/runs/{id}/resume ONCE after Failed → if still Failed, exit non-zero. `abandon` → immediately write runs/{runId}-failed.json + exit non-zero (skips resume). Ignored in interactive mode (operator answers resume/abandon prompt). Bucket B LOW#2 SESSION 18 (customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we): implementation verified at SKILL.md Step 4b line 1197-1201 — `switch ($script:BatchOnFailedPolicy) { 'autoResumeOnce' { ... POST /api/runs/$runId/resume ... single attempt } }`. If future SKILL.md edit removes this branch, this description is stale — sync both."
+    },
+    "onQuarantinedPolicy": {
+      "type": "string",
+      "enum": ["failFast"],
+      "default": "failFast",
+      "description": "Batch policy for skill Step 4b Quarantined row (BAT-07). ALWAYS `failFast` in batch (enum-of-one for forward compat) — write structured JSON diagnostic to runs/{runId}-quarantine.json and exit with distinct non-zero code (3). Quarantine is never auto-cleared in batch mode; operator MUST manually invoke QuarantineClearService via a separate maintenance workflow."
+    },
+    "onManualGatePolicy": {
+      "type": "string",
+      "enum": ["waitAndExit", "pollUntilTimeout", "failFast"],
+      "default": "waitAndExit",
+      "description": "Batch policy for skill Step 5 Manual Gate Handling (BAT-08). `waitAndExit` → write runs/{runId}-WAITING.md + runs/{runId}-gate.json + exit code 4 (operator resumes via `--resume` flag after clearing gate). `pollUntilTimeout` → poll GET /api/runs/{id} at 10s cadence until gate clears or configured timeout (currently 30 min hard-cap); exit 0 on clear, exit 4 on timeout. `failFast` → immediately exit code 4 (no wait, no polling). Applies to H0.5 admin consent · H1 quota bump · H8 SPE 24h · any WaitingOnGate transition."
+    },
+    "costEnvelopePolicy": {
+      "type": "string",
+      "enum": ["abortOnOverrun", "warnAndProceed"],
+      "default": "abortOnOverrun",
+      "description": "Batch policy for H0 preflight cost-envelope check (COMP-10). `abortOnOverrun` → H0 fail-fast if projected monthly cost exceeds tier ceiling; run enters Failed(cost-overrun) before any side-effecting handler dispatches. `warnAndProceed` → log warning to runs/{runId}-cost-warning.json but continue dispatch (Model 1 shared-trial ONLY — MUST reject for Model2 + prod). Default `abortOnOverrun` per binding NFR intent."
+    },
+    "postmortemFile": {
+      "type": "string",
+      "description": "Optional path to a pre-authored lessons-learned template (BAT-09). If provided + valid → skill Step 7b uses as base and appends run-specific data. If provided + invalid (missing required sections) → HARD STOP with runs/{runId}-postmortem-invalid.json. If omitted → skill auto-generates minimum lessons-learned.md from run outcome. Path is relative to repo root."
+    },
+    "identityPreset": {
+      "type": "string",
+      "enum": ["B2BGuest", "NativeAccount"],
+      "description": "T245c — H11 identity preset (design.md D6): B2BGuest invites each user as a guest (email required per user, consent gate); NativeAccount creates each user in the stamp's tenant (UPN from first/last name). Exact case. Same rule as POST /api/runs (UserProvisioningIntake) — pinned by IntakeSchemaProfileParityTests."
+    },
+    "users": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "description": "T245c — the users H11 provisions (1-500); the skill sends it as nonSecretParameters.usersJson. NativeAccount entries need a non-blank firstName and lastName (the UPN is built from them); B2BGuest entries need an email (the invitation goes to it) — allOf below. Same rules as POST /api/runs (UserProvisioningIntake); this schema may be stricter than the API, never looser (IntakeSchemaProfileParityTests). Personal data: stored in the L2 run document (owner decision D15) — never in git: the skill refuses an intake file git would track, and writes only the count to provisioning-runs/{run}/intake.md.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "firstName": { "type": "string", "pattern": "\\S" },
+          "lastName": { "type": "string", "pattern": "\\S" },
+          "email": { "type": "string", "pattern": "\\S" },
+          "companyName": { "type": "string" }
+        }
+      }
+    },
+    "exchangePolicyScopeGroupId": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "T245c — the mail-enabled security group that scopes H14a's Exchange ApplicationAccessPolicy (which mailboxes the BFF app + UAMI may use): its email address or object id. Created by the Exchange admin of the stamp's tenant BEFORE the run (prereqs.yaml PRQ-C-08; owner decision 2026-10-01). Required."
+    },
+    "communicationGraphResource": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "T245c — Graph subscription resource H14b subscribes to for the Communication module (e.g. users/{mailbox}/messages). At least one of this and emailGraphResource (allOf below)."
+    },
+    "emailGraphResource": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "T245c — Graph subscription resource H14b subscribes to for the Email module. At least one of this and communicationGraphResource (allOf below)."
+    },
+    "communicationDefaultMailbox": {
+      "type": "string",
+      "maxLength": 254,
+      "pattern": "^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$",
+      "description": "T245c — the Communication module's default mailbox address (local@domain.tld, at most 254 characters) — use a shared/service mailbox; H4 writes it to the customer vault as Communication-DefaultMailbox. Same pattern and length as IntakeParameterCatalog (POST /api/runs) — pinned by IntakeSchemaProfileParityTests."
+    }
+  },
+  "allOf": [
+    {
+      "description": "tenancyModel × profile invariant — Model1 pairs ONLY with spaarke-hosted-model2 (same rule as POST /api/runs: tenancy-profile-invalid)",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model1" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "properties": {
+          "profile": { "const": "spaarke-hosted-model2" }
+        }
+      }
+    },
+    {
+      "description": "tenancyModel × profile invariant — Model2 pairs ONLY with customer-owned-model2 (same rule as POST /api/runs: tenancy-profile-invalid)",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model2" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "properties": {
+          "profile": { "const": "customer-owned-model2" }
+        }
+      }
+    },
+    {
+      "description": "ISH-02 — subscriptionId REQUIRED for Model2 (customer's own subscription per ADR-027 D4). Model1 runs auto-default the Spaarke shared sub-id in-skill at CreateRun time, so subscriptionId is OPTIONAL at intake for Model 1.",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model2" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "required": ["subscriptionId"]
+      }
+    },
+    {
+      "description": "T245c — H14b needs at least one Graph subscription resource (same rule as POST /api/runs: h14b-no-webhook-targets-configured).",
+      "anyOf": [{ "required": ["communicationGraphResource"] }, { "required": ["emailGraphResource"] }]
+    },
+    {
+      "description": "T245c — a NativeAccount user's UPN and display name are built from the names, so every user needs both (same rule as POST /api/runs / H11: userprov-invalid-user-entry).",
+      "if": {
+        "properties": { "identityPreset": { "const": "NativeAccount" } },
+        "required": ["identityPreset"]
+      },
+      "then": {
+        "properties": {
+          "users": { "items": { "required": ["firstName", "lastName"] } }
+        }
+      }
+    },
+    {
+      "description": "T245c — a B2BGuest invitation is sent to each user's email, so every user needs one (same rule as POST /api/runs / H11: userprov-invalid-user-entry).",
+      "if": {
+        "properties": { "identityPreset": { "const": "B2BGuest" } },
+        "required": ["identityPreset"]
+      },
+      "then": {
+        "properties": {
+          "users": { "items": { "required": ["email"] } }
+        }
+      }
+    }
+  ],
+  "examples": [
+    {
+      "customerId": "trial1",
+      "displayName": "Spaarke Trial 1",
+      "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+      "tenancyModel": "Model1",
+      "controlPlaneEnv": "dev",
+      "profile": "spaarke-hosted-model2",
+      "region": "westus2",
+      "openAiRegion": "westus3",
+      "tier": "shared-trial",
+      "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING).",
+      "confirmationAcknowledgment": "proceed with provisioning",
+      "mcpDisconnectPolicy": "proceedWithFallback",
+      "acknowledgeUpgradeMode": true,
+      "onFailedPolicy": "abandon",
+      "onQuarantinedPolicy": "failFast",
+      "onManualGatePolicy": "waitAndExit",
+      "costEnvelopePolicy": "abortOnOverrun",
+      "identityPreset": "NativeAccount",
+      "users": [{ "firstName": "Trial", "lastName": "Admin", "companyName": "Spaarke" }],
+      "exchangePolicyScopeGroupId": "spaarke-trial1-mail-scope@spaarke.com",
+      "communicationGraphResource": "users/trial1-comms@spaarke.com/messages",
+      "communicationDefaultMailbox": "trial1-comms@spaarke.com"
+    },
+    {
+      "customerId": "acme",
+      "displayName": "Acme Corporation",
+      "tenantId": "12345678-1234-1234-1234-123456789012",
+      "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
+      "tenancyModel": "Model2",
+      "controlPlaneEnv": "prod",
+      "profile": "customer-owned-model2",
+      "region": "westus2",
+      "openAiRegion": "westus3",
+      "tier": "dedicated",
+      "confirmationAcknowledgment": "proceed with provisioning",
+      "acknowledgeUpgradeMode": false,
+      "onFailedPolicy": "abandon",
+      "onManualGatePolicy": "waitAndExit",
+      "costEnvelopePolicy": "abortOnOverrun",
+      "identityPreset": "B2BGuest",
+      "users": [{ "firstName": "Ada", "lastName": "Lovelace", "email": "ada@acme.example", "companyName": "Acme" }],
+      "exchangePolicyScopeGroupId": "spaarke-mail-scope@acme.example",
+      "communicationGraphResource": "users/legal-comms@acme.example/messages",
+      "emailGraphResource": "users/legal-intake@acme.example/messages",
+      "communicationDefaultMailbox": "legal-comms@acme.example"
+    }
+  ]
+}

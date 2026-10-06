@@ -227,9 +227,22 @@ module.exports = async (env, options) => {
         // wrapper's import closure (22 files) has no Xrm/host dependency; its third-party imports
         // (react, Fluent v9, lexical) resolve from THIS package's node_modules — see the first rule
         // under `module.rules`.
+        // Task 099 (ADR-012 amended 2026-10-05 / ADR-044): the ONE shared `cleanGuid` (`utils/guid.ts` — a pure
+        // module, zero imports), by exact alias — replaces this package's former local copy.
+        '@spaarke/ui-components/guid$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/utils/guid.ts'
+        ),
         '@spaarke/ui-components/send-email-pane$': path.resolve(
           __dirname,
           '../shared/Spaarke.UI.Components/src/components/EmailComposer/wrappers/SendEmailPane.tsx'
+        ),
+        // Task 100 (owner decision C, ADR-012 amended 2026-10-05): the "+ New" form's Assigned To picker is the
+        // shared host-agnostic `LookupField` (`onSearch` injected; imports Fluent, react-icons, LookupTypes and the
+        // shared thin scrollbar — no Xrm). Exact ($) match to the component FILE, never the barrel.
+        '@spaarke/ui-components/lookup-field$': path.resolve(
+          __dirname,
+          '../shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx'
         ),
       },
     },

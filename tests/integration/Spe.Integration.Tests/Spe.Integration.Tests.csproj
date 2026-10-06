@@ -52,4 +52,12 @@
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="SharedTestHelpers" />
   </ItemGroup>
+
+  <!-- The endpoint-table helper ("is this route registered?"), linked from the BFF unit-test assembly so both suites
+       read registration the same way. An anonymous request no longer proves a route exists — the authorization
+       FallbackPolicy answers 401 for a missing route too (unified-access-control-r2 task 167 f2). Linked, not moved
+       into ..\Shared: that folder also compiles into the control-plane load tests, which do not reference the BFF. -->
+  <ItemGroup>
+    <Compile Include="..\..\unit\Sprk.Bff.Api.Tests\TestInfrastructure\EndpointTable.cs" Link="SharedTestHelpers\EndpointTable.cs" />
+  </ItemGroup>
 </Project>

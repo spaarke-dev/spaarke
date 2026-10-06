@@ -1,0 +1,45 @@
+<form headerdensity="HighWithControls">
+  <tabs>
+    <tab id="{10000000-0000-0000-0000-000000000002}" name="tab_02" verticallayout="true">
+      <labels><label description="General &amp; more" languagecode="1033" /></labels>
+      <columns>
+        <column width="100%">
+          <sections>
+            <section id="{20000000-0000-0000-0000-000000000002}" name="sec_02" showlabel="true" columns="1">
+              <labels><label description='Details' languagecode="1033" /></labels>
+              <rows>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000006}">
+                    <labels><label description="REGARDING" languagecode="1033" /></labels>
+                    <control id="sprk_regardingrecordname" classid="{F9A8A302-114E-466A-B582-6771B2AE0D92}" datafieldname="sprk_regardingrecordname" uniqueid="{aaaaaaaa-0000-0000-0000-000000000002}" />
+                  </cell>
+                </row>
+                <row>
+                  <cell id="{30000000-0000-0000-0000-000000000001}">
+                    <labels><label description="Subject" languagecode="1033" /></labels>
+                    <control id="sprk_subject" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_subject" />
+                  </cell>
+                </row>
+              </rows>
+            </section>
+          </sections>
+        </column>
+      </columns>
+    </tab>
+  </tabs>
+  <controlDescriptions>
+    <controlDescription forControl="{aaaaaaaa-0000-0000-0000-000000000002}">
+      <customControl id="{270BD3DB-D9AF-4782-9025-509E298DEC0A}"><parameters><datafieldname>sprk_regardingrecordname</datafieldname></parameters></customControl>
+      <customControl name="sprk_Spaarke.Controls.RegardingResolver" formFactor="2"><parameters><regardingRecordType type="Lookup.Simple">sprk_regardingrecordtype</regardingRecordType><entity type="SingleLine.Text" static="true">sprk_event</entity></parameters></customControl>
+    </controlDescription>
+  </controlDescriptions>
+  <events>
+    <event name="onload" application="false" active="false">
+      <Handlers><Handler functionName="Other.onLoad" libraryName="sprk_other" handlerUniqueId="{cccccccc-0000-0000-0000-000000000002}" enabled="true" parameters="" passExecutionContext="true" /></Handlers>
+    </event>
+    <event name="onchange" application="false" active="false" attribute="sprk_subject">
+      <Handlers><Handler functionName="Other.onChange" libraryName="sprk_other" handlerUniqueId="{cccccccc-0000-0000-0000-000000000003}" enabled="true" parameters="" passExecutionContext="true" /></Handlers>
+    </event>
+  </events>
+  <formLibraries><Library name="sprk_other" libraryUniqueId="{bbbbbbbb-0000-0000-0000-000000000002}" /></formLibraries>
+</form>

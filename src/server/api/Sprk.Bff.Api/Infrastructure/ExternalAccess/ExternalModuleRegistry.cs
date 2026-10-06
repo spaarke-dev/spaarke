@@ -139,6 +139,27 @@ public sealed class ExternalModuleDescriptor
             : new HashSet<string>(value, StringComparer.OrdinalIgnoreCase);
     }
 
+    private readonly IReadOnlySet<Guid> _savedQueryIds = new HashSet<Guid>();
+
+    /// <summary>
+    /// The saved queries (Dataverse <c>savedquery</c> views) this module's external grid is REGISTERED to use
+    /// (unified-access-control-r2 task 157, finding F1). They are the only views the external
+    /// <c>/savedquery/{id}</c> and <c>/savedqueries/{entity}</c> routes return for this module; every other view,
+    /// including the entity's internal MDA views, gets a 404 there. A contact gets only what it is granted (owner
+    /// decisions C6 / C9).
+    /// </summary>
+    /// <remarks>
+    /// Derived from the same source as <see cref="ReadableColumns"/>: the module's <c>sprk_gridconfiguration</c>. A grid
+    /// whose source is <c>savedquery</c> registers that query's id here; an <c>inline</c> source registers nothing. Empty
+    /// by default, which refuses every view (fail closed). A <c>null</c> value is read as empty. Validated at
+    /// <see cref="ExternalModuleRegistry.Register"/>: no <see cref="Guid.Empty"/>, and no view registered by two modules.
+    /// </remarks>
+    public IReadOnlySet<Guid> SavedQueryIds
+    {
+        get => _savedQueryIds;
+        init => _savedQueryIds = value is null ? new HashSet<Guid>() : new HashSet<Guid>(value);
+    }
+
     /// <summary>
     /// The module's resolved scope dimensions — either the explicit <see cref="ScopeDimensions"/> list,
     /// or a one-element list built from the <see cref="RecordIdAttribute"/> + <see cref="AccessibleRecordIds"/>
@@ -300,6 +321,7 @@ public sealed class ExternalModuleRegistry
         new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, ExternalModuleDescriptor> _byEntity =
         new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<Guid, ExternalModuleDescriptor> _bySavedQueryId = new();
 
     /// <summary>All registered modules.</summary>
     public IReadOnlyCollection<ExternalModuleDescriptor> Modules => _byName.Values;
@@ -347,6 +369,7 @@ public sealed class ExternalModuleRegistry
         // EffectiveDimensions throws a descriptive InvalidOperationException if neither is configured.
         var dimensions = descriptor.EffectiveDimensions;
         ValidateReadableColumns(descriptor, dimensions);
+        ValidateSavedQueryIds(descriptor);
         if (!_byName.TryAdd(descriptor.Name, descriptor))
         {
             throw new InvalidOperationException(
@@ -359,7 +382,40 @@ public sealed class ExternalModuleRegistry
                 $"An external module for entity '{descriptor.RecordEntity}' is already registered " +
                 $"(by module '{_byEntity[descriptor.RecordEntity].Name}').");
         }
+        foreach (var savedQueryId in descriptor.SavedQueryIds)
+        {
+            _bySavedQueryId.Add(savedQueryId, descriptor); // ValidateSavedQueryIds proved it is not taken
+        }
     }
+
+    /// <summary>
+    /// Fail-closed validation of a module's registered views (task 157, F1): no <see cref="Guid.Empty"/>, and no view
+    /// already registered by another module. A view belongs to one entity, so it can belong to one module only.
+    /// </summary>
+    private void ValidateSavedQueryIds(ExternalModuleDescriptor descriptor)
+    {
+        if (descriptor.SavedQueryIds.Contains(Guid.Empty))
+        {
+            throw new InvalidOperationException(
+                $"External module '{descriptor.Name}' SavedQueryIds contains Guid.Empty.");
+        }
+        foreach (var savedQueryId in descriptor.SavedQueryIds)
+        {
+            if (_bySavedQueryId.TryGetValue(savedQueryId, out var owner))
+            {
+                throw new InvalidOperationException(
+                    $"Saved query {savedQueryId} is already registered by external module '{owner.Name}'; " +
+                    $"module '{descriptor.Name}' cannot register it too.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds the module whose grid is registered to use <paramref name="savedQueryId"/>, or null (task 157, F1). A null
+    /// answer MUST be enforced as "not found" by the caller: the view is not available on the external surface.
+    /// </summary>
+    public ExternalModuleDescriptor? FindBySavedQueryId(Guid savedQueryId) =>
+        savedQueryId != Guid.Empty && _bySavedQueryId.TryGetValue(savedQueryId, out var d) ? d : null;
 
     /// <summary>
     /// Fail-closed validation of a module's column allow-list (task 134 / ADR-003). Refuses, at startup:

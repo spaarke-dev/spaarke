@@ -1,0 +1,57 @@
+{
+  "table": "sprk_event",
+  "formId": "a0000001-0000-0000-0000-000000000001",
+  "managed": false,
+  "columns": [
+    {
+      "name": "sprk_regardingrecordtype",
+      "kind": "Lookup",
+      "label": "Regarding Record Type"
+    },
+    {
+      "name": "sprk_regardingrecordid",
+      "kind": "Text",
+      "label": "Regarding Record Id"
+    },
+    {
+      "name": "sprk_regardingrecordname",
+      "kind": "Text",
+      "label": "Regarding Record Name"
+    },
+    {
+      "name": "sprk_regardingrecordurl",
+      "kind": "Url",
+      "label": "Link"
+    },
+    {
+      "name": "sprk_regardingrecordnumber",
+      "kind": "Text",
+      "label": "Regarding Record Number"
+    },
+    {
+      "name": "sprk_regardingmatter",
+      "kind": "Lookup",
+      "label": "Regarding Matter"
+    },
+    {
+      "name": "sprk_regardingproject",
+      "kind": "Lookup",
+      "label": "Regarding Project"
+    },
+    {
+      "name": "sprk_regardingcommunication",
+      "kind": "Lookup",
+      "label": "Regarding Communication"
+    }
+  ],
+  "workflows": [
+    {
+      "workflowid": "b0000020-0000-0000-0000-000000000020",
+      "name": "Event intake process",
+      "category": 4,
+      "primaryentity": "sprk_eventintakeprocess",
+      "xaml": "",
+      "clientdata": "{\"stages\":[{\"entity\":\"sprk_event\",\"name\":\"Intake\",\"steps\":[{\"attribute\":\"sprk_regardingcommunication\",\"isRequired\":false}]}]}"
+    }
+  ]
+}

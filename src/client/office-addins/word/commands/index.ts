@@ -38,7 +38,7 @@ import {
   configuredSpaarkeAppName,
   openFileUrl,
 } from '@shared/taskpane/services/openRecordLauncher';
-import { cleanGuid } from '@shared/taskpane/utils/cleanGuid';
+import { cleanGuid } from '@spaarke/ui-components/guid';
 
 // Register global functions for Office to call
 declare global {

@@ -22,8 +22,13 @@
     Probes are intentionally UNAUTHENTICATED. For protected routes this
     measures the pre-auth pipeline (TLS, routing, auth middleware returning
     401). For open routes (/healthz, /ping, /status) it measures end-to-end.
-    What it tests: route exists, responds with expected status, latency
-    within bounds. What it does NOT test: handler internals, downstream
+    What it tests: responds with expected status, latency within bounds.
+    It does NOT prove a protected route is REGISTERED: since
+    unified-access-control-r2 task 167 the authorization FallbackPolicy
+    answers an anonymous request for an unmapped path 401 as well, so a
+    401 here looks the same for a present and a missing route. (The open
+    routes are rate limited per client IP: /healthz and /ping at 120/min,
+    /status at 10/min — keep -Samples within those budgets.) What it does NOT test: handler internals, downstream
     Graph/Dataverse calls. For deeper regression checks of specific Phase 4
     candidates, augment with focused authenticated probes.
 

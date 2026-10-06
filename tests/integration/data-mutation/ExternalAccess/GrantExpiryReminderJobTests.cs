@@ -229,6 +229,34 @@ public class GrantExpiryReminderJobTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_ARecordTheApplicationCreated_RemindsThePersonWhoAskedForIt()
+    {
+        // Task 147 r1 (owner round 28 item 1): "createdbyperson, else createdby". A root created app-only (Office
+        // quick-create, POST /api/v1/work-assignments) has the APPLICATION as createdby; the person is sprk_createdbyperson.
+        var applicationUser = Guid.Parse("a0000000-0000-0000-0000-0000000000a9");
+        _dataverse.Users[applicationUser] = new UserRow(IsDisabled: false, IsApplication: true);
+        var rootId = Seed(7, grantedBy: null, owner: null, creator: applicationUser);
+        _dataverse.Roots[("sprk_matter", rootId)] = _dataverse.Roots[("sprk_matter", rootId)] with { CreatedByPerson = RecordCreator };
+
+        await RunAsync();
+
+        _notifications.Select(RecipientOf).Should().Equal(RecordCreator);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_TheCreatorPersonWins_OverAHumanCreatedBy()
+    {
+        var other = Guid.Parse("a0000000-0000-0000-0000-0000000000b9");
+        _dataverse.Users[other] = new UserRow(IsDisabled: false, IsApplication: false);
+        var rootId = Seed(7, grantedBy: null, owner: null, creator: other);
+        _dataverse.Roots[("sprk_matter", rootId)] = _dataverse.Roots[("sprk_matter", rootId)] with { CreatedByPerson = RecordCreator };
+
+        await RunAsync();
+
+        _notifications.Select(RecipientOf).Should().Equal(new[] { RecordCreator }, "createdbyperson, else createdby");
+    }
+
+    [Fact]
     public async Task ExecuteAsync_NoGranterAndTeamOwnedRecord_RemindsTheRecordCreator()
     {
         // A team-owned record has no owninguser — the shape of 10 of 11 live root records (task 100 notes).
@@ -883,7 +911,7 @@ public class GrantExpiryReminderJobTests
     private sealed record GrantRow(
         Guid Id, int StateCode, DateOnly? Expires, string RootEntity, Guid RootId, Guid? ContactId, Guid? OrganizationId, Guid? GrantedBy);
 
-    private sealed record RootRow(string Name, Guid? OwningUser, Guid? CreatedBy);
+    private sealed record RootRow(string Name, Guid? OwningUser, Guid? CreatedBy, Guid? CreatedByPerson = null);
 
     /// <summary>A systemuser. <c>AccessMode</c>: 0 Read-Write, 1 Administrative, 2 Read, 3 Support, 5 Delegated Admin.</summary>
     private sealed record UserRow(bool IsDisabled, bool IsApplication, int AccessMode = 0);
@@ -1111,6 +1139,7 @@ public class GrantExpiryReminderJobTests
                     {
                         "owninguser" => root.OwningUser is { } owner ? new EntityReference("systemuser", owner) : null,
                         "createdby" => root.CreatedBy is { } creator ? new EntityReference("systemuser", creator) : null,
+                        "sprk_createdbyperson" => root.CreatedByPerson is { } person ? new EntityReference("systemuser", person) : null,
                         _ => throw new InvalidOperationException($"{entityName} column '{column}' is not modelled."),
                     };
             }

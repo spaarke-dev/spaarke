@@ -1,6 +1,6 @@
-using Microsoft.Extensions.Caching.Distributed;
 using OpenTelemetry.Trace;
 using Sprk.Bff.Api.Configuration;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -88,45 +88,17 @@ public static class TelemetryModule
         // ILogger/OTel pipeline. This runs at service-registration time (pre-host-build) where no
         // ILogger is available; the registration itself is the source of truth, so the echo was noise.
 
-        // Health Checks - Redis availability monitoring
+        // Health check - Redis availability (/healthz). An async PING on the app's own singleton multiplexer,
+        // resolved by the health-check factory; see RedisHealthCheck for why this replaced the inline lambda
+        // that built a new service provider on every probe.
         var redisEnabled = configuration.GetValue<bool>("Redis:Enabled");
         services.AddHealthChecks()
-            .AddCheck("redis", () =>
-            {
-                if (!redisEnabled)
-                {
-                    return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy(
-                        "Redis is disabled (using in-memory cache for development)");
-                }
-
-                try
-                {
-#pragma warning disable ASP0000
-                    var cache = services.BuildServiceProvider().GetRequiredService<Microsoft.Extensions.Caching.Distributed.IDistributedCache>();
-#pragma warning restore ASP0000
-                    var testKey = "_health_check_";
-                    var testValue = DateTimeOffset.UtcNow.ToString("O");
-
-                    cache.SetString(testKey, testValue, new Microsoft.Extensions.Caching.Distributed.DistributedCacheEntryOptions
-                    {
-                        AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(10)
-                    });
-
-                    var retrieved = cache.GetString(testKey);
-                    cache.Remove(testKey);
-
-                    if (retrieved == testValue)
-                    {
-                        return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Healthy("Redis cache is available and responsive");
-                    }
-
-                    return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Degraded("Redis cache returned unexpected value");
-                }
-                catch (Exception ex)
-                {
-                    return Microsoft.Extensions.Diagnostics.HealthChecks.HealthCheckResult.Unhealthy("Redis cache is unavailable", ex);
-                }
-            });
+            .Add(new HealthCheckRegistration(
+                "redis",
+                sp => new Sprk.Bff.Api.Infrastructure.Cache.RedisHealthCheck(
+                    redisEnabled ? sp.GetRequiredService<StackExchange.Redis.IConnectionMultiplexer>() : null),
+                failureStatus: null,
+                tags: null));
 
         return services;
     }

@@ -19,6 +19,11 @@ namespace Sprk.Bff.Api.Api.Admin.Models;
 /// <param name="ErrorMessage">Final failure message from <see cref="Spaarke.Scheduling.JobRunResult.ErrorMessage"/>, or <c>null</c> on success or while in-progress.</param>
 /// <param name="ProcessedItems">Optional item-processing count from <see cref="Spaarke.Scheduling.JobRunResult.ProcessedItems"/>.</param>
 /// <param name="DurationMs">Run duration in milliseconds (<c>null</c> while in-progress).</param>
+/// <param name="ResultJson">
+/// The run's own structured report (<see cref="Spaarke.Scheduling.JobRunResult.ResultJson"/>, FR-2.8 — "for the admin UI /
+/// history queries"), verbatim; <c>null</c> while in progress or when the job reports none. Added by unified-access-control-r2
+/// task 148: the one-time secure-child backfill's dry run, apply and verify read their per-run reports here. Additive.
+/// </param>
 public sealed record JobRunDetail(
     Guid RunId,
     string Trigger,
@@ -28,4 +33,5 @@ public sealed record JobRunDetail(
     string Status,
     string? ErrorMessage,
     int? ProcessedItems,
-    long? DurationMs);
+    long? DurationMs,
+    string? ResultJson = null);

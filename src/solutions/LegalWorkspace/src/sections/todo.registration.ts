@@ -64,6 +64,7 @@ import type {
 import { WidgetErrorBoundary, navigateToEntityRecordSurfaceAsync, getOobModalSize, getXrm } from "@spaarke/ui-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { SmartTodoWidget } from "@spaarke/smart-todo-components";
+import { authenticatedFetch } from "../services/authInit";
 import type { IFeedSyncBridge, SmartTodoWidgetProps } from "@spaarke/smart-todo-components";
 import { useFeedTodoSync } from "../hooks/useFeedTodoSync";
 
@@ -293,6 +294,9 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
 
   const widgetElement = React.createElement(SmartTodoWidget, {
     webApi: ctx.webApi as SmartTodoWidgetProps["webApi"],
+    // UAC-r2 task 147 r1 (owner round 28 item 1): QuickAdd creates through the BFF (G5).
+    authenticatedFetch,
+    bffBaseUrl: ctx.bffBaseUrl,
     userId: ctx.userId,
     scope: ctx.scope,
     businessUnitId: ctx.businessUnitId,
