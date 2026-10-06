@@ -39,6 +39,9 @@ public static class NoAccessEnforceEndpoint
     /// <summary>The entity set the delegation filter checks the caller's Write against.</summary>
     internal const string EntrySet = "sprk_noaccessentries";
 
+    /// <summary>The table Write privilege the delegation filter asks: the table is organization-owned (see DelegationRuleFilter).</summary>
+    internal const string EntryWritePrivilege = "prvWritesprk_noaccessentry";
+
     internal const string EntryRequiredReasonCode = "sdap.access.no_access.entry_required";
     internal const string EntryNotFoundReasonCode = "sdap.access.no_access.entry_not_found";
     internal const string EntryInactiveReasonCode = "sdap.access.no_access.entry_inactive";
