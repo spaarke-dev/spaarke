@@ -274,7 +274,7 @@ public partial class RouteAuthorizationGuardTests
             var waived = byRoute.GetValueOrDefault(a.Key) ?? new List<Waiver>();
             switch (a.Credit)
             {
-                case Credit.None when waived.Count == 0:
+                case Credit.None when waived.Count == 0 && !ProvenRoutes.Value.Contains(a.Key):
                     violations.Add($"{a.Key}\n      at {a.Route.File}:{a.Route.Line} — only signed-in (or nothing): "
                                    + $"[{string.Join(", ", a.Route.Forms)}]");
                     break;
@@ -449,6 +449,12 @@ public partial class RouteAuthorizationGuardTests
 
             if (!byKey.TryGetValue(entry.Route, out var a))
             {
+                if (entry.ProvenByTest)
+                {
+                    violations.Add($"{label}: ProvenByTest credits a PRESENT route only — a deleted route resolves by its absence "
+                                   + "proof (round 34 item 4)");
+                }
+
                 violations.AddRange(RetiredEntryViolations(entry, label, routes, waived, readTestFile, mappedAtRunTime));
                 continue;
             }
@@ -471,6 +477,14 @@ public partial class RouteAuthorizationGuardTests
                 if (waived.Count > 0)
                 {
                     violations.Add($"{label}: ResolvedBy is set, so the route carries no waiver of any kind — delete it");
+                }
+
+                // Round 65 item 2: the ProvenByTest credit replaces the by-credit requirement for THIS entry only — its proof is
+                // checked instead (real app, the route, refusal AND success), never waived.
+                if (entry.ProvenByTest)
+                {
+                    violations.AddRange(ProvenByTestViolations(entry, readTestFile));
+                    continue;
                 }
 
                 // Admin credit resolves a sweep entry only through the pinned AdminOnlyRoutes set, in a group whose
@@ -1104,53 +1118,7 @@ public partial class RouteAuthorizationGuardTests
 
         foreach (var method in methods)
         {
-            // Scope: from the method's attribute lines ([Theory], [InlineData(...)], [MemberData(...)]) to the end of its
-            // body, plus the same-type members it names.
-            var start = unit.Text.LastIndexOf('\n', Math.Max(0, method.NameIndex - 1)) + 1;
-            while (start > 1)
-            {
-                var previousLineEnd = start - 1;
-                var previousLineStart = unit.Text.LastIndexOf('\n', previousLineEnd - 1) + 1;
-                if (!unit.Text[previousLineStart..previousLineEnd].TrimStart().StartsWith('['))
-                {
-                    break;
-                }
-
-                start = previousLineStart;
-            }
-
-            var scopes = new List<(int Start, int End)> { (start, method.BodyEnd) };
-            var type = unit.Types.Where(t => t.BodyStart <= method.NameIndex && method.NameIndex < t.BodyEnd)
-                .OrderBy(t => t.BodyEnd - t.BodyStart).FirstOrDefault();
-            if (type is not null)
-            {
-                var top = TopLevelOf(unit.Code, type.BodyStart, type.BodyEnd);
-                var named = Regex.Matches(unit.Code[start..method.BodyEnd], @"(?<![\w.])[A-Za-z_]\w*").Select(m => m.Value)
-                    .Distinct(StringComparer.Ordinal);
-                foreach (var name in named)
-                {
-                    var declaration = Regex.Match(top, $@"(?<![\w.]){Regex.Escape(name)}\s*(?:=>|=(?![=>])|\{{)");
-                    if (!declaration.Success)
-                    {
-                        continue;
-                    }
-
-                    var memberStart = type.BodyStart + 1 + declaration.Index;
-                    if (memberStart >= start && memberStart < method.BodyEnd)
-                    {
-                        continue;
-                    }
-
-                    var memberEnd = StatementEnd(unit.Code, memberStart);
-                    var braceEnd = unit.Code[memberStart] == '{' ? MatchClose(unit.Code, memberStart) : -1;
-                    var end = Math.Max(memberEnd, braceEnd);
-                    if (end > memberStart)
-                    {
-                        scopes.Add((memberStart, end + 1));
-                    }
-                }
-            }
-
+            var scopes = ProofScopes(unit, method);
             var pathMatched = false;
             foreach (var (from, to) in scopes)
             {
@@ -1176,6 +1144,63 @@ public partial class RouteAuthorizationGuardTests
         }
 
         return string.Join("; ", problems.Distinct(StringComparer.Ordinal));
+    }
+
+    /// <summary>
+    /// The text a proof test is judged on: from the method's attribute lines ([Theory], [InlineData(...)],
+    /// [MemberData(...)]) to the end of its body, plus the initializers of the same-type members it names. ONE definition,
+    /// shared by the retired-route absence pin and the ProvenByTest credit (main-session round 65 item 2).
+    /// </summary>
+    private static List<(int Start, int End)> ProofScopes(SourceUnit unit, MethodDecl method)
+    {
+        // Scope: from the method's attribute lines ([Theory], [InlineData(...)], [MemberData(...)]) to the end of its
+        // body, plus the same-type members it names.
+        var start = unit.Text.LastIndexOf('\n', Math.Max(0, method.NameIndex - 1)) + 1;
+        while (start > 1)
+        {
+            var previousLineEnd = start - 1;
+            var previousLineStart = unit.Text.LastIndexOf('\n', previousLineEnd - 1) + 1;
+            if (!unit.Text[previousLineStart..previousLineEnd].TrimStart().StartsWith('['))
+            {
+                break;
+            }
+
+            start = previousLineStart;
+        }
+
+        var scopes = new List<(int Start, int End)> { (start, method.BodyEnd) };
+        var type = unit.Types.Where(t => t.BodyStart <= method.NameIndex && method.NameIndex < t.BodyEnd)
+            .OrderBy(t => t.BodyEnd - t.BodyStart).FirstOrDefault();
+        if (type is not null)
+        {
+            var top = TopLevelOf(unit.Code, type.BodyStart, type.BodyEnd);
+            var named = Regex.Matches(unit.Code[start..method.BodyEnd], @"(?<![\w.])[A-Za-z_]\w*").Select(m => m.Value)
+                .Distinct(StringComparer.Ordinal);
+            foreach (var name in named)
+            {
+                var declaration = Regex.Match(top, $@"(?<![\w.]){Regex.Escape(name)}\s*(?:=>|=(?![=>])|\{{)");
+                if (!declaration.Success)
+                {
+                    continue;
+                }
+
+                var memberStart = type.BodyStart + 1 + declaration.Index;
+                if (memberStart >= start && memberStart < method.BodyEnd)
+                {
+                    continue;
+                }
+
+                var memberEnd = StatementEnd(unit.Code, memberStart);
+                var braceEnd = unit.Code[memberStart] == '{' ? MatchClose(unit.Code, memberStart) : -1;
+                var end = Math.Max(memberEnd, braceEnd);
+                if (end > memberStart)
+                {
+                    scopes.Add((memberStart, end + 1));
+                }
+            }
+        }
+
+        return scopes;
     }
 
     /// <summary>

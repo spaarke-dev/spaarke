@@ -2088,25 +2088,11 @@ public partial class RouteAuthorizationGuardTests
         // =========================================================================================
 
         // ---------- sweep fix task 164 ----------
-        Pending("POST /api/ai/chat/sessions", "164", Gap.NoDecision,
-            "S-24 (high), Api/Ai/ChatEndpoints.cs:83: A signed-in user with no rights on a matter can create a "
-            + "session hosted on it and ask the Assistant what it knows. Record-scope AI memory facts and matter "
-            + "pinned context (see the sweep note). FIXED IN CODE by task 164 r1 (AiAuthorizationFilter chat-context "
-            + "evaluation of the body document, host and playbook, AiAuthorizationFilter.cs:375-521; deny test "
-            + "ChatContextAuthorizationContractTests.Create_UnreadableHost_UnreadableDocument_UnknownIds_AndASeamFault_"
-            + "AreOneUniform403_AndNothingIsStored) — Pending only because the guard cannot credit that mode by form."),
-        Pending("POST /api/agent/message", "164", Gap.NoDecision,
-            "S-18 (high), Api/Agent/AgentEndpoints.cs:35: Binds a chat agent to any sprk_document GUID. "
-            + "Document metadata (name, drive/item ids) is read app-only. Content is OBO, so it is gated only by "
-            + "SPE container (see the sweep note). FIXED IN CODE by task 164 r1 (AiAuthorizationFilter chat-context "
-            + "evaluation of the body document and the resumed session's stored context; deny test "
-            + "ChatContextAuthorizationContractTests.AgentMessage_ABodyDocumentTheCallerCannotRead_IsTheUniform403_"
-            + "BeforeAnySessionIsCreated) — Pending only because the guard cannot credit that mode by form."),
-        Pending("GET /api/agent/playbooks/status/{jobId:guid}", "164", Gap.NoDecision,
-            "S-78 (low), Api/Agent/AgentEndpoints.cs:78: Reads status, progress and ErrorMessage of another "
-            + "user's playbook run if the GUID is known. Exposure is limited to status and error text. FIXED IN CODE by "
-            + "task 164: the handler compares PlaybookRunStatus.StartedByOid with the caller (AgentEndpoints.cs:498-506) "
-            + "and answers one uniform 404 — an owner comparison, which resolves no sweep entry in this guard."),
+
+        // ---------- round 65 item 2: five Pending waivers DELETED (2026-10-05) ----------
+        // S-24, S-18, S-78 (task 164) and S-64, S-65 (task 166) were FIXED IN CODE in shapes the scanner cannot credit by form
+        // (a filter mode for some request types of a shared attachment, two owner comparisons, an OBO metadata read). Each is
+        // resolved by the ONE generic ProvenByTest credit: a real-app test asserting the route's refusal AND success.
 
         // ---------- sweep fix task 165: all nine waivers DELETED at its integration (batch-4, 2026-10-05) ----------
         // S-44, S-72 (bulk), S-45, S-73..S-75 (configs) and S-47, S-48, S-77 (record matching) are resolved by credit:
@@ -2116,18 +2102,6 @@ public partial class RouteAuthorizationGuardTests
         // {configId:guid} (its note section 1), so those three waivers' keys no longer exist. ResolvedBy + ProofTest below.
 
         // ---------- sweep fix task 166 ----------
-        Pending("POST /api/compose/upload", "166", Gap.NoDecision,
-            "S-64 (medium), Api/ComposeMountEndpoints.cs:30: A same-tenant user who knows or obtains another "
-            + "user's chat sessionId and uploaded documentId can retrieve that user's uploaded file bytes plus "
-            + "the projection. Session (see the sweep note). FIXED IN CODE by task 166: the body sessionId must be a "
-            + "session the caller owns before any cache read (ComposeMountEndpoints.cs:142, ResolveOwnedSessionAsync) — an "
-            + "owner comparison, which resolves no sweep entry in this guard."),
-        Pending("POST /api/compose/document/{documentSpeId}/check-changes", "166", Gap.NoDecision,
-            "S-65 (medium), Api/ComposeSyncEndpoints.cs:66: Any signed-in user can run an app-only delta over "
-            + "any container the managed identity can access. For a known item id this returns its name, eTag and "
-            + "deleted flag, which (see the sweep note). FIXED IN CODE by task 166: an OBO metadata read of that item in "
-            + "that container as the caller precedes the delta (ComposeSyncEndpoints.cs:266, GetFileMetadataAsUserAsync) — "
-            + "not a seam in CallerContextSeams, so the guard cannot credit it."),
 
         // =========================================================================================
         // TASK 167: EVERY OTHER ROUTE THE EXTENDED GUARD FLAGS — each decided by reading its handler.
@@ -2588,6 +2562,13 @@ public partial class RouteAuthorizationGuardTests
         public string? ResolvedBy { get; init; }
 
         public string? ProofTest { get; init; }
+
+        /// <summary>
+        /// Main-session round 65 item 2: the ONE generic credit for a fix the scanner cannot see. When true, a present
+        /// route's entry resolves only if its ProofTest drives the real app and asserts the route's refusal AND success
+        /// (RouteAuthorizationGuardTests.ProvenByTest.cs), and Rule A then counts the route as declared.
+        /// </summary>
+        public bool ProvenByTest { get; init; }
     }
 
     private static readonly IReadOnlyList<SweepFinding> SweepFindings = new[]
@@ -2682,17 +2663,20 @@ public partial class RouteAuthorizationGuardTests
             { ResolvedBy = "163", ProofTest = "tests/integration/contract/Api/Insights/InsightsRouteAuthorizationContractTests.cs::Search_UnreadableAndAbsentSubjects_AreTheIdenticalUniform404_AndSearchNeverRuns" },
         new SweepFinding("S-46", Severity.High, "POST /api/workspace/ai/summary", "163", Gap.NoDecision)
             { ResolvedBy = "163", ProofTest = "tests/integration/contract/Api/Workspace/WorkspaceAiSummaryAuthorizationContractTests.cs::UnreadableAndAbsentRecords_AreTheIdenticalUniform404_AndNothingIsRead" },
-        new SweepFinding("S-24", Severity.High, "POST /api/ai/chat/sessions", "164", Gap.NoDecision),
+        new SweepFinding("S-24", Severity.High, "POST /api/ai/chat/sessions", "164", Gap.NoDecision)
+            { ResolvedBy = "164", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Ai/ChatAgentRouteProofTests.cs::ProvenByTest_ChatSessionCreate_UnreadableDocumentIs403_ReadableDocumentIs201" },
         new SweepFinding("S-23", Severity.High, "PATCH /api/ai/chat/sessions/{sessionId}/context", "164", Gap.InsufficientDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/ChatContextAuthorizationContractTests.cs::SwitchContext_AnyIdTheCallerCannotRead_IsTheUniform403_AndTheSessionIsUnchanged" },
         new SweepFinding("S-25", Severity.High, "POST /api/ai/chat/sessions/{sessionId}/messages", "164", Gap.InsufficientDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/ChatContextAuthorizationContractTests.cs::Messages_APerTurnDocumentTheCallerCannotRead_IsTheUniform403ProblemDetails_NotAStream_AndNoTurnRuns" },
         new SweepFinding("S-53", Severity.Medium, "POST /api/ai/chat/sessions/{sessionId}/dispatch", "164", Gap.InsufficientDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/ChatContextAuthorizationContractTests.cs::Dispatch_AStoredContextTheCallerCannotRead_IsTheUniform403_AndTheOrchestratorNeverRuns" },
-        new SweepFinding("S-18", Severity.High, "POST /api/agent/message", "164", Gap.NoDecision),
+        new SweepFinding("S-18", Severity.High, "POST /api/agent/message", "164", Gap.NoDecision)
+            { ResolvedBy = "164", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Ai/ChatAgentRouteProofTests.cs::ProvenByTest_AgentMessage_UnreadableBodyDocumentIs403_ReadableOneRunsTheTurnAnd200" },
         new SweepFinding("S-19", Severity.High, "POST /api/agent/run-playbook", "164", Gap.NoDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/PlaybookRouteAuthorizationContractTests.cs::AgentRunPlaybook_UnreadableDocument_Is403_AndNothingRuns" },
-        new SweepFinding("S-78", Severity.Low, "GET /api/agent/playbooks/status/{jobId:guid}", "164", Gap.NoDecision),
+        new SweepFinding("S-78", Severity.Low, "GET /api/agent/playbooks/status/{jobId:guid}", "164", Gap.NoDecision)
+            { ResolvedBy = "164", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Ai/ChatAgentRouteProofTests.cs::ProvenByTest_AgentPlaybookStatus_AnotherUsersRunIs404_TheCallersOwnRunIs200" },
         new SweepFinding("S-29", Severity.High, "POST /api/ai/playbooks/{id:guid}/execute", "164", Gap.InsufficientDecision)
             { ResolvedBy = "164", ProofTest = "tests/integration/contract/Api/Ai/PlaybookRouteAuthorizationContractTests.cs::Execute_UnreadableDocument_Is403ProblemDetailsBeforeAnySseHeader_AndNothingRuns" },
         new SweepFinding("S-54", Severity.Medium, "PUT /api/ai/playbooks/{id:guid}/nodes/reorder", "164", Gap.InsufficientDecision)
@@ -2752,8 +2736,10 @@ public partial class RouteAuthorizationGuardTests
             { ResolvedBy = "166", ProofTest = "tests/integration/contract/Api/Memory/MemoryRecordAndPinAuthorizationContractTests.cs::UpdatePin_AnotherUsersPinAndAnUnknownPin_AreTheSame404_AndNoMatterIsAsked" },
         new SweepFinding("S-63", Severity.Medium, "POST /api/compose/documents/{documentSpeId}/promote", "166", Gap.NoDecision)
             { ResolvedBy = "166", ProofTest = "tests/integration/regression/RouteAuthorization/DeadRouteRetirementTests.cs::RetiredRoute_WhenRequested_Returns404NotRouted" },
-        new SweepFinding("S-64", Severity.Medium, "POST /api/compose/upload", "166", Gap.NoDecision),
-        new SweepFinding("S-65", Severity.Medium, "POST /api/compose/document/{documentSpeId}/check-changes", "166", Gap.NoDecision),
+        new SweepFinding("S-64", Severity.Medium, "POST /api/compose/upload", "166", Gap.NoDecision)
+            { ResolvedBy = "166", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Compose/ComposeSessionAndContainerAuthorizationContractTests.cs::ProvenByTest_Upload_AnotherUsersSessionIs404_TheOwnersSessionIs200" },
+        new SweepFinding("S-65", Severity.Medium, "POST /api/compose/document/{documentSpeId}/check-changes", "166", Gap.NoDecision)
+            { ResolvedBy = "166", ProvenByTest = true, ProofTest = "tests/integration/contract/Api/Ai/ComposeWordShuttlePollEndpointContractTests.cs::ProvenByTest_CheckChanges_AnItemTheCallerCannotSeeIs404_AVisibleItemIs200" },
         new SweepFinding("S-80", Severity.Low, "POST /api/compose/sessions/{sessionId}/annotations", "166", Gap.InsufficientDecision)
             { ResolvedBy = "166", ProofTest = "tests/integration/contract/Api/Compose/ComposeSessionAndContainerAuthorizationContractTests.cs::SaveAnnotations_AForeignBodyTenant_IsIgnored_TheWriteLandsOnTheAuthorizedSession" },
         new SweepFinding("S-67", Severity.Medium, "POST /api/v1/field-mappings/push", "166", Gap.NoDecision)

@@ -241,6 +241,36 @@ public sealed class ComposeSessionAndContainerAuthorizationContractTests : IClas
         body!.Content.Should().Equal(SecretBytes);
     }
 
+    /// <summary>
+    /// S-64, both outcomes in one test (the route ledger's "ProvenByTest" credit): the body sessionId must be a session
+    /// the caller owns (ResolveOwnedSessionAsync). Another user's session holding bytes is the uniform 404 and returns
+    /// none of them; the caller's own session holding bytes is 200 and mounts exactly those bytes.
+    /// </summary>
+    [Fact]
+    public async Task ProvenByTest_Upload_AnotherUsersSessionIs404_TheOwnersSessionIs200()
+    {
+        _fixture.ResetBoundaries();
+        var othersSession = await CreateSessionAsync(TestSessionOwner.OtherOid);
+        var ownSession = await CreateSessionAsync(TestSessionOwner.Oid);
+        var documentId = $"doc-{Guid.NewGuid():N}";
+        var ownBytes = "OWNERS-PROOF-BYTES"u8.ToArray();
+        await SeedUploadAsync(othersSession, documentId, SecretBytes);
+        await SeedUploadAsync(ownSession, documentId, ownBytes);
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var stolen = await client.PostAsJsonAsync("/api/compose/upload", new { sessionId = othersSession, documentId });
+
+        stolen.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        var stolenBody = await stolen.Content.ReadAsStringAsync();
+        stolenBody.Should().NotContain("SECRET-CONTRACT-BYTES").And.NotContain(Convert.ToBase64String(SecretBytes));
+
+        var own = await client.PostAsJsonAsync("/api/compose/upload", new { sessionId = ownSession, documentId });
+
+        own.StatusCode.Should().Be(HttpStatusCode.OK, await own.Content.ReadAsStringAsync());
+        var mounted = await own.Content.ReadFromJsonAsync<ComposeUploadResponse>();
+        mounted!.Content.Should().Equal(ownBytes, "the owner's session mounts the owner's bytes, never the other user's");
+    }
+
     // =============================================================================================
     // 3. POST /api/compose/sessions/{sessionId}/annotations (S-80) — the write uses the CLAIM tenant the
     //    ownership filter authorized, never the body's.

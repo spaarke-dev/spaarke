@@ -313,6 +313,51 @@ public sealed class ComposeWordShuttlePollEndpointContractTests
         Normalize(await invisible.Content.ReadAsStringAsync()).Should().Be(Normalize(await throwing.Content.ReadAsStringAsync()));
     }
 
+    /// <summary>
+    /// S-65, both outcomes in one test (the route ledger's "ProvenByTest" credit): the OBO metadata read of the named
+    /// item in the named container AS THE CALLER precedes the app-only delta. An item that read cannot see is the
+    /// uniform 404 and the delta never runs; a visible item is 200 and the delta runs for it.
+    /// </summary>
+    [Fact]
+    public async Task ProvenByTest_CheckChanges_AnItemTheCallerCannotSeeIs404_AVisibleItemIs200()
+    {
+        const string deniedDriveId = "b!word-shuttle-proof-denied";
+        const string allowedDriveId = "b!word-shuttle-proof-allowed";
+        const string invisibleItem = "spe-item-proof-invisible";
+        const string visibleItem = "spe-item-proof-visible";
+        _fixture.ResetBoundaries();
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string c, CancellationToken _) => c);
+        ArrangeCallerCanSee(allowedDriveId, visibleItem); // the invisible item is never arranged: the OBO read answers null
+        _fixture.SpeMock
+            .Setup(s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string drive, string? _, CancellationToken _) => new SpeDeltaResult(
+                new[] { new SpeDriveChange(ItemId: drive == allowedDriveId ? visibleItem : invisibleItem, Name: "contract.docx", ETag: "\"v2\"", Deleted: false) },
+                DeltaLink: "delta-token-proof"));
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var denied = await client.PostAsJsonAsync(
+            $"/api/compose/document/{invisibleItem}/check-changes", new { containerId = deniedDriveId });
+
+        denied.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await denied.Content.ReadAsStringAsync()).Should().Contain(Sprk.Bff.Api.Api.ComposeSyncEndpoints.DocumentNotVisibleReasonCode);
+        _fixture.SpeMock.Verify(
+            s => s.EnumerateDriveDeltaAsync(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the app-only delta must not run for an item the caller cannot see");
+
+        var allowed = await client.PostAsJsonAsync(
+            $"/api/compose/document/{visibleItem}/check-changes", new { containerId = allowedDriveId });
+
+        allowed.StatusCode.Should().Be(HttpStatusCode.OK, await allowed.Content.ReadAsStringAsync());
+        var check = await allowed.Content.ReadFromJsonAsync<CheckChangesWire>();
+        check!.DocumentSpeId.Should().Be(visibleItem);
+        check.Changed.Should().BeTrue("the delta ran for the visible item and surfaced its change");
+        _fixture.SpeMock.Verify(
+            s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), deniedDriveId, invisibleItem, It.IsAny<CancellationToken>()),
+            Times.Once, "the refusal came from the caller's own OBO read of that item in that container");
+    }
+
     private static string Normalize(string problemJson)
     {
         var node = System.Text.Json.Nodes.JsonNode.Parse(problemJson)!.AsObject();
