@@ -1,9 +1,13 @@
-# Task 097: `/api/communications/send` authorization and the archive id. BLOCKED (escalation trigger 3)
+# Task 097: `/api/communications/send` authorization and the archive id
 
-> **Date**: 2026-10-04 · **Status**: blocked before any code edit · **Rigor**: FULL (opus @ high)
-> **Outcome**: `/conflict-check` found another active project already fixing the authorization half of this
-> task on the same three files, and editing the archive code. The POML says to coordinate before editing,
-> so no source or test file was changed. The owner needs to pick a path (§4).
+> **Status (2026-10-06)**: RE-SCOPED per §6 and executed; see **§7** for the re-scoped work. The authorization is
+> UAC-r2 task 161's (on master via #1312, `d254d7166`). This task fixed the outbound archive pointer, switched the
+> Word Email tab on in the deploy workflow, and recorded how 161 treats the Word tab's request. The live checks
+> stay open.
+>
+> **History (2026-10-04)**: blocked before any code edit. `/conflict-check` found another active project
+> already fixing the authorization half of this task on the same three files, and editing the archive code
+> (§1-§5). The owner picked option 1 (§6).
 
 ## 1. The gap is real on this branch and on master
 
@@ -135,3 +139,142 @@ The owner, on the §4 question: *"yes we can follow your recommendation - ensure
 | Round-4 PR (095 + 096-held) → merge → ONE dev BFF deploy (083 + round 4) → add-in site | this project | owner go for the BFF deploy (given: "once, with round 4 + 097") |
 | 161 (+146) to master and deployed | UAC-r2 | UAC-r2's own verification |
 | Flip `ADDIN_EMAIL_TAB_ENABLED` on; archive fix; live checks | this project (097) | 161 on master + deployed |
+
+## 7. Re-scoped execution (2026-10-06)
+
+**Trigger**: 161 is on master (#1312, `d254d7166`; it is an ancestor of this branch's HEAD) and 146 is on master.
+Owner, 2026-10-06: *"uac-r2 task 161 is working so you can proceed with completing the dependent work"*.
+
+### 7.1 Archive pointer fix: implemented and tested, but NOT safe to ship as is (🔔 decision needed)
+
+**The change** (`src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs`):
+
+- `DownloadAndBuildAttachmentsAsync` (`:2636`) now returns `PreparedAttachments`, which holds the channel attachments
+  plus, index-aligned, one `OutboundAttachmentSource(DocumentId, DriveId, ItemId)` per attachment (`:2621`,
+  recorded at `:2875`). These are the source document's own `sprk_graphdriveid` / `sprk_graphitemid`, after task
+  166's pointer check (`:2743`) has passed them.
+- Both send paths carry the sources (SharedMailbox `:1144`, User `:1509`) to the archive (`:1336`, `:1658`). The
+  `_options.ArchiveContainerId` drive and the raw id array are no longer passed.
+- `ArchiveOutboundAttachmentsAsync` (`:2507`) writes `sprk_graphitemid = source.ItemId` and `sprk_graphdriveid =
+  source.DriveId` (`:2541`). Task 146's `ResolveContentOwnerAsync`, its refusal branch and `ApplyContentOwner` are
+  unchanged.
+
+**Regression test**: `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/OutboundAttachmentArchivePointerTests.cs`.
+It is a theory over both send modes. It runs the real `SendAsync` and two source documents in two different
+drives. File metadata comes from the real `GraphMetadataCache` over an in-memory cache, so there is no
+`HttpMessageHandler`. The real document-pointer check runs. The test asserts each archived attachment's
+(drive, item) and that its owner is the team.
+
+- **Red on HEAD** (the old file restored with `git restore --source=HEAD`): 2/2 failed with exactly the bug, `Expected
+  … to be "drive-bu-north" … but "drive-archive"` and `Expected … to be "item-contract" … but
+  "8be08e48-7cef-4365-8ec2-6f5a875dd8d7"` (the `sprk_document` GUID), for both attachments and in both modes.
+- **Green on the fix**: 2/2 passed.
+
+**🔔 Why it must not ship as is: the fix makes two `sprk_document` rows share ONE SharePoint Embedded file, and
+two existing BFF paths delete the file a row points at.**
+
+| Path | What it does to the shared file |
+|---|---|
+| `DELETE /api/documents/{id}` → `DocumentCheckoutService.DeleteAsync` (`Services/DocumentCheckoutService.cs:794-799`) | Deletes `document.DriveId/ItemId` from SPE first. Deleting the **archived copy** would delete the **original document's** file. |
+| `DocumentContainerRelocator` (Make Secure moves and the legacy migration; `Services/Documents/DocumentContainerRelocator.cs:1808`) | After the copy is verified, deletes the source item. Relocating the archived copy (for example when the communication's record is made secure) would remove the original document's file. |
+
+Today's broken pointer names no file, so both paths miss (`not found`) and nothing is lost. After the fix, both
+paths can destroy a user's original document. This is the kind of data-integrity change that needs a human
+decision (CLAUDE.md §6).
+
+Two smaller interactions with task 166's pointer check (`RecordContainerResolver.DocumentPointer.cs`):
+
+- Under the **STRICT** rule, the archived copy's derived container is the communication's container, not the source
+  record's. App-only reads of the copy are refused, including the Document Profile job this method enqueues.
+- Under the **INTERIM** rule, a read is served only when the item's creator is the archived row's creator, that is,
+  the sender. So the copy works only for documents the sender uploaded.
+
+**Options (owner)**:
+
+| # | Option | Effect |
+|---|---|---|
+| A | **Copy the bytes** into the communication's container, the one `CommunicationContainerResolver` gives the `.eml` (`ArchiveToSpeAsync`), named `{communicationId:N}_{file}`, and point the archived document at the copy. | No shared item. Matches the inbound archive (`MessageAttachmentMaterializer`) and task 166's ARCHIVE-PATH rule (b), so it reads under both rules. Delete and relocate are safe. Cost: the bytes (already in memory for the send) are stored twice, and files over 4 MB need the upload-session path, not `UploadSmallAsync`. |
+| B | **Do not create a duplicate document** when the attachment is already a `sprk_document`. The `sprk_communicationattachment` row already links the source document (`CreateAttachmentRecordsAsync`, `sprk_document`). | No duplicate rows, no shared items, no second copy of the file. It is a product change: the copy's `sprk_relatedcommunication` listing and its Document Profile job go away, and the source document is already profiled. |
+| C | Ship the shared pointer as implemented. | Not recommended: it adds the data-loss path above. |
+
+**Recommendation: B if the product agrees that "documents of this communication" may be read through the
+attachment rows; otherwise A.** Either one is a new, small task. The pointer change and its test stay in the
+working tree, uncommitted, so the main session can keep them as the basis for A or drop them for B.
+
+**Reachability today**: only sends with `archiveToSpe: true` reach this code, which means the Spaarke email page
+with archiving on. The **Word Email tab sends `archiveToSpe: false`** (096), so the tab does not depend on this
+decision.
+
+### 7.2 Word Email tab switched on (deploy workflow only)
+
+- `.github/workflows/deploy-office-addins.yml`: `ADDIN_EMAIL_TAB_ENABLED: "true"`, with a comment citing 161 on master
+  (#1312, `d254d7166`) and the owner's go of 2026-10-06.
+- `src/client/office-addins/webpack.config.js`: the code default stays **OFF** (only the exact string `"true"` turns
+  it on). The comment now says the deploy workflow turns it on.
+- `src/client/office-addins/.env.example`: "held off" wording replaced. The commented example is now `=true` for
+  local builds.
+- `WordAdapter.ts:727` and `capabilities.test.ts` are unchanged (the capability follows the setting).
+
+### 7.3 How 161's filter treats the Word Email tab's request (read from the code)
+
+Request: `POST /api/communications/send`, `sendMode: "User"`, `attachmentDocumentIds: [<the open document's
+sprk_document id>]`, `associations: [{ entityType: <logical name>, entityId }]` (or none when unfiled),
+`archiveToSpe: false`, and the pane's bearer token.
+
+The route (`Api/CommunicationEndpoints.cs:62-64`) runs `CommunicationAuthorizationFilter` (signed in, has `oid`),
+then `CommunicationRecordAuthorizationFilter(Send)` (`Api/Filters/CommunicationRecordAuthorizationFilter.cs`):
+
+1. `CheckRequestShape` (`:309`): no shape rule for Send, so it passes.
+2. `CheckCallerPreconditionsAsync` (`:368`): a bearer token plus a resolvable Dataverse `systemuser`. Every add-in user
+   holds at least Basic User, so this passes.
+3. `AuthorizeSendAsync` → `AuthorizeSendBodyAsync` (`:582`, `:610`):
+   - attachment count is at most 150 (one).
+   - **(1) Read on each attachment** (`:621-629`) through `AuthorizationService` with operation `read` (`:753-769`). This
+     is the same decision the document download route makes, asked as the caller. The user's own saved document is
+     one they can already open and download from the pane (Find / Open), so **it passes**. A foreign or unknown id
+     fails with `sdap.access.deny.communication.send`.
+   - **(2) Thread**: the tab sends no `threadId`, so skipped. **Inherit-from**: none, so skipped.
+   - **(3) AppendTo on each association** (`:635-666`) through `CallerRecordAccessProbe.GetCallerRightsForRecordsAsync`.
+     The Word document's related record comes from the four direct slots the Office save writes (`sprk_matter`,
+     `sprk_project`, `sprk_invoice`, `sprk_workassignment`; `OfficeDocumentPersistence.DirectAssociationAttributes`).
+     All four are in `RegardingNameFields.EntitySetName`. The save itself required **AppendTo** on that record
+     through the **same probe** (`EntityAccessFilter`, task 084), so a record the save accepted **passes**. An unfiled
+     document sends no association, so the target list is empty and it passes (`:743-744`).
+   - Every fault denies (`Safely`, fail closed).
+
+**Verdict: unaffected.** The user's own document plus its filed record passes all three checks. A document id the
+user cannot read gets 403 `sdap.access.deny.communication.send` before any mail is sent. **One edge to know:**
+`sprk_todo` is not in `RegardingNameFields.EntitySetName`, and `sprk_communication` has no regarding column for it.
+If the related-record card ever surfaced a To Do (today it does not; it reads only the four slots above), that send
+would be refused with the same 403.
+
+### 7.4 Gates
+
+| Gate | Result |
+|---|---|
+| `/conflict-check` | Soft warns only. PR #1314 (`fix/uac-r2-deploy-script-fixes`) edits `CommunicationService.cs` around `:446` (template read) and `CommunicationServiceArchiveEmbedTests.cs`. This task's hunks are elsewhere, and its test is a new file. Dependabot PR #909 touches only the workflow's setup-node line. |
+| `dotnet build src/server/api/Sprk.Bff.Api/ --no-incremental` | 0 warnings, 0 errors |
+| Unit project, filter `Communication\|Office` (includes the linked `tests/integration/contract/**` and `auth/**`, among them 161's `CommunicationRecordAuthorizationContractTests`) | 1904 passed, 16 skipped, 0 failed |
+| `tests/Spaarke.ArchTests` | 806 passed, 0 failed |
+| `dotnet list package --vulnerable --include-transitive` | no vulnerable packages |
+| Publish size: fresh worktrees `C:\code_files\wt097m` (origin/master `dc469d4a2`) and `C:\code_files\wt097b` (HEAD `a5ec128a4` + the changed `CommunicationService.cs`), `dotnet publish -c Release`, `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` | master **37,886,369 B (36.13 MB)**, branch **37,887,104 B (36.13 MB)**, delta **+735 B**. 192 files on each side. Both worktrees removed. |
+| Inline code-review + adr-check | see the findings in §7.1. ADR-007: SPE only through `SpeFileStore`, no new Graph call. ADR-010: no new DI registration. ADR-002: no plugin. ADR-028: no auth change. ADR-038: no `Mock<HttpMessageHandler>`. The test sits in `tests/unit/Sprk.Bff.Api.Tests/Services/Communication/` beside the other CommunicationService tests, as instructed; ADR-038 would place a bug regression under `tests/integration/regression/` (low). CLAUDE.md §10 placement: an existing service is modified; no new endpoint, service, package or registration. |
+
+### 7.5 Open
+
+- 🔔 **Owner decision on §7.1** (A / B / C). Until then, do not commit the `CommunicationService.cs` change and its test
+  as a fix.
+- **Live (main session, after the add-in deploy)**: the Word Email tab sends the user's own document; a foreign
+  document id is refused with `sdap.access.deny.communication.send`.
+
+## 8. Main session (2026-10-06): what ships now, what waits
+
+- **Ships now**: the Word Email tab switch (`ADDIN_EMAIL_TAB_ENABLED: "true"` in the deploy workflow) — 161 is on master
+  and live on dev since ~04:47 UTC (UAC-r2's confirmation), and the tab sends `archiveToSpe: false`, so it does not
+  touch the archive path.
+- **Waits for the owner**: the archive fix. The drafted change (carry the source drive/item ids into the archived copy)
+  would make two `sprk_document` rows share one SPE file, and `DELETE /api/documents/{id}` / the container relocator
+  delete the file a row points at — deleting the copy would delete the original. Options A (copy the bytes into the
+  communication's container, like inbound archiving) / B (no duplicate; the attachment row already links the source) /
+  C (ship as is — no). The draft code + its red/green regression test are kept at
+  `notes/097-archive-pointer-fix-draft.patch`, NOT in the tree.

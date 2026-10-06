@@ -21,7 +21,7 @@
 
   <role>SPAARKE BFF security engineer: endpoint-filter authorization (ADR-008), OBO vs app-only access (ADR-028), SPE file access (ADR-007).</role>
 
-  <goal>`POST /api/communications/send` (and `/send-bulk`, which shares the code) sends only documents the caller can read and associates the communication only with records the caller may link to; anything else is refused with a clear reason before any mail is sent. The outbound archive stores correct Graph identifiers.</goal>
+  <goal>RE-SCOPED 2026-10-06 (owner decision option 1, notes/097 §6; owner go 2026-10-06: "uac-r2 task 161 is working so you can proceed with completing the dependent work"). The send authorization is unified-access-control-r2 task 161's (`Api/Filters/CommunicationRecordAuthorizationFilter.cs`, on master via #1312, d254d7166) and is NOT rebuilt here. This task: (1) fixes the outbound archive so each archived attachment `sprk_document` carries the SOURCE document's own `sprk_graphdriveid` / `sprk_graphitemid` (it wrote the `sprk_document` id and the archive container), keeping UAC-r2 task 146's owner behaviour; (2) switches the Word Email tab on in the deploy workflow (`ADDIN_EMAIL_TAB_ENABLED: "true"`; the code default stays off); (3) records, by reading 161's filter, that the Word Email tab's request passes it; (4) leaves the live checks open for the main session.</goal>
 
   <context>
     <background>
@@ -58,16 +58,13 @@
   </constraints>
 
   <acceptance-criteria>
-    <criterion testable="true">A send whose every attachment the caller can read and every association the caller may link to succeeds as before (User and SharedMailbox modes).</criterion>
-    <criterion testable="true">One attachment the caller cannot read (or that does not exist) → 403 with a stable code, nothing sent, no `sprk_communication` row; denied and not-found are indistinguishable.</criterion>
-    <criterion testable="true">One association the caller may not link to → 403, nothing sent, no row.</criterion>
-    <criterion testable="true">The access check itself failing → the request fails closed (no send).</criterion>
-    <criterion testable="true">`/send-bulk` enforces the same checks (test).</criterion>
-    <criterion testable="true">Seeded negative control: with the new check removed, the 403 tests fail; restored, they pass. Both outputs recorded.</criterion>
-    <criterion testable="true">Archive: an outbound archive stores the Graph item id (not a `sprk_document` id) in `sprk_graphitemid` — regression test red before, green after.</criterion>
-    <criterion testable="true">Every other caller of `CommunicationService` is listed with its verdict (unaffected / now checked / app-only by design, with reason).</criterion>
-    <criterion testable="true">Gates: build 0/0; Communication + Office test scopes green; ArchTests green (incl. `RouteAuthorizationGuardTests` — add the route to its census if it is not governed); CVE clean.</criterion>
-    <criterion testable="true">Live (after deploy): the Word Email tab still sends the user's own document; an attempt with a document id the user cannot read is refused. If unavailable, leave open.</criterion>
+    <!-- RE-SCOPED 2026-10-06. The original ten criteria are kept verbatim in <notes> as history. -->
+    <criterion testable="true">Archive: with ArchiveToSpe on, each outbound attachment's archived `sprk_document` stores the SOURCE document's `sprk_graphdriveid` and `sprk_graphitemid` (never the `sprk_document` id, never `Communication:ArchiveContainerId`), in both send modes (SharedMailbox and User). Task 146's owner stamping (`ApplyContentOwner`) and its refusal path are unchanged.</criterion>
+    <criterion testable="true">Regression test in `tests/unit/Sprk.Bff.Api.Tests/` (no `Mock&lt;HttpMessageHandler&gt;`): red on the old code (output recorded), green on the fix.</criterion>
+    <criterion testable="true">`.github/workflows/deploy-office-addins.yml` sets `ADDIN_EMAIL_TAB_ENABLED: "true"` with a comment citing 161 on master (#1312) and the owner go of 2026-10-06; `webpack.config.js` keeps the default OFF and its comment says the workflow turns it on; `.env.example` no longer says "held off".</criterion>
+    <criterion testable="true">notes/097 §7 records, from reading 161's filter, which checks run for the Word Email tab's request (sendMode User, the user's own document as the attachment, the document's record as the association) and why they pass.</criterion>
+    <criterion testable="true">Gates: `/conflict-check`; build 0/0; Communication + Office test scopes and ArchTests green; no new HIGH CVE; publish size master vs branch from fresh short-path worktrees (equal file counts); inline code-review + adr-check.</criterion>
+    <criterion testable="false">Live (main session, after deploy): the Word Email tab sends the user's own document; a foreign document id is refused with `sdap.access.deny.communication.send`. Left OPEN by this task.</criterion>
   </acceptance-criteria>
 
   <escalation>
@@ -116,6 +113,34 @@
   </outputs>
 
   <notes>
+    HISTORY: the ORIGINAL goal and acceptance criteria (superseded 2026-10-06 by the re-scope above).
+    Original goal: `POST /api/communications/send` (and `/send-bulk`, which shares the code) sends only documents the
+    caller can read and associates the communication only with records the caller may link to; anything else is
+    refused with a clear reason before any mail is sent. The outbound archive stores correct Graph identifiers.
+    Original criteria: (1) a send whose every attachment the caller can read and every association the caller may link
+    to succeeds as before (User and SharedMailbox modes); (2) one attachment the caller cannot read (or that does not
+    exist) → 403 with a stable code, nothing sent, no `sprk_communication` row; denied and not-found are
+    indistinguishable; (3) one association the caller may not link to → 403, nothing sent, no row; (4) the access check
+    itself failing → the request fails closed (no send); (5) `/send-bulk` enforces the same checks (test); (6) seeded
+    negative control: with the new check removed, the 403 tests fail; restored, they pass; both outputs recorded;
+    (7) archive: an outbound archive stores the Graph item id (not a `sprk_document` id) in `sprk_graphitemid` —
+    regression test red before, green after; (8) every other caller of `CommunicationService` is listed with its
+    verdict; (9) gates: build 0/0; Communication + Office test scopes green; ArchTests green (incl.
+    `RouteAuthorizationGuardTests`); CVE clean; (10) live (after deploy): the Word Email tab still sends the user's own
+    document; an attempt with a document id the user cannot read is refused. Criteria 1-6 and 8 are met by UAC-r2
+    task 161 (its `CommunicationRecordAuthorizationContractTests`); 7 and the live check carry into the re-scope.
+
+    2026-10-06 (re-scoped run): DONE: Word Email tab switched on in deploy-office-addins.yml (code default stays off);
+    161's coverage of the Word tab's request recorded (notes §7.3, verdict unaffected); archive pointer fix implemented
+    with a regression test (red on HEAD, green on the fix, both send modes); gates green (build 0/0, 1904 unit +
+    contract tests, 806 ArchTests, no CVE, publish +735 B at 192 files each side). STILL BLOCKED (new, notes §7.1): the
+    instructed fix makes the archived copy and the source document share ONE SPE file. DELETE /api/documents/{id}
+    (DocumentCheckoutService) and DocumentContainerRelocator both delete the file a row points at, so deleting or
+    relocating the copy would destroy the original document's file. Owner to choose A (copy the bytes into the
+    communication's container), B (no duplicate document; the attachment row already links the source) or C (ship
+    as is, not recommended). The CommunicationService change and its test stay uncommitted pending that decision.
+    Live checks: open.
+
     2026-10-04: BLOCKED on escalation trigger 3 before any code edit. `/conflict-check` found that
     unified-access-control-r2 task 161 (#1100), commits 7f9159027 and 0f8cc61ea, merged and pushed to
     origin/integ/uac-r2-batch4 but not on master, already authorizes /send and /send-bulk. It checks Read on

@@ -10,6 +10,7 @@
 - [Power Pages vs Entra External ID portal (2026-07-17)](power-pages-vs-entra-external-id-portal-2026-07-17.md) — external portal choice; licensing + SPE-external story
 
 ## Word add-in / Office
+- [Outlook desktop unified button inert (2026-10-06)](outlook-desktop-unified-button-inert-2026-10-06.md) — classic ≥2307/16626.20132; 24-72h; XML-vs-unified button fingerprint; Wef+HubAppFileCache; #6768; script 404
 - [Task pane width (2026-10-04)](office-addin-taskpane-width-2026-10-04.md) — YES runtime setWidth (TaskPaneApi 1.1, Win 2507+); manifest preferredWidth preview-only; RequestedWidth content-only
 - [Launch ms-word: from task pane (2026-10-03)](office-addin-launch-ms-word-uri-2026-10-03.md) — openBrowserWindow http(s)-only (#2820 by design), N/A on web; anchor-click works Win (#6926); Office.context.platform
 - [Word unified manifest GA status (2026-09-30)](word-unified-manifest-ga-status-2026-09-30.md) — GA Win 2501+/Mac 16.103+/web; schema 1.30; "Teams app" zip upload; hide bug #6938
