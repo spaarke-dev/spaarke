@@ -41,7 +41,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
 | Handler catalog | 20 handlers per run (Model 1: 19 — skips H0.5; Model 2: 20 — H11 runs on EVERY run, both models; it was once documented as skipped for Model 2, but `DagAdvancer` has no such skip and H12a/H12b depend on it): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14 — the 20 ids in `HandlerIds.Dispatchable` (`Sprk.Provisioning.ControlPlane.Core`), H0 included. H4-shared was retired by T226 (2026-09-30). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
 | Trap catalog | 7 traps T1-T7 (see design §4B) — each handler asserts its trap clear before reporting success |
-| Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests + verified at H13 acceptance |
+| Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests; I2-I5 also sample-verified on the stamp at H13 acceptance (I1 is a build gate — T230a) |
 | Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
 | Cost envelope | One envelope per customer stamp, both models: ≤ $400/mo empty (NFR-04; ≈ $337 fixed at 2026-10-06 list prices — T229). H0 refuses an estimate above the tier ceiling (smb $700 / enterprise $2,500 / dedicated $5,000); H13 flags > 20% drift |
 | Handoff report path | `runs/{runId}.md` in operator's cwd (NOT under `.claude/`) |

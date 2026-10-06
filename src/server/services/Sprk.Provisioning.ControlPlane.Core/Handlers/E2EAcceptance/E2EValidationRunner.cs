@@ -11,9 +11,10 @@
 // ValidateDeployedEnvironmentScriptRunner.cs retirement banner).
 //
 // TASK: 181 (Phase C'' Wave G-7 Batch G-7B). Sibling of tasks 182
-// (NamingConformanceChecker -- pure-C# port) and 183 (ArmCostEnvelopeChecker
-// -- Azure.ResourceManager.CostManagement SDK port). Combined they retire all
-// three E2EAcceptance shell-outs so H13 executes cleanly under Option D.
+// (NamingConformanceChecker -- pure-C# port; deleted by task 230a) and 183
+// (ArmCostEnvelopeChecker -- Azure.ResourceManager.CostManagement SDK port).
+// Combined they retired all three E2EAcceptance shell-outs so H13 executes
+// cleanly under Option D.
 //
 // SILENT-FAIL AUDIT (per this task's dispatch directive):
 //   The POML task 181 prompt described the .ps1 as containing "5 effect probes:
@@ -120,12 +121,10 @@
 //       (Phase F rerun) closes -- until then this port SURFACES the gap.
 //
 //   * naming-conformance
-//       Delegated to INamingConformanceChecker (task 182's pure-C# port,
-//       registered in E2EAcceptanceModule.cs). H13's own handler invokes it
-//       INDEPENDENTLY per the interface header: "H13 owns SC #17 ... as its
-//       own explicit pass/fail boundary so that failure in either surface
-//       fails H13 with a distinct rejection code." Re-checking here would
-//       duplicate the invocation.
+//       Not a per-run check (task 230a): it lints Spaarke repo files, not the
+//       deployed stamp, and scripts/naming-conformance-check.ps1 runs once as
+//       a blocking CI step. H13's former INamingConformanceChecker step was
+//       deleted for the same reason.
 //
 //   * sample-ai-analysis, sample-doc-upload-index, sample-workspace-layout-
 //     render, sample-wizard-field-map
@@ -162,9 +161,9 @@
 // PATTERN PARITY:
 //   Mirrors AiSearchTenantFilterInvariantProbe (task 173) for the injected
 //   IHttpClientFactory + named-client convention + FakeHttpMessageHandler-
-//   friendly test seam; mirrors NamingConformanceChecker (task 182) for the
-//   pure-C# port banner + forcing-function ArchTest-style source-file
-//   scanning. ADR-038 path-1 pyramid: tests exercise the runner against
+//   friendly test seam; mirrors the (deleted) NamingConformanceChecker (task
+//   182) for the pure-C# port banner + forcing-function ArchTest-style
+//   source-file scanning. ADR-038 path-1 pyramid: tests exercise the runner against
 //   hand-rolled FakeHttpMessageHandler (never Mock<HttpMessageHandler>).
 //
 // PLACEMENT JUSTIFICATION (CLAUDE.md section 10):
@@ -210,8 +209,8 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
     /// <summary>Check name emitted in ChecksSkipped for the .ps1's Test-DevValueLeakage (dependent on env-vars).</summary>
     public const string SkippedDataverseEnvVarsDevLeakage = "dataverse-env-vars-dev-leakage";
 
-    /// <summary>Check name emitted in ChecksSkipped for naming-conformance (delegated to INamingConformanceChecker).</summary>
-    public const string SkippedNamingConformance = "naming-conformance-delegated-to-INamingConformanceChecker";
+    /// <summary>Check name emitted in ChecksSkipped for the .ps1's naming-conformance step — a repo lint enforced once in CI, not per run (task 230a).</summary>
+    public const string SkippedNamingConformance = "naming-conformance-enforced-in-ci";
 
     /// <summary>
     /// Check name for the SC #5 sample AI analysis check (G-8 Batch 11). Suffix
@@ -421,8 +420,8 @@ public sealed class E2EValidationRunner : IE2EValidationRunner
 
     /// <summary>
     /// Builds the ALWAYS-skipped list emitted on every run. The list is
-    /// intentionally NON-EMPTY: it advertises the naming-conformance
-    /// delegation + the Dataverse-auth gap. An operator grepping H13 outcome
+    /// intentionally NON-EMPTY: it advertises that naming conformance is
+    /// enforced in CI (task 230a) + the Dataverse-auth gap. An operator grepping H13 outcome
     /// for "not implemented yet" gaps sees them in a stable place.
     ///
     /// G-8 Batch 11 (2026-08-20): the four Phase-B sample-workload rows were

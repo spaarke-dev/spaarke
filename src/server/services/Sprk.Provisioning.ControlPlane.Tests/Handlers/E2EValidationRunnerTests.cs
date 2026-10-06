@@ -14,7 +14,7 @@
 // behavior through the runner's PUBLIC RunAsync surface. It lives in the
 // existing Tests project alongside the sibling H13 real-probe test files
 // (AiSearchTenantFilterInvariantProbeTests, SpeContainerTenantDerivationInvariantProbeTests,
-// NamingConformanceCheckerTests, ArmCostEnvelopeCheckerTests). Path is not
+// ArmCostEnvelopeCheckerTests). Path is not
 // under tests/integration/** because the runner is not itself an integration
 // boundary -- the LIVE-run integration lands in Phase F rerun (task 186).
 //
@@ -627,8 +627,8 @@ public sealed class E2EValidationRunnerTests
     }
 
     // -----------------------------------------------------------------------
-    // AC-1 + AC-3 forcing functions -- source-file scans (parity with task 182
-    // NamingConformanceCheckerTests.SourceFile_ContainsNoProcessStartInfoOrShellOutInCode).
+    // AC-1 + AC-3 forcing functions -- source-file scans (parity with task 182's
+    // NamingConformanceCheckerTests source scan; that test was deleted by task 230a).
     // -----------------------------------------------------------------------
 
     [Fact]

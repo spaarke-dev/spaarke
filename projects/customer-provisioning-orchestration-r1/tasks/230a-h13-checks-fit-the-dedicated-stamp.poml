@@ -4,7 +4,7 @@
     <title>H13's checks fit the dedicated stamp: I3 checks the partition keys the stamp template declares, no shared-platform assumption or wording remains, naming/I1 inputs ship with the Worker, dead shell-out options go</title>
     <phase>Model 1 dedicated-stamp remediation — plan §7 T230 part 1 (G5)</phase>
     <gate>after 229 (✅)</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>H13 probe code + options + tests; acceptance-gate semantics.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -88,5 +88,41 @@
     <trigger>The I3 invariant's spec meaning (FR-30 "/customerId predicate") conflicts with the dedicated-stamp reading — surface per CLAUDE.md §6.5 if a spec/ADR change is needed.</trigger>
   </escalation>
 
-  <notes/>
+  <notes>
+    COMPLETED 2026-10-06 (SESSION 40).
+    - I3: CosmosPartitionKeyInvariantProbe compares the stamp's account with cosmos-db.bicep — DeclaredPartitionKeys (7
+      containers, /tenantId, /partitionKey, /subjectId) + DeclaredDatabaseName spaarke-ai, bicep parity test (non-empty
+      literal names). Failed: a declared container with another/hierarchical/no key, or ANY container with no key.
+      Membership drift (declared container absent / extra keyed container) is logged, not failed — the Worker table and the
+      template H2a deploys ship on different schedules and ARM never deletes a retired container (code-review F3). It
+      used to demand /customerId everywhere (FR-30 reserves that for L2's ProvisioningRun) → would have failed every stamp.
+    - Wording: I2 (no "shared platform"), T2/T3 (tenantId is intake-required for every model); stale comments in
+      H13RejectionCodes, IRegistrySetupStatusUpdater, IE2EValidationRunner, E2EValidationRunner, CompositeTrapVerifier, I2.
+    - DEVIATION from AC3 ("ship the inputs or fail closed"), chosen by necessity (constraint "needed-or-remove", step 3 "or
+      drop the dependency"): H13's naming check and runtime I1 probe both scanned REPOSITORY files that are identical for
+      every run and absent from the Worker host (DOTNETCORE|10.0; publish has no scripts/ or infrastructure/), so each
+      would have blocked every stamp (naming → QuarantineRequired, I1 → Resumable forever). Both removed (sub-agent):
+      NamingConformanceChecker + seam + gate + codes + option; PackagedScriptTenantLiteral probe/verifier, InvariantKind.I1,
+      InvariantI1Failed, ProvisioningScriptsDirectory; unregistered Placeholder*Verifier; unread shell-out options. H13
+      runtime set = I2–I5 (CompositeInvariantVerifier now built from the enum — a new kind without a probe defers, never
+      passes). I1 stays enforced by I1_NoHardcodedTenantTests (Tier-1, blocking). Naming conformance → NEW merge-blocking
+      job in ci-tier1-blocking.yml (self-test + scan; the Router's required check — sdap-ci.yml is not required and its
+      code-quality job is continue-on-error, so the first attempt there could never block: adr-check V1 / code-review F2).
+      Vault rule R3 now accepts sprk-{customerId}-{env}-kv but not reserved ids / env tokens in that slot, case-sensitive,
+      ≤ 24 chars (code-review F1); self-test fixtures added; Seed-ProductionKeyVault.ps1's drift default
+      sprk-platform-prod-kv removed (VaultName mandatory; the script is inactive until a real prod exists). Spec FR-18 /
+      FR-35 / SC #17 + asset rows, design rows, naming standard R3 + Enforcement, guide H13 row (pure C#) / §7.10 / §8 /
+      §13.6 / gates list (God-class ratchet marked retired), constraints, skill, CHANGELOG.
+    - Found and filed: G38 / T253 — H4b (pwsh Configure script) and H6 (pac org settings, pac required apps) still shell out
+      on the Worker host that has neither tool → both fail live; queued before T186.
+    - Step 9.5: code-review F1/F2 (Critical) fixed, F3 fixed (membership drift), F4 partly (non-empty-name check; hierarchical
+      keys would already fail the parity test), F5 noted (no lease containers exist), F6/F7/F8 fixed, F9 accepted (retired
+      DotnetR3GateVerifier, unregistered), F10 accepted (skipped-check name changed to naming-conformance-enforced-in-ci),
+      F11 covered. adr-check V1 fixed; W1 recorded here; W2/W3/W6 fixed; W4 checked (sprk-xxxxxxxx-staging-kv = 24);
+      W5 (deploy-bff-api.yml keeps its own advisory naming step feeding R3GateStatus) accepted; W7/W8 informational.
+    - Observation: tests/scripts/Auth-V4-Operator-Script-Gates.Tests.ps1 fails 27/27 locally under Pester 6.2 at HEAD too
+      (Set-A38cAzShadow not recognized) — pre-existing, not run in CI.
+    - Tests: ControlPlane 2146 / 0 failed (1 skip); ArchTests 831/831; Worker/Api/Tests 0 warnings; naming lint 0 violations,
+      self-test PASSED; workflow YAML parses.
+  </notes>
 </task>

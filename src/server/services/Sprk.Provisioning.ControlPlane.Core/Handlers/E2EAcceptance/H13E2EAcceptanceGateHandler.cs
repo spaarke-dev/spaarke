@@ -7,16 +7,20 @@
 //
 // PURPOSE:
 //   Asserts EFFECTS not intentions (R7 principle). Independently re-verifies
-//   every prior handler's silent-fail post-condition + samples every §4D
-//   tenant-isolation invariant + gates naming-conformance + samples cost
-//   envelope. Registry transition happens if-and-only-if ALL six gates green.
-//   On any failure → Cosmos state = Quarantined per §4C.
+//   every prior handler's silent-fail post-condition + samples the runtime
+//   §4D tenant-isolation invariants (I2–I5) + samples cost envelope. Registry
+//   transition happens if-and-only-if ALL five gates green. On any failure →
+//   Cosmos state = Quarantined per §4C.
+//   Task 230a: the naming-conformance step (SC #17) DELETED — it linted Spaarke
+//   repo files absent from the Worker publish; scripts/naming-conformance-check.ps1
+//   runs once as a blocking CI step. I1 (no hardcoded tenant) likewise left the
+//   runtime set — it is a build-time property owned by the I1 ArchTest.
 //
 // SPEC / DESIGN references:
 //   - spec.md FR-18 (H13 acceptance criteria) + SC #5 (extended validate
 //     script) + SC #6 (all 7 traps re-verified) + SC #14 (cost envelope) +
-//     SC #17 (naming exit 0) + §4B (T1–T7 trap catalog; T7 added by task 238) + §4C (Quarantined
-//     rollback) + §4D (I1–I5 invariants) + §15 #14 (cost).
+//     §4B (T1–T7 trap catalog; T7 added by task 238) + §4C (Quarantined
+//     rollback) + §4D (I2–I5 runtime invariants) + §15 #14 (cost).
 //   - design.md §4.1 H13 row (final gate, downstream of H14) + §4B (trap
 //     catalog + owning-handler post-condition table) + §4D (5 invariants).
 //   - .claude/adr/ADR-004: single IProvisioningHandler-shape impl registered
@@ -31,7 +35,7 @@
 //     boundary).
 //
 // AGGREGATE-GATE PATTERN:
-//   H13 fans out to 6 collaborator seams in a deterministic order + collects
+//   H13 fans out to 5 collaborator seams in a deterministic order + collects
 //   every outcome BEFORE deciding pass/fail — the operator sees the full
 //   picture on failure, not just the first observed failure. Each collaborator
 //   is invoked once; short-circuit-fail on any hard failure is deliberately
@@ -44,7 +48,7 @@
 //   │ Failure mode                                  │ §4C class                 │
 //   ├───────────────────────────────────────────────┼───────────────────────────┤
 //   │ Missing tenantId/subscriptionId/buildId/      │ Resumable                 │
-//   │ dataverseUrl/bffApiUrl (§4D I1 / idempotency) │ (external precondition)   │
+//   │ dataverseUrl/bffApiUrl (idempotency)          │ (external precondition)   │
 //   │ Missing InterStepState resourceGroupName/     │ Resumable                 │
 //   │ appServiceName/keyVaultName (H2a outputs)     │ (upstream H2a not done)   │
 //   │ Run not found in Cosmos partition             │ Resumable                 │
@@ -58,12 +62,10 @@
 //   │ (silent-fail actually manifested — SC #6)     │                           │
 //   │ Trap verifier InfraFault                      │ Resumable                 │
 //   │ (probe could not run — no verdict)            │                           │
-//   │ ANY I1–I5 invariant FAILED                    │ QuarantineRequired        │
+//   │ ANY I2–I5 invariant FAILED                    │ QuarantineRequired        │
 //   │ (§4D CATASTROPHIC severity — cross-tenant     │                           │
 //   │ bleed risk)                                   │                           │
 //   │ Invariant verifier InfraFault                 │ Resumable                 │
-//   │ Naming-conformance FAILED (SC #17)            │ QuarantineRequired        │
-//   │ Naming-conformance infra fault                │ Resumable                 │
 //   │ Cost drift > threshold AND CostDriftFailsRun  │ QuarantineRequired        │
 //   │ Cost drift > threshold AND !CostDriftFailsRun │ (advisory-warn — Ready    │
 //   │                                               │ still transitions if all │
@@ -89,14 +91,14 @@
 //   H13 lives in L2 (not BFF) per spec §5.2 / D3 / D8 / D12; consumes NO
 //   AI-internal types (ADR-013 forcing-function rule — no IActionResolver,
 //   IActionRunner, IOpenAiClient, IPlaybookService injection). Uses
-//   IProvisioningRunRepository (task 037) + 6 dedicated seams
+//   IProvisioningRunRepository (task 037) + 5 dedicated seams
 //   (IE2EValidationRunner, IE2ETrapVerifier, IE2EInvariantVerifier,
-//   INamingConformanceChecker, ICostEnvelopeChecker, IRegistrySetupStatusUpdater);
+//   ICostEnvelopeChecker, IRegistrySetupStatusUpdater);
 //   no BFF-facade dependencies.
 //
 // COMPONENT JUSTIFICATION (CLAUDE.md §11):
-//   Existing: scripts/Validate-DeployedEnvironment.ps1 (operator-invocable) +
-//     scripts/naming-conformance-check.ps1 (r3 task 063). Neither extends the
+//   Existing: scripts/Validate-DeployedEnvironment.ps1 (operator-invocable).
+//     It does not extend the
 //     automated per-run Cosmos state transition + registry-status transition
 //     + §4C Quarantine semantics H13 needs.
 //   Extension: no — H13 is the SOLE authoritative gate for Setup Status =
@@ -126,7 +128,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     /// <summary>Handler identifier — matches design.md §4.1 catalog verbatim.</summary>
     public const string HandlerIdentifier = HandlerIds.H13;
 
-    /// <summary>Non-secret parameter key carrying the Entra tenant id (§4D I1).</summary>
+    /// <summary>Non-secret parameter key carrying the Entra tenant id — every trap/invariant probe scopes to it.</summary>
     public const string TenantIdParameterKey = "tenantId";
 
     /// <summary>Non-secret parameter key carrying the customer subscription id (ADR-027 D4) — required for cost query + ARM trap probes.</summary>
@@ -137,14 +139,12 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     //     (InterStepState.ResourceGroupName / .AppServiceName / .KeyVaultName);
     //   - the deployed BFF URL and build → H9 outputs (InterStepState.BffApiUrl / .BffBuildId);
     //   - the SPE owner credential for T6 → SpeContainerOptions.ContainerTypeOwners, by the intake
-    //     containerTypeId;
-    //   - the I1 scripts directory → H13AcceptanceOptions.ProvisioningScriptsDirectory.
+    //     containerTypeId.
 
     private readonly IProvisioningRunRepository _repository;
     private readonly IE2EValidationRunner _validationRunner;
     private readonly IE2ETrapVerifier _trapVerifier;
     private readonly IE2EInvariantVerifier _invariantVerifier;
-    private readonly INamingConformanceChecker _namingChecker;
     private readonly ICostEnvelopeChecker _costChecker;
     private readonly IRegistrySetupStatusUpdater _registryUpdater;
     private readonly IDataverseEnvironmentRegistryClient _registryClient;
@@ -159,7 +159,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         IE2EValidationRunner validationRunner,
         IE2ETrapVerifier trapVerifier,
         IE2EInvariantVerifier invariantVerifier,
-        INamingConformanceChecker namingChecker,
         ICostEnvelopeChecker costChecker,
         IRegistrySetupStatusUpdater registryUpdater,
         IDataverseEnvironmentRegistryClient registryClient,
@@ -170,7 +169,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(validationRunner);
         ArgumentNullException.ThrowIfNull(trapVerifier);
         ArgumentNullException.ThrowIfNull(invariantVerifier);
-        ArgumentNullException.ThrowIfNull(namingChecker);
         ArgumentNullException.ThrowIfNull(costChecker);
         ArgumentNullException.ThrowIfNull(registryUpdater);
         ArgumentNullException.ThrowIfNull(registryClient);
@@ -181,7 +179,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         _validationRunner = validationRunner;
         _trapVerifier = trapVerifier;
         _invariantVerifier = invariantVerifier;
-        _namingChecker = namingChecker;
         _costChecker = costChecker;
         _registryUpdater = registryUpdater;
         _registryClient = registryClient;
@@ -232,7 +229,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         if (!TryGetNonEmpty(parameters, TenantIdParameterKey, out var tenantId))
         {
             return await FailAsync(run, etag, FailureClass.Resumable, H13Rejections.MissingTenantId,
-                "Run parameter 'tenantId' is required by H13 (§4D I1 no-hardcoded-tenant). " +
+                "Run parameter 'tenantId' is required by H13. " +
                 "Every trap/invariant probe scopes to this tenant.",
                 cancellationToken).ConfigureAwait(false);
         }
@@ -297,8 +294,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 "produces it and must complete before H13. The T5 trap probe checks slot-MI RBAC on this vault.",
                 cancellationToken).ConfigureAwait(false);
         }
-
-        var scriptsDirectory = _options.ProvisioningScriptsDirectory;
 
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, buildId);
 
@@ -410,7 +405,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         _logger.LogInformation("H13 trap-catalog: runId={RunId} summary={Summary}",
             envelope.RunId, trapResult.ToLogSummary());
 
-        // (6) Invariant verifier (§4D I1–I5).
+        // (6) Invariant verifier (§4D I2–I5; task 230a: I1 is build-time — the I1 ArchTest).
         InvariantCatalogVerificationResult invariantResult;
         try
         {
@@ -423,7 +418,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                     AiSearchEndpoint: aiSearchEndpoint,
                     CosmosEndpoint: cosmosEndpoint,
                     BffApiUrl: bffApiUrl,
-                    ProvisioningScriptsDirectory: scriptsDirectory,
                     // T227c: I4 checks the BFF is configured with this run's container type and H8's container.
                     ContainerTypeId: parameters.TryGetValue(IntakeParameterCatalog.ContainerTypeId, out var i4ContainerTypeId)
                         ? i4ContainerTypeId?.Trim() ?? string.Empty
@@ -444,26 +438,9 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         _logger.LogInformation("H13 invariant-catalog: runId={RunId} summary={Summary}",
             envelope.RunId, invariantResult.ToLogSummary());
 
-        // (7) Naming-conformance (SC #17).
-        NamingConformanceOutcome namingOutcome;
-        try
-        {
-            namingOutcome = await _namingChecker.CheckAsync(
-                new NamingConformanceRequest(envelope.CustomerId, envelope.RunId),
-                cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            _logger.LogError(ex,
-                "H13 naming-conformance infra fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                H13Rejections.NamingConformanceInfraFault,
-                $"naming-conformance-check.ps1 infra fault: {ex.GetType().Name}: {ex.Message}.",
-                cancellationToken).ConfigureAwait(false);
-        }
+        // Task 230a: the naming-conformance step (SC #17) DELETED — a repo lint, now a blocking CI step.
 
-        // (8) Cost envelope (SC #14 + §15 #14).
+        // (7) Cost envelope (SC #14 + §15 #14).
         // Task 223 (D-12): parse tenancyModel at the handler edge (matches H1's pattern) —
         // pre-D-12 the ArmCostEnvelopeChecker had an `_`-arm fallback that silently used
         // Model1SharedFloorEnvelopeUsd for any unrecognized string. That option + fallback are
@@ -512,15 +489,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             }
         }
 
-        // (9) DECISION: aggregate every collaborator's outcome + pick failure
+        // (8) DECISION: aggregate every collaborator's outcome + pick failure
         //     with correct §4C classification. Priority order:
         //       (a) Trap/invariant FAILED → QuarantineRequired (silent-fail
         //           actually manifested — CATASTROPHIC).
-        //       (b) Naming-conformance FAILED → QuarantineRequired.
-        //       (c) Extended-validate FAILED → QuarantineRequired.
-        //       (d) Cost drift (fail-run mode) → QuarantineRequired.
-        //       (e) Trap/invariant InfraFault → Resumable (no verdict).
-        //       (f) Cost query infra fault → Resumable.
+        //       (b) Extended-validate FAILED → QuarantineRequired.
+        //       (c) Cost drift (fail-run mode) → QuarantineRequired.
+        //       (d) Trap/invariant InfraFault → Resumable (no verdict).
+        //       (e) Cost query infra fault → Resumable.
         //     Advisory-warn cost drift is NOT a failure branch — it's attached
         //     to the diagnostic + gate-state but the Ready transition still
         //     happens if all else green (per POML deviation note).
@@ -539,13 +515,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 MapInvariantKindToRejectionCode(invFail.Kind),
                 $"I{(int)invFail.Kind} tenant-isolation invariant VIOLATED (CATASTROPHIC): {invFail.Diagnostic}. " +
                 $"Full invariant catalog: {invariantResult.ToLogSummary()}",
-                cancellationToken).ConfigureAwait(false);
-        }
-        if (namingOutcome is NamingConformanceOutcome.Failure namingFail)
-        {
-            return await FailAsync(run, etag, FailureClass.QuarantineRequired,
-                H13Rejections.NamingConformanceFailed,
-                $"naming-conformance-check.ps1 exit {namingFail.ExitCode}: {namingFail.Diagnostic}.",
                 cancellationToken).ConfigureAwait(false);
         }
         if (validationOutcome is E2EValidationOutcome.Failure valFail)
@@ -596,7 +565,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (9.5) MED#10 SESSION-19 COSMOS-FIRST ORDERING (customer-provisioning-
+        // (8.5) MED#10 SESSION-19 COSMOS-FIRST ORDERING (customer-provisioning-
         //       orchestration-r1 adversarial e2e verify workflow wepdcb8we).
         //
         //       PRINCIPLE: write your OWN state (Cosmos, ETag-protected, your
@@ -627,7 +596,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         //       of registry-Ready + Cosmos-Running for the same window.
         PrepareRunStateForCompletion(
             run, idempotencyKey, envelope, trapResult, invariantResult, costReport,
-            validationOutcome, namingOutcome);
+            validationOutcome);
 
         var cosmosResult = await WriteCompletionToCosmosAsync(
             run, etag, idempotencyKey, cancellationToken).ConfigureAwait(false);
@@ -638,7 +607,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             return cosmosResult;
         }
 
-        // (10) Cosmos-Completed landed. Registry PATCHes are BEST-EFFORT.
+        // (9) Cosmos-Completed landed. Registry PATCHes are BEST-EFFORT.
         //      A failure here leaves the registry stale (log-warn); the operator
         //      SKILL Step 6a picks up the residual. Do NOT re-flip Cosmos back
         //      to Failed — that would churn state and violate Cosmos-first.
@@ -678,7 +647,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             }
         }
 
-        // (11) sprk_setupstatus → Ready. Best-effort — operator SKILL Step 6a picks up on failure.
+        // (10) sprk_setupstatus → Ready. Best-effort — operator SKILL Step 6a picks up on failure.
         var envUpdate = new RegistrySetupStatusUpdateRequest(
             CustomerId: envelope.CustomerId,
             RunId: envelope.RunId,
@@ -706,14 +675,14 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
         }
 
-        // (12) Full success — Cosmos-Completed AND registry-Ready both landed.
+        // (11) Full success — Cosmos-Completed AND registry-Ready both landed.
         return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: false);
     }
 
     /// <summary>
     /// MED#10 SESSION-19 helper — emits the H13 success-summary log and returns
-    /// <see cref="HandlerResult.Success"/>. Centralized so the (12) full-success
-    /// path AND every (10)/(11) registry-stale fallback path produce a consistent
+    /// <see cref="HandlerResult.Success"/>. Centralized so the (11) full-success
+    /// path AND every (9)/(10) registry-stale fallback path produce a consistent
     /// operator-visible summary. Stopwatch is stopped here (no double-stop).
     /// </summary>
     private HandlerResult SuccessSummaryLog(
@@ -818,7 +787,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     /// </summary>
     internal static string MapInvariantKindToRejectionCode(InvariantKind kind) => kind switch
     {
-        InvariantKind.I1NoHardcodedTenant => H13Rejections.InvariantI1Failed,
         InvariantKind.I2AiSearchTenantFilter => H13Rejections.InvariantI2Failed,
         InvariantKind.I3CosmosPartitionKey => H13Rejections.InvariantI3Failed,
         InvariantKind.I4SpeContainerResolver => H13Rejections.InvariantI4Failed,
@@ -986,10 +954,9 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         TrapCatalogVerificationResult trapResult,
         InvariantCatalogVerificationResult invariantResult,
         CostEnvelopeReport? costReport,
-        E2EValidationOutcome validationOutcome,
-        NamingConformanceOutcome namingOutcome)
+        E2EValidationOutcome validationOutcome)
     {
-        _ = trapResult; _ = invariantResult; _ = validationOutcome; _ = namingOutcome;
+        _ = trapResult; _ = invariantResult; _ = validationOutcome;
 
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
@@ -1008,7 +975,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         run.ErrorDetail = null;
 
         // Record every H13 gate as Verified — operators can grep the run for
-        // each of the 6 gates independently without opening the full doc.
+        // each of the 5 gates independently without opening the full doc.
         // NOTE (MED#10 SESSION-19): RegistryReadyTransitioned is stamped Verified
         // OPTIMISTICALLY here — the registry PATCH runs AFTER this method returns
         // AND after WriteCompletionToCosmosAsync. If the registry PATCH fails,
@@ -1025,7 +992,6 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         run.GateStates[H13Gates.ExtendedValidationVerified] = verified;
         run.GateStates[H13Gates.TrapCatalogVerified] = verified;
         run.GateStates[H13Gates.InvariantCatalogVerified] = verified;
-        run.GateStates[H13Gates.NamingConformanceVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry
         {
             Status = GateState.Verified,   // Advisory-warn is Verified (Ready still transitions) — the warning is captured in the ErrorDetail advisory suffix + summary.

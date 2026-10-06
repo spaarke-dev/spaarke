@@ -3,8 +3,9 @@
 //
 // Machine-stable rejection codes + gate identifiers emitted by
 // H13E2EAcceptanceGateHandler (task 055, wave C4 Batch 4E). H13 is the FINAL
-// acceptance gate — it re-verifies EVERY T1–T7 silent-fail trap + EVERY
-// I1–I5 tenant-isolation invariant + naming conformance + cost envelope, and
+// acceptance gate — it re-verifies EVERY T1–T7 silent-fail trap + the
+// I2–I5 tenant-isolation invariants on the stamp + cost envelope (task 230a:
+// I1 and naming conformance are build gates, not per-run checks), and
 // gates the Dataverse registry `sprk_setupstatus → Ready` transition on the
 // aggregate pass/fail outcome.
 //
@@ -110,9 +111,8 @@ public static class H13Rejections
     public const string TrapVerifierInfraFault = "h13-trap-verifier-infra-fault";
 
     // ---- §4D tenant-isolation invariant failures (one code per invariant) ----
-
-    /// <summary>I1 CATASTROPHIC — a hardcoded tenant-shaped GUID default was found in the r1-owned provisioning scripts (grep gate).</summary>
-    public const string InvariantI1Failed = "h13-invariant-I1-hardcoded-tenant";
+    // Task 230a: InvariantI1Failed DELETED — I1 (no hardcoded tenant) is a build-time property the
+    // I1 ArchTest enforces; H13 has no runtime I1 probe (it scanned scripts the Worker publish never ships).
 
     /// <summary>I2 CATASTROPHIC — a sample AI Search query per index does NOT carry the required unconditional <c>tenantId eq</c> filter.</summary>
     public const string InvariantI2Failed = "h13-invariant-I2-ai-search-tenant-filter";
@@ -129,13 +129,8 @@ public static class H13Rejections
     /// <summary>Invariant verifier infra fault (probe blew up) — no confirmed pass/fail outcome. Resumable.</summary>
     public const string InvariantVerifierInfraFault = "h13-invariant-verifier-infra-fault";
 
-    // ---- naming-conformance (SC #17) ----
-
-    /// <summary>The independent invocation of scripts/naming-conformance-check.ps1 returned non-zero — r1-owned surface has a naming violation post-provisioning.</summary>
-    public const string NamingConformanceFailed = "h13-naming-conformance-failed";
-
-    /// <summary>The naming-conformance script invocation threw (pwsh not on PATH, script not found, timeout).</summary>
-    public const string NamingConformanceInfraFault = "h13-naming-conformance-infra-fault";
+    // Task 230a: NamingConformanceFailed / NamingConformanceInfraFault DELETED with H13's naming step —
+    // naming conformance (SC #17) lints repo files and runs once as a blocking CI step.
 
     // ---- cost envelope (SC #14 + §15 #14) ----
 
@@ -177,11 +172,10 @@ public static class H13Gates
     /// <summary>Flips to Verified when ALL 7 §4B T1–T7 trap re-verifications pass (SC #6).</summary>
     public const string TrapCatalogVerified = "h13-trap-catalog";
 
-    /// <summary>Flips to Verified when ALL 5 §4D I1–I5 sample invariants pass.</summary>
+    /// <summary>Flips to Verified when ALL 4 runtime §4D I2–I5 sample invariants pass (I1 is build-time — task 230a).</summary>
     public const string InvariantCatalogVerified = "h13-invariant-catalog";
 
-    /// <summary>Flips to Verified when the independent naming-conformance run exits 0 (SC #17).</summary>
-    public const string NamingConformanceVerified = "h13-naming-conformance";
+    // Task 230a: NamingConformanceVerified DELETED with H13's naming step (now a blocking CI step).
 
     /// <summary>Flips to Verified when the cost envelope query is within tolerance (§15 #14).</summary>
     public const string CostEnvelopeVerified = "h13-cost-envelope";

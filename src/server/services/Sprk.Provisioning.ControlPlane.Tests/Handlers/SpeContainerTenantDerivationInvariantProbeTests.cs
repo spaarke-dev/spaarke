@@ -486,7 +486,6 @@ public sealed class SpeContainerTenantDerivationInvariantProbeTests
             AiSearchEndpoint: string.Empty,
             CosmosEndpoint: string.Empty,
             BffApiUrl: bffApiUrl,
-            ProvisioningScriptsDirectory: string.Empty,
             ContainerTypeId: ContainerTypeId,
             SpeContainerId: ContainerId);
 

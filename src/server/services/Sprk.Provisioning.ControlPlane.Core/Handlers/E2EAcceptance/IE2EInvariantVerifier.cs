@@ -1,17 +1,18 @@
 // -----------------------------------------------------------------------------
 // IE2EInvariantVerifier.cs
 //
-// L2 abstraction over the 5 §4D tenant-isolation invariant SAMPLE probes H13
-// performs. Complements the compile-time enforcement (ArchTests I1–I5, r1
-// task 064) with a RUNTIME sample assertion — belt-and-braces per POML notes.
+// L2 abstraction over the 4 runtime §4D tenant-isolation invariant SAMPLE
+// probes H13 performs (I2–I5). Complements the compile-time enforcement
+// (ArchTests I1–I5, r1 task 064) with a RUNTIME sample assertion —
+// belt-and-braces per POML notes. I1 (no hardcoded tenant) is build-time only:
+// task 230a deleted its runtime probe, which grepped a scripts/ folder the
+// Worker publish never ships.
 //
 // SEAM JUSTIFICATION (ADR-010):
 //   ≥2 impls exist by design (production invariant verifier + test fakes per
 //   unit test). One aggregate seam mirrors IE2ETrapVerifier's shape.
 //
 // LIVE-PROBE POSTURE:
-//   I1 grep provisioning scripts on-disk for tenant-shaped GUID defaults (no
-//     live dependency; deterministic).
 //   I2 sample AI Search query per index — asserts the query URL/body carries
 //     the unconditional tenantId eq filter (queries the customer's AI Search
 //     endpoint if reachable; falls back to InfraFault if the endpoint is not
@@ -30,13 +31,13 @@
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
 /// <summary>
-/// Sample-verifies all 5 §4D tenant-isolation invariants (I1–I5). Production
+/// Sample-verifies the 4 runtime §4D tenant-isolation invariants (I2–I5). Production
 /// impl issues live probes; test impls return canned results.
 /// </summary>
 public interface IE2EInvariantVerifier
 {
     /// <summary>
-    /// Runs all 5 invariant probes in a bounded fan-out and returns per-
+    /// Runs all 4 invariant probes in a bounded fan-out and returns per-
     /// invariant outcomes. Individual probe failures do NOT throw — the handler
     /// decides how to react (Quarantined on any invariant failure per §4D
     /// CATASTROPHIC severity).
@@ -50,12 +51,11 @@ public interface IE2EInvariantVerifier
 /// </summary>
 /// <param name="CustomerId">Customer id — probes scope to the customer stamp.</param>
 /// <param name="RunId">RunId — for log correlation.</param>
-/// <param name="TenantId">Explicit tenantId — probes MUST use this scope (§4D I1).</param>
+/// <param name="TenantId">Explicit tenantId — probes MUST use this scope.</param>
 /// <param name="SubscriptionId">Customer subscription id — probes scope to this subscription.</param>
 /// <param name="AiSearchEndpoint">Customer AI Search endpoint URI (H2a output) for I2.</param>
 /// <param name="CosmosEndpoint">Customer Cosmos endpoint URI (H2a output) for I3.</param>
 /// <param name="BffApiUrl">BFF API URL for I4 (SPE container resolver diagnostic).</param>
-/// <param name="ProvisioningScriptsDirectory">Path to <c>scripts/</c> on disk for I1 grep probe.</param>
 /// <param name="ContainerTypeId">The run's SPE container type (intake) — I4 checks the BFF is configured with it (task 227c).</param>
 /// <param name="SpeContainerId">The customer's container H8 created — I4 checks the BFF's container settings name it (task 227c).</param>
 public sealed record InvariantVerificationRequest(
@@ -66,19 +66,16 @@ public sealed record InvariantVerificationRequest(
     string AiSearchEndpoint,
     string CosmosEndpoint,
     string BffApiUrl,
-    string ProvisioningScriptsDirectory,
     string ContainerTypeId = "",
     string SpeContainerId = "");
 
 /// <summary>
-/// The 5 §4D tenant-isolation invariants, enumerated (matches design.md §4D
-/// verbatim).
+/// The §4D tenant-isolation invariants H13 verifies at runtime (numbering
+/// matches design.md §4D). Task 230a: I1NoHardcodedTenant DELETED — I1 is a
+/// build-time property owned by the I1 ArchTest, not a runtime probe.
 /// </summary>
 public enum InvariantKind
 {
-    /// <summary>I1 — no hardcoded tenant-shaped GUID defaults in provisioning scripts (FR-28).</summary>
-    I1NoHardcodedTenant = 1,
-
     /// <summary>I2 — every AI Search query includes unconditional <c>tenantId eq</c> filter (FR-29).</summary>
     I2AiSearchTenantFilter = 2,
 

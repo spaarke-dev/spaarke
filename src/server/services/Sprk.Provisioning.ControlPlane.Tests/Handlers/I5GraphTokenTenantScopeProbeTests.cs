@@ -273,8 +273,7 @@ public sealed class I5GraphTokenTenantScopeProbeTests
             SubscriptionId: "sub-cus-acme-prod",
             AiSearchEndpoint: "https://sprk-acme-search.search.windows.net",
             CosmosEndpoint: "https://sprk-acme-cosmos.documents.azure.com/",
-            BffApiUrl: "https://sprk-bff-acme.azurewebsites.net",
-            ProvisioningScriptsDirectory: "/opt/spaarke/scripts");
+            BffApiUrl: "https://sprk-bff-acme.azurewebsites.net");
 
     /// <summary>
     /// Builds a JWT (unsigned — signature bytes irrelevant to the probe) with

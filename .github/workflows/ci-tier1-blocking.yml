@@ -702,6 +702,32 @@ jobs:
           path: ./TestResults/tenant-isolation-results.trx
           if-no-files-found: warn
 
+  # ──────────────────────────────────────────────────────────────────────────
+  # customer-provisioning-orchestration-r1 T230a (2026-10-06) — Naming-conformance
+  # gate (FR-35 + NFR-08; r3 task 063 owns the rules R1–R3). Static regex scan of
+  # the KV-secret / vault names in the canonical secret-name sources, read-only,
+  # ~1 s. MERGE-BLOCKING (moved from sdap-ci.yml, which is not a required check
+  # and ran it inside a continue-on-error job). This is the ONE enforcement
+  # point: H13 no longer re-scans the repository's files per customer run (they
+  # are identical for every run and are not on the L2 Worker host). -SelfTest
+  # first, so a broken rule cannot pass silently.
+  # ──────────────────────────────────────────────────────────────────────────
+  naming-conformance:
+    name: Naming Conformance (FR-35)
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Naming-conformance rule self-test
+        shell: pwsh
+        run: ./scripts/naming-conformance-check.ps1 -SelfTest
+
+      - name: Naming-conformance gate (merge-blocking)
+        shell: pwsh
+        run: ./scripts/naming-conformance-check.ps1
+
 
   # ──────────────────────────────────────────────────────────────────────────
   # Compose fidelity gate (FR-08, spaarkeai-compose-r6 tasks 060/061 +

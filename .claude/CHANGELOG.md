@@ -7,6 +7,18 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — H13 checks the deployed stamp; naming conformance + I1 are build gates (T230a)
+
+`customer-provisioning-orchestration-r1` T230a (G5).
+
+- **`.claude/constraints/provisioning.md`**: I3 text corrected to spec FR-30 (`/tenantId` on the stamp's containers or the
+  key `cosmos-db.bicep` declares; `/customerId` only on L2's ProvisioningRun); H13 samples I2–I5 on the stamp, I1 is
+  enforced by its ArchTest only (the L2 Worker ships and runs no script — T253).
+- **`.claude/skills/provision-environment/SKILL.md`**: invariants row — I2–I5 at H13, I1 a build gate.
+- Naming conformance (`scripts/naming-conformance-check.ps1`, vault rule now also `sprk-{customerId}-{env}-kv`) runs as a
+  merge-blocking job in `ci-tier1-blocking.yml`; H13's per-run copy (which linted repository files absent from the
+  Worker host) is removed.
+
 ###### 2026-10-06 — Cost model for dedicated stamps: one rule set, every model, no waiver (T229)
 
 `customer-provisioning-orchestration-r1` T229 (G4, G13; D-12 — every customer gets a dedicated stamp).

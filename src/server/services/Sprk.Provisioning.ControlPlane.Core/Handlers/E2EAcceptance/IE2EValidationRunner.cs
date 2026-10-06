@@ -17,7 +17,7 @@
 //
 // PHASE-B EXTENSION POSTURE (per POML mandatory pre-work #8):
 //   The r2 shipped Validate-DeployedEnvironment.ps1 already contains the
-//   BFF /healthz + env-var + CORS + dev-leakage + naming-conformance checks.
+//   BFF /healthz + env-var + CORS + dev-leakage checks (naming conformance is a CI gate since task 230a).
 //   The Phase-B extension (sample analysis + sample doc upload+index +
 //   workspace-layout render + wizard field-map) is TRACKED but out-of-scope
 //   for this task (task 055 is the L2 handler; the script extension is a

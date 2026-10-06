@@ -7,16 +7,16 @@
 //
 // ADR-038 CATEGORY:
 //   Path #1 — pure C# unit test. NO live pwsh / az CLI / Graph / Dataverse.
-//   Fakes replace the repository + 6 collaborator seams + registry lookup
+//   Fakes replace the repository + 5 collaborator seams + registry lookup
 //   client so the handler orchestration + §4C rollback classification + all
 //   green/red branches are exercised in isolation. Live-Azure coverage
 //   belongs to the Phase F acceptance suite (task 089) per POML mandatory
 //   pre-work #escalation.
 //
 // COVERAGE (POML acceptance criteria mapped to test cases):
-//   AC-1   Happy path — all 6 gates green → Success + Cosmos state Completed +
-//          registry Ready transition + all 6 H13 gates Verified.
-//   AC-2a  Missing tenantId (§4D I1) → Resumable + MissingTenantId.
+//   AC-1   Happy path — all 5 gates green → Success + Cosmos state Completed +
+//          registry Ready transition + all 5 H13 gates Verified.
+//   AC-2a  Missing tenantId → Resumable + MissingTenantId.
 //   AC-2b  Missing subscriptionId → Resumable + MissingSubscriptionId.
 //   AC-2c  Missing InterStepState.BffBuildId (H9 output, task 245b) → Resumable + MissingBuildId.
 //   AC-2d  Missing InterStepState.BffApiUrl (H9 output, task 245b) → Resumable + MissingBffApiUrl.
@@ -31,11 +31,12 @@
 //          ExtendedValidationFailed.
 //   AC-4   Extended validate script infra fault → Resumable + ExtendedValidationInfraFault.
 //   AC-5a..g Each of 7 T1–T7 trap fail branches → QuarantineRequired + distinct code.
-//   AC-6a..e Each of 5 I1–I5 invariant fail branches → QuarantineRequired + distinct code.
+//   AC-6a..d Each of 4 runtime I2–I5 invariant fail branches → QuarantineRequired + distinct code
+//          (task 230a: I1 is build-time — the I1 ArchTest — not a runtime invariant).
 //   AC-7   Trap verifier InfraFault (no failed traps) → Resumable + TrapVerifierInfraFault.
 //   AC-8   Invariant verifier InfraFault (no failed invariants) → Resumable + InvariantVerifierInfraFault.
-//   AC-9   Naming-conformance FAILED (SC #17) → QuarantineRequired + NamingConformanceFailed.
-//   AC-10  Naming-conformance infra fault → Resumable + NamingConformanceInfraFault.
+//   AC-9/AC-10 (naming-conformance FAILED / infra fault) DELETED by task 230a with H13's naming
+//          step — naming conformance is a repo lint enforced once in CI.
 //   AC-11a Cost drift > threshold + CostDriftFailsRun=false (default) → SUCCESS
 //          with advisory-warn on the run.
 //   AC-11b Cost drift > threshold + CostDriftFailsRun=true → QuarantineRequired +
@@ -49,7 +50,7 @@
 //   AC-17  Run not found → Resumable + RunNotFound.
 //   AC-18  HandlerId mismatch → throws InvalidOperationException.
 //   AC-19a..g Trap rejection code mapping table — each TrapKind maps to distinct code.
-//   AC-20a..e Invariant rejection code mapping table — each InvariantKind maps to distinct code.
+//   AC-20a..d Invariant rejection code mapping table — each InvariantKind maps to distinct code.
 //   AC-21  All infra faults present at once — first-in-priority (extended-validate
 //          infra fault) wins the diagnostic; still Resumable.
 //   AC-22  Trap Failed short-circuits over invariant Failed (both present) —
@@ -105,7 +106,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.ExtendedValidationVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.TrapCatalogVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.InvariantCatalogVerified);
-        repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.NamingConformanceVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.CostEnvelopeVerified);
         repo.LastWrittenRun.GateStates.Should().ContainKey(H13Gates.RegistryReadyTransitioned);
         repo.LastWrittenRun.GateStates[H13Gates.TrapCatalogVerified].Status.Should().Be(GateState.Verified);
@@ -113,7 +113,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Validator.CallCount.Should().Be(1);
         seams.Traps.CallCount.Should().Be(1);
         seams.Invariants.CallCount.Should().Be(1);
-        seams.Naming.CallCount.Should().Be(1);
         seams.Cost.CallCount.Should().Be(1);
         seams.Registry.CallCount.Should().Be(1);
     }
@@ -221,7 +220,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Validator.CallCount.Should().Be(0);
         seams.Traps.CallCount.Should().Be(0);
         seams.Invariants.CallCount.Should().Be(0);
-        seams.Naming.CallCount.Should().Be(0);
         seams.Cost.CallCount.Should().Be(0);
         seams.Registry.CallCount.Should().Be(0);
         seams.RegistryClient.UpdateColumnsCallCount.Should().Be(0);
@@ -347,10 +345,9 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Registry.CallCount.Should().Be(0);
     }
 
-    // ---------- AC-6 invariant fail branches (5 tests) ----------
+    // ---------- AC-6 invariant fail branches (4 tests) ----------
 
     [Theory]
-    [InlineData(InvariantKind.I1NoHardcodedTenant, H13Rejections.InvariantI1Failed)]
     [InlineData(InvariantKind.I2AiSearchTenantFilter, H13Rejections.InvariantI2Failed)]
     [InlineData(InvariantKind.I3CosmosPartitionKey, H13Rejections.InvariantI3Failed)]
     [InlineData(InvariantKind.I4SpeContainerResolver, H13Rejections.InvariantI4Failed)]
@@ -401,40 +398,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
         failure.Class.Should().Be(FailureClass.Resumable);
         failure.RejectionCode.Should().Be(H13Rejections.InvariantVerifierInfraFault);
-    }
-
-    // ---------- AC-9 naming-conformance FAILED ----------
-
-    [Fact]
-    public async Task AC9_NamingConformanceFailed_FailsQuarantine()
-    {
-        var repo = new FakeRepository(BuildRun(), etag: "etag-9");
-        var handler = BuildHandler(repo, out _,
-            configureSeams: s => s.Naming = FakeNamingChecker.Failure(1, "R1: SPRK-DEV-DATAVERSE-URL contains env token DEV"));
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.QuarantineRequired);
-        failure.RejectionCode.Should().Be(H13Rejections.NamingConformanceFailed);
-        failure.Diagnostic.Should().Contain("SPRK-DEV-DATAVERSE-URL");
-        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
-    }
-
-    // ---------- AC-10 naming-conformance infra fault ----------
-
-    [Fact]
-    public async Task AC10_NamingConformanceInfraFault_FailsResumable()
-    {
-        var repo = new FakeRepository(BuildRun(), etag: "etag-10");
-        var handler = BuildHandler(repo, out _,
-            configureSeams: s => s.Naming = FakeNamingChecker.Throws(new FileNotFoundException("script missing")));
-
-        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
-
-        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
-        failure.Class.Should().Be(FailureClass.Resumable);
-        failure.RejectionCode.Should().Be(H13Rejections.NamingConformanceInfraFault);
     }
 
     // ---------- AC-11a cost drift advisory-warn (default) ----------
@@ -633,7 +596,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         seams.Validator.CallCount.Should().Be(0);
         seams.Traps.CallCount.Should().Be(0);
         seams.Invariants.CallCount.Should().Be(0);
-        seams.Naming.CallCount.Should().Be(0);
         seams.Cost.CallCount.Should().Be(0);
         seams.Registry.CallCount.Should().Be(0);
     }
@@ -706,7 +668,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
     // ---------- AC-20 invariant rejection code mapping ----------
 
     [Theory]
-    [InlineData(InvariantKind.I1NoHardcodedTenant, H13Rejections.InvariantI1Failed)]
     [InlineData(InvariantKind.I2AiSearchTenantFilter, H13Rejections.InvariantI2Failed)]
     [InlineData(InvariantKind.I3CosmosPartitionKey, H13Rejections.InvariantI3Failed)]
     [InlineData(InvariantKind.I4SpeContainerResolver, H13Rejections.InvariantI4Failed)]
@@ -742,14 +703,12 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public IE2EValidationRunner Validator { get; set; } = FakeValidator.Success();
         public IE2ETrapVerifier Traps { get; set; } = FakeTrapVerifier.AllPassed();
         public IE2EInvariantVerifier Invariants { get; set; } = FakeInvariantVerifier.AllPassed();
-        public INamingConformanceChecker Naming { get; set; } = FakeNamingChecker.Success();
         public ICostEnvelopeChecker Cost { get; set; } = FakeCostChecker.WithinBudget();
         public IRegistrySetupStatusUpdater Registry { get; set; } = FakeRegistryUpdater.Success();
 
         public FakeValidator ValidatorFake => (FakeValidator)Validator;
         public FakeTrapVerifier TrapsFake => (FakeTrapVerifier)Traps;
         public FakeInvariantVerifier InvariantsFake => (FakeInvariantVerifier)Invariants;
-        public FakeNamingChecker NamingFake => (FakeNamingChecker)Naming;
         public FakeCostChecker CostFake => (FakeCostChecker)Cost;
         public FakeRegistryUpdater RegistryFake => (FakeRegistryUpdater)Registry;
 
@@ -761,7 +720,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public required FakeValidator Validator { get; init; }
         public required FakeTrapVerifier Traps { get; init; }
         public required FakeInvariantVerifier Invariants { get; init; }
-        public required FakeNamingChecker Naming { get; init; }
         public required FakeCostChecker Cost { get; init; }
         public required FakeRegistryUpdater Registry { get; init; }
         // MED#10 SESSION-19: expose the wire-registry-client so tests can
@@ -791,7 +749,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             Validator = seams.ValidatorFake,
             Traps = seams.TrapsFake,
             Invariants = seams.InvariantsFake,
-            Naming = seams.NamingFake,
             Cost = seams.CostFake,
             Registry = seams.RegistryFake,
             RegistryClient = registryClient,
@@ -799,7 +756,7 @@ public sealed class H13E2EAcceptanceGateHandlerTests
 
         return new H13E2EAcceptanceGateHandler(
             repo, seams.Validator, seams.Traps, seams.Invariants,
-            seams.Naming, seams.Cost, seams.Registry,
+            seams.Cost, seams.Registry,
             registryClient, Options.Create(options),
             NullLogger<H13E2EAcceptanceGateHandler>.Instance);
     }
@@ -1042,25 +999,6 @@ public sealed class H13E2EAcceptanceGateHandlerTests
             CallCount++;
             LastRequest = request;
             return Task.FromResult(_result);
-        }
-    }
-
-    private sealed class FakeNamingChecker : INamingConformanceChecker
-    {
-        private readonly Func<Task<NamingConformanceOutcome>> _check;
-        public int CallCount { get; private set; }
-        private FakeNamingChecker(Func<Task<NamingConformanceOutcome>> check) { _check = check; }
-
-        public static FakeNamingChecker Success() =>
-            new(() => Task.FromResult<NamingConformanceOutcome>(new NamingConformanceOutcome.Success()));
-        public static FakeNamingChecker Failure(int exit, string diag) =>
-            new(() => Task.FromResult<NamingConformanceOutcome>(new NamingConformanceOutcome.Failure(exit, diag)));
-        public static FakeNamingChecker Throws(Exception ex) => new(() => throw ex);
-
-        public Task<NamingConformanceOutcome> CheckAsync(NamingConformanceRequest request, CancellationToken ct)
-        {
-            CallCount++;
-            return _check();
         }
     }
 

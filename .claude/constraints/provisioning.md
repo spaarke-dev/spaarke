@@ -18,11 +18,11 @@ Any code path in the L2 control-plane, handlers, BFF-provisioning surface, or op
 
 - **I1 — Explicit tenantId** (FR-28): the operator's `tenantId` is passed explicitly on every operation. **NEVER** hardcode a "default tenant" in provisioning scripts. Handlers reject requests missing `tenantId`. Operator's own AAD identity per NFR-11 — bootstrap under a service principal is a HARD violation.
 - **I2 — AI Search unconditional `tenantId` filter** (FR-29): every AI Search query MUST include `tenantId eq '{tenantId}'` in the filter clause. The `spaarke-session-files` index uses tenantId + sessionId dual-filter (ADR-014 strengthens). A query missing this filter is a silent cross-tenant leak.
-- **I3 — Cosmos partition-key predicate** (FR-30): every Cosmos read/write MUST include the partition-key `/customerId` predicate. Cross-partition queries are audit-flagged and treated as bugs.
+- **I3 — Cosmos partition-key predicate** (FR-30): every Cosmos read/write MUST include the container's partition-key predicate — `/tenantId` on the stamp's tenant-scoped containers (or the key `cosmos-db.bicep` declares: `/partitionKey`, `/subjectId`), `/customerId` on L2's ProvisioningRun container. Cross-partition queries are audit-flagged and treated as bugs. H13's I3 probe checks the stamp's account holds exactly the template's containers with their declared keys (T230a).
 - **I4 — SPE container ID resolution** (FR-31): SPE container IDs come from the record being served or the stamp's own settings, and every app-only SPE call passes `SpeContainerOwnershipGuard` — the BFF's one definition of this stamp's containers (T227d; the unused `ITenantContainerResolver` was retired by T227f). NEVER hardcode a container ID.
 - **I5 — Graph token per-tenant** (FR-32): every Graph token acquisition uses tenant `{tenantId}` — never the operator's home tenant, never a shared "app-tenant" for cross-tenant ops. `ITokenAcquisition.GetAccessTokenForAppAsync(tenant)` is the discipline.
 
-Violations of I1-I5 surface via ArchTests (planned in task 204e) + are Critical findings in code-review Step 6.
+Violations of I1-I5 surface via ArchTests + are Critical findings in code-review Step 6. H13 samples I2–I5 on the deployed stamp; I1 (no hardcoded tenant in scripts) is a build-time property — the I1 ArchTest is its one enforcement point, since the L2 Worker ships and runs no script (T230a / T253).
 
 ## KV credential lifecycle — BINDING per ADR-028 Amendment A4 + E-3 closure (§6.5 resolution 2026-08-25; supersedes the r3-handoff never-delete list)
 

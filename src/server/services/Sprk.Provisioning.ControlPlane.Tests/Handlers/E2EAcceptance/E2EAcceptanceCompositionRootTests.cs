@@ -2,11 +2,13 @@
 // E2EAcceptanceCompositionRootTests.cs
 //
 // L2 CONTROL-PLANE Phase C'' Wave G-7 Batch G-7E TERMINAL acceptance test --
-// framework-level proof that the 15 constituent checks of the H13 E2E
+// framework-level proof that the constituent checks of the H13 E2E
 // acceptance gate are wired to REAL implementations in the REAL Worker
 // composition root (no PlaceholderTrapVerifier, no PlaceholderInvariantVerifier,
 // no logged-no-op Ready writer, no shell-out CostEnvelopeChecker/Validation
-// Runner/NamingConformanceChecker remaining registered).
+// Runner remaining registered). Task 230a deleted the naming-conformance
+// checker (CR6) and the runtime I1 probe outright — both read Spaarke repo
+// files absent from the Worker publish.
 //
 // WHY THIS TEST EXISTS (task 186):
 //   Task 186's charter is to demonstrate for the FIRST TIME (per the
@@ -50,14 +52,13 @@
 //        Wave-C4 logged-no-op not registered).
 //   CR5  ICostEnvelopeChecker == ArmCostEnvelopeChecker (task 183; retired
 //        AzCliCostEnvelopeChecker shell-out not registered).
-//   CR6  INamingConformanceChecker == NamingConformanceChecker (task 182;
-//        retired NamingConformanceScriptRunner shell-out not registered).
+//   CR6  (deleted by task 230a with INamingConformanceChecker.)
 //   CR7  IE2EValidationRunner == E2EValidationRunner (task 181; retired
 //        ValidateDeployedEnvironmentScriptRunner shell-out not registered).
 //   CR8  All 7 ITrapProbe kinds are registered exactly once (T1-T7, tasks
 //        171/177/178/180/172/175/238) with the expected concrete types.
-//   CR9  All 5 IInvariantProbe kinds are registered exactly once (I1-I5,
-//        tasks 170/173/174/176/179) with the expected concrete types.
+//   CR9  All 4 IInvariantProbe kinds are registered exactly once (I2-I5,
+//        tasks 173/174/204c/179) with the expected concrete types.
 //   CR10 The composite verifiers accept the resolved probe collections
 //        without construction-time exceptions (composition-time contract
 //        held: no duplicate registration).
@@ -156,8 +157,8 @@ public sealed class E2EAcceptanceCompositionRootTests
         verifier.Should().BeOfType<CompositeInvariantVerifier>(
             "task 174 (Wave G-7 Batch G-7A1) swaps IE2EInvariantVerifier from " +
             "PlaceholderInvariantVerifier to CompositeInvariantVerifier " +
-            "composing the 5 real per-invariant probes (I1-I5, tasks 170/173/" +
-            "174/176/179). A regression here would silently return the H13 " +
+            "composing the 4 real per-invariant probes (I2-I5, tasks 173/" +
+            "174/204c/179). A regression here would silently return the H13 " +
             "invariant surface to Resumable-forever.");
     }
 
@@ -197,23 +198,6 @@ public sealed class E2EAcceptanceCompositionRootTests
             "AzCliCostEnvelopeChecker remains on disk unregistered per the " +
             "project retirement convention; regressing to it would silently " +
             "reintroduce the shell-out failure modes DS-4 audited.");
-    }
-
-    // ---------- CR6 -- Pure-C# naming-conformance checker ----------
-
-    [Fact]
-    public void CR6_NamingConformanceChecker_IsPureCsharpPort_NotScriptRunner()
-    {
-        using var scope = _factory.Services.CreateScope();
-
-        var checker = scope.ServiceProvider.GetRequiredService<INamingConformanceChecker>();
-
-        checker.Should().BeOfType<NamingConformanceChecker>(
-            "task 182 (Wave G-7 Batch G-7A1) replaces NamingConformanceScriptRunner " +
-            "(pwsh shell-out) with a pure-C# port per DS-4 section 6 (this " +
-            "script has 0 az/REST calls; the port is a trivial mechanical " +
-            "translation). The retired script runner remains on disk " +
-            "unregistered per the project retirement convention.");
     }
 
     // ---------- CR7 -- Pure-C# E2E validation runner ----------
@@ -290,15 +274,15 @@ public sealed class E2EAcceptanceCompositionRootTests
             $"[{string.Join(", ", probes.Select(p => $"{p.Kind}={p.GetType().Name}"))}].");
     }
 
-    // ---------- CR9 -- All 5 IInvariantProbe kinds wired with expected concrete types ----------
+    // ---------- CR9 -- All 4 IInvariantProbe kinds wired with expected concrete types ----------
 
     public static TheoryData<InvariantKind, Type> ExpectedInvariantProbes()
     {
-        // Task 174 + module wire exactly these 5 concrete types; each row
+        // Task 174 + module wire exactly these 4 concrete types; each row
         // matches a Wave-G-7 probe task. Anti-drift gate (see CR8 rationale).
+        // Task 230a: the I1 row (PackagedScriptTenantLiteralInvariantProbe) DELETED — I1 is build-time.
         return new TheoryData<InvariantKind, Type>
         {
-            { InvariantKind.I1NoHardcodedTenant,    typeof(PackagedScriptTenantLiteralInvariantProbe) },
             { InvariantKind.I2AiSearchTenantFilter, typeof(AiSearchTenantFilterInvariantProbe) },
             { InvariantKind.I3CosmosPartitionKey,   typeof(CosmosPartitionKeyInvariantProbe) },
             { InvariantKind.I4SpeContainerResolver, typeof(SpeContainerTenantDerivationInvariantProbe) },   // task 204c B07 SESSION 12 2026-08-26: swap from the task-176 BFF-diagnostic resolver probe (deleted by task 227f) to independent ARM app-settings re-verification per 204c dispatch principle
@@ -325,15 +309,15 @@ public sealed class E2EAcceptanceCompositionRootTests
     }
 
     [Fact]
-    public void CR9_InvariantProbes_TotalRegistrationCount_Equals5()
+    public void CR9_InvariantProbes_TotalRegistrationCount_EqualsEveryInvariantKind()
     {
         using var scope = _factory.Services.CreateScope();
 
         var probes = scope.ServiceProvider.GetServices<IInvariantProbe>().ToList();
 
-        probes.Should().HaveCount(5,
-            "exactly 5 IInvariantProbe registrations MUST exist post-Wave-G-7 " +
-            $"(one per InvariantKind I1-I5). Observed: [{string.Join(", ", probes.Select(p => $"{p.Kind}={p.GetType().Name}"))}].");
+        probes.Should().HaveCount(Enum.GetValues<InvariantKind>().Length,
+            "exactly one IInvariantProbe registration MUST exist per InvariantKind " +
+            $"(I2-I5). Observed: [{string.Join(", ", probes.Select(p => $"{p.Kind}={p.GetType().Name}"))}].");
     }
 
     // ---------- CR10 -- Composite verifiers construct cleanly against real probe graph ----------

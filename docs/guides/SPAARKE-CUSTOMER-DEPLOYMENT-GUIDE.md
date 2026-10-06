@@ -373,7 +373,6 @@ parameters: `POST /api/runs` rejects them. A missing or malformed value stops th
 | `SpeContainerOptions__ContainerTypeOwners__{i}__*` | Per SPE container type: `ContainerTypeId` and `OwnerAppId` (the container type's **owning** app) — nothing else. L2 signs in as the owning app through the Worker UAMI's federated identity credential on that app (MI-FIC, task 248 / owner D16): the UAMI's token for `api://AzureADTokenExchange` is the client assertion. No certificate or secret is stored; the former `OwnerCert*` settings and `SPE-OwnerCert-Pfx` no longer exist. The run's intake `containerTypeId` selects the entry. Empty is valid at boot; H0 then rejects every run (`spe-owner-not-configured`) until the topology runbook has set up a container type + owning app and its entry is added. Dev: `Spaarke Model 1` `fb3817a8-…` → `Spaarke SPE Model 1 Owner` `bfac7f6e-…`. | H0 (SpeOwnerCredential), H8, H13 (T6) |
 | `IntegrationWiring__ExchangeAdminAppId` | Client id of `Spaarke Exchange Admin` (§4.2.1). The Worker signs in as it through its UAMI's federated credential and sends the Exchange Online token to the H14a sidecar with each request — the sidecar holds no credential (task 251, owner D24). Empty: the Worker boots; H14a / H13 T4 fail with "ExchangeAdminAppId is not configured". Dev: `46670ee2-…`. | H14a, H13 (T4) |
 | `IntegrationWiring__SidecarSharedSecret{VaultName,SubscriptionId,Name}` | Where the Worker reads the Worker↔sidecar shared secret (`Sidecar-Shared-Secret` in the platform vault). The sidecar gets the same secret through the `ExchangeSidecar__SharedSecret` Key Vault reference setting: a sitecontainer variable must **name** an app setting, never hold a literal (Microsoft's `sitecontainers` contract — G30). | H14a, H13 (T4) |
-| `E2EAcceptance__ProvisioningScriptsDirectory` | Directory the I1 invariant probe scans (default `<app>/scripts`). | H13 |
 
 Bicep: `modules/controlplane-worker-app-service.bicep` params `controlPlanePrincipalId` (passed `uami.outputs.principalId`),
 `speContainerTypeOwners` (array) and `exchangeAdminAppId` (both threaded from `platform-controlplane.bicep`). T225b removed `vendorKeysKeyVaultName`
@@ -501,7 +500,7 @@ Every handler is idempotent, resumable, and has a verified post-condition. Full 
 | **H12a** | AI seed chain | type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers (single AI routing surface per **ADR-039**) | All seed rows present, no dupes | `aiseed-{customerId}-{seedVer}` |
 | **H12b** | App-config seed | DataGrid configs, field-mapping profiles + rules, system workspace layouts, chart definitions (DAG-parallel with H12a) | Config records seeded per manifest | `configseed-{customerId}-{configSeedVer}` |
 | **H12c** | Runtime references | `sprk_aimodeldeployment` rows point at the customer's **own dedicated** OpenAI deployment — both models (D-12 §3) | Endpoint resolves via env-var + join | `runtimerefs-{customerId}-{modelVer}` |
-| **H13** | E2E acceptance gate | Extended `Validate-DeployedEnvironment.ps1` — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **all 5 I1–I5 invariants sample-verified**, cost envelope (one $400/month envelope for both models, §3.2) | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
+| **H13** | E2E acceptance gate | Pure C# in the Worker (ARM, Graph, Dataverse, AI Search, Cost Management calls — no script) — verifies `/health`, sample analysis, sample upload+index, layout render, wizard field-map, **all 7 T1–T7 traps cleared**, **I2–I5 invariants sample-verified on the stamp** (I1 + naming are CI gates — T230a), cost envelope (one $400/month envelope for both models, §3.2) | `Setup Status = Ready` only if H13 exits 0 | `validate-{customerId}-{buildId}` — `buildId` = the build H9 deployed |
 | **H14** | Post-deploy integrations | (a) Exchange mailbox access: the stamp UAMI gets the 4 `Application Mail.*` roles scoped to the customer's group (RBAC for Applications — **T4**); (b) Graph webhook subscriptions per Communication/Email module; (c) Dataverse service-endpoint webhooks. Sub-steps DAG-parallel | H13 T4: every role held in scope, none outside | `integrations-{customerId}-{integrationVer}` |
 
 ### 5.1 Handler dependency DAG
@@ -1057,9 +1056,9 @@ check confirms the owner entry, the owning-app token and the registration before
 
 r3-era gates (all must pass — run in CI and recorded in the manifest):
 - Analyzers-as-errors
-- God-class ratchet (no NEW server `.cs` > 2,000 LOC; 13 frozen files respect +100 grace)
+- ~~God-class ratchet~~ — retired 2026-08-20 (root CLAUDE.md §11.5: complexity is judged at review, with a non-blocking `scripts/report-large-server-files.ps1` observation report)
 - 5 new ArchTests (I1–I5 tenant-isolation invariants)
-- Naming-conformance (`scripts/naming-conformance-check.ps1` exit 0)
+- Naming-conformance (`scripts/naming-conformance-check.ps1` exit 0 — blocking in `sdap-ci.yml` since T230a)
 - Graph app-role parity (`GraphAppRoles.cs` constant)
 
 **BFF publish-size ceiling**: **≤ 60 MB compressed (HARD)**. Current net10 baseline: 44.96 MB incl. PDBs. Per-PR measurement + delta report required (NFR-01).
@@ -1111,8 +1110,10 @@ Three DAG-parallel sub-steps:
 - Workspace-layout render succeeds
 - Wizard field-map succeeds
 - **All 7 §4B T1–T7 silent-fail traps cleared** (see §9)
-- `scripts/naming-conformance-check.ps1` exits 0
-- **All 5 §4D I1–I5 tenant-isolation invariants sample-verified** (see §8)
+- **The §4D I2–I5 tenant-isolation invariants sample-verified on the deployed stamp** (see §8; I1 is a build gate —
+  T230a), with I3 checking the Cosmos account holds exactly `cosmos-db.bicep`'s containers and partition keys
+- (Naming conformance is a blocking CI gate — `scripts/naming-conformance-check.ps1` in `sdap-ci.yml` — not a per-run
+  H13 check: it lints the repository's own files, T230a.)
 - Cost envelope: the subscription's month-to-date cost, extrapolated, within 20 % of $400/month (one envelope for both models — §3.2, T229)
 
 **`sprk_dataverseenvironment.Setup Status` transitions to `Ready` only if H13 exits 0.**
@@ -1145,7 +1146,7 @@ Cross-tenant data bleed is the single class of catastrophe r1 must make structur
 
 - **At code time**: 5 ArchTests (CI Tier-1 blocking, coordinated PR with `ci-cd-unit-test-remediation-r1`)
   - **Functions projects** live under `src/server/functions/` ([ADR-052](../adr/ADR-052-workload-placement.md) §5). The I2 and I3 ArchTests scan all of `src/server/**`, so a Model-1 shared Function carries those invariants automatically; I4 and I5 currently scan BFF paths only (`Sprk.Bff.Api/Services`, `Sprk.Bff.Api/Infrastructure/{Graph,Auth}`), so a Function's SPE-container and Graph-token code is covered by review until those scans are widened.
-- **At provisioning time**: H13 samples a query in each of the 5 classes
+- **At provisioning time**: H13 samples I2–I5 on the deployed stamp (I3: the Cosmos account holds exactly the template's containers and partition keys). I1 is verified at code time only — the L2 Worker ships and runs no script (T230a / T253)
 - **At runtime**: OpenTelemetry span attributes include `tenantId`; log samples cross-referenced for anomaly detection
 
 **Scope**: r1's threat model is honest-but-buggy code + operator error. External-actor threat (cross-tenant abuse from the internet) is handled by CORS + AAD auth + per-request `tid` validation per ADR-028.
@@ -1539,9 +1540,12 @@ Per §11.1. If `sprk_currentrunid` is set + status = `Quarantined`:
 3. **Repair path**: manual resolve + `POST /api/runs/{id}/clear-quarantine` (reason required, audit-logged)
 4. **Teardown path**: `.\scripts\Decommission-Customer.ps1 -CustomerId {id}` then start fresh run
 
-### 13.6 Naming-conformance failure at H13
+### 13.6 Naming-conformance failure in CI
 
-`scripts/naming-conformance-check.ps1` exits non-0. Read the output — typically a resource created via portal / manual `az` invocation that doesn't match `sprk-{env}-*` / `spaarke-*-{env}` pattern. Either rename (if safe) or add to the Phase G exception list with rationale (must be reviewed at code-review).
+`scripts/naming-conformance-check.ps1` exits non-0 in `sdap-ci.yml` (a build gate since T230a — H13 no longer runs it per
+customer). Read the output — typically a secret or vault name in a changed file that matches neither `sprk-{env}-kv` /
+`sprk-{customerId}-{env}-kv` nor the secret-name rules. Rename it, or codify an exception in the script with a rationale
+(reviewed at code-review).
 
 ---
 

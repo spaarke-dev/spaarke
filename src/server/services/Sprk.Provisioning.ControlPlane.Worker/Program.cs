@@ -904,7 +904,7 @@ builder.Services.AddHttpClient<IHealthProbe, HttpHealthProbe>();
 builder.Services.AddSingleton<IBffPublishSizeReporter, FileBffPublishSizeReporter>();
 builder.Services.AddScoped<H9BffDeployHandler>();
 
-// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + SIX collaborator seams,
+// Task 055 (Batch 4E): H13 E2E acceptance-gate handler + FIVE collaborator seams,
 // ALL NOW REAL as of Wave G-7 (task 185, 2026-08-20) — see
 // E2EAcceptanceModule.AddH13E2EAcceptanceGateHandler for the authoritative
 // registration (this comment summarizes; that module is the source of truth):
@@ -914,19 +914,18 @@ builder.Services.AddScoped<H9BffDeployHandler>();
 // (Phase F rerun task 186 closes); IE2ETrapVerifier = CompositeTrapVerifier
 // dispatching per-TrapKind to the 7 registered real ITrapProbe implementations
 // (T1–T7, tasks 171/177/178/180/172/175/238); IE2EInvariantVerifier =
-// CompositeInvariantVerifier dispatching to the 5 registered real
-// IInvariantProbe implementations (I1–I5, tasks 170/173/174/176/179);
-// INamingConformanceChecker = NamingConformanceChecker — pure-C# port of r3
-// task 063's scripts/naming-conformance-check.ps1 (task 182, 2026-08-20);
+// CompositeInvariantVerifier dispatching to the 4 registered real
+// IInvariantProbe implementations (I2–I5, tasks 173/174/204c/179);
 // ICostEnvelopeChecker = ArmCostEnvelopeChecker (task 183, Wave G-7 SDK port,
 // 2026-08-20) uses Azure.ResourceManager.CostManagement.UsageQueryAsync per
 // subscription + compares against §15 #14 envelopes;
 // IRegistrySetupStatusUpdater = DataverseRegistrySetupStatusUpdater (task 184)
 // performs the real Web API PATCH via IDataverseEnvironmentRegistryClient —
 // THE acceptance-target sprk_setupstatus = Ready transition (spec.md FR-18 /
-// SC #5). PlaceholderTrapVerifier and PlaceholderInvariantVerifier (the
-// Wave-C4 stubs the composite verifiers replaced) remain on disk UNREGISTERED
-// for reference only per the project retirement convention. The retired
+// SC #5). Task 230a deleted the naming-conformance checker and the runtime I1
+// probe (both read Spaarke repo files absent from this publish — naming runs
+// once in CI, I1 is the I1 ArchTest) and the unregistered Wave-C4
+// PlaceholderTrapVerifier / PlaceholderInvariantVerifier stubs. The retired
 // shell-out predecessors (ValidateDeployedEnvironmentScriptRunner,
 // NamingConformanceScriptRunner, AzCliCostEnvelopeChecker, and the Wave-C4
 // logged-no-op registry updater) were deleted in the Wave G-8 cleanup sweep
