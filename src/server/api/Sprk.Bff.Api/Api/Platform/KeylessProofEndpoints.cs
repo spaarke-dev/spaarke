@@ -22,10 +22,15 @@ namespace Sprk.Bff.Api.Api.Platform;
 /// </remarks>
 public static class KeylessProofEndpoints
 {
-    /// <summary>Maps the keyless-proof route.</summary>
+    /// <summary>
+    /// Maps the keyless-proof route — <see cref="KeylessProofContract.Route"/>, written as literals because the route
+    /// authorization guard reads paths from source; the contract test posts to the contract's constant, so the two
+    /// cannot differ unnoticed.
+    /// </summary>
     public static IEndpointRouteBuilder MapKeylessProofEndpoints(this IEndpointRouteBuilder app)
     {
-        app.MapPost(KeylessProofContract.Route, ProveAsync)
+        var group = app.MapGroup("/api/platform");
+        group.MapPost("/keyless-proof", ProveAsync)
             .RequireAuthorization()
             .AddKeylessProofAuthorizationFilter()
             .RequireRateLimiting("job-submission")

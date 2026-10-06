@@ -290,7 +290,13 @@ public class ADR010_DITests
         // ITenantContainerResolver -> OptionsTenantContainerResolver REMOVED with the I4 diagnostic route it served: no
         // consumer remained (the L2 probe that called the route was unregistered; H13's I4 reads the deployed app
         // settings), and SpeContainerOwnershipGuard is the BFF's one definition of this stamp's containers (T227d).
-        const int knownOneToOneCeiling = 158;
+        //
+        // ───────── Ceiling raised 158 → 159, 2026-10-06 (customer-provisioning-orchestration-r1 task 230b) ─────────
+        // IAiKeylessProbe -> AiKeylessProbe. SEAM JUSTIFICATION: it is the Services/Ai/PublicContracts facade (ADR-013) through
+        // which Infrastructure/Diagnostics/KeylessProofService reaches the AI-owned probes, and the module boundary the
+        // keyless-proof contract test substitutes — the real probes call Azure OpenAI, Document Intelligence, AI Search,
+        // Cosmos, Blob and Content Safety. Same category as IFileSummarizeAi / IPreferenceMemoryCapture.
+        const int knownOneToOneCeiling = 159;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

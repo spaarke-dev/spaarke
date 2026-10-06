@@ -277,6 +277,9 @@ public partial class RouteAuthorizationGuardTests
             + "S-71, S-81; amendment f). PUT /reports/{reportId} was replaced by PATCH."),
         new GovernedFile("Api/ResilienceEndpoints.cs", Scope.RouteLevelGate,
             "circuit-breaker diagnostics behind sign-in only (task-167 UNOWNED-NEW, assigned to 166)."),
+        new GovernedFile("Api/Platform/KeylessProofEndpoints.cs", Scope.RouteLevelGate,
+            "the stamp's keyless proof for provisioning's acceptance gate (customer-provisioning task 230b): one managed-identity "
+            + "call per Azure service, behind an application role only the L2 Worker identity holds; no record is read or returned."),
         new GovernedFile("Api/UserEndpoints.cs", Scope.RouteLevelGate,
             "the caller's own profile and capabilities, read on behalf of the caller."),
         // Api/WorkAssignmentEndpoints.cs entry DELETED at the task-167 integration (2026-10-05): task 166 deleted the file
@@ -662,7 +665,13 @@ public partial class RouteAuthorizationGuardTests
     //             SpeContainerOwnershipGuard is the BFF's one definition of this stamp's containers (T227d). Its
     //             GovernedFiles entry and its P:OperatorGateInHandler waiver went with it — a route that no longer exists
     //             needs no gate.
-    private const int ExpectedEndpointFileCount = 116;
+    //
+    // 116 -> 117 (2026-10-06, customer-provisioning-orchestration-r1 task 230b). An UPWARD move:
+    //
+    //   230b  +1  Api/Platform/KeylessProofEndpoints.cs — POST /api/platform/keyless-proof, the stamp's keyless proof
+    //             for provisioning's acceptance gate (H13). GovernedFiles entry, AdminMechanism
+    //             (AddKeylessProofAuthorizationFilter), AdminOnlyRoutes group and ClaimOnlyFilters entry added with it.
+    private const int ExpectedEndpointFileCount = 117;
 
     // =============================================================================================
     // THE CREDITED ALLOW-LIST — the only attachment forms Rule A credits as a per-resource decision
@@ -820,6 +829,10 @@ public partial class RouteAuthorizationGuardTests
             + "from the /api/spe aggregator."),
         new AdminMechanism("AddRegistrationAuthorizationFilter",
             "The demo-registration approver role (RegistrationAuthorizationFilter.cs) on approve/reject."),
+        new AdminMechanism("AddKeylessProofAuthorizationFilter",
+            "The Provisioning.KeylessProof APPLICATION role on an app-only token (KeylessProofAuthorizationFilter.cs IsAdmitted: "
+            + "no scp, idtyp absent or 'app') — a machine credential H3 assigns only to the L2 Worker identity "
+            + "(allowedMemberTypes Application, so no user can hold it). Customer-provisioning task 230b."),
     };
 
     // =============================================================================================
@@ -1066,6 +1079,7 @@ public partial class RouteAuthorizationGuardTests
     private const string SpeAdminPolicy = "AddSpeAdminAuthorizationFilter";
     private const string RagApiKeyCredential = "RequireAuthorization(AuthPolicies.RagApiKey)";
     private const string RegistrationApproverRole = "AddRegistrationAuthorizationFilter";
+    private const string KeylessProofRole = "AddKeylessProofAuthorizationFilter";
 
     private static readonly IReadOnlyList<AdminOnlyGroup> AdminOnlyRoutes = new[]
     {
@@ -1088,6 +1102,14 @@ public partial class RouteAuthorizationGuardTests
             {
                 "GET /api/admin/membership/discovered/{entityType}",
                 "POST /api/admin/membership/refresh-metadata",
+            }),
+        new AdminOnlyGroup("Api/Platform/KeylessProofEndpoints.cs", KeylessProofRole,
+            "PROVISIONING AUTOMATION behind the Provisioning.KeylessProof application role (no user acts): L2's acceptance gate "
+            + "(H13) asks the stamp's BFF to prove one managed-identity call per Azure service. Status and timing only — no "
+            + "record, data or secret is returned (task 230b).",
+            new[]
+            {
+                "POST /api/platform/keyless-proof",
             }),
         new AdminOnlyGroup("Api/Ai/RagEndpoints.cs", RagApiKeyCredential,
             "enqueue-indexing is SERVICE AUTOMATION behind the RagApiKey machine credential (no user acts). The key "
@@ -1654,6 +1676,10 @@ public partial class RouteAuthorizationGuardTests
             // PlaybookAuthorizationFilter's OWNER-COMPARISON entry was DELETED at the task-167 integration (2026-10-05): since
             // task 164 every mode asks the caller's own Dataverse Read through AuthorizationService (PlaybookAuthorizationFilter.cs
             // GetCallerRecordAccessAsync / AuthorizeAsync), so the filter passes Rule B on its own and is inspected like any other.
+            ["KeylessProofAuthorizationFilter"] =
+                "Provisioning acceptance surface (task 230b). Decides from the token's claims — the Provisioning.KeylessProof "
+                + "application role on an app-only token (no scp; idtyp absent or 'app') — one of the admin mechanisms. The "
+                + "route reads no record; it returns per-service status and timing only.",
             ["ReportingAuthorizationFilter"] =
                 "Power BI embed surface. Decides from role claims checked against configuration — a module role, not a record "
                 + "decision; it earns no Rule A credit (NonDecidingAttachments).",

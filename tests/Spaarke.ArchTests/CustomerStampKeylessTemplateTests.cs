@@ -105,6 +105,20 @@ public class CustomerStampKeylessTemplateTests
         Assert.True(violations.Count == 0, "Event Grid dead-lettering is not keyless: " + string.Join("; ", violations));
     }
 
+    [Fact(DisplayName = "D13/T230b: H13's ARM keyless check reads every keyed type this test pins on the template")]
+    public void RuntimeArmCheck_CoversEveryKeyedTemplateType()
+    {
+        // The template test proves the stamp is DEPLOYED keyless by intent; H13's ArmStampKeylessVerifier proves the
+        // deployed stamp still IS. A type added here and not there would be checked in CI and never on a live stamp.
+        var verifier = File.ReadAllText(Path.Combine(SourceScan.RepoRoot,
+            "src", "server", "services", "Sprk.Provisioning.ControlPlane.Core", "Handlers", "E2EAcceptance", "ArmStampKeylessVerifier.cs"));
+        var types = LocalAuthTypes.Keys.Concat(new[] { "Microsoft.Storage/storageAccounts", "Microsoft.Cache/redisEnterprise" });
+
+        var missing = types.Where(t => !verifier.Contains($"[\"{t}\"]", StringComparison.Ordinal)).ToList();
+
+        Assert.True(missing.Count == 0, "ArmStampKeylessVerifier.KeyedTypes does not read: " + string.Join(", ", missing));
+    }
+
     // ---- negative controls: each rule flags the shape it exists to stop ----------------------------------------
 
     [Fact(DisplayName = "D13/T244: negative control — an account without disableLocalAuth, and one with it false, are flagged")]
