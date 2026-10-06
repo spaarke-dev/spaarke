@@ -11,10 +11,12 @@ using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Channels;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Tests.TestInfrastructure;
@@ -42,6 +44,7 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 public class OutboundAttachmentArchiveTests
 {
     private const string ArchiveContainerId = "drive-archive";
+    private const string RootBusinessUnitContainer = "drive-bu-root";
     private const int EmailAttachmentSourceType = 659490004;
 
     private sealed record SourceDocument(Guid Id, string DriveId, string ItemId, string Name, byte[] Content);
@@ -56,6 +59,7 @@ public class OutboundAttachmentArchiveTests
         public required List<(Entity Entity, Guid Id)> Created { get; init; }
         public required List<Upload> Uploads { get; init; }
         public required List<JobContract> Jobs { get; init; }
+        public required RecordOwnershipResolverDouble Ownership { get; init; }
 
         public Guid CommunicationId => Created.Single(c => c.Entity.LogicalName == "sprk_communication").Id;
 
@@ -170,6 +174,139 @@ public class OutboundAttachmentArchiveTests
             It.Is<ConflictBehavior>(b => b != ConflictBehavior.Fail), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    // ── owner decision 2026-10-06: "keep the copy as protected as the original" ─────────────────────────────────
+
+    [Fact]
+    public async Task SendAsync_WithArchiveToSpe_SecureSource_NonSecureCommunication_CopyGoesToTheSourcesSecureContainer()
+    {
+        // Arrange — the source is filed to a SECURE matter and its file lives in that matter's own container; the email
+        // regards nothing secure, so its own content (the .eml) goes to the shared archive container.
+        var secureMatter = Guid.NewGuid();
+        var source = Doc("drive-secure-m1", "item-privileged", "privileged-memo.docx");
+        var h = await BuildAsync([source], (world, _) =>
+        {
+            SecureMatter(world, secureMatter, "drive-secure-m1");
+            FiledTo(world, source, secureMatter);
+        });
+
+        // Act
+        var response = await h.Sut.SendAsync(Request(SendMode.User, source), UserContext());
+
+        // Assert — the send succeeded and archived.
+        response.ArchivedDocumentId.Should().NotBeNull("(warning: {0})", response.ArchivalWarning);
+
+        // The copy is in the SOURCE's secure container, never the shared archive the communication uses.
+        var upload = AttachmentUploads(h, source).Should().ContainSingle().Subject;
+        upload.DriveId.Should().Be("drive-secure-m1", "a secure source's bytes never go to a less-protected container");
+
+        // The row points at the copy, stays associated to the communication, and carries the secure record that put it
+        // there — so its derived container, the pointer check and the secure-if-any owner all see the secure matter.
+        var row = h.ArchivedAttachments.Should().ContainSingle().Subject.Entity;
+        row.GetAttributeValue<string>("sprk_graphdriveid").Should().Be("drive-secure-m1");
+        row.GetAttributeValue<string>("sprk_graphitemid").Should().Be(upload.ReturnedItemId);
+        row.GetAttributeValue<EntityReference>("sprk_relatedcommunication").Id.Should().Be(h.CommunicationId);
+        row.GetAttributeValue<EntityReference>("sprk_matter").Should().NotBeNull();
+        row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(secureMatter);
+
+        // Owned by task 146's rule over the copy's own parents (the secure matter primary), for the person who sent it.
+        h.Ownership.Requests.Should().Contain(c =>
+            c.TargetEntityLogicalName == "sprk_matter" && c.TargetRecordId == secureMatter
+            && c.Parents.Any(p => p.EntityLogicalName == "sprk_matter" && p.RecordId == secureMatter)
+            && c.RequestedBy != null);
+        row.GetAttributeValue<EntityReference>("ownerid").Id.Should().Be(RecordOwnershipResolverDouble.DefaultTeamId);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithArchiveToSpe_NonSecureSource_CopyGoesToTheCommunicationsContainer()
+    {
+        // Arrange — the source is filed to an ORDINARY matter (its container is the business unit's); the communication
+        // regards nothing secure.
+        var ordinaryMatter = Guid.NewGuid();
+        var source = Doc("drive-bu-north", "item-ordinary", "engagement-letter.pdf");
+        var h = await BuildAsync([source], (world, _) =>
+        {
+            world.Rows[("sprk_matter", ordinaryMatter)] = new Entity("sprk_matter", ordinaryMatter)
+            {
+                ["sprk_issecure"] = false,
+                ["owningbusinessunit"] = new EntityReference("businessunit", TestRecordContainerResolver.PointerWorldRootBusinessUnit),
+            };
+            FiledTo(world, source, ordinaryMatter);
+        });
+
+        // Act
+        var response = await h.Sut.SendAsync(Request(SendMode.SharedMailbox, source));
+
+        // Assert — option A unchanged: the communication's container; the row carries no record link of its own.
+        response.ArchivedDocumentId.Should().NotBeNull("(warning: {0})", response.ArchivalWarning);
+        var upload = AttachmentUploads(h, source).Should().ContainSingle().Subject;
+        upload.DriveId.Should().Be(ArchiveContainerId, "a non-secure source's copy goes where the communication's content goes");
+        var row = h.ArchivedAttachments.Should().ContainSingle().Subject.Entity;
+        row.GetAttributeValue<string>("sprk_graphdriveid").Should().Be(ArchiveContainerId);
+        row.GetAttributeValue<EntityReference>("sprk_matter").Should().BeNull();
+        row.GetAttributeValue<EntityReference>("sprk_relatedcommunication").Id.Should().Be(h.CommunicationId);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithArchiveToSpe_SourceSecurityCannotBeDetermined_ThatAttachmentIsNotArchived_OthersAre()
+    {
+        // Arrange — the second source is filed to a matter whose row cannot be read, so whether it is secure cannot be
+        // determined. (The send's own pointer check does not read that link, so the email itself is sent.)
+        var unreadableMatter = Guid.NewGuid();
+        var ordinary = Doc("drive-bu-north", "item-ok", "agenda.pdf");
+        var undetermined = Doc("drive-bu-south", "item-undetermined", "board-minutes.pdf");
+        var h = await BuildAsync([ordinary, undetermined], (world, _) => FiledTo(world, undetermined, unreadableMatter));
+
+        // Act
+        var response = await h.Sut.SendAsync(Request(SendMode.User, ordinary, undetermined), UserContext());
+
+        // Assert — the send succeeded and archived its .eml.
+        response.ArchivedDocumentId.Should().NotBeNull("(warning: {0})", response.ArchivalWarning);
+
+        // Fail closed for THAT attachment only: no file anywhere, no row — never the shared archive container.
+        AttachmentUploads(h, undetermined).Should().BeEmpty(
+            "a source whose security cannot be determined is not copied anywhere");
+        h.ArchivedAttachments.Should().ContainSingle("only the attachment whose source is known non-secure is archived")
+            .Which.Entity.GetAttributeValue<string>("sprk_filename").Should().Be(ordinary.Name);
+        AttachmentUploads(h, ordinary).Should().ContainSingle().Which.DriveId.Should().Be(ArchiveContainerId);
+    }
+
+    [Fact]
+    public async Task SendAsync_WithArchiveToSpe_SecureSourceAndSecureCommunicationInDifferentContainers_UsesTheSourcesContainer()
+    {
+        // Arrange — the email regards secure matter M2 (its .eml goes to M2's container); the attachment's source belongs
+        // to a DIFFERENT secure matter, M1.
+        var m1 = Guid.NewGuid();
+        var m2 = Guid.NewGuid();
+        var source = Doc("drive-secure-m1", "item-m1", "m1-strategy.docx");
+        var h = await BuildAsync([source], (world, communicationId) =>
+        {
+            SecureMatter(world, m1, "drive-secure-m1");
+            SecureMatter(world, m2, "drive-secure-m2");
+            FiledTo(world, source, m1);
+            world.Rows[("sprk_communication", communicationId)] = new Entity("sprk_communication", communicationId)
+            {
+                ["sprk_regardingmatter"] = new EntityReference("sprk_matter", m2),
+            };
+        }, communicationFromWorld: true);
+
+        // Act
+        var response = await h.Sut.SendAsync(Request(SendMode.SharedMailbox, source));
+
+        // Assert — the communication's own content went to M2's container ...
+        response.ArchivedDocumentId.Should().NotBeNull("(warning: {0})", response.ArchivalWarning);
+        h.Uploads.Should().Contain(u => u.DriveId == "drive-secure-m2" && u.Path.EndsWith(".eml", StringComparison.Ordinal),
+            "the .eml follows the communication's secure regarding");
+
+        // ... but the attachment copy is in the SOURCE's container: at least as protected as the original.
+        var upload = AttachmentUploads(h, source).Should().ContainSingle().Subject;
+        upload.DriveId.Should().Be("drive-secure-m1");
+        var row = h.ArchivedAttachments.Should().ContainSingle().Subject.Entity;
+        row.GetAttributeValue<string>("sprk_graphdriveid").Should().Be("drive-secure-m1");
+        row.GetAttributeValue<EntityReference>("sprk_matter").Id.Should().Be(m1);
+        row.GetAttributeValue<EntityReference>("sprk_relatedcommunication").Id.Should().Be(h.CommunicationId,
+            "the copy stays associated to the communication");
+    }
+
     // ── harness ─────────────────────────────────────────────────────────────────────────────────────────────────
 
     private static SendCommunicationRequest Request(SendMode sendMode, params SourceDocument[] documents) => new()
@@ -188,8 +325,34 @@ public class OutboundAttachmentArchiveTests
     private static List<Upload> AttachmentUploads(Harness h, params SourceDocument[] documents)
         => h.Uploads.Where(u => documents.Any(d => d.Content.AsSpan().SequenceEqual(u.Content))).ToList();
 
-    private static async Task<Harness> BuildAsync(params SourceDocument[] documents)
+    private static Task<Harness> BuildAsync(params SourceDocument[] documents) => BuildAsync(documents, arrange: null);
+
+    /// <param name="documents">The source documents the send attaches.</param>
+    /// <param name="arrange">Adds rows to the task 166 document world (secure records, filed documents), given the id the
+    /// communication will get.</param>
+    /// <param name="communicationFromWorld">The communication's container is decided by the REAL resolver over that world
+    /// (its row must be arranged), instead of "regards nothing secure".</param>
+    private static async Task<Harness> BuildAsync(
+        SourceDocument[] documents,
+        Action<TestRecordContainerResolver.DocumentPointerWorld, Guid>? arrange,
+        bool communicationFromWorld = false)
     {
+        // The REAL RecordContainerResolver (task 166) over a Dataverse world: the root business unit stamps
+        // RootBusinessUnitContainer and claims every drive-bu-* container; an unmodelled document is unfiled and owned
+        // there. It serves the download's pointer check AND the archive's "is the source secure?" question.
+        var communicationId = Guid.NewGuid();
+        var world = new TestRecordContainerResolver.DocumentPointerWorld
+        {
+            RootClaims = c => c.StartsWith("drive-bu-", StringComparison.Ordinal),
+        };
+        world.BusinessUnits[TestRecordContainerResolver.PointerWorldRootBusinessUnit] = (null, RootBusinessUnitContainer);
+        arrange?.Invoke(world, communicationId);
+        var recordContainerResolver = world.Build();
+        var communicationContainerResolver = communicationFromWorld
+            ? new CommunicationContainerResolver(
+                recordContainerResolver, SecurableRegistry(), Mock.Of<ILogger<CommunicationContainerResolver>>())
+            : SpeScopeFactoryStub.NonSecureContainerResolver();
+
         var options = new CommunicationOptions
         {
             ApprovedSenders = new[]
@@ -233,13 +396,17 @@ public class OutboundAttachmentArchiveTests
         var created = new List<(Entity Entity, Guid Id)>();
         var entityService = new Mock<IGenericEntityService>();
         entityService
+            .Setup(s => s.RetrieveAsync("sprk_document", It.IsAny<Guid>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .Returns((string entity, Guid id, string[] columns, CancellationToken ct) =>
+                world.EntityService!.RetrieveAsync(entity, id, columns, ct));
+        entityService
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new EntityCollection());
         entityService
             .Setup(s => s.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity e, CancellationToken _) =>
             {
-                var id = Guid.NewGuid();
+                var id = e.LogicalName == "sprk_communication" ? communicationId : Guid.NewGuid();
                 created.Add((e, id));
                 return id;
             });
@@ -267,6 +434,7 @@ public class OutboundAttachmentArchiveTests
             Mock.Of<ILogger<ApprovedSenderValidator>>());
 
         var jobs = new List<JobContract>();
+        var ownership = new RecordOwnershipResolverDouble();
         var sut = new CommunicationService(
             dispatcher,
             senderValidator,
@@ -278,12 +446,44 @@ public class OutboundAttachmentArchiveTests
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
             CoreAncestorResolverFixtures.Inert(),
-            new RecordOwnershipResolverDouble(),
+            ownership,
             Mock.Of<ILogger<CommunicationService>>(),
-            scopeFactory: SpeScopeFactoryStub.Create(spe.Object));
+            scopeFactory: SpeScopeFactoryStub.Create(spe.Object, communicationContainerResolver, recordContainerResolver));
 
         // The capture lists are shared by reference: the SUT writes into them during the act.
-        return new Harness { Sut = sut, Spe = spe, Created = created, Uploads = uploads, Jobs = jobs };
+        return new Harness
+        {
+            Sut = sut, Spe = spe, Created = created, Uploads = uploads, Jobs = jobs, Ownership = ownership,
+        };
+    }
+
+    /// <summary>The securable roots — non-empty, so the communication resolver does not refuse.</summary>
+    private static ISecurableEntityRegistry SecurableRegistry()
+    {
+        var registry = new Mock<ISecurableEntityRegistry>();
+        registry.Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<string>(StringComparer.Ordinal) { "sprk_project", "sprk_matter", "sprk_workassignment" });
+        return registry.Object;
+    }
+
+    /// <summary>A SECURE matter owning <paramref name="container"/>: its row, and the container's claimant.</summary>
+    private static void SecureMatter(TestRecordContainerResolver.DocumentPointerWorld world, Guid matterId, string container)
+    {
+        world.Rows[("sprk_matter", matterId)] = new Entity("sprk_matter", matterId)
+        {
+            ["sprk_issecure"] = true,
+            ["sprk_containerid"] = container,
+            ["owningbusinessunit"] = new EntityReference("businessunit", TestRecordContainerResolver.PointerWorldRootBusinessUnit),
+        };
+        world.SecureClaims[container] = ("sprk_matter", matterId);
+    }
+
+    /// <summary>The source document's row, filed to <paramref name="matterId"/> (<c>sprk_matter</c>).</summary>
+    private static void FiledTo(TestRecordContainerResolver.DocumentPointerWorld world, SourceDocument document, Guid matterId)
+    {
+        var row = TestRecordContainerResolver.DocumentPointerWorld.Document(document.Id);
+        row["sprk_matter"] = new EntityReference("sprk_matter", matterId);
+        world.Rows[("sprk_document", document.Id)] = row;
     }
 
     /// <summary>

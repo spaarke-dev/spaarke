@@ -1135,10 +1135,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         // Step 1b: Download and validate attachments (if any)
         List<ChannelAttachment>? fileAttachments = null;
+        IReadOnlyList<OutboundAttachmentSource>? attachmentSources = null;
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
-            fileAttachments = await DownloadAndBuildAttachmentsAsync(
+            var prepared = await DownloadAndBuildAttachmentsAsync(
                 request.AttachmentDocumentIds, correlationId, cancellationToken);
+            fileAttachments = prepared.Attachments;
+            attachmentSources = prepared.Sources;
         }
 
         // Step 2: Resolve sender
@@ -1336,7 +1339,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     try
                     {
                         await ArchiveOutboundAttachmentsAsync(
-                            communicationId.Value, fileAttachments,
+                            communicationId.Value, fileAttachments, attachmentSources!,
                             correlationId, cancellationToken, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfCaller(httpContext?.User));
                     }
                     catch (Exception attArchEx)
@@ -1494,10 +1497,13 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
         // Step 1c: Download and validate attachments (if any)
         List<ChannelAttachment>? fileAttachments = null;
+        IReadOnlyList<OutboundAttachmentSource>? attachmentSources = null;
         if (request.AttachmentDocumentIds is { Length: > 0 })
         {
-            fileAttachments = await DownloadAndBuildAttachmentsAsync(
+            var prepared = await DownloadAndBuildAttachmentsAsync(
                 request.AttachmentDocumentIds, correlationId, ct);
+            fileAttachments = prepared.Attachments;
+            attachmentSources = prepared.Sources;
         }
 
         // Step 2: Resolve user email from claims (no ApprovedSenderValidator for user mode)
@@ -1652,7 +1658,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     try
                     {
                         await ArchiveOutboundAttachmentsAsync(
-                            communicationId.Value, fileAttachments,
+                            communicationId.Value, fileAttachments, attachmentSources!,
                             correlationId, ct, Sprk.Bff.Api.Services.Dataverse.RecordRequester.OfObjectId(userObjectId));
                     }
                     catch (Exception attArchEx)
@@ -2511,6 +2517,12 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// archive writer; the prefix is what task 166's document-pointer check reads as "the archive wrote it for this
     /// communication". A name repeated within one send gets a " (n)" suffix, and the upload uses
     /// <see cref="ConflictBehavior.Fail"/>, so an existing file is never replaced and no two rows share one file.</para>
+    /// <para><b>As protected as the original</b> (owner decision 2026-10-06): a copy of a SECURE source goes to the
+    /// source's own secure container, carries the source's record links that resolve there, and is owned by task 146's
+    /// secure-if-any rule over those links — even when the communication is filed against a non-secure record, or is
+    /// secure in a different container. A non-secure source goes to the communication's container. When the source's
+    /// security cannot be determined, that attachment is not archived (<see cref="ResolveArchiveCopyPlacementAsync"/>);
+    /// it never falls back to the communication's container.</para>
     /// <para><b>Failure</b> never fails the send (the email is already out): an owner refusal archives nothing; a
     /// container fault propagates to the caller's non-fatal catch; a per-attachment upload or row failure is logged
     /// and the next attachment continues. An upload that returns no item creates no row.</para>
@@ -2518,6 +2530,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     private async Task ArchiveOutboundAttachmentsAsync(
         Guid communicationId,
         IReadOnlyList<ChannelAttachment> attachments,
+        IReadOnlyList<OutboundAttachmentSource> sources,
         string correlationId,
         CancellationToken ct,
         Sprk.Bff.Api.Services.Dataverse.RecordRequester? requestedBy = null)
@@ -2533,14 +2546,15 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             return;
         }
 
-        // SpeFileStore and the container resolver are Scoped — resolved per operation (R9).
+        // SpeFileStore and the container resolvers are Scoped — resolved per operation (R9).
         using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
             "IServiceScopeFactory is required to resolve SpeFileStore for outbound attachment archival.")).CreateScope();
         var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+        var containerResolver = speScope.ServiceProvider.GetRequiredService<RecordContainerResolver>();
 
         // The same container decision as this communication's .eml (fail closed for a secure regarding).
-        var driveId = await ResolveCommunicationContentContainerAsync(speScope, communicationId, ct);
-        if (string.IsNullOrWhiteSpace(driveId))
+        var communicationDriveId = await ResolveCommunicationContentContainerAsync(speScope, communicationId, ct);
+        if (string.IsNullOrWhiteSpace(communicationDriveId))
         {
             throw new InvalidOperationException("ArchiveContainerId not configured for SPE archival");
         }
@@ -2553,6 +2567,59 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
 
             try
             {
+                // Owner decision 2026-10-06: the copy is at least as protected as its source.
+                var placement = i < sources.Count
+                    ? await ResolveArchiveCopyPlacementAsync(containerResolver, sources[i], ct)
+                    : ArchiveCopyPlacement.Skip("its source document is not known");
+                if (placement.SkipReason is not null)
+                {
+                    _logger.LogWarning(
+                        "Outbound attachment {Index}/{Total} NOT archived (fail closed; the email was sent): {Reason} | FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                        i + 1, attachments.Count, placement.SkipReason, fileName, communicationId, correlationId);
+                    continue;
+                }
+
+                var attachmentDoc = new DataverseEntity("sprk_document")
+                {
+                    ["sprk_documentname"] = TruncateTo(fileName, 200),
+                    ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
+                    ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
+                    ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
+                    ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
+                };
+
+                var driveId = communicationDriveId;
+                var copyOwner = docOwner;
+                if (placement.SecureContainerId is { } secureContainerId)
+                {
+                    // A SECURE source: the copy goes to the source's secure container and carries the record links that
+                    // put the source there, so its own derived container, task 166's pointer check and task 146's
+                    // secure-if-any owner all see the secure record — not just the communication.
+                    foreach (var (column, record) in placement.SecureLinks)
+                    {
+                        attachmentDoc[column] = record;
+                    }
+
+                    var primary = placement.SecureLinks[0].Record;
+                    copyOwner = await _ownership.ResolveOwnerAsync(
+                        Sprk.Bff.Api.Services.Dataverse.RecordOwnershipContext.ForChild(
+                            attachmentDoc,
+                            new Sprk.Bff.Api.Services.Dataverse.RecordOwnershipParent(primary.LogicalName, primary.Id)) with
+                        {
+                            RequestedBy = requestedBy,
+                        },
+                        ct);
+                    if (copyOwner.IsRefused)
+                    {
+                        _logger.LogWarning(
+                            "Outbound attachment {Index}/{Total} NOT archived: no owner for the secure copy ({Code}: {Reason}) (task 146) | FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
+                            i + 1, attachments.Count, copyOwner.RefusalCode, copyOwner.Reason, fileName, communicationId, correlationId);
+                        continue;
+                    }
+
+                    driveId = secureContainerId;
+                }
+
                 var spePath = UniqueArchivePath(communicationId, SpeUploadPath.SanitizeFileName(fileName), usedPaths);
                 using var stream = new MemoryStream(attachment.Content, writable: false);
                 var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ConflictBehavior.Fail, ct);
@@ -2564,17 +2631,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     continue;
                 }
 
-                var attachmentDoc = new DataverseEntity("sprk_document")
-                {
-                    ["sprk_documentname"] = TruncateTo(fileName, 200),
-                    ["sprk_filename"] = fileName, // AI analyzer reads this for file type detection
-                    ["sprk_documenttype"] = new OptionSetValue(100000006), // Email
-                    ["sprk_sourcetype"] = new OptionSetValue(659490004), // Email Attachment
-                    ["sprk_relatedcommunication"] = new EntityReference("sprk_communication", communicationId),
-                    ["sprk_graphitemid"] = fileHandle.Id,
-                    ["sprk_graphdriveid"] = driveId,
-                };
-                ApplyContentOwner(attachmentDoc, docOwner);
+                attachmentDoc["sprk_graphitemid"] = fileHandle.Id;
+                attachmentDoc["sprk_graphdriveid"] = driveId;
+                ApplyContentOwner(attachmentDoc, copyOwner);
 
                 var documentId = await _genericEntityService.CreateAsync(attachmentDoc, ct);
 
@@ -2592,6 +2651,113 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                     "Failed to archive outbound attachment {Index}/{Total} (non-fatal) | FileName: {FileName}, CommunicationId: {CommunicationId}, CorrelationId: {CorrelationId}",
                     i + 1, attachments.Count, fileName, communicationId, correlationId);
             }
+        }
+    }
+
+    /// <summary>
+    /// Decides where the archived copy of ONE outbound attachment goes — task 097, owner decision 2026-10-06: "keep the
+    /// copy as protected as the original". Uses only task 166's resolver (<see cref="RecordContainerResolver"/>) and its
+    /// one notion of "secure": a record with <c>sprk_issecure</c> = true and its own <c>sprk_containerid</c>.
+    /// </summary>
+    /// <remarks>
+    /// <list type="number">
+    /// <item><b>Is the source marked secure?</b> <see cref="RecordContainerResolver.DeriveDocumentContainersAsync"/> — the
+    /// container the source's file BELONGS in, from its record links (the strict pointer rule's reference and Make
+    /// Secure's target). Not decided → skip.</item>
+    /// <item><b>Does its file live in a secure record's own container?</b>
+    /// <see cref="RecordContainerResolver.ResolveOwningRecordAsync"/> over the drive the source row points at (the one
+    /// the send read the bytes from).</item>
+    /// <item>Neither → <see cref="ArchiveCopyPlacement.CommunicationContainer"/> (option A, unchanged). Marked secure →
+    /// the derivation's secure container — even when the communication is secure in a DIFFERENT container (the copy is
+    /// at least as protected as the original) — with the source's record links that resolve to it, which the copy
+    /// carries. The two answers disagree (the file sits in a secure container its records do not name), or no carried
+    /// link resolves there (the secure filing comes only through the source's parent document or a communication) →
+    /// skip.</item>
+    /// </list>
+    /// <para><b>Fail closed.</b> Any lookup fault is a skip, never the communication's (possibly shared) container. The
+    /// email is already sent; the skip is logged.</para>
+    /// </remarks>
+    private async Task<ArchiveCopyPlacement> ResolveArchiveCopyPlacementAsync(
+        RecordContainerResolver containerResolver, OutboundAttachmentSource source, CancellationToken ct)
+    {
+        try
+        {
+            if (!Guid.TryParse(source.DocumentId, out var sourceId))
+            {
+                return ArchiveCopyPlacement.Skip("its source document id is not a document id");
+            }
+
+            var derivation = await containerResolver.DeriveDocumentContainersAsync(sourceId, ct);
+            if (!derivation.Decided)
+            {
+                return ArchiveCopyPlacement.Skip(
+                    $"whether source document {sourceId} is secure could not be determined ({derivation.Reason})");
+            }
+
+            var fileOwner = await containerResolver.ResolveOwningRecordAsync(source.DriveId, ct);
+
+            if (!derivation.IsSecure)
+            {
+                return fileOwner is null
+                    ? ArchiveCopyPlacement.CommunicationContainer
+                    : ArchiveCopyPlacement.Skip(
+                        $"source document {sourceId}'s file lives in the own container of secure {fileOwner.EntityLogicalName} "
+                        + $"{fileOwner.RecordId}, but its records do not resolve there");
+            }
+
+            var secureContainer = derivation.PrimaryContainer!;
+            if (fileOwner is not null && !RecordContainerResolver.IsSameContainerId(secureContainer, source.DriveId))
+            {
+                return ArchiveCopyPlacement.Skip(
+                    $"source document {sourceId}'s file lives in a different secure container from the one its records resolve to");
+            }
+
+            // The source's record links that put it in that secure container — the same links the derivation consults
+            // (a project / matter / work assignment, or a record that hangs off one; never a party or a communication).
+            var row = await _genericEntityService.RetrieveAsync(
+                "sprk_document", sourceId, DocumentLinkFields.LogicalNames.ToArray(), ct);
+            if (row is null)
+            {
+                return ArchiveCopyPlacement.Skip($"source document {sourceId} could not be read");
+            }
+
+            var links = new List<(string Column, EntityReference Record)>();
+            foreach (var link in DocumentLinkFields.All)
+            {
+                if (RecordContainerResolver.ChildAncestorLinks.KindOf(link.TargetEntityLogicalName)
+                        is not (RecordContainerResolver.ChildAncestorLinks.RecordKind.Root
+                            or RecordContainerResolver.ChildAncestorLinks.RecordKind.Intermediate)
+                    || string.Equals(link.TargetEntityLogicalName, "sprk_communication", StringComparison.Ordinal)
+                    || row.GetAttributeValue<EntityReference>(link.LogicalName) is not { Id: var linkedId }
+                    || linkedId == Guid.Empty)
+                {
+                    continue;
+                }
+
+                var decision = await containerResolver.ResolveForRecordAsync(link.TargetEntityLogicalName, linkedId, ct);
+                if (decision.Outcome == ContainerDecisionOutcome.ResolvedSecure
+                    && RecordContainerResolver.IsSameContainerId(secureContainer, decision.ContainerId))
+                {
+                    links.Add((link.LogicalName, new EntityReference(link.TargetEntityLogicalName, linkedId)));
+                }
+            }
+
+            return links.Count > 0
+                ? new ArchiveCopyPlacement(secureContainer, links, null)
+                : ArchiveCopyPlacement.Skip(
+                    $"source document {sourceId} is secure only through its parent document or a communication, which the copy cannot carry");
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Whether outbound attachment source {DocumentId} is secure could not be determined (fail closed).",
+                source.DocumentId);
+            return ArchiveCopyPlacement.Skip(
+                $"whether source document {source.DocumentId} is secure could not be determined ({ex.GetType().Name})");
         }
     }
 
@@ -2662,6 +2828,28 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
     }
 
+    /// <summary>The source document an attachment's bytes were read from: its <c>sprk_document</c> id and the drive its
+    /// row points at (already verified by task 166's pointer check on the download).</summary>
+    private sealed record OutboundAttachmentSource(string DocumentId, string DriveId);
+
+    /// <summary>The attachments a send transmits, index-aligned with the source documents they were read from.</summary>
+    private sealed record PreparedAttachments(
+        List<ChannelAttachment> Attachments, IReadOnlyList<OutboundAttachmentSource> Sources);
+
+    /// <summary>
+    /// Where ONE archived attachment copy goes (task 097, owner decision 2026-10-06: "keep the copy as protected as the
+    /// original"): the communication's container (a non-secure source), the SOURCE's secure container with the record
+    /// links that put it there (a secure source), or nowhere (<see cref="SkipReason"/>: the source's security could not
+    /// be determined — fail closed for that attachment).
+    /// </summary>
+    private sealed record ArchiveCopyPlacement(
+        string? SecureContainerId, IReadOnlyList<(string Column, EntityReference Record)> SecureLinks, string? SkipReason)
+    {
+        public static ArchiveCopyPlacement CommunicationContainer { get; } = new(null, [], null);
+
+        public static ArchiveCopyPlacement Skip(string reason) => new(null, [], reason);
+    }
+
     /// <summary>
     /// Maximum number of attachments allowed per email (Graph API limit).
     /// </summary>
@@ -2680,7 +2868,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Thrown when attachment count exceeds 150, total size exceeds 35MB,
     /// or an individual file download fails.
     /// </exception>
-    private async Task<List<ChannelAttachment>> DownloadAndBuildAttachmentsAsync(
+    private async Task<PreparedAttachments> DownloadAndBuildAttachmentsAsync(
         string[] attachmentDocumentIds,
         string correlationId,
         CancellationToken ct)
@@ -2707,6 +2895,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // container) and sprk_graphitemid (file in that container).
         // The legacy _options.ArchiveContainerId is no longer used here.
         var attachments = new List<ChannelAttachment>(attachmentDocumentIds.Length);
+        var sources = new List<OutboundAttachmentSource>(attachmentDocumentIds.Length);
         long totalSize = 0;
 
         // SpeFileStore is Scoped — resolve once for this whole download operation (R9); the scope
@@ -2918,6 +3107,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
                 ContentType = InferContentType(metadata.Name ?? "attachment"),
                 Content = contentBytes
             });
+            sources.Add(new OutboundAttachmentSource(sprkDocumentId, driveId));
 
             _logger.LogDebug(
                 "Attachment {Index}/{Total} prepared | Name: {Name}, Size: {Size} bytes, CorrelationId: {CorrelationId}",
@@ -2928,7 +3118,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             "All attachments prepared | Count: {Count}, TotalSize: {TotalSize} bytes, CorrelationId: {CorrelationId}",
             attachments.Count, totalSize, correlationId);
 
-        return attachments;
+        return new PreparedAttachments(attachments, sources);
     }
 
     /// <summary>
