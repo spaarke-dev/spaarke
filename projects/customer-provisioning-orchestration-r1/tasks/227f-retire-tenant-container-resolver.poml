@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="227f" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Retire the unused ITenantContainerResolver diagnostic (superseded by SpeContainerOwnershipGuard) and the unwritten StagingContainerId</title>
+    <phase>Model 1 dedicated-stamp remediation — plan §7 T227 (found during T227d, 2026-10-06)</phase>
+    <gate>after 227d (✅)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>BFF code + L2 code deletion, ArchTests, spec/MUST wording; touches another project's scoped diagnostic.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded deletion with a named reference list; the design decision is made.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>BFF hot path; edits .claude/constraints and the provision-environment skill (main-session-only)</parallel-reason>
+    <tags>bff-api, provisioning, l2-controlplane, spe, tenant-isolation, model1-dedicated, testing</tags>
+    <deps>227d</deps>
+  </metadata>
+
+  <prompt>Remove the tenant-container-resolver diagnostic and everything that exists only to serve it; make "own container" have one definition.</prompt>
+
+  <role>SPAARKE platform developer (BFF Minimal API, L2 control plane, ArchTests).</role>
+
+  <goal>
+    After T227d the BFF's one definition of "this stamp's container" is SpeContainerOwnershipGuard (configured stamp
+    containers + the spaarkeCustomerId marker). The older diagnostic — ITenantContainerResolver /
+    OptionsTenantContainerResolver / GET /api/diagnostics/tenant-container-resolver — has no consumer: L2's
+    SpeContainerResolverInvariantProbe is retained on disk UNREGISTERED (E2EAcceptanceModule), and H13's I4 has read the
+    deployed app settings since T227c. The resolver also reads SharePointEmbedded:StagingContainerId, which nothing
+    writes. Remove the resolver, its endpoint and registration, the unregistered L2 probe and their tests; remove the
+    StagingContainerId option and its reads (ChatDocumentEndpoints / ChatWordExportEndpoints / pre-fill services fall
+    back to EmailProcessing:DefaultContainerId already); amend spec FR-31, the project CLAUDE.md MUST row, design §4D I4
+    and the I4 ArchTest messages to name SpeContainerOwnershipGuard; lower the ADR010_DITests ceiling by one.
+  </goal>
+
+  <context>
+    <background>
+      Needed→build, else remove (owner feedback): the resolver is not needed, so it goes. unified-access-control-r2 task
+      081 scoped the diagnostic route's authorization — check projects/INDEX.md for that project's state and say in the
+      notes that the route is removed (a route that no longer exists needs no scoping). RouteAuthorizationGuardTests and
+      SpeWriteSinkContainerProvenanceGuardTests name the route / StagingContainerId: update their lists, do not weaken
+      their rules.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/{ITenantContainerResolver,OptionsTenantContainerResolver,TenantContainerResolverEndpoint,DiagnosticsModule}.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Configuration/SharePointEmbeddedOptions.cs (StagingContainerId)</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/{ChatDocumentEndpoints,ChatWordExportEndpoints}.cs; Services/Workspace/{MatterPreFillService,ProjectPreFillService}.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/SpeContainerResolverInvariantProbe.cs (+ its tests, E2EAcceptanceModule comment, H13RejectionCodes)</file>
+      <file>tests/Spaarke.ArchTests/{ADR010_DITests,RouteAuthorizationGuardTests,SpeWriteSinkContainerProvenanceGuardTests}.cs; TenantIsolation/I4_SpeContainerIdLiteralTests.cs</file>
+      <file>projects/customer-provisioning-orchestration-r1/{spec.md FR-31, CLAUDE.md MUST row, design.md §4D I4}</file>
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/provisioning.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <constraints>
+    <constraint source="tests">Deleting tests under a KEEP path needs a same-PR replacement covering the same scenario — the scenario (no fallback container; tenant-scoped container) is now covered by SpeAppOnlyContainerIsolationTests; cite it.</constraint>
+    <constraint source="scope">Do not change SpeContainerOwnershipGuard's rules.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="1">git grep the full reference list; delete the resolver, endpoint, registration, unregistered L2 probe and tests.</step>
+    <step order="2">Remove StagingContainerId (option + reads); update the ArchTest lists and the FR-31 / MUST / §4D wording.</step>
+    <step order="3">BFF + ControlPlane builds, BFF tests, ControlPlane.Tests, ArchTests; Step 9.5; close.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">`git grep -n "ITenantContainerResolver\|tenant-container-resolver\|StagingContainerId\|SpeContainerResolverInvariantProbe" -- src tests` returns nothing (docs/history excepted).</criterion>
+    <criterion testable="true">FR-31, the project CLAUDE.md MUST row and design §4D I4 name SpeContainerOwnershipGuard as the single definition of the stamp's containers.</criterion>
+    <criterion testable="true">BFF tests, ControlPlane.Tests and ArchTests pass; ADR010 ceiling lowered by exactly the removed interface.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+  </notes>
+</task>

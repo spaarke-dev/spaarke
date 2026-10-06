@@ -9,6 +9,7 @@ using Moq;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -74,7 +75,7 @@ public class SpeContainerPagingTests
         factory.Setup(f => f.ForApp()).Returns(graphClient);
 
         return new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -143,7 +144,7 @@ public class SpeContainerPagingTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
         var service = new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         await service.ListExternalMembersAsync(ContainerId);
 
@@ -165,7 +166,7 @@ public class SpeContainerPagingTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
         var service = new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         await service.ListExternalMembersAsync(ContainerId);
 
@@ -281,7 +282,7 @@ public class SpeContainerPagingTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
         var service = new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         var results = await service.RemoveMembershipsAsync(
             ContainerId, ["a@client-firm.com", "b@client-firm.com", "c@client-firm.com"]);
@@ -349,7 +350,7 @@ public class SpeContainerPagingTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Throws(new InvalidOperationException("Graph unreachable"));
         var service = new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         var results = await service.RemoveMembershipsAsync(
             ContainerId, ["a@client-firm.com", "b@client-firm.com"]);
@@ -371,7 +372,7 @@ public class SpeContainerPagingTests
         var factory = new Mock<IGraphClientFactory>();
         factory.Setup(f => f.ForApp()).Returns(new GraphServiceClient(adapter));
         var service = new SpeContainerMembershipService(
-            factory.Object, NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(factory.Object), NullLogger<SpeContainerMembershipService>.Instance);
 
         var results = await service.RemoveMembershipsAsync(ContainerId, []);
 

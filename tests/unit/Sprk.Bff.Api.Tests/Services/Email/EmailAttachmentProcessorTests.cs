@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Email;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Services.Email;
 
@@ -86,9 +87,9 @@ public class EmailAttachmentProcessorTests
     {
         var graphClientFactory = Mock.Of<IGraphClientFactory>();
         var speFileStore = new SpeFileStore(
-            new ContainerOperations(graphClientFactory, NullLogger<ContainerOperations>.Instance),
-            new DriveItemOperations(graphClientFactory, NullLogger<DriveItemOperations>.Instance),
-            new UploadSessionManager(graphClientFactory, Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance),
+            new ContainerOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), NullLogger<ContainerOperations>.Instance),
+            new DriveItemOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), NullLogger<DriveItemOperations>.Instance),
+            new UploadSessionManager(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance),
             new UserOperations(graphClientFactory, NullLogger<UserOperations>.Instance));
 
         return new EmailAttachmentProcessor(

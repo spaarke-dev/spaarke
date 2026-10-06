@@ -14,12 +14,22 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 public class UploadSessionManager
 {
     private readonly IGraphClientFactory _factory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<UploadSessionManager> _logger;
 
-    public UploadSessionManager(IGraphClientFactory factory, IHttpClientFactory httpClientFactory, ILogger<UploadSessionManager> logger)
+    /// <remarks>
+    /// The app-only upload gets its Graph client from <see cref="SpeContainerOwnershipGuard"/>, which refuses a
+    /// drive this stamp does not own before Graph is called (task 227d). OBO uploads are isolated by Graph.
+    /// </remarks>
+    public UploadSessionManager(
+        IGraphClientFactory factory,
+        SpeContainerOwnershipGuard ownership,
+        IHttpClientFactory httpClientFactory,
+        ILogger<UploadSessionManager> logger)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _httpClientFactory = httpClientFactory ?? throw new ArgumentNullException(nameof(httpClientFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -130,10 +140,11 @@ public class UploadSessionManager
         _logger.LogInformation("Uploading small file to drive {DriveId} at path {Path}",
             driveId, path);
 
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never swallowed into a null result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
-
             // Upload the file using PUT to drive item content endpoint.
             // conflictBehavior is stated EXPLICITLY — never left to Graph's PUT default, which its own
             // docs contradict each other about. The 4-arg overload supplies Replace to preserve this

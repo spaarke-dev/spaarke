@@ -1,5 +1,6 @@
 ## SharePoint Embedded + Graph
 - [SPE app-only per-container isolation (2026-10-06)](spe-apponly-per-container-isolation-2026-10-06.md) — app-only = ALL containers of CT; no per-container app scoping; CT-per-customer is the only hard boundary
+- [SPE container customProperties (2026-10-06)](spe-container-custom-properties.md) — not settable at create (PATCH …/customProperties after); `$select=id,containerTypeId,customProperties` reads type+marker in one app-only GET; any app with Write/Full on the CT and container Writers can edit; containerId == driveId (`b!`)
 - [SPE owner app via MI-as-FIC (2026-10-02)](spe-owning-app-mi-as-fic-2026-10-02.md) — GA 2025-05; same-tenant MI; FIC token appidacr=2; registration now Graph v1.0 PUT
 - [SPE version comment (2026-09-12)](spe-version-comment-2026-09-12.md) — WRITE-ONLY via checkin{comment}; no read-back in Graph (CSDL); repo checkin drops comment
 - [SPE WOPI co-auth lock / 423 (2026-07-30)](spe-wopi-coauthoring-lock-423-2026-07-30.md) — no Graph API releases co-auth lock; checkout/checkin = formal checkout only; ~30-min timeout

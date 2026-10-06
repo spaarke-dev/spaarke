@@ -11,6 +11,7 @@ using Microsoft.Kiota.Abstractions;
 using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Authentication.Azure;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Infrastructure.Graph;
 
@@ -48,7 +49,7 @@ public sealed class SpeAdminGraphService
     /// Represents a resolved container type configuration from Dataverse.
     ///
     /// <para><see cref="TenantId"/> is load-bearing: it is the tenant the config's container type is
-    /// registered in, and <see cref="GetClientForConfigAsync"/> refuses a config whose tenant is not the
+    /// registered in, and <see cref="GetClientForContainerAsync"/> refuses a config whose tenant is not the
     /// BFF's own — the BFF's identity can only act in its own tenant (fail closed, WP-6).</para>
     ///
     /// <para><see cref="ClientId"/> / <see cref="OwningAppId"/> record the container type's owning app
@@ -472,7 +473,7 @@ public sealed class SpeAdminGraphService
     /// <summary>
     /// The tenant the BFF's own identity lives in (<c>TENANT_ID</c>, falling back to
     /// <c>AzureAd:TenantId</c>). App-only work is refused for any config registered elsewhere — see
-    /// <see cref="GetClientForConfigAsync"/>. Null when neither key is set, which also refuses.
+    /// <see cref="GetClientForContainerAsync"/>. Null when neither key is set, which also refuses.
     /// </summary>
     private readonly string? _bffTenantId;
 
@@ -494,6 +495,14 @@ public sealed class SpeAdminGraphService
     /// </summary>
     private readonly IGraphClientFactory? _graphClientFactory;
 
+    /// <summary>
+    /// The source of every APP-ONLY client in this service (task 227d, owner D29): container-scoped work
+    /// gets a client only for a container this stamp owns, and type-wide results are filtered to owned
+    /// containers. Optional for the same reason as <see cref="_graphClientFactory"/>; every production path
+    /// that needs it throws a named error when it is missing.
+    /// </summary>
+    private readonly SpeContainerOwnershipGuard? _ownership;
+
     // Throttling: exponential backoff constants
     private const int MaxRetries = 4;
     private static readonly TimeSpan BaseRetryDelay = TimeSpan.FromSeconds(1);
@@ -506,7 +515,8 @@ public sealed class SpeAdminGraphService
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
         ILogger<SpeAdminGraphService> logger,
-        IGraphClientFactory? graphClientFactory = null)
+        IGraphClientFactory? graphClientFactory = null,
+        SpeContainerOwnershipGuard? ownership = null)
     {
         ArgumentNullException.ThrowIfNull(dataverseClient);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -515,6 +525,7 @@ public sealed class SpeAdminGraphService
         _dataverseClient = dataverseClient;
         _logger = logger;
         _graphClientFactory = graphClientFactory;
+        _ownership = ownership;
 
         // Same key GraphClientFactory pins its app-only credential to, so the guard compares against the
         // tenant the identity actually authenticates in rather than a second, drift-prone setting.
@@ -529,7 +540,7 @@ public sealed class SpeAdminGraphService
         _searchRegion = string.IsNullOrWhiteSpace(region) ? DefaultSearchRegion : region;
 
         _logger.LogInformation(
-            "SpeAdminGraphService initialized. App-only identity: the BFF's own (IGraphClientFactory.ForApp). " +
+            "SpeAdminGraphService initialized. App-only identity: the BFF's own, via SpeContainerOwnershipGuard. " +
             "BFF tenant known: {HasTenant}. Search region: {SearchRegion}",
             _bffTenantId is not null,
             _searchRegion);
@@ -540,8 +551,9 @@ public sealed class SpeAdminGraphService
     // =========================================================================
 
     /// <summary>
-    /// Returns the app-only Graph client for container work under <paramref name="config"/> — the BFF's
-    /// own identity, never the container type's owning app.
+    /// Returns the app-only Graph client for work on ONE container under <paramref name="config"/> — the
+    /// BFF's own identity, never the container type's owning app — and only for a container this stamp
+    /// owns (task 227d, owner D29: SPE Admin on a stamp reaches the stamp's own containers only).
     /// </summary>
     /// <remarks>
     /// <para><b>No credential is built here.</b> The client is <see cref="IGraphClientFactory.ForApp"/>,
@@ -556,31 +568,91 @@ public sealed class SpeAdminGraphService
     /// in. A config registered in any other tenant would otherwise be served by a client pointed at the
     /// WRONG tenant, listing that tenant's containers under the config's name. So a config whose tenant
     /// is not the BFF's — or whose tenant cannot be established — is refused with a named error.</para>
-    /// <para>Kept async and per-config so the ~50 <c>…ForConfigAsync</c> call sites are unchanged.</para>
+    /// <para><b>Ownership guard — fail closed (task 227d).</b> Every stamp shares the container type,
+    /// and its identity reaches every container of it. The client comes from
+    /// <see cref="SpeContainerOwnershipGuard.ForOwnedContainerAsync"/>, which refuses (404
+    /// <c>spe_container_not_owned</c>) any container this stamp neither configured nor created.</para>
     /// </remarks>
-    /// <exception cref="InvalidOperationException">No Graph client factory, or a tenant mismatch.</exception>
-    public Task<GraphServiceClient> GetClientForConfigAsync(
+    /// <exception cref="InvalidOperationException">No ownership guard, or a tenant mismatch.</exception>
+    public async Task<GraphServiceClient> GetClientForContainerAsync(
+        ContainerTypeConfig config,
+        string containerId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var ownership = RequireOwnership();
+        EnsureConfigIsInBffTenant(config);
+        return await ownership.ForOwnedContainerAsync(containerId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// As <see cref="GetClientForContainerAsync"/>, for a container in the deleted-containers bin (a plain
+    /// container read answers 404 for those, so ownership is read from the bin).
+    /// </summary>
+    internal async Task<GraphServiceClient> GetClientForDeletedContainerAsync(
+        ContainerTypeConfig config,
+        string containerId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(config);
+        var ownership = RequireOwnership();
+        EnsureConfigIsInBffTenant(config);
+        await ownership.EnsureDeletedContainerOwnedAsync(containerId, ct).ConfigureAwait(false);
+        return ownership.ForTypeWideOperation();
+    }
+
+    /// <summary>
+    /// The app-only client for work that names no single container: creating one, listing or searching
+    /// across the type, container-type metadata, tenant security reads. Every result that names a
+    /// container MUST pass through <see cref="FilterOwnedAsync{T}"/>, and a created container MUST be
+    /// marked (task 227d).
+    /// </summary>
+    internal Task<GraphServiceClient> GetTypeWideClientForConfigAsync(
         ContainerTypeConfig config,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(config);
-
-        if (_graphClientFactory is null)
-        {
-            throw new InvalidOperationException(
-                "IGraphClientFactory is not available, so the BFF's app-only Graph client cannot be " +
-                "obtained. SPE Admin container operations run as the BFF's own identity and have no " +
-                "other credential to fall back to.");
-        }
-
+        var ownership = RequireOwnership();
         EnsureConfigIsInBffTenant(config);
-
-        return Task.FromResult(_graphClientFactory.ForApp());
+        return Task.FromResult(ownership.ForTypeWideOperation());
     }
 
     /// <summary>
+    /// Keeps only the items whose container this stamp owns (task 227d). <paramref name="deleted"/> reads
+    /// ownership from the deleted-containers bin.
+    /// </summary>
+    public async Task<IReadOnlyList<T>> FilterOwnedAsync<T>(
+        IEnumerable<T> items,
+        Func<T, string?> containerIdOf,
+        CancellationToken ct,
+        bool deleted = false)
+    {
+        var ownership = RequireOwnership();
+        var list = items.ToList();
+        var ids = list.Select(containerIdOf).Select(id => id?.Trim()).Where(id => !string.IsNullOrEmpty(id))
+            .Select(id => id!).Distinct(StringComparer.Ordinal).ToList();
+
+        // One ownership read per DISTINCT container, at most 8 at a time (cached; see the guard).
+        var ownedIds = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
+        await Parallel.ForEachAsync(
+            ids,
+            new ParallelOptions { MaxDegreeOfParallelism = 8, CancellationToken = ct },
+            async (id, token) => ownedIds[id] = deleted
+                ? await ownership.IsDeletedContainerOwnedAsync(id, token).ConfigureAwait(false)
+                : await ownership.IsOwnedAsync(id, token).ConfigureAwait(false)).ConfigureAwait(false);
+
+        return list.Where(item => containerIdOf(item)?.Trim() is { Length: > 0 } id && ownedIds.GetValueOrDefault(id)).ToList();
+    }
+
+    private SpeContainerOwnershipGuard RequireOwnership()
+        => _ownership ?? throw new InvalidOperationException(
+            "SpeContainerOwnershipGuard is not available, so the BFF's app-only Graph client cannot be " +
+            "obtained. SPE Admin container operations run as the BFF's own identity and have no " +
+            "other credential to fall back to.");
+
+    /// <summary>
     /// Refuses a config whose container-type tenant is not the BFF's own. See the tenant-guard remarks on
-    /// <see cref="GetClientForConfigAsync"/>.
+    /// <see cref="GetClientForContainerAsync"/>.
     /// </summary>
     internal void EnsureConfigIsInBffTenant(ContainerTypeConfig config)
     {
@@ -709,7 +781,7 @@ public sealed class SpeAdminGraphService
     /// Handles pagination automatically via manual nextLink following.
     /// Returns domain model <see cref="SpeContainerSummary"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The SPE container type GUID to filter by.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>All containers matching the container type.</returns>
@@ -791,7 +863,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns domain model <see cref="SpeContainerItemSummary"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE container ID (Graph FileStorageContainer ID, i.e., the drive's container).</param>
     /// <param name="folderId">Optional DriveItem ID of a subfolder. Pass <c>null</c> to list root items.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -890,7 +962,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns domain model <see cref="SpeContainerItemSummary"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE FileStorageContainer ID.</param>
     /// <param name="folderName">Name of the folder to create.</param>
     /// <param name="parentFolderId">Optional DriveItem ID of the parent folder. Pass <c>null</c> to create at root.</param>
@@ -1010,7 +1082,7 @@ public sealed class SpeAdminGraphService
     /// Use <see cref="ContainerPage.NextSkipToken"/> from the response to retrieve subsequent pages.
     /// When <paramref name="skipToken"/> is non-null, it is passed directly to Graph as the OData nextLink token.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The SPE container type GUID to filter by.</param>
     /// <param name="top">Maximum number of items to return. Graph default applies when null.</param>
     /// <param name="skipToken">Opaque pagination token from a prior <see cref="ContainerPage.NextSkipToken"/>.</param>
@@ -1126,7 +1198,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns a <see cref="SpeContainerSummary"/> domain record — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The SPE container type GUID string (from the config record).</param>
     /// <param name="displayName">Display name for the new container. Required; must not exceed 256 characters.</param>
     /// <param name="description">Optional description for the new container.</param>
@@ -1198,7 +1270,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>null</c> when Graph responds with 404 (container not found).
     /// Throws <see cref="ODataError"/> for other Graph API failures.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to retrieve.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Container summary, or <c>null</c> if not found.</returns>
@@ -1284,7 +1356,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>false</c> when Graph responds 404 (container not found).
     /// Throws <see cref="ODataError"/> for other Graph API failures.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to update.</param>
     /// <param name="displayName">New display name. Pass <c>null</c> to leave unchanged.</param>
     /// <param name="description">New description. Pass <c>null</c> to leave unchanged.</param>
@@ -1336,7 +1408,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>false</c> when Graph responds 404.
     /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if state transition is invalid).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to activate.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if activated; <c>false</c> if container not found.</returns>
@@ -1383,7 +1455,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>false</c> when Graph responds 404.
     /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if state transition is invalid).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to lock.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if locked; <c>false</c> if container not found.</returns>
@@ -1428,7 +1500,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>false</c> when Graph responds 404.
     /// Throws <see cref="ODataError"/> for other failures (e.g., 409 Conflict if not currently locked).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to unlock.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if unlocked; <c>false</c> if container not found.</returns>
@@ -1478,11 +1550,16 @@ public sealed class SpeAdminGraphService
     //
     // Why these exist: NetArchTest's `HaveDependencyOn("Microsoft.Graph")`
     // inspects IL for ALL referenced types — including delegate parameter types
-    // emitted by closures. Endpoints calling `RunForConfig(..., (client, t) =>
-    // graphService.X(client, ...))` still leak GraphServiceClient into the
-    // endpoint's IL via the closure's Func<GraphServiceClient, CT, Task<T>>
-    // field. These facades let endpoints call graphService.XForConfigAsync(...)
-    // with NO GraphServiceClient anywhere in their IL.
+    // emitted by closures. A closure over a GraphServiceClient (the retired
+    // `GraphCallScope.RunForConfig`) leaks it into the endpoint's IL via the
+    // closure's Func<GraphServiceClient, CT, Task<T>> field. These facades let
+    // endpoints call graphService.XForConfigAsync(...) with NO GraphServiceClient
+    // anywhere in their IL.
+    //
+    // Task 227d (owner D29): a method naming a container gets its client from
+    // GetClientForContainerAsync (refused unless this stamp owns the container);
+    // a type-wide method uses GetTypeWideClientForConfigAsync and filters its
+    // results with FilterOwnedAsync.
     //
     // Added 2026-06-26 by ci-cd-unit-test-remediation-r1 task CICD-088b
     // per ADR-007 §1.
@@ -1491,7 +1568,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeContainerItemSummary>> ListContainerItemsForConfigAsync(
         ContainerTypeConfig config, string containerId, string? folderId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await ListContainerItemsAsync(client, containerId, folderId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListContainerItems({containerId})"); }
     }
@@ -1499,7 +1576,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerItemSummary> CreateFolderForConfigAsync(
         ContainerTypeConfig config, string containerId, string folderName, string? parentFolderId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await CreateFolderAsync(client, containerId, folderName, parentFolderId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateFolder({containerId})"); }
     }
@@ -1507,23 +1584,32 @@ public sealed class SpeAdminGraphService
     public async Task<ContainerPage> ListContainersPageForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, int? top, string? skipToken, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await ListContainersPageAsync(client, containerTypeId, top, skipToken, ct).ConfigureAwait(false); }
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
+        ContainerPage page;
+        try { page = await ListContainersPageAsync(client, containerTypeId, top, skipToken, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListContainersPage({containerTypeId})"); }
+        // Type-wide listing: every customer's containers come back; show only this stamp's (task 227d).
+        return page with { Items = await FilterOwnedAsync(page.Items, c => c.Id, ct).ConfigureAwait(false) };
     }
 
     public async Task<SpeContainerSummary> CreateContainerForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, string displayName, string? description, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await CreateContainerAsync(client, containerTypeId, displayName, description, ct).ConfigureAwait(false); }
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
+        // Resolve the marker value BEFORE creating, so an unresolved identity cannot leave an unmarked container.
+        RequireOwnership().RequireCustomerId();
+        SpeContainerSummary created;
+        try { created = await CreateContainerAsync(client, containerTypeId, displayName, description, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainer({containerTypeId})"); }
+        // Without the marker this stamp could not reach the container it just created (task 227d).
+        await RequireOwnership().MarkOwnedAsync(created.Id, ct).ConfigureAwait(false);
+        return created;
     }
 
     public async Task<SpeContainerSummary?> GetContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await GetContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainer({containerId})"); }
     }
@@ -1531,7 +1617,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> UpdateContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, string? displayName, string? description, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await UpdateContainerAsync(client, containerId, displayName, description, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainer({containerId})"); }
     }
@@ -1539,7 +1625,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> ActivateContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await ActivateContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ActivateContainer({containerId})"); }
     }
@@ -1547,7 +1633,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> LockContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await LockContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"LockContainer({containerId})"); }
     }
@@ -1555,7 +1641,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> UnlockContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await UnlockContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UnlockContainer({containerId})"); }
     }
@@ -1563,7 +1649,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>?> GetCustomPropertiesForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await GetCustomPropertiesAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetCustomProperties({containerId})"); }
     }
@@ -1571,15 +1657,30 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto>?> UpdateCustomPropertiesForConfigAsync(
         ContainerTypeConfig config, string containerId, IReadOnlyList<Sprk.Bff.Api.Models.SpeAdmin.CustomPropertyDto> properties, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await UpdateCustomPropertiesAsync(client, containerId, properties, ct).ConfigureAwait(false); }
+        // The ownership marker is the stamp's claim on the container (task 227d) — never editable here. The
+        // editor sends back every property it read, marker included, so an UNCHANGED marker is dropped from the
+        // write (the PATCH merges; an omitted property is untouched); any other value is refused.
+        var ownership = RequireOwnership();
+        var marker = properties.Where(p => SpeContainerOwnershipGuard.IsMarkerProperty(p.Name)).ToList();
+        if (marker.Any(p => !ownership.IsThisStampsMarker(p.Value)))
+        {
+            throw new SdapProblemException(
+                "reserved_custom_property",
+                "Reserved custom property",
+                $"'{SpeContainerOwnershipGuard.MarkerPropertyName}' is set by Spaarke and cannot be changed.",
+                StatusCodes.Status400BadRequest);
+        }
+
+        var writable = marker.Count == 0 ? properties : properties.Except(marker).ToList();
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
+        try { return await UpdateCustomPropertiesAsync(client, containerId, writable, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateCustomProperties({containerId})"); }
     }
 
     public async Task<IReadOnlyList<SpeFileVersionSummary>> GetFileVersionsForConfigAsync(
         ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await GetFileVersionsAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetFileVersions({containerId},{itemId})"); }
     }
@@ -1587,7 +1688,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeThumbnailSet>> GetFileThumbnailsForConfigAsync(
         ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await GetFileThumbnailsAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetFileThumbnails({containerId},{itemId})"); }
     }
@@ -1595,7 +1696,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeSharingLink> CreateSharingLinkForConfigAsync(
         ContainerTypeConfig config, string containerId, string itemId, string linkType, string scope, DateTimeOffset? expirationDateTime, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await CreateSharingLinkAsync(client, containerId, itemId, linkType, scope, expirationDateTime, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateSharingLink({containerId},{itemId})"); }
     }
@@ -1603,7 +1704,7 @@ public sealed class SpeAdminGraphService
     public async Task<(Stream Content, string MimeType, string FileName)?> DownloadDriveItemForConfigAsync(
         ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await DownloadDriveItemAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"DownloadDriveItem({containerId},{itemId})"); }
     }
@@ -1611,7 +1712,7 @@ public sealed class SpeAdminGraphService
     public async Task<string?> GetPreviewUrlForConfigAsync(
         ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await GetPreviewUrlAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetPreviewUrl({containerId},{itemId})"); }
     }
@@ -1619,7 +1720,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> DeleteDriveItemForConfigAsync(
         ContainerTypeConfig config, string containerId, string itemId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await DeleteDriveItemAsync(client, containerId, itemId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"DeleteDriveItem({containerId},{itemId})"); }
     }
@@ -1627,7 +1728,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeContainerPermission>> ListContainerPermissionsForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await ListContainerPermissionsAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListContainerPermissions({containerId})"); }
     }
@@ -1635,7 +1736,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerPermission> GrantContainerPermissionForConfigAsync(
         ContainerTypeConfig config, string containerId, string? userId, string? groupId, string role, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await GrantContainerPermissionAsync(client, containerId, userId, groupId, role, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GrantContainerPermission({containerId})"); }
     }
@@ -1643,7 +1744,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerPermission?> UpdateContainerPermissionForConfigAsync(
         ContainerTypeConfig config, string containerId, string permissionId, string newRole, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await UpdateContainerPermissionAsync(client, containerId, permissionId, newRole, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerPermission({containerId},{permissionId})"); }
     }
@@ -1651,7 +1752,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> RevokeContainerPermissionForConfigAsync(
         ContainerTypeConfig config, string containerId, string permissionId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await RevokeContainerPermissionAsync(client, containerId, permissionId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RevokeContainerPermission({containerId},{permissionId})"); }
     }
@@ -1659,7 +1760,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeContainerColumn>> ListColumnsForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await ListColumnsAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListColumns({containerId})"); }
     }
@@ -1667,7 +1768,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerColumn> CreateColumnForConfigAsync(
         ContainerTypeConfig config, string containerId, string name, string? displayName, string? description, string columnType, bool required, bool indexed, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await CreateColumnAsync(client, containerId, name, displayName, description, columnType, required, indexed, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateColumn({containerId})"); }
     }
@@ -1675,7 +1776,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerColumn?> UpdateColumnForConfigAsync(
         ContainerTypeConfig config, string containerId, string columnId, string? displayName, string? description, bool? required, bool? indexed, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await UpdateColumnAsync(client, containerId, columnId, displayName, description, required, indexed, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateColumn({containerId},{columnId})"); }
     }
@@ -1683,7 +1784,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> DeleteColumnForConfigAsync(
         ContainerTypeConfig config, string containerId, string columnId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await DeleteColumnAsync(client, containerId, columnId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"DeleteColumn({containerId},{columnId})"); }
     }
@@ -1691,7 +1792,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerItemSummary> UploadFileToContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, string fileName, Stream fileStream, long fileSize, string? folderId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await UploadFileToContainerAsync(client, containerId, fileName, fileStream, fileSize, folderId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UploadFileToContainer({containerId},{fileName})"); }
     }
@@ -1699,9 +1800,17 @@ public sealed class SpeAdminGraphService
     public async Task<ContainerSearchPage> SearchContainersForConfigAsync(
         ContainerTypeConfig config, string query, int? pageSize, string? skipToken, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await SearchContainersAsync(client, config.ContainerTypeId, query, pageSize, skipToken, ct).ConfigureAwait(false); }
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
+        ContainerSearchPage page;
+        try { page = await SearchContainersAsync(client, config.ContainerTypeId, query, pageSize, skipToken, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchContainers({query})"); }
+        // Type-wide search: keep only this stamp's containers (task 227d). TotalCount is Graph's count across
+        // the type, so it is dropped rather than reported for a list it no longer describes.
+        return page with
+        {
+            Items = await FilterOwnedAsync(page.Items, c => c.Id, ct).ConfigureAwait(false),
+            TotalCount = null,
+        };
     }
 
     /// <summary>
@@ -1754,7 +1863,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForConfigAsync(
         ContainerTypeConfig config, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await ListContainerTypesAsync(client, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes"); }
     }
@@ -2243,7 +2352,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeContainerTypeSummary?> GetContainerTypeForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await GetContainerTypeAsync(client, containerTypeId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerType({containerTypeId})"); }
     }
@@ -2260,7 +2369,7 @@ public sealed class SpeAdminGraphService
         if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.OwningAppId;
         if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.ClientId;
 
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await CreateContainerTypeAsync(client, displayName, billingClassification, resolvedOwningAppId!, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName})"); }
     }
@@ -2313,7 +2422,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeContainerTypePermission>?> GetContainerTypePermissionsForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await GetContainerTypePermissionsAsync(client, containerTypeId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerTypePermissions({containerTypeId})"); }
     }
@@ -2321,7 +2430,7 @@ public sealed class SpeAdminGraphService
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes, bool? isSearchEnabled = null, bool? isDiscoverabilityEnabled = null, bool? isSharingRestricted = null, string? urlTemplate = null, string? consumingTenantOverridables = null, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit, maxStoragePerContainerInBytes, isSearchEnabled, isDiscoverabilityEnabled, isSharingRestricted, urlTemplate, consumingTenantOverridables, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId})"); }
     }
@@ -2329,23 +2438,30 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<DeletedContainerSummary>> ListDeletedContainersForConfigAsync(
         ContainerTypeConfig config, string containerTypeId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await ListDeletedContainersAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
+        IReadOnlyList<DeletedContainerSummary> deleted;
+        try { deleted = await ListDeletedContainersAsync(client, containerTypeId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListDeletedContainers({containerTypeId})"); }
+        // Type-wide bin: keep only this stamp's deleted containers (task 227d).
+        return await FilterOwnedAsync(deleted, c => c.Id, ct, deleted: true).ConfigureAwait(false);
     }
 
     public async Task<bool> RestoreContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await RestoreContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        var client = await GetClientForDeletedContainerAsync(config, containerId, ct).ConfigureAwait(false);
+        bool restored;
+        try { restored = await RestoreContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RestoreContainer({containerId})"); }
+        // While in the bin the container read as "no marker" (404); drop that so the restored one is reachable now.
+        await RequireOwnership().ForgetContainerAsync(containerId).ConfigureAwait(false);
+        return restored;
     }
 
     public async Task<bool> PermanentDeleteContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForDeletedContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await PermanentDeleteContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteContainer({containerId})"); }
     }
@@ -2360,7 +2476,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> ArchiveContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await ArchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ArchiveContainer({containerId})"); }
     }
@@ -2369,7 +2485,7 @@ public sealed class SpeAdminGraphService
     public async Task<bool> UnarchiveContainerForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await UnarchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UnarchiveContainer({containerId})"); }
     }
@@ -2381,7 +2497,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SpeRecycleBinItem>> ListRecycleBinItemsForConfigAsync(
         ContainerTypeConfig config, string containerId, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await ListRecycleBinItemsAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListRecycleBinItems({containerId})"); }
     }
@@ -2396,7 +2512,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeRecycleBinRestoreResult> RestoreRecycleBinItemsForConfigAsync(
         ContainerTypeConfig config, string containerId, IReadOnlyList<string> itemIds, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await RestoreRecycleBinItemsAsync(client, containerId, itemIds, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RestoreRecycleBinItems({containerId})"); }
     }
@@ -2408,7 +2524,7 @@ public sealed class SpeAdminGraphService
     public async Task<SpeRecycleBinDeleteResult> PermanentDeleteRecycleBinItemsForConfigAsync(
         ContainerTypeConfig config, string containerId, IReadOnlyList<string> itemIds, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
         try { return await PermanentDeleteRecycleBinItemsAsync(client, containerId, itemIds, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteRecycleBinItems({containerId})"); }
     }
@@ -2416,7 +2532,7 @@ public sealed class SpeAdminGraphService
     public async Task<IReadOnlyList<SecurityAlertResult>> GetSecurityAlertsForConfigAsync(
         ContainerTypeConfig config, int maxAlerts = 50, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await GetSecurityAlertsAsync(client, maxAlerts, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetSecurityAlerts(maxAlerts={maxAlerts})"); }
     }
@@ -2424,17 +2540,49 @@ public sealed class SpeAdminGraphService
     public async Task<SecureScoreResult?> GetSecureScoreForConfigAsync(
         ContainerTypeConfig config, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        var client = await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await GetSecureScoreAsync(client, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException("GetSecureScore"); }
     }
 
+    /// <summary>Graph search pages read per returned page while collecting owned hits (task 227d).</summary>
+    internal const int MaxSearchRoundsPerPage = 10;
+
     public async Task<SearchItemPage> SearchItemsForConfigAsync(
         ContainerTypeConfig config, string query, string? containerId, string? fileType, int? pageSize, string? skipToken, CancellationToken ct = default)
     {
-        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await SearchItemsAsync(client, query, containerId, fileType, pageSize, skipToken, ct).ConfigureAwait(false); }
-        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchItems({query})"); }
+        // One container → that container must be this stamp's. No container → Graph searches EVERY container
+        // the identity reaches (all customers'), so only hits in this stamp's containers are kept (task 227d).
+        // Graph's own total and its "more results" flag count other customers' documents, so neither is passed
+        // through: Graph pages are read until a full page of OWNED hits is collected (bounded), and a next-page
+        // token is issued only when that page filled and Graph has more. TotalCount is the number returned.
+        var client = string.IsNullOrWhiteSpace(containerId)
+            ? await GetTypeWideClientForConfigAsync(config, ct).ConfigureAwait(false)
+            : await GetClientForContainerAsync(config, containerId, ct).ConfigureAwait(false);
+
+        var size = pageSize is > 0 ? Math.Min(pageSize.Value, 500) : 25;
+        var owned = new List<SpeSearchItemResult>(size);
+        var token = skipToken;
+        string? next = null;
+        for (var round = 0; round < MaxSearchRoundsPerPage && owned.Count < size; round++)
+        {
+            SearchItemPage page;
+            try { page = await SearchItemsAsync(client, query, containerId, fileType, size, token, ct).ConfigureAwait(false); }
+            catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchItems({query})"); }
+
+            owned.AddRange(await FilterOwnedAsync(page.Items, i => i.ContainerId, ct).ConfigureAwait(false));
+            next = page.NextSkipToken;
+            if (next is null)
+            {
+                break;
+            }
+
+            token = next;
+        }
+
+        var items = owned.Take(size).ToList();
+        var nextToken = owned.Count >= size && next is not null ? next : null;
+        return new SearchItemPage(items, nextToken, items.Count);
     }
 
     // =========================================================================
@@ -2455,7 +2603,7 @@ public sealed class SpeAdminGraphService
     /// Returns an empty list when the container has no custom properties.
     /// Returns <c>null</c> when the container is not found (Graph 404).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
@@ -2557,7 +2705,7 @@ public sealed class SpeAdminGraphService
     /// Returns the updated list of custom properties after the PATCH (re-reads from Graph).
     /// Returns <c>null</c> when the container is not found (Graph 404).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="properties">The complete set of custom properties to store on the container.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -2655,7 +2803,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns domain model <see cref="SpeFileVersionSummary"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE container ID (FileStorageContainer ID).</param>
     /// <param name="itemId">The DriveItem ID of the file.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -2719,7 +2867,7 @@ public sealed class SpeAdminGraphService
     /// Returns domain model <see cref="SpeThumbnailSet"/> — no Graph SDK types exposed (ADR-007).
     /// Returns an empty list for folders or items that do not support thumbnails.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE container ID (FileStorageContainer ID).</param>
     /// <param name="itemId">The DriveItem ID of the file.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -2773,7 +2921,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns domain model <see cref="SpeSharingLink"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE container ID (FileStorageContainer ID).</param>
     /// <param name="itemId">The DriveItem ID of the file.</param>
     /// <param name="linkType">Link type: "view", "edit", or "embed".</param>
@@ -2844,7 +2992,7 @@ public sealed class SpeAdminGraphService
     /// The caller is responsible for disposing the returned <see cref="Stream"/>.
     /// Returns <c>null</c> when Graph responds with 404 (item not found).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE FileStorageContainer ID.</param>
     /// <param name="itemId">The DriveItem ID to download.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -2923,7 +3071,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>null</c> when Graph responds with 404 (item not found).
     /// Throws <see cref="ODataError"/> for other Graph failures.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE FileStorageContainer ID.</param>
     /// <param name="itemId">The DriveItem ID to preview.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -2981,7 +3129,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>false</c> when Graph responds with 404 (item not found).
     /// Throws <see cref="ODataError"/> for other Graph API failures.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE FileStorageContainer ID.</param>
     /// <param name="itemId">The DriveItem ID to delete.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -3028,7 +3176,7 @@ public sealed class SpeAdminGraphService
     /// Lists all permissions on an SPE container.
     /// Returns domain model <see cref="SpeContainerPermission"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>All permission entries on the container.</returns>
@@ -3089,7 +3237,7 @@ public sealed class SpeAdminGraphService
     /// or to a group (by <paramref name="groupId"/>). Exactly one must be provided.
     /// Returns the newly created <see cref="SpeContainerPermission"/> — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="userId">Azure AD user object ID. Mutually exclusive with <paramref name="groupId"/>.</param>
     /// <param name="groupId">Azure AD group object ID. Mutually exclusive with <paramref name="userId"/>.</param>
@@ -3151,7 +3299,7 @@ public sealed class SpeAdminGraphService
     /// Returns the updated <see cref="SpeContainerPermission"/>, or <c>null</c> when the permission is not found.
     /// Returns domain model only — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="permissionId">The Graph permission ID to update.</param>
     /// <param name="newRole">New SPE role: reader, writer, manager, or owner.</param>
@@ -3212,7 +3360,7 @@ public sealed class SpeAdminGraphService
     /// Revokes (deletes) an existing permission from an SPE container.
     /// Returns <c>true</c> when successfully deleted; <c>false</c> when the permission was not found.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID.</param>
     /// <param name="permissionId">The Graph permission ID to delete.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -3576,7 +3724,7 @@ public sealed class SpeAdminGraphService
     /// Files 4 MB and above use the Graph SDK LargeFileUploadTask with 5 MB chunks.
     /// Returns domain model SpeContainerItemSummary — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The SPE FileStorageContainer ID.</param>
     /// <param name="fileName">Name of the file to create (e.g. "report.pdf").</param>
     /// <param name="fileStream">Readable stream of the file content.</param>
@@ -3855,7 +4003,7 @@ public sealed class SpeAdminGraphService
     /// endpoint contract already declared the token opaque, so callers are unaffected.
     /// </para>
     /// </remarks>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">Container type GUID to scope the search to.</param>
     /// <param name="query">Search term. Required; matched as a substring, not a full-text query.</param>
     /// <param name="pageSize">Number of results per page (1–50). Defaults to 25.</param>
@@ -3974,7 +4122,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns domain records only — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>All container types registered in the tenant for the calling app registration.</returns>
     public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesAsync(
@@ -4036,7 +4184,7 @@ public sealed class SpeAdminGraphService
     /// Returns <c>null</c> when Graph responds with 404 (container type not found).
     /// Returns domain record only — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Container type summary, or <c>null</c> if not found.</returns>
@@ -4086,7 +4234,7 @@ public sealed class SpeAdminGraphService
     ///
     /// Returns a <see cref="SpeContainerTypeSummary"/> domain record — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="displayName">
     ///   Human-readable name for the container type. Maps to Graph SDK <c>FileStorageContainerType.Name</c>
     ///   (Graph uses "Name", not "DisplayName", for the containerType resource).
@@ -5067,7 +5215,7 @@ public sealed class SpeAdminGraphService
     /// Returns null when the container type is not found (Graph 404).
     /// Returns domain records only — no Graph SDK types exposed (ADR-007).
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
@@ -5266,7 +5414,7 @@ public sealed class SpeAdminGraphService
     /// settings; the remaining five are task 025's surface.)
     /// </para>
     /// </remarks>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
     /// <param name="sharingCapability">
     /// New sharing capability — a member of <c>SharingCapabilities</c> (<c>disabled</c>,
@@ -5681,7 +5829,7 @@ public sealed class SpeAdminGraphService
     /// version missing properties the application needs.
     /// </para>
     /// <para>
-    /// This client is reached through <c>GetClientForConfigAsync</c> and therefore backs EVERY
+    /// This client is reached through <c>GetClientForContainerAsync</c> / <c>GetTypeWideClientForConfigAsync</c> and backs EVERY
     /// <c>…ForConfigAsync</c> method — containers, recycle bin, search, security, audit. Changing this one
     /// address changes all of them at once. Do not flip it without re-running the probe above.
     /// Full evidence: <c>projects/sdap-SPE-admin-app-r2/notes/beta-vs-v1-surface-verification.md</c>.
@@ -5793,7 +5941,7 @@ public sealed class SpeAdminGraphService
     ///
     /// ADR-007: Returns domain model <see cref="DeletedContainerSummary"/> — no Graph SDK types exposed.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerTypeId">The SPE container type GUID to filter by.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>All soft-deleted containers for the container type; empty list when none.</returns>
@@ -5887,7 +6035,7 @@ public sealed class SpeAdminGraphService
     ///
     /// ADR-007: No Graph SDK types exposed — boolean result only.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID of the deleted container.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if restored; <c>false</c> if not found.</returns>
@@ -6604,7 +6752,7 @@ public sealed class SpeAdminGraphService
     ///
     /// ADR-007: No Graph SDK types exposed — boolean result only.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID of the deleted container.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if permanently deleted; <c>false</c> if not found.</returns>
@@ -6660,7 +6808,7 @@ public sealed class SpeAdminGraphService
     /// <see cref="SecurityAlertResult"/> domain models only.
     /// </summary>
     /// <param name="graphClient">
-    /// Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.
+    /// Authenticated Graph client from <see cref="GetClientForContainerAsync"/>.
     /// </param>
     /// <param name="maxAlerts">Maximum number of alerts to return. Defaults to 50.</param>
     /// <param name="ct">Cancellation token.</param>
@@ -6746,7 +6894,7 @@ public sealed class SpeAdminGraphService
     /// <see cref="SecureScoreResult"/> domain model only.
     /// </summary>
     /// <param name="graphClient">
-    /// Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.
+    /// Authenticated Graph client from <see cref="GetClientForContainerAsync"/>.
     /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>
@@ -6839,7 +6987,7 @@ public sealed class SpeAdminGraphService
     ///
     /// ADR-007: No Graph SDK types exposed — boolean result only.
     /// </summary>
-    /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
+    /// <param name="graphClient">App-only Graph client: from <see cref="GetClientForContainerAsync"/> for one container, or <see cref="GetTypeWideClientForConfigAsync"/> for type-wide work.</param>
     /// <param name="containerId">The Graph FileStorageContainer ID to soft-delete.</param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns><c>true</c> if soft-deleted; <c>false</c> if not found.</returns>
@@ -7084,7 +7232,9 @@ public sealed class SpeAdminGraphService
                             Name: driveItem.Name ?? string.Empty,
                             Size: driveItem.Size,
                             LastModifiedDateTime: driveItem.LastModifiedDateTime,
-                            ContainerId: containerId,
+                            // The hit's OWN drive (= container id in SPE), not the requested one: a
+                            // type-wide search must be able to filter hits by owner (task 227d).
+                            ContainerId: driveItem.ParentReference?.DriveId ?? containerId,
                             ContainerName: null,
                             WebUrl: driveItem.WebUrl,
                             MimeType: driveItem.File?.MimeType));

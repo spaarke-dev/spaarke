@@ -7,20 +7,28 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 
 /// <summary>
 /// Handles SharePoint Embedded container operations.
-/// Responsible for container creation, retrieval, and listing.
+/// Responsible for container creation and retrieval.
 /// </summary>
+/// <remarks>
+/// App-only work goes through <see cref="SpeContainerOwnershipGuard"/> (task 227d): a container this
+/// stamp did not create or configure is refused before Graph is called, and a container it creates is
+/// marked as its own.
+/// </remarks>
 public class ContainerOperations
 {
     private readonly IGraphClientFactory _factory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly ILogger<ContainerOperations> _logger;
     private readonly GraphMetadataCache? _metadataCache;
 
     public ContainerOperations(
         IGraphClientFactory factory,
+        SpeContainerOwnershipGuard ownership,
         ILogger<ContainerOperations> logger,
         GraphMetadataCache? metadataCache = null)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metadataCache = metadataCache; // Optional: cache can be null if not configured
     }
@@ -41,9 +49,12 @@ public class ContainerOperations
         _logger.LogInformation("Creating SPE container {DisplayName} with type {ContainerTypeId}",
             displayName, containerTypeId);
 
+        // Resolve the marker value BEFORE creating, so an unresolved identity cannot leave an unmarked container.
+        _ownership.RequireCustomerId();
+
         try
         {
-            var graphClient = _factory.ForApp();
+            var graphClient = _ownership.ForTypeWideOperation();
 
             var container = new FileStorageContainer
             {
@@ -63,6 +74,9 @@ public class ContainerOperations
 
             _logger.LogInformation("Successfully created SPE container {ContainerId} with display name {DisplayName}",
                 createdContainer.Id, displayName);
+
+            // Without the marker this stamp could not reach its own new container (task 227d).
+            await _ownership.MarkOwnedAsync(createdContainer.Id!, ct);
 
             return new ContainerDto(
                 createdContainer.Id!,
@@ -96,6 +110,10 @@ public class ContainerOperations
         activity?.SetTag("operation", "GetContainerDrive");
         activity?.SetTag("containerId", containerId);
 
+        // Ownership first, outside the try and before the cache: a cached mapping must not let a foreign
+        // container through, and a refusal must surface as the guard's 404, not as a null "not found" (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
+
         // Cache-aside: check Redis first (ADR-009, 24h TTL for stable mappings)
         if (_metadataCache != null)
         {
@@ -113,8 +131,6 @@ public class ContainerOperations
 
         try
         {
-            var graphClient = _factory.ForApp();
-
             var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
                 .GetAsync(cancellationToken: ct);
 
@@ -159,61 +175,6 @@ public class ContainerOperations
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unexpected error getting container drive: {Error}", ex.Message);
-            throw;
-        }
-    }
-
-    public async Task<IList<ContainerDto>?> ListContainersAsync(Guid containerTypeId, CancellationToken ct = default)
-    {
-        // Task 093: tags go on the caller's request Activity, as always. No `using` — this method did not
-        // start the Activity, and disposing it here ended the request's own trace span early (see
-        // UploadSessionManager.UploadSmallAsync for the full explanation; same fix, all 20 sites).
-        var activity = Activity.Current;
-        activity?.SetTag("operation", "ListContainers");
-        activity?.SetTag("containerTypeId", containerTypeId.ToString());
-
-        _logger.LogInformation("Listing containers for type {ContainerTypeId}", containerTypeId);
-
-        try
-        {
-            var graphClient = _factory.ForApp();
-
-            // Get containers filtered by containerTypeId
-            var response = await graphClient.Storage.FileStorage.Containers
-                .GetAsync(requestConfiguration =>
-                {
-                    requestConfiguration.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
-                }, cancellationToken: ct);
-
-            if (response?.Value == null)
-            {
-                _logger.LogWarning("No containers found for type {ContainerTypeId}", containerTypeId);
-                return new List<ContainerDto>();
-            }
-
-            var result = response.Value;
-            _logger.LogInformation("Found {Count} containers for type {ContainerTypeId}",
-                result.Count, containerTypeId);
-
-            return result.Select(c => new ContainerDto(
-                c.Id!,
-                c.DisplayName!,
-                c.Description,
-                c.CreatedDateTime ?? DateTimeOffset.UtcNow)).ToList();
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
-        {
-            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
-        }
-        catch (ServiceException ex)
-        {
-            _logger.LogError(ex, "Graph API error listing containers: {Error}", ex.Message);
-            throw new InvalidOperationException($"Failed to list containers: {ex.Message}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error listing containers: {Error}", ex.Message);
             throw;
         }
     }

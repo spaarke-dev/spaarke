@@ -24,15 +24,23 @@ namespace Sprk.Bff.Api.Infrastructure.Graph;
 public class DriveItemOperations
 {
     private readonly IGraphClientFactory _factory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly ILogger<DriveItemOperations> _logger;
     private readonly GraphMetadataCache? _metadataCache;
 
+    /// <remarks>
+    /// App-only methods get their Graph client from <see cref="SpeContainerOwnershipGuard"/>, which refuses a
+    /// drive this stamp does not own before Graph is called (task 227d). <c>…AsUser…</c> methods stay on
+    /// OBO, where Graph enforces container membership.
+    /// </remarks>
     public DriveItemOperations(
         IGraphClientFactory factory,
+        SpeContainerOwnershipGuard ownership,
         ILogger<DriveItemOperations> logger,
         GraphMetadataCache? metadataCache = null)
     {
         _factory = factory ?? throw new ArgumentNullException(nameof(factory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _metadataCache = metadataCache; // Optional: cache can be null if not configured
     }
@@ -49,6 +57,9 @@ public class DriveItemOperations
         activity?.SetTag("operation", "ListChildren");
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
+
+        // Ownership before the cache and outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
 
         // Cache-aside: check Redis first (ADR-009)
         if (_metadataCache != null)
@@ -67,8 +78,6 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = _factory.ForApp();
-
             DriveItemCollectionResponse? page;
 
             if (string.IsNullOrEmpty(itemId))
@@ -153,10 +162,11 @@ public class DriveItemOperations
 
         _logger.LogInformation("Downloading file {ItemId} from drive {DriveId}", itemId, driveId);
 
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
-
             var stream = await graphClient.Drives[driveId].Items[itemId].Content
                 .GetAsync(cancellationToken: ct);
 
@@ -206,10 +216,11 @@ public class DriveItemOperations
 
         _logger.LogInformation("Deleting file {ItemId} from drive {DriveId}", itemId, driveId);
 
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
-
             await graphClient.Drives[driveId].Items[itemId]
                 .DeleteAsync(cancellationToken: ct);
 
@@ -260,6 +271,9 @@ public class DriveItemOperations
         activity?.SetTag("driveId", driveId);
         activity?.SetTag("itemId", itemId);
 
+        // Ownership before the cache and outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         // Cache-aside: check Redis first (ADR-009)
         if (_metadataCache != null)
         {
@@ -277,8 +291,6 @@ public class DriveItemOperations
 
         try
         {
-            var graphClient = _factory.ForApp();
-
             var item = await graphClient.Drives[driveId].Items[itemId]
                 .GetAsync(cancellationToken: ct);
 
@@ -1115,10 +1127,11 @@ public class DriveItemOperations
         _logger.LogInformation(
             "Listing versions of file {ItemId} in drive {DriveId} (app-only)", itemId, driveId);
 
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
-
             var versions = await graphClient.Drives[driveId].Items[itemId]
                 .Versions.GetAsync(cancellationToken: ct);
 
@@ -1183,10 +1196,11 @@ public class DriveItemOperations
         _logger.LogInformation("[{CorrelationId}] Getting preview URL for {DriveId}/{ItemId} (app-only)",
             correlationId ?? "N/A", driveId, itemId);
 
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
-
             // Call Graph API preview action with default viewer settings
             var previewRequest = new Microsoft.Graph.Drives.Item.Items.Item.Preview.PreviewPostRequestBody();
 
@@ -1506,13 +1520,16 @@ public class DriveItemOperations
     /// be used. <c>crc32</c>/<c>sha1</c> are consumer-OneDrive only.</para>
     /// <para>Best-effort / non-fatal (NFR-04): returns null when the item is missing, the hash facet is not yet
     /// populated (large/chunked uploads may lag), or any Graph call fails — the caller treats a null hash as
-    /// "no dedup, proceed". Never throws.</para>
+    /// "no dedup, proceed". Never throws — except the ownership refusal (404, task 227d), which is raised before
+    /// the try: a drive this stamp does not own is refused, not treated as "no dedup".</para>
     /// </remarks>
     public async Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
     {
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, never a cached or empty result (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(driveId, ct);
+
         try
         {
-            var graphClient = _factory.ForApp();
             var item = await graphClient.Drives[driveId].Items[itemId]
                 .GetAsync(req => req.QueryParameters.Select = new[] { "id", "file" }, cancellationToken: ct);
 

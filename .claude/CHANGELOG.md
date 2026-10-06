@@ -7,6 +7,14 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — App-only SPE calls go through the ownership guard (T227d, owner D28/D29)
+
+`customer-provisioning-orchestration-r1` T227d.
+
+- **`.claude/constraints/provisioning.md`** (SPE section): app-only SPE Graph clients come only from
+  `SpeContainerOwnershipGuard`; "own" = a configured stamp container or the `spaarkeCustomerId` marker; SPE Admin on a
+  stamp is confined to own containers (owner D29); enforced by ArchTest `SpeAppOnlyContainerGuardTests`.
+
 ###### 2026-10-06 — Non-secret values from later handlers are settings, not vault secrets (T227c, plan G18)
 
 `customer-provisioning-orchestration-r1` T227c.

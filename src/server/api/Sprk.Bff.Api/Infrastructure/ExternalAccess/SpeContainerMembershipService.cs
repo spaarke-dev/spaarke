@@ -9,12 +9,14 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 /// When a Contact is granted access to a Secure Project, they are added to
 /// the project's SPE container so they can access files.
 ///
-/// This service uses app-only Graph authentication (ForApp) since container
-/// permission management requires elevated permissions beyond what OBO provides.
+/// This service uses app-only Graph authentication since container permission management requires
+/// elevated permissions beyond what OBO provides. Its client comes from
+/// <see cref="SpeContainerOwnershipGuard"/>: a container this stamp does not own is refused (404) before Graph is called, so a forged <c>sprk_containerid</c> cannot add an external user to another
+/// customer's container (task 227d).
 /// </summary>
 public class SpeContainerMembershipService
 {
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly ILogger<SpeContainerMembershipService> _logger;
 
     /// <summary>
@@ -53,10 +55,10 @@ public class SpeContainerMembershipService
     internal const string NoPermissionFoundError = "No permission found";
 
     public SpeContainerMembershipService(
-        IGraphClientFactory graphClientFactory,
+        SpeContainerOwnershipGuard ownership,
         ILogger<SpeContainerMembershipService> logger)
     {
-        _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -90,9 +92,11 @@ public class SpeContainerMembershipService
             "Granting SPE container membership: containerId={ContainerId}, email={Email}, accessLevel={AccessLevel}",
             containerId, contactEmail, accessLevel);
 
+        // Ownership outside the try: a container this stamp does not own is refused (404 spe_container_not_owned) before Graph (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
+
         try
         {
-            var graphClient = _graphClientFactory.ForApp();
             var roles = AccessLevelRoleMap[accessLevel];
 
             // Graph SDK 5.x: use SharePointIdentity with userPrincipalName in AdditionalData
@@ -183,10 +187,11 @@ public class SpeContainerMembershipService
             "Revoking SPE container membership: containerId={ContainerId}, email={Email}",
             containerId, contactEmail);
 
+        // Ownership outside the try: a container this stamp does not own is refused (404 spe_container_not_owned) before Graph (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
+
         try
         {
-            var graphClient = _graphClientFactory.ForApp();
-
             var read = await ReadPermissionsAsync(graphClient, containerId, ct);
 
             var targetPermission = FindPermissionByEmail(read.Permissions, contactEmail);
@@ -297,7 +302,7 @@ public class SpeContainerMembershipService
     {
         _logger.LogInformation("Listing external SPE members: containerId={ContainerId}", containerId);
 
-        var graphClient = _graphClientFactory.ForApp();
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
 
         var read = await ReadPermissionsAsync(graphClient, containerId, ct);
 
@@ -360,7 +365,7 @@ public class SpeContainerMembershipService
             "Removing {Count} external members from container {ContainerId}",
             externalMembers.Count, containerId);
 
-        var graphClient = _graphClientFactory.ForApp();
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
         int removedCount = 0;
         int failedCount = 0;
 
@@ -462,11 +467,14 @@ public class SpeContainerMembershipService
             "Removing {Count} contact permission(s) from container {ContainerId} via one paged read",
             distinct.Count, containerId);
 
+        // Ownership outside the try: a refusal is a 404 spe_container_not_owned, not a per-contact failure (task 227d).
+        // Acquiring the client stays inside it, as before: a client that cannot be obtained fails every contact.
+        await _ownership.EnsureOwnedAsync(containerId, ct);
         GraphServiceClient graphClient;
         PermissionReadResult read;
         try
         {
-            graphClient = _graphClientFactory.ForApp();
+            graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
             read = await ReadPermissionsAsync(graphClient, containerId, ct);
         }
         catch (Exception ex)

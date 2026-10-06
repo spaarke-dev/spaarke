@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Office;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Api.Office;
 
@@ -601,10 +602,10 @@ public class OfficeSaveNoTargetContainerContractTests
                 var graphClientFactory = Mock.Of<IGraphClientFactory>();
                 var speFileStore = new Mock<SpeFileStore>(
                     MockBehavior.Loose,
-                    new ContainerOperations(graphClientFactory, Mock.Of<ILogger<ContainerOperations>>()),
-                    new DriveItemOperations(graphClientFactory, Mock.Of<ILogger<DriveItemOperations>>()),
+                    new ContainerOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<ILogger<ContainerOperations>>()),
+                    new DriveItemOperations(graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory), Mock.Of<ILogger<DriveItemOperations>>()),
                     new UploadSessionManager(
-                        graphClientFactory,
+                        graphClientFactory, TestSpeOwnership.AllowAll(graphClientFactory),
                         Mock.Of<IHttpClientFactory>(),
                         Mock.Of<ILogger<UploadSessionManager>>()),
                     new UserOperations(graphClientFactory, Mock.Of<ILogger<UserOperations>>()),

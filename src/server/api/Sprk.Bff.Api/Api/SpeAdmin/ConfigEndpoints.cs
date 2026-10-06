@@ -4,6 +4,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -177,7 +178,7 @@ public static class ConfigEndpoints
 
             return TypedResults.Ok(items);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex,
                 "ListSpeConfigs failed. correlationId={CorrelationId}",
@@ -237,7 +238,7 @@ public static class ConfigEndpoints
                 title: "Not Found",
                 extensions: new Dictionary<string, object?> { ["correlationId"] = context.TraceIdentifier });
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex,
                 "GetSpeConfig failed. id={Id} correlationId={CorrelationId}",
@@ -325,7 +326,7 @@ public static class ConfigEndpoints
 
             return TypedResults.Created($"/api/spe/configs/{newId}", created.ToDetail());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex,
                 "CreateSpeConfig failed. name={Name} correlationId={CorrelationId}",
@@ -409,7 +410,7 @@ public static class ConfigEndpoints
 
             return TypedResults.Ok(updated?.ToDetail() ?? existing.ToDetail());
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex,
                 "UpdateSpeConfig failed. id={Id} correlationId={CorrelationId}",
@@ -479,7 +480,7 @@ public static class ConfigEndpoints
 
             return TypedResults.NoContent();
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogError(ex,
                 "DeleteSpeConfig failed. id={Id} correlationId={CorrelationId}",

@@ -253,6 +253,17 @@ per customer in both models (D-12).
 > authorization*, 2026-08-24). Delegated (OBO) access is isolated by container membership. The owner chose one container
 > type per model and one container per customer (per Dataverse environment), with app-only isolation **enforced in the
 > BFF's code and tests (T227d)**: an app-only SPE call may only target the stamp's own container(s).
+>
+> **How it is enforced (T227d).** Every app-only SPE call in the BFF gets its Graph client from
+> `SpeContainerOwnershipGuard`, which refuses (404 `spe_container_not_owned` — the same answer as "does not exist" —
+> before Graph) any container the stamp
+> does not own. Own = an id in the stamp's container settings (`EmailProcessing__DefaultContainerId`,
+> `Communication__ArchiveContainerId`, and — for environments older than the marker — `SharePointEmbedded__OwnedContainerIds`)
+> **or** a container whose custom property `spaarkeCustomerId` equals the BFF's `Customer__Id`. The BFF writes that
+> marker on every container it creates. SPE Admin on a stamp is confined the same way (owner D29): lists and searches
+> show only the stamp's containers. Container-TYPE operations (settings, permissions, create a type) touch no customer's container data and are not filtered: Graph refuses them app-only, because a stamp's identity holds only `FileStorageContainer.Selected` (no `FileStorageContainerType.*`). The marker stops a misrouted or forged container id; it does not stop another
+> stamp's code, since every stamp identity can rewrite markers. ArchTest `SpeAppOnlyContainerGuardTests` fails the
+> build on an app-only SPE path that bypasses the guard.
 
 Grant the BFF app what it needs on the relevant registration; **do not make it an owner.** The per-app
 grant API is v1.0 `PUT /storage/fileStorage/containerTypeRegistrations/{containerTypeId}/applicationPermissionGrants/{appId}`

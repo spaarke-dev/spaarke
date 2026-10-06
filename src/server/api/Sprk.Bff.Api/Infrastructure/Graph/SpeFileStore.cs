@@ -18,21 +18,22 @@ public class SpeFileStore : ISpeFileOperations
 
     // Optional so existing 4-arg construction (unit tests, legacy callers) keeps compiling.
     // The DI container (DocumentsModule: AddScoped&lt;SpeFileStore&gt;) resolves the registered
-    // IGraphClientFactory into this slot, enabling the FR-26 subscription/delta facade.
-    private readonly IGraphClientFactory? _graphClientFactory;
+    // SpeContainerOwnershipGuard into this slot, enabling the FR-26 subscription/delta facade.
+    // Absent, those methods throw — never an unguarded app-only client (task 227d).
+    private readonly SpeContainerOwnershipGuard? _ownership;
 
     public SpeFileStore(
         ContainerOperations containerOps,
         DriveItemOperations driveItemOps,
         UploadSessionManager uploadManager,
         UserOperations userOps,
-        IGraphClientFactory? graphClientFactory = null)
+        SpeContainerOwnershipGuard? ownership = null)
     {
         _containerOps = containerOps ?? throw new ArgumentNullException(nameof(containerOps));
         _driveItemOps = driveItemOps ?? throw new ArgumentNullException(nameof(driveItemOps));
         _uploadManager = uploadManager ?? throw new ArgumentNullException(nameof(uploadManager));
         _userOps = userOps ?? throw new ArgumentNullException(nameof(userOps));
-        _graphClientFactory = graphClientFactory;
+        _ownership = ownership;
     }
 
     // Container Operations - delegate to ContainerOperations
@@ -60,9 +61,6 @@ public class SpeFileStore : ISpeFileOperations
 
     public Task<ContainerDto?> GetContainerDriveAsync(string containerId, CancellationToken ct = default)
         => _containerOps.GetContainerDriveAsync(containerId, ct);
-
-    public Task<IList<ContainerDto>?> ListContainersAsync(Guid containerTypeId, CancellationToken ct = default)
-        => _containerOps.ListContainersAsync(containerTypeId, ct);
 
     // Upload Operations - delegate to UploadSessionManager.
     // `virtual` enables module-boundary test doubles (Moq) of this concrete facade — the established
@@ -395,7 +393,8 @@ public class SpeFileStore : ISpeFileOperations
     //
     // ADR-007: this is the ONLY place the Graph subscription/delta SDK types live.
     // Callers above the facade (Services/Compose/SpeSyncOrchestrator) receive DTOs.
-    // App-only (managed identity, ADR-028) via IGraphClientFactory.ForApp().
+    // App-only (managed identity, ADR-028) via SpeContainerOwnershipGuard (task 227d): a drive this
+    // stamp does not own is refused before Graph is called.
     // API shape mirrors the proven Services/Communication/GraphSubscriptionManager.
     // =========================================================================
 
@@ -407,7 +406,7 @@ public class SpeFileStore : ISpeFileOperations
         DateTimeOffset expirationDateTime,
         CancellationToken ct = default)
     {
-        var graph = RequireGraphForApp();
+        var graph = await RequireOwnership().ForOwnedContainerAsync(driveId, ct).ConfigureAwait(false);
         var subscription = new Subscription
         {
             ChangeType = "updated",
@@ -430,7 +429,8 @@ public class SpeFileStore : ISpeFileOperations
         DateTimeOffset newExpirationDateTime,
         CancellationToken ct = default)
     {
-        var graph = RequireGraphForApp();
+        // A subscription id names no container; Graph lets an app manage only subscriptions it created.
+        var graph = RequireOwnership().ForTypeWideOperation();
         var renewal = new Subscription { ExpirationDateTime = newExpirationDateTime };
 
         var updated = await graph.Subscriptions[subscriptionId]
@@ -444,7 +444,7 @@ public class SpeFileStore : ISpeFileOperations
     /// <inheritdoc />
     public async Task DeleteSubscriptionAsync(string subscriptionId, CancellationToken ct = default)
     {
-        var graph = RequireGraphForApp();
+        var graph = RequireOwnership().ForTypeWideOperation();
         await graph.Subscriptions[subscriptionId].DeleteAsync(cancellationToken: ct).ConfigureAwait(false);
     }
 
@@ -454,7 +454,8 @@ public class SpeFileStore : ISpeFileOperations
         string? deltaLink,
         CancellationToken ct = default)
     {
-        var graph = RequireGraphForApp();
+        var graph = await RequireOwnership().ForOwnedContainerAsync(driveId, ct).ConfigureAwait(false);
+        EnsureDeltaLinkTargetsDrive(deltaLink, driveId);
         var changes = new List<SpeDriveChange>();
 
         // Initial call: /drives/{id}/items/root/delta. Subsequent rounds replay the stored
@@ -505,11 +506,38 @@ public class SpeFileStore : ISpeFileOperations
         return new SpeDeltaResult(changes, advancedDeltaLink);
     }
 
-    private GraphServiceClient RequireGraphForApp()
-        => (_graphClientFactory ?? throw new InvalidOperationException(
-                "SpeFileStore was constructed without an IGraphClientFactory; SPE subscription/delta " +
-                "operations require app-only Graph access. Resolve SpeFileStore from DI."))
-            .ForApp();
+    private SpeContainerOwnershipGuard RequireOwnership()
+        => _ownership ?? throw new InvalidOperationException(
+                "SpeFileStore was constructed without a SpeContainerOwnershipGuard; SPE subscription/delta " +
+                "operations require app-only Graph access. Resolve SpeFileStore from DI.");
+
+    /// <summary>
+    /// A stored delta link is replayed verbatim, carrying the app-only token. It must be a Graph URL for
+    /// the drive just checked — otherwise the ownership check would vouch for one drive while the request
+    /// read another (or sent the token to another host).
+    /// </summary>
+    internal static void EnsureDeltaLinkTargetsDrive(string? deltaLink, string driveId)
+    {
+        if (deltaLink is null)
+        {
+            return;
+        }
+
+        // The PATH must start with /{version}/drives/{driveId}/ — the query string is not inspected (a drive id
+        // smuggled into it must not satisfy the check), and dot-segments are normalised by Uri first.
+        var isGraph = Uri.TryCreate(deltaLink, UriKind.Absolute, out var uri)
+                      && uri.Scheme == Uri.UriSchemeHttps
+                      && string.Equals(uri.Host, "graph.microsoft.com", StringComparison.OrdinalIgnoreCase);
+        var path = isGraph ? Uri.UnescapeDataString(uri!.AbsolutePath) : string.Empty;
+        var targetsDrive = path.StartsWith($"/v1.0/drives/{driveId}/", StringComparison.Ordinal)
+                           || path.StartsWith($"/beta/drives/{driveId}/", StringComparison.Ordinal);
+
+        if (!targetsDrive)
+        {
+            throw new InvalidOperationException(
+                $"Stored delta link does not target drive {driveId} on Microsoft Graph; refusing to replay it.");
+        }
+    }
 
     private static SpeSubscriptionDto MapSubscription(Subscription subscription)
         => new(

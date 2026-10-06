@@ -71,5 +71,10 @@
   </acceptance-criteria>
 
   <notes>
+    - From T227d (2026-10-06): the BFF recognises a container as the customer's when it is configured (H4b settings)
+      OR carries custom property `spaarkeCustomerId` = the run's customerId (`Customer__Id`). H8 should write that marker
+      on the container it creates/reuses — PATCH /storage/fileStorage/containers/{id}/customProperties (after activation;
+      not settable in the create body) — and find-or-create should look for the marker first (listing by display name is
+      the fallback for containers created before the marker). Marker shape and semantics: SpeContainerOwnershipGuard.MarkOwnedAsync.
   </notes>
 </task>

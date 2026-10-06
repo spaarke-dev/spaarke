@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -285,7 +286,7 @@ public class GrantLifecycleCharacterizationTests
             new RevokeAccessRequest(accessRecordId, contactId, ProjectId, ContainerId: null),
             client.Object,
             new SpeContainerMembershipService(
-                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance),
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance),
             Mock.Of<ITenantCache>(),
             new DefaultHttpContext(), NullLogger<Program>.Instance, CancellationToken.None);
 

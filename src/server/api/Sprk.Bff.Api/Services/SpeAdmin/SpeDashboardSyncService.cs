@@ -19,7 +19,8 @@ namespace Sprk.Bff.Api.Services.SpeAdmin;
 /// Sync flow:
 ///   1. Query sprk_specontainertypeconfigs from Dataverse (all active configs).
 ///   2. For each config, call SpeAdminGraphService.ListContainersAsync() via the appropriate
-///      Graph client (resolved by SpeAdminGraphService.GetClientForConfigAsync).
+///      Graph client (SpeAdminGraphService.GetTypeWideClientForConfigAsync), keeping only this stamp's
+///      containers (SpeAdminGraphService.FilterOwnedAsync, task 227d).
 ///   3. Aggregate: total container count, total storage used, counts by status, per-config breakdown.
 ///   4. Store aggregated DashboardMetrics as JSON in IDistributedCache (key: sdap:spe:dashboard:metrics).
 ///   5. Wait for next interval (configurable, default 15 min) OR immediate signal via Channel.
@@ -425,9 +426,12 @@ public sealed class SpeDashboardSyncService : BackgroundService
 
             try
             {
-                var graphClient = await _graphService.GetClientForConfigAsync(config, ct);
-                var containers = await _graphService.ListContainersAsync(
-                    graphClient, config.ContainerTypeId, ct);
+                // Type-wide listing returns every customer's containers; count only this stamp's (task 227d).
+                var graphClient = await _graphService.GetTypeWideClientForConfigAsync(config, ct);
+                var containers = await _graphService.FilterOwnedAsync(
+                    await _graphService.ListContainersAsync(graphClient, config.ContainerTypeId, ct),
+                    c => c.Id,
+                    ct);
 
                 containerCountByConfig[config.ConfigId.ToString()] = containers.Count;
                 totalContainerCount += containers.Count;

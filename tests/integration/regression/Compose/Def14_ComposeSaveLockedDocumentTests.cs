@@ -55,6 +55,7 @@ using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Regression.Compose;
 
@@ -300,7 +301,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var httpClient = new HttpClient(handler) { BaseAddress = new Uri("https://graph.microsoft.com/v1.0/") };
         var graph = new GraphServiceClient(httpClient);
         var factory = new StubGraphClientFactory(graph);
-        return new UploadSessionManager(factory, Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance);
+        return new UploadSessionManager(factory, TestSpeOwnership.AllowAll(factory), Mock.Of<IHttpClientFactory>(), NullLogger<UploadSessionManager>.Instance);
     }
 }
 

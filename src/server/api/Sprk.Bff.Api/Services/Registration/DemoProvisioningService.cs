@@ -20,7 +20,7 @@ public sealed class DemoProvisioningService
     private readonly RegistrationDataverseService _dataverseService;
     private readonly RegistrationEmailService _emailService;
     private readonly PasswordGenerator _passwordGenerator;
-    private readonly IGraphClientFactory _graphClientFactory;
+    private readonly SpeContainerOwnershipGuard _ownership;
     private readonly DemoProvisioningOptions _options;
     private readonly ILogger<DemoProvisioningService> _logger;
 
@@ -29,7 +29,7 @@ public sealed class DemoProvisioningService
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
         PasswordGenerator passwordGenerator,
-        IGraphClientFactory graphClientFactory,
+        SpeContainerOwnershipGuard ownership,
         IOptions<DemoProvisioningOptions> options,
         ILogger<DemoProvisioningService> logger)
     {
@@ -37,7 +37,7 @@ public sealed class DemoProvisioningService
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
         _passwordGenerator = passwordGenerator ?? throw new ArgumentNullException(nameof(passwordGenerator));
-        _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -163,7 +163,9 @@ public sealed class DemoProvisioningService
             _logger.LogInformation("[Step 7/9] Added to team {TeamName}", environment.TeamName);
 
             // ── Step 8: Grant SPE container Writer access ──
-            // SPE container access is optional — skip gracefully if container ID is a placeholder or grant fails
+            // SPE container access is optional — skip gracefully if container ID is a placeholder or grant fails.
+            // Only a container this BFF owns can be granted (task 227d, owner D29): a target environment served
+            // by another BFF is refused (404 spe_container_not_owned) and lands here as a skipped step.
             try
             {
                 _logger.LogInformation("[Step 8/9] Granting Writer access on SPE container {ContainerId} to user {UserId}",
@@ -248,7 +250,8 @@ public sealed class DemoProvisioningService
     private async Task GrantSpeContainerAccessAsync(
         string containerId, string userId, string upn, CancellationToken ct)
     {
-        var graphClient = _graphClientFactory.ForApp();
+        // Refuses a container this BFF does not own before Graph is called (task 227d).
+        var graphClient = await _ownership.ForOwnedContainerAsync(containerId, ct);
 
         var permissionRequest = new Permission
         {

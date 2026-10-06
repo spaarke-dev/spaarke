@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.AccessControl;
 
@@ -255,7 +256,7 @@ public class ProjectClosureCascadeTests
             new CloseProjectRequest(projectId ?? ProjectId, containerId),
             client.Object,
             spe?.Object ?? new SpeContainerMembershipService(
-                Mock.Of<IGraphClientFactory>(),
+                TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()),
                 NullLogger<SpeContainerMembershipService>.Instance),
             cache ?? Mock.Of<ITenantCache>(),
             AuthenticatedContext(),
@@ -510,7 +511,7 @@ public class ProjectClosureCascadeTests
 
         // Listing the container's members fails, so nothing could be removed.
         var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Graph unreachable"));
 
@@ -538,7 +539,7 @@ public class ProjectClosureCascadeTests
         var client = table.BuildMock();
 
         var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpeBulkRemovalResult(Removed: 3, Failed: 2));
 
@@ -560,7 +561,7 @@ public class ProjectClosureCascadeTests
         var client = table.BuildMock();
 
         var spe = new Mock<SpeContainerMembershipService>(
-            Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+            TestSpeOwnership.AllowAll(Mock.Of<IGraphClientFactory>()), NullLogger<SpeContainerMembershipService>.Instance);
         spe.Setup(s => s.RemoveAllExternalMembersAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SpeBulkRemovalResult(Removed: 4, Failed: 0));
 

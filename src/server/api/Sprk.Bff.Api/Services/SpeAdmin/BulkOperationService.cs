@@ -239,7 +239,6 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         SpeAdminGraphService.ContainerTypeConfig? config;
-        Microsoft.Graph.GraphServiceClient? graphClient;
 
         try
         {
@@ -253,13 +252,11 @@ public sealed class BulkOperationService : BackgroundService
                 status.CompletedAt = DateTimeOffset.UtcNow;
                 return;
             }
-
-            graphClient = await _graphService.GetClientForConfigAsync(config, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "BulkOperationService: Delete job {OperationId} — failed to resolve config or Graph client.",
+                "BulkOperationService: Delete job {OperationId} — failed to resolve config.",
                 operationId);
             status.IsFinished = true;
             status.CompletedAt = DateTimeOffset.UtcNow;
@@ -276,6 +273,9 @@ public sealed class BulkOperationService : BackgroundService
                 // Soft-delete: move to recycle bin (not permanent delete).
                 // GraphCallScope translates ODataError -> SpaarkeStorageException inside
                 // Infrastructure.Graph, so this file catches a Spaarke-domain type (ADR-007 §1).
+                // Per container: one this stamp does not own is refused (404 spe_container_not_owned) and recorded as this item's
+                // error — the batch continues (task 227d, owner D29).
+                var graphClient = await _graphService.GetClientForContainerAsync(config, containerId, ct);
                 await GraphCallScope.Run(
                     () => _graphService.SoftDeleteContainerAsync(graphClient, containerId, ct),
                     $"SoftDeleteContainer({containerId})");
@@ -342,7 +342,6 @@ public sealed class BulkOperationService : BackgroundService
         }
 
         SpeAdminGraphService.ContainerTypeConfig? config;
-        Microsoft.Graph.GraphServiceClient? graphClient;
 
         try
         {
@@ -356,13 +355,11 @@ public sealed class BulkOperationService : BackgroundService
                 status.CompletedAt = DateTimeOffset.UtcNow;
                 return;
             }
-
-            graphClient = await _graphService.GetClientForConfigAsync(config, ct);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _logger.LogError(ex,
-                "BulkOperationService: Permissions job {OperationId} — failed to resolve config or Graph client.",
+                "BulkOperationService: Permissions job {OperationId} — failed to resolve config.",
                 operationId);
             status.IsFinished = true;
             status.CompletedAt = DateTimeOffset.UtcNow;
@@ -378,6 +375,7 @@ public sealed class BulkOperationService : BackgroundService
             {
                 // See the delete path above — GraphCallScope keeps the ODataError inside
                 // Infrastructure.Graph so this file stays ADR-007 §1 clean.
+                var graphClient = await _graphService.GetClientForContainerAsync(config, containerId, ct);
                 await GraphCallScope.Run(
                     () => _graphService.GrantContainerPermissionAsync(
                         graphClient, containerId, request.UserId, request.GroupId, request.Role, ct),

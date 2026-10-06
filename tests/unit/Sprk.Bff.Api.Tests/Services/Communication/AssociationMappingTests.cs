@@ -13,6 +13,7 @@ using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
 using Xunit;
 using DataverseEntity = Microsoft.Xrm.Sdk.Entity;
+using Sprk.Bff.Api.Tests.TestInfrastructure;
 
 namespace Sprk.Bff.Api.Tests.Services.Communication;
 
@@ -87,9 +88,9 @@ public class AssociationMappingTests
 
         var fakeGraphFactory = Mock.Of<IGraphClientFactory>();
         var speFileStore = new SpeFileStore(
-            new ContainerOperations(fakeGraphFactory, Mock.Of<ILogger<ContainerOperations>>()),
-            new DriveItemOperations(fakeGraphFactory, Mock.Of<ILogger<DriveItemOperations>>()),
-            new UploadSessionManager(fakeGraphFactory, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
+            new ContainerOperations(fakeGraphFactory, TestSpeOwnership.AllowAll(fakeGraphFactory), Mock.Of<ILogger<ContainerOperations>>()),
+            new DriveItemOperations(fakeGraphFactory, TestSpeOwnership.AllowAll(fakeGraphFactory), Mock.Of<ILogger<DriveItemOperations>>()),
+            new UploadSessionManager(fakeGraphFactory, TestSpeOwnership.AllowAll(fakeGraphFactory), Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>()),
             new UserOperations(fakeGraphFactory, Mock.Of<ILogger<UserOperations>>()));
 
         return new CommunicationService(

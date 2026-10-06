@@ -1,6 +1,7 @@
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
 
 // Moved from Api/ into Api/SpeAdmin/ by task 060 (spec F02) — it serves the /api/spe surface and
 // every sibling here declares this namespace. File placement only: the 9 route strings are
@@ -305,7 +306,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced by GetClientForConfigAsync: config not in the BFF's tenant, or no Graph client factory
+            // Surfaced by GetClientForContainerAsync: config not in the BFF's tenant, or no ownership guard
             logger.LogError(ex,
                 "Configuration error listing items — Container: {ContainerId}, ConfigId: {ConfigId}, " +
                 "TraceId: {TraceId}",
@@ -673,7 +674,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced by GetClientForConfigAsync's tenant guard, or when drive ID resolution fails.
+            // Surfaced by GetClientForContainerAsync's tenant guard, or when drive ID resolution fails.
             logger.LogError(ex,
                 "Configuration error creating folder — Container: {ContainerId}, FolderName: {FolderName}, " +
                 "ConfigId: {ConfigId}, TraceId: {TraceId}",
@@ -1027,7 +1028,7 @@ public static class ContainerItemEndpoints
             var form = await request.ReadFormAsync(ct);
             formFile = form.Files["file"];
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not SdapProblemException)
         {
             logger.LogWarning(ex,
                 "Failed to read multipart form for upload — Container: {ContainerId}, TraceId: {TraceId}",
@@ -1108,7 +1109,7 @@ public static class ContainerItemEndpoints
         }
         catch (InvalidOperationException ex)
         {
-            // Surfaced by GetClientForConfigAsync's tenant guard, or when upload session creation fails.
+            // Surfaced by GetClientForContainerAsync's tenant guard, or when upload session creation fails.
             logger.LogError(ex,
                 "Configuration error uploading file — Container: {ContainerId}, ConfigId: {ConfigId}, " +
                 "TraceId: {TraceId}",
