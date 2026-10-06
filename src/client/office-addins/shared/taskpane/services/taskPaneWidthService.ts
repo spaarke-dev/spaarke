@@ -56,3 +56,121 @@ export function requestWiderTaskPane(currentWidth: number = window.innerWidth): 
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Expand / collapse (task 103, owner UAT round 6 item 6)
+// ---------------------------------------------------------------------------
+
+/** The expanded pane targets this multiple of the platform default (owner: "3x"). */
+export const TASK_PANE_EXPAND_FACTOR = 3;
+
+/** Word on the web caps the pane at 500 px (Office.TaskPane docs), so it is a known-good last step there. */
+const WEB_MAX_WIDTH_PX = 500;
+
+/** Fractions of the screen's available width tried after the 3x request (Windows/Mac allow up to 50% of the Word window). */
+const SCREEN_FRACTION_STEPS: readonly number[] = [0.5, 0.4, 0.3];
+
+/** How long to wait for the host to apply a width before treating the request as ignored. */
+const RESIZE_SETTLE_TIMEOUT_MS = 300;
+
+/** A width change smaller than this is not treated as the host applying the request. */
+const RESIZE_TOLERANCE_PX = 4;
+
+function getSetWidth(): ((width: number) => void) | null {
+  const taskpane = (Office as unknown as TaskPaneLifeCycle).extensionLifeCycle?.taskpane;
+  return taskpane && typeof taskpane.setWidth === 'function' ? taskpane.setWidth.bind(taskpane) : null;
+}
+
+/**
+ * Whether this host can resize the pane at runtime: the TaskPaneApi 1.1 requirement set is supported, `setWidth`
+ * exists, and the platform's default width is documented. Decided by requirement set, never by host type (NFR-10).
+ * Never throws.
+ */
+export function isTaskPaneResizeSupported(): boolean {
+  try {
+    if (!Office.context.requirements.isSetSupported('TaskPaneApi', '1.1')) return false;
+    if (preferredTaskPaneWidth(String(Office.context.platform)) === null) return false;
+    return getSetWidth() !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The widths to try for "expand", widest first: 3x the platform default, then fractions of the screen, then the
+ * web cap. Out-of-limit requests are silently ignored by the host, so the caller steps down until one takes.
+ * Only widths meaningfully above `currentWidth` are candidates.
+ */
+export function expandCandidateWidths(
+  platform: string | undefined,
+  currentWidth: number,
+  screenWidth: number = typeof window !== 'undefined' ? (window.screen?.availWidth ?? 0) : 0
+): number[] {
+  if (!platform) return [];
+  const base = DEFAULT_WIDTH_BY_PLATFORM[platform];
+  if (base === undefined) return [];
+  const candidates = [base * TASK_PANE_EXPAND_FACTOR];
+  if (Number.isFinite(screenWidth) && screenWidth > 0) {
+    for (const fraction of SCREEN_FRACTION_STEPS) candidates.push(Math.floor(screenWidth * fraction));
+  }
+  if (platform === 'OfficeOnline') candidates.push(WEB_MAX_WIDTH_PX);
+  const floor = Number.isFinite(currentWidth) ? currentWidth + RESIZE_TOLERANCE_PX : 0;
+  return Array.from(new Set(candidates))
+    .filter(width => width > floor)
+    .sort((a, b) => b - a);
+}
+
+/** Resolves once the window resizes or the timeout passes, whichever is first. */
+function waitForResize(timeoutMs: number): Promise<void> {
+  return new Promise(resolve => {
+    const timer = setTimeout(() => done(), timeoutMs);
+    function done(): void {
+      window.removeEventListener('resize', done);
+      clearTimeout(timer);
+      resolve();
+    }
+    window.addEventListener('resize', done);
+  });
+}
+
+/**
+ * Widens the pane as far as the host allows, up to 3x the platform default: requests each candidate width from
+ * widest to narrowest until the pane's own viewport width actually changes. Returns the width that took, or
+ * `null` when none did (API unsupported, nothing wider than the current width, every request ignored, or a
+ * failure). Never throws; a failure leaves the width unchanged.
+ */
+export async function expandTaskPane(): Promise<number | null> {
+  try {
+    if (!isTaskPaneResizeSupported()) return null;
+    const setWidth = getSetWidth();
+    if (!setWidth) return null;
+    const candidates = expandCandidateWidths(String(Office.context.platform), window.innerWidth);
+    for (const width of candidates) {
+      const before = window.innerWidth;
+      setWidth(width);
+      await waitForResize(RESIZE_SETTLE_TIMEOUT_MS);
+      if (Math.abs(window.innerWidth - before) > RESIZE_TOLERANCE_PX) return width;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Returns the pane to the round-4 width (`preferredTaskPaneWidth`, default + 75). Returns the width requested, or
+ * `null` when nothing was requested. Unlike {@link requestWiderTaskPane} this does shrink: it is the explicit
+ * "collapse" action. Never throws.
+ */
+export function collapseTaskPane(): number | null {
+  try {
+    if (!isTaskPaneResizeSupported()) return null;
+    const width = preferredTaskPaneWidth(String(Office.context.platform));
+    const setWidth = getSetWidth();
+    if (width === null || !setWidth) return null;
+    setWidth(width);
+    return width;
+  } catch {
+    return null;
+  }
+}

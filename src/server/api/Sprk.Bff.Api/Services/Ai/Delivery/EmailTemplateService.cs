@@ -327,8 +327,13 @@ internal sealed record DataverseEmailTemplate
     [JsonPropertyName("ispersonal")]
     public bool IsPersonal { get; init; }
 
+    /// <summary>
+    /// The entity the template is for, as the Web API returns it: a logical-name STRING (e.g. <c>"contact"</c>,
+    /// <c>"systemuser"</c>), not a number. Typed <c>int</c> before 2026-10-06, which failed every template read
+    /// with a JsonException (found by unified-access-control-r2's task 161 live gate).
+    /// </summary>
     [JsonPropertyName("templatetypecode")]
-    public int TemplateTypeCode { get; init; }
+    public string? TemplateTypeCode { get; init; }
 }
 
 /// <summary>

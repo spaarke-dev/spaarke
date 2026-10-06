@@ -3,9 +3,9 @@
  * task 092 / UAT-3+UAT-8 — 2026-10-03 round-3 UAT, `notes/042-uat-round3-2026-10-03.md` §1).
  *
  * Covers:
- * - Two INDEPENDENT sections ("Most similar documents" / "Matching records"), each with its own
+ * - Two INDEPENDENT sections ("Similar Documents" / "Matching records"), each with its own
  *   loading, empty and error state — neither section's state affects the other's render (UAT-3/8).
- * - Exactly ONE scroll container for the results, with no `maxHeight` cap anywhere (UAT-3).
+ * - Task 102: each section has its OWN scroll container, with no `maxHeight` cap anywhere.
  * - Opening a document row / a parent (hub) row / a matching-record row via `onOpenRecord`, gated by
  *   its mere presence (NFR-10) — omitted means every row is plain, non-interactive text.
  * - A hub row with no real record id (the `thread-` shape) never renders as a button, even when
@@ -90,8 +90,8 @@ function recordsResult(overrides: Partial<UseFindRecordMatchesResult> = {}): Use
 }
 
 describe('FindResultsList', () => {
-  describe('the single scroll container (task 092, UAT-3)', () => {
-    it('renders exactly one scroll-area wrapper, containing BOTH section headings', () => {
+  describe('two sections, each with its own scroll container (task 102, UAT round 6 item 4)', () => {
+    it('renders "Similar Documents" and "Matching records" as separate sections with separate scrollers', () => {
       const announce = jest.fn();
       renderWithProvider(
         <FindResultsList
@@ -101,10 +101,39 @@ describe('FindResultsList', () => {
         />
       );
 
-      const scrollAreas = screen.getAllByTestId('find-results-scroll-area');
-      expect(scrollAreas).toHaveLength(1);
-      expect(within(scrollAreas[0]!).getByText('Most similar documents')).toBeTruthy();
-      expect(within(scrollAreas[0]!).getByText('Matching records')).toBeTruthy();
+      const docsSection = screen.getByTestId('find-documents-section');
+      const recordsSection = screen.getByTestId('find-records-section');
+      expect(within(docsSection).getByText('Similar Documents')).toBeTruthy();
+      expect(within(recordsSection).getByText('Matching records')).toBeTruthy();
+      expect(screen.queryByText('Most similar documents')).toBeNull();
+
+      const docsScroll = screen.getByTestId('find-documents-scroll');
+      const recordsScroll = screen.getByTestId('find-records-scroll');
+      expect(docsScroll).not.toBe(recordsScroll);
+      expect(docsSection.contains(docsScroll)).toBe(true);
+      expect(recordsSection.contains(recordsScroll)).toBe(true);
+      expect(docsScroll.contains(recordsScroll)).toBe(false);
+      expect(within(docsScroll).getByText('MSA Draft')).toBeTruthy();
+      expect(within(recordsScroll).getByText('Acme v. Globex')).toBeTruthy();
+      // The divider sits between the two sections.
+      expect(screen.getByRole('separator')).toBeTruthy();
+    });
+
+    it('the pinned "this document\'s record" row lives with Similar Documents', () => {
+      renderWithProvider(
+        <FindResultsList
+          documents={loaded([resultNode('doc-1', 'MSA Draft', 0.9), hubNode('matter-m1', 'matter', 'Smith v Smith')])}
+          announce={jest.fn()}
+          records={recordsResult()}
+        />
+      );
+      expect(within(screen.getByTestId('find-documents-scroll')).getByTestId('find-results-hub-section')).toBeTruthy();
+    });
+
+    it('without records, only the documents pane renders (no divider)', () => {
+      renderWithProvider(<FindResultsList documents={loaded([resultNode('doc-1', 'A', 0.9)])} announce={jest.fn()} />);
+      expect(screen.queryByRole('separator')).toBeNull();
+      expect(screen.getByTestId('find-documents-scroll')).toBeTruthy();
     });
 
     it('never has a 360px maxHeight anywhere in the component source (regression guard)', () => {
@@ -279,10 +308,32 @@ describe('FindResultsList', () => {
       expect(hubSection.textContent).toContain('Matter: Smith v Smith');
       expect(hubSection.textContent).toMatch(/not a similarity match/i);
 
-      const scrollArea = screen.getByTestId('find-results-scroll-area');
-      expect(within(scrollArea).getByRole('list', { name: 'Most similar documents' }).textContent).not.toContain(
+      const scrollArea = screen.getByTestId('find-documents-scroll');
+      expect(within(scrollArea).getByRole('list', { name: 'Similar Documents' }).textContent).not.toContain(
         'Smith v Smith'
       );
+    });
+  });
+
+  describe('row labels (task 102 label check — server placeholders are not shown as data)', () => {
+    it('a hub whose name is the server placeholder (label === type) reads "Matter (name unavailable)", not "Matter: Matter"', () => {
+      renderWithProvider(
+        <FindResultsList documents={loaded([hubNode('matter-m1', 'matter', 'Matter')])} announce={jest.fn()} />
+      );
+      const hub = screen.getByTestId('find-results-hub-section');
+      expect(hub.textContent).toContain('Matter (name unavailable)');
+      expect(hub.textContent).not.toContain('Matter: Matter');
+    });
+
+    it('a document with the server fallback type "Unknown" omits it from the meta line', () => {
+      const node: FindResultNode = {
+        id: 'd1',
+        type: 'related',
+        data: { label: 'SEC FORM 4_2.pdf', documentType: 'Unknown', similarity: 1 },
+      };
+      renderWithProvider(<FindResultsList documents={loaded([node])} announce={jest.fn()} />);
+      expect(screen.getByText('100% match')).toBeTruthy();
+      expect(screen.queryByText(/Unknown/)).toBeNull();
     });
   });
 
@@ -496,9 +547,11 @@ describe('FindResultsList', () => {
       const docs = Array.from({ length: 25 }, (_, i) => resultNode(`d-${i}`, `Doc ${i}`, 0.9));
       renderWithProvider(<FindResultsList documents={loaded(docs)} announce={announce} records={recordsResult()} />);
 
-      const scrollArea = screen.getByTestId('find-results-scroll-area');
-      expect(within(scrollArea).getByTestId('find-results-sentinel')).toBeTruthy();
-      expect(within(scrollArea).getByTestId('find-records-sentinel')).toBeTruthy();
+      // Each sentinel sits at the end of its OWN scroller, so each load is triggered by its own scroll.
+      expect(within(screen.getByTestId('find-documents-scroll')).getByTestId('find-results-sentinel')).toBeTruthy();
+      expect(within(screen.getByTestId('find-records-scroll')).getByTestId('find-records-sentinel')).toBeTruthy();
+      expect(within(screen.getByTestId('find-documents-scroll')).queryByTestId('find-records-sentinel')).toBeNull();
+      expect(within(screen.getByTestId('find-records-scroll')).queryByTestId('find-results-sentinel')).toBeNull();
     });
   });
 });

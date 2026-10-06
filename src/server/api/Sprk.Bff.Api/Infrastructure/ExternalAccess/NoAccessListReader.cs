@@ -296,17 +296,17 @@ public class NoAccessListReader : INoAccessListReader
         var parts = new List<string>();
         foreach (var cid in subjects.Contacts)
         {
-            parts.Add($"sprk_subjectcontact eq {cid}");
+            parts.Add($"_sprk_subjectcontact_value eq {cid}");
         }
 
         if (subjects.Organizations.Count > 0)
         {
-            parts.Add("(" + string.Join(" or ", subjects.Organizations.Select(id => $"sprk_subjectorganization eq {id}")) + ")");
+            parts.Add("(" + string.Join(" or ", subjects.Organizations.Select(id => $"_sprk_subjectorganization_value eq {id}")) + ")");
         }
 
         if (subjects.User is { } userId)
         {
-            parts.Add($"sprk_subjectsystemuser eq {userId}");
+            parts.Add($"_sprk_subjectsystemuser_value eq {userId}");
         }
 
         // Caller (GetDeniedRecordsAsync) guarantees at least one part before calling this.
@@ -315,7 +315,7 @@ public class NoAccessListReader : INoAccessListReader
 
     /// <summary>The object <c>$filter</c> fragment for one chunk of referenced-organization ids (ethical wall).</summary>
     internal static string BuildOrganizationObjectFilter(IEnumerable<Guid> organizationIds)
-        => "(" + string.Join(" or ", organizationIds.Select(id => $"sprk_objectorganization eq {id}")) + ")";
+        => "(" + string.Join(" or ", organizationIds.Select(id => $"_sprk_objectorganization_value eq {id}")) + ")";
 
     /// <summary>
     /// The object <c>$filter</c> fragment for one chunk of candidate record ids (per-child

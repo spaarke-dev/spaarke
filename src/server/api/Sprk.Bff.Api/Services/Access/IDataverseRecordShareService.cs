@@ -54,12 +54,37 @@ public interface IDataverseRecordShareService
         string accessRightsCsv,
         CancellationToken ct = default);
 
-    /// <inheritdoc cref="DataverseWebApiService.RevokeAccessAsync"/>
+    /// <inheritdoc cref="DataverseWebApiService.RevokeAccessAsync(string, Guid, DataversePrincipalRef, CancellationToken)"/>
+    /// <remarks>App-only: it says nothing about who owns the record. Dataverse refuses this for the share of the record's
+    /// current owning user (0x80040223) — a caller that may be revoking THAT share uses the overload that names the
+    /// owner.</remarks>
     Task RevokeAccessAsync(
         string entitySetName,
         Guid recordId,
         DataversePrincipalRef principal,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Revokes <paramref name="principal"/>'s share on a record whose CURRENT owner the caller knows
+    /// (<paramref name="recordOwner"/>, read back by the caller). When the principal IS the owning user, the revoke runs as
+    /// that user — the only identity Dataverse lets revoke the owner's own share ("Only owner can revoke access to the
+    /// owner", 0x80040223); for every other principal, and for a team-owned record, it is the app-only revoke above.
+    /// </summary>
+    /// <remarks>
+    /// <para>unified-access-control-r2 (live on dev 2026-10-06): the unsecure sweep revoked the new owner's own share
+    /// app-only and every creator-driven unsecure ended <c>sweepComplete: false</c>; provisioning's undo on a record the
+    /// creator owns ended <c>sharesRestored: false</c>. Both callers know the owner, so they say so here rather than this
+    /// seam reading the owner again per revoke.</para>
+    /// <para>The default body is the app-only revoke: an implementation that predates this member behaves exactly as it
+    /// did, and against Dataverse that fails closed (the owner's share is refused, never silently kept as revoked).</para>
+    /// </remarks>
+    Task RevokeAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        DataversePrincipalRef recordOwner,
+        CancellationToken ct = default)
+        => RevokeAccessAsync(entitySetName, recordId, principal, ct);
 
     /// <inheritdoc cref="DataverseWebApiService.GetPrincipalAccessAsync"/>
     Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(
@@ -150,6 +175,15 @@ public sealed class DataverseRecordShareService : IDataverseRecordShareService
         DataversePrincipalRef principal,
         CancellationToken ct = default)
         => _dataverse.RevokeAccessAsync(entitySetName, recordId, principal, ct);
+
+    /// <inheritdoc />
+    public Task RevokeAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        DataversePrincipalRef recordOwner,
+        CancellationToken ct = default)
+        => _dataverse.RevokeAccessAsync(entitySetName, recordId, principal, recordOwner, ct);
 
     /// <inheritdoc />
     public Task<IReadOnlyList<DataversePrincipalAccess>> GetPrincipalAccessAsync(

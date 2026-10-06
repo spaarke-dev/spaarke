@@ -747,7 +747,7 @@ That matters disproportionately because perturbation testing is the primary anti
 
 ### G-13: A Dataverse `$select` is all-or-nothing
 
-> **Date**: 2026-08-26 · **Class**: Gotcha · **Occurrences**: 3 (`RS-1`, RecordHeader UAT, and the generic guard that closed it)
+> **Date**: 2026-08-26 (extended 2026-10-06) · **Class**: Gotcha · **Occurrences**: 5 (`RS-1`, RecordHeader UAT, the generic guard that closed it, and two `$filter` cases in 2026-10)
 
 **What happened**: Three separate times, one invalid column name in a `useRecordFieldValues` `$select` produced HTTP 400 for the **whole request**, so every field came back null and the entire control rendered em-dashes. It presents as "the control is broken", not as "one field is wrong", which sends diagnosis in the wrong direction.
 
@@ -761,6 +761,8 @@ That matters disproportionately because perturbation testing is the primary anti
 **Prevention**: Never let a `$select` be assembled from names that a *derivation step* produced without a fallback. When adding or renaming a Dataverse column that any control selects, grep for the old name across `src/client/**` — a deleted column is a live outage, not a stale reference.
 
 **Evidence**: `projects/record-header-and-notepad-r2/notes/rs1-hotfix-decision.md`; `notes/decisions/033-def1-metadata-never-reached-resolver.md`.
+
+**Same rule in `$filter` (2026-10-06, `unified-access-control-r2`)**: a lookup in a `$filter` must also be `_<name>_value eq {id}`; `<name> eq {id}` is a 400 (`0x80060888` "Could not find a property named …"). `NoAccessListReader` filtered all four No Access lookups that way (`sprk_subjectcontact` / `sprk_subjectorganization` / `sprk_subjectsystemuser` / `sprk_objectorganization`). Every deny-list read failed closed on dev, so secure provisioning returned 500 and No Access checks refused. The provisioning field-mapping seeder had the same bug (#1318). **It survived every suite because the test doubles answered on the filter TEXT and had copied the wrong form.** A double that matches on a query string proves only that the code and the double agree. When a test double keys on a Dataverse query, take its key from a query proven against the live Web API, not from the code under test. The sweep that found the second case (lookup names from metadata, grepped against `eq`/`ne` in `src/**`) is a cheap check to repeat.
 
 ---
 

@@ -220,3 +220,97 @@ describe('RelatedToPicker — round 5 (task 099)', () => {
     );
   });
 });
+
+describe('RelatedToPicker — round 6 (task 101)', () => {
+  const lists = {
+    matterTypes: { options: [{ id: 'mt-1', name: 'Litigation' }], loading: false, error: null, retry: jest.fn() },
+    practiceAreas: { options: [{ id: 'pa-1', name: 'Appellate' }], loading: false, error: null, retry: jest.fn() },
+    projectTypes: { options: [{ id: 'pt-1', name: 'Due Diligence' }], loading: false, error: null, retry: jest.fn() },
+    defaultAssignee: null,
+  };
+
+  function renderWithForm(onSearch = jest.fn().mockResolvedValue([ACME])) {
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RelatedToPicker
+          value={null}
+          onChange={jest.fn()}
+          candidates={[]}
+          onSearch={onSearch}
+          onCreateRecord={jest.fn()}
+          createForm={lists}
+          allowedTypes={['Matter', 'Project', 'Invoice']}
+          defaultType="Matter"
+        />
+      </FluentProvider>
+    );
+    return { onSearch };
+  }
+
+  it('item 2: a "Create New Record" heading sits above the pills only while the form is open', () => {
+    renderWithForm();
+    expect(screen.queryByRole('heading', { name: 'Create New Record' })).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    const heading = screen.getByRole('heading', { name: 'Create New Record' });
+    const pills = screen.getByRole('radiogroup');
+    // Heading precedes the pills in document order.
+    expect(heading.compareDocumentPosition(pills) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByRole('heading', { name: 'Create New Record' })).toBeNull();
+  });
+
+  it('item 1: a pill switches the open form to that type; shared values carry over, type-only values do not', () => {
+    renderWithForm();
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+
+    fireEvent.change(screen.getByLabelText('New Matter name'), { target: { value: 'Acme' } });
+    fireEvent.change(screen.getByLabelText('Description'), { target: { value: 'From Word' } });
+    expect(screen.getByRole('combobox', { name: 'Matter Type' })).toBeTruthy();
+
+    const projectPill = screen.getByRole('radio', { name: 'Project' });
+    projectPill.focus();
+    fireEvent.click(projectPill);
+
+    // Still the form (not the search view), now Project's fields; Name/Description kept.
+    expect(screen.getByRole('heading', { name: 'Create New Record' })).toBeTruthy();
+    expect((screen.getByLabelText('New Project name') as HTMLInputElement).value).toBe('Acme');
+    expect((screen.getByLabelText('Description') as HTMLTextAreaElement).value).toBe('From Word');
+    expect(screen.getByRole('combobox', { name: 'Project Type' })).toBeTruthy();
+    expect(screen.queryByRole('combobox', { name: 'Matter Type' })).toBeNull();
+    expect(screen.queryByRole('combobox', { name: 'Practice Area' })).toBeNull();
+    // Focus stays on the pill.
+    expect(document.activeElement).toBe(screen.getByRole('radio', { name: 'Project' }));
+    // Project has no required reference field: Create is enabled with just the carried name.
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
+  });
+
+  it('switching back to Matter requires Matter Type + Practice Area again (type-only values were dropped)', async () => {
+    renderWithForm();
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.change(screen.getByLabelText('New Matter name'), { target: { value: 'Acme' } });
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('radio', { name: 'Invoice' }));
+    expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
+    fireEvent.click(screen.getByRole('radio', { name: 'Matter' }));
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
+  });
+
+  it('Cancel after a type switch restores the pre-"+ New" view: the original pill, query and results', async () => {
+    const { onSearch } = renderWithForm();
+    fireEvent.change(screen.getByPlaceholderText('Look up related Matter...'), { target: { value: 'acme' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Search' }));
+    await screen.findByText('MAT-1 : Acme v. Beta');
+
+    fireEvent.click(screen.getByRole('button', { name: 'New' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Invoice' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    expect(screen.getByRole('radio', { name: 'Matter' })).toHaveAttribute('aria-checked', 'true');
+    expect((screen.getByPlaceholderText('Look up related Matter...') as HTMLInputElement).value).toBe('acme');
+    expect(screen.getByText('MAT-1 : Acme v. Beta')).toBeTruthy();
+    expect(onSearch).toHaveBeenCalledTimes(1);
+  });
+});

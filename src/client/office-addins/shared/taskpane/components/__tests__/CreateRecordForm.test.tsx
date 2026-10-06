@@ -203,6 +203,31 @@ describe('CreateRecordForm — submit and failure', () => {
     expect(screen.getByRole('button', { name: 'Create' })).toBeEnabled();
   });
 
+  it('Cancel is left of Create (the Save tab footer pattern)', () => {
+    renderForm({ type: 'Invoice' });
+
+    const cancel = screen.getByRole('button', { name: 'Cancel' });
+    const create = screen.getByRole('button', { name: 'Create' });
+    expect(cancel.compareDocumentPosition(create) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('a type change keeps Name/Description/Assigned To and drops Matter Type / Practice Area (task 101)', async () => {
+    const { onSubmit, rerenderWith } = renderForm({ type: 'Matter' });
+    await userEvent.type(screen.getByLabelText('New Matter name'), 'Acme');
+    await userEvent.type(screen.getByLabelText('Description'), 'From Word');
+    await choose('Matter Type', 'Litigation');
+    await choose('Practice Area', 'Appellate');
+
+    rerenderWith({ type: 'Project' });
+    await userEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      name: 'Acme',
+      description: 'From Word',
+      assignedToContactId: ME.id,
+    });
+  });
+
   it('Cancel calls onCancel and submits nothing', async () => {
     const onCancel = jest.fn();
     const { onSubmit } = renderForm({ type: 'Invoice', onCancel });

@@ -430,7 +430,30 @@ steps below are reads or user actions through the product; no schema change.
   `prvAssignsprk_Event`, `prvWritesprk_CommunicationAccount`, `prvAppendTocontact` (via `RetrieveUserPrivileges` or
   the role read used in §6). If Assign is missing, trigger 4 fires — stop and ask the owner (land 146 first, recommended).
 
-Results: _pending — main session_.
+Results (2026-10-06, main session). Dev, BFF from master `d254d7166`, run through the BFF routes the UI calls.
+The caller was **testuser1@spaarke.com** (systemuser `8d7bad7a`): no admin role, in Spaarke Business Unit 1 (a child of
+root), member only of that BU's team, not "Spaarke Demo". The round-11 user `uac.child.user` has no known password, so it
+was replaced.
+
+| Step | Result |
+|---|---|
+| (a) send with an attachment the caller cannot read (doc `cc3a88c6`, under MAT-000011) | ✅ 403 `sdap.access.deny.communication.send`; nothing sent |
+| (b) template render, regarding matter the caller cannot read (`ced2c3d9`) | ✅ 403 `sdap.access.deny.communication.template_render` |
+| (b) template render on a readable record; merge parity | ❌ 500 for EVERY template and caller (admin, no regarding too). Pre-existing: `DataverseEmailTemplate.TemplateTypeCode` typed `int`, but the Web API returns a string. Fixed in PR #1314. Parity is re-checked after its deploy, but dev has no Spaarke email template, only Microsoft's built-ins |
+| (c) archive / suggest-associations on hidden communication `41882db9`; `GET /status` | ✅ 404 `COMMUNICATION_NOT_FOUND` ×2; 404; `sprk_document` count 1 → 1 |
+| (d) send with a readable attachment (`3816c8e5`), matter CMRCL-734193 | ✅ 200 |
+| (d) Save to SharePoint (`/archive`) on that email | ❌ 500. Pre-existing since 07fd904d77: `FindExistingArchiveDocumentAsync` filtered `sprk_document` on the nonexistent `sprk_communication`. Fixed in PR #1314; re-checked after its deploy |
+| (d) create record thread on CMRCL-734193 | ✅ 200; name = "Test New Matter via Workspace" (the record's own name) |
+| (d) pin own thread / a thread in the caller's BU (Deep Write) | ✅ 200 / ✅ 200. Correct: the caller holds Write |
+| (d) pin a thread the caller can READ but not write (admin thread on MAT-000011, Read-only share) | ✅ 403 `THREAD_PIN_FORBIDDEN` |
+| (d) delete own message in a Direct thread (app-owned row) | 403 `MESSAGE_DELETE_FORBIDDEN`, the §4.3 behaviour change, recorded for the owner |
+| (d) reconcile tabs (apply/dismiss/undo/create-task) | Not testable: the caller's queue feed is empty on dev |
+| (e) verify account `cb2132f9` as the caller, then as admin | ✅ 404 `ACCOUNT_NOT_FOUND`, status/modifiedon unchanged; ✅ 200 as admin |
+| (f) Office add-in suggestions | Not run (no suitable mailbox item) |
+| (g) caller privileges | Create Event/Document Deep, Assign Event **Deep** (trigger 4 does not fire), Write CommunicationAccount Basic, AppendTo contact Basic |
+
+Test records left on dev, all named "UAC-r2 161 gate": one sent email, two record threads (one with a Read-only share to
+testuser1), and a direct thread with one message.
 
 ## 14. `.claude/**` edits needed (main session)
 

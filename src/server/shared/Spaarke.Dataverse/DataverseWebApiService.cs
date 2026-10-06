@@ -752,8 +752,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         {
             ["sprk_eventlogname"] = logName,
             ["sprk_Event@odata.bind"] = $"/sprk_events({eventId})", // R5 002: PascalCase nav prop (metadata-verified)
-            ["sprk_action"] = action,
-            ["sprk_description"] = description
+            ["sprk_action"] = action
+            // No description column: sprk_eventlog has none, and writing one made every log write a 400. The
+            // description is recorded in the caller's [EventLog] trace only.
         };
         if (owningTeamId is { } teamId && teamId != Guid.Empty)
         {
@@ -1364,6 +1365,10 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// share that does not exist is a Dataverse no-op; Microsoft Learn does not document that case. A caller that must
     /// be idempotent reads the shares first (<see cref="GetPrincipalAccessOrThrowAsync"/>) and skips the call when
     /// there is nothing to revoke.</para>
+    ///
+    /// <para><b>Not for the owner's own share.</b> Dataverse refuses an app-only revoke of the share held by the record's
+    /// CURRENT owning user (0x80040223). A caller that may be revoking that share uses
+    /// <see cref="RevokeAccessAsync(string, Guid, DataversePrincipalRef, DataversePrincipalRef, CancellationToken)"/>.</para>
     /// </remarks>
     public async Task RevokeAccessAsync(
         string entitySetName,
@@ -1373,6 +1378,48 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         => await SendShareWriteAsync(
             "RevokeAccess", RecordShareWrite.Revoke, entitySetName, recordId,
             RevokePayload(entitySetName, recordId, principal), ct);
+
+    /// <summary>
+    /// Revokes a principal's POA share on a record whose CURRENT owner the caller knows — app-only, except for the one
+    /// share Dataverse lets nobody but its holder revoke: the share of the record's owning USER, which is revoked AS that
+    /// user.
+    /// </summary>
+    /// <remarks>
+    /// <para>unified-access-control-r2 (live on dev 2026-10-06). Dataverse refuses an app-only RevokeAccess of a share held
+    /// by the record's current owning user — HTTP 400 <c>0x80040223</c> "Only owner can revoke access to the owner" — and
+    /// accepts the same request sent as that user (<c>MSCRMCallerID</c>, 204; the BFF's application user holds
+    /// <c>prvActOnBehalfOfAnotherUser</c>). So when <paramref name="recordOwner"/> is a systemuser AND is
+    /// <paramref name="principal"/>, the request runs as the principal, through the shared request builder
+    /// (<see cref="DataverseImpersonation.ApplyAsSystemUser"/>). The impersonated identity is therefore always the revokee
+    /// itself and only when it owns the record: no other principal is ever impersonated, and a team (owner or principal)
+    /// never is — every other combination is byte-for-byte the app-only revoke above.</para>
+    /// <para>Same name as the app-only revoke on purpose: the POA guards recognise a client share write by the three names
+    /// GrantAccessAsync / ModifyAccessAsync / RevokeAccessAsync, and this one sends through the same notifying sender.</para>
+    /// </remarks>
+    /// <param name="recordOwner">
+    /// The record's CURRENT owner, as the caller last read it back. Used only to decide whether this is the owner's own
+    /// share.
+    /// </param>
+    public async Task RevokeAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        DataversePrincipalRef principal,
+        DataversePrincipalRef recordOwner,
+        CancellationToken ct = default)
+        => await SendShareWriteAsync(
+            "RevokeAccess", RecordShareWrite.Revoke, entitySetName, recordId,
+            RevokePayload(entitySetName, recordId, principal), ct,
+            impersonateSystemUserId: IsOwnersOwnShare(principal, recordOwner) ? principal.Id : null);
+
+    /// <summary>
+    /// Whether <paramref name="principal"/>'s share is the one held by the record's current owning USER — the share
+    /// Dataverse lets only that user revoke. A team (as principal or as owner) never is.
+    /// </summary>
+    private static bool IsOwnersOwnShare(DataversePrincipalRef principal, DataversePrincipalRef recordOwner)
+        => recordOwner.Kind == DataversePrincipalKind.SystemUser
+           && principal.Kind == DataversePrincipalKind.SystemUser
+           && recordOwner.Id == principal.Id
+           && principal.Id != Guid.Empty;
 
     /// <summary>The <c>Target</c> + <c>Revokee</c> body RevokeAccess takes — the same key shape as a grant's.</summary>
     private static Dictionary<string, object> RevokePayload(string entitySetName, Guid recordId, DataversePrincipalRef principal)
@@ -1400,6 +1447,9 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
     /// reflection, a late binder, an expression tree). What lies outside it is a request that does not go through those
     /// methods: a raw HTTP call, including one assembled from this class's private members by reflection (its generic POST
     /// helper, request builder or <see cref="HttpClient"/>) — task 132's notes record that as a known limit.
+    /// <para><paramref name="impersonateSystemUserId"/>: null (every grant and modify, and every revoke but the owner's
+    /// own) sends app-only; set only by <see cref="RevokeAccessAsync(string, Guid, DataversePrincipalRef, DataversePrincipalRef, CancellationToken)"/> for
+    /// the record owner's own share.</para>
     /// </remarks>
     private async Task SendShareWriteAsync(
         string action,
@@ -1407,11 +1457,12 @@ public class DataverseWebApiService : IEventDataverseService, IFieldMappingDatav
         string entitySetName,
         Guid recordId,
         Dictionary<string, object> payload,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? impersonateSystemUserId = null)
     {
         try
         {
-            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, action, ct);
+            using var request = await CreateAuthenticatedRequestAsync(HttpMethod.Post, action, ct, impersonateSystemUserId);
             request.Content = JsonContent.Create(payload);
             using var response = await _httpClient.SendAsync(request, ct);
             response.EnsureSuccessStatusCode();

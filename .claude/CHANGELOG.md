@@ -15,6 +15,10 @@ DataGrid External-Host Gate, which the row was missing. The troubleshooting tabl
 owner-approved (2026-10-06) CLAUDE.md §6.5 path-A exception to the workflow's "do not extend without spec
 amendment" (ci-cd-unit-test-remediation-r1 FR-A02), scoped to this one job.
 
+###### 2026-10-06 — FAILURE-MODES G-13 extended to `$filter` (unified-access-control-r2 dev live gates)
+
+`.claude/FAILURE-MODES.md` G-13: a lookup in a `$filter` must be `_<name>_value`. The section now records the No Access reader defect (every deny-list read was a 400 on dev and failed closed, which blocked secure provisioning) and the provisioning seeder case (#1318). It also records the lesson: a test double that matches on query text can't catch a wrong query, because it copies the same mistake.
+
 ###### 2026-10-05 — bff-deploy route verification and smoke check; FAILURE-MODES AP-15 (unified-access-control-r2 tasks 140, 166, 167)
 
 `.claude/skills/bff-deploy/SKILL.md`: §9c's smoke check moves from the retired anonymous `/healthz/dataverse/doc/{id}` to
