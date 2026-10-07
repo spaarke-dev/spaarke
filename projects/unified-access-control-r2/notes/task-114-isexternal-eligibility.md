@@ -55,9 +55,11 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
 - New `Infrastructure/ExternalAccess/RestrictedExternalShareRemover` (Component Justification in its header): on a
   Restricted root, removes every DIRECT system-user share whose holder's `sprk_isexternal` is a stored `true`. Strict
   read first, revoke through the one share seam, strict read-back, root-set cache cleared in `finally`, task 149's child
-  sync after a removal. Never a team share, never an internal user's, never on a non-Restricted record. **S5**: on a
-  Restricted SECURE record, when no enabled internal user with a readable share would remain, nothing is removed and the
-  external sharers are reported `keptAsLastReader`. Fails closed on unreadable flags / shares / users.
+  sync after a removal. Never a team share, never an internal user's, never on a non-Restricted record. **Restricted wins
+  over the last-reader rule** (owner round 67 item 3, decided 2026-10-06 — superseding the S5 hold first built here): on a
+  Restricted SECURE record the external sharers are removed even when they are its last readers, and the pass reports
+  `noInternalReader` (`no-internal-reader — an administrator must share it with an internal user`) with a warning naming
+  the record — not a failure; administrators still see it. Fails closed on unreadable flags / shares / users.
 - Sync route: runs between the No Access enforcement and the materializer; response gains `restrictedExternal`
   (additive); a removal that cannot be confirmed → 500 `sdap.access.assigned.restricted_external_incomplete`.
 - Materializer: an auto share the remover took away is recorded `Skipped(restricted)` — a KNOWN cause, never
@@ -78,8 +80,8 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
 - **(b) reconciliation removal** — `AssignedAccessReconciliationJob` scans Restricted roots
   (`AssignedAccessStore.ScanRestrictedRootsAsync`, `sprk_accesspermission eq 100000002`) and runs the remover on each,
   before the materializer. WRITES ON (like task 143's No Access job — it only removes); NOT behind the revoke-on-change
-  switch (that switch governs ended assignments). A root only in the Restricted set is not materialized. A kept S5 share
-  makes the run partial (`KEPT-LAST-READER`); an unconfirmed removal fails the run. **Cost: small** (one scan, one call).
+  switch (that switch governs ended assignments). A root only in the Restricted set is not materialized. A record left with
+  no internal reader is counted (`noInternalReader`) without making the run partial; an unconfirmed removal fails the run. **Cost: small** (one scan, one call).
 - **(c) Manage Access label** — `/user-shares` reads `sprk_isexternal` with the names and, when one is listed, the
   root's flags; `RecordUserShare.ExternalNoAccess` (additive) is true for an external-flagged user on a Restricted
   record. `AccessGrantModal` shows **"External user — no access"** (`EXTERNAL_USER_NO_ACCESS_LABEL`) for such a row,
@@ -94,7 +96,7 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
 | Secure-root inheritance (`SecureChildShareSynchronizer.SyncInheritedRootAsync`, `:879/:885`) | ✅ follow-up item 1: `RestrictedExternalPrincipalsOrThrowAsync` → `ClassifyEligibility(…, rootIsRestricted: true)`; a barred sharee is `InheritedShareAction.Restricted` (never copied); `SecureRootInheritance` records a removed one `Skipped(restricted)`, restored when lifted; an unreadable answer gives nobody anything |
 | `SecureRootInheritance` `:1664` (`ModifyAccess` back to the prior mask) | n/a — narrows only |
 | Provisioning colleagues (`ProvisionProjectEndpoint.ShareToColleaguesAsync`) | ✅ follow-up item 1: `WithoutExternalOnRestrictedAsync` — an external-flagged colleague (or, on Make Secure, the record's creator) on a Restricted record is skipped `sdap.provision.principal_external_on_restricted`; an unreadable flag skips as `principal_no_access_unverifiable` |
-| Provisioning creator / Make Secure caller (`EnsureCreatorShareAsync`, the unconfirmed-move fallback grant) | ⚠️ deliberately exempt: it is the share that keeps a secure record openable (S5's floor). An external-flagged creator on a Restricted record is then the remover's S5 "kept as last reader" case — owner item 3 decides |
+| Provisioning creator / Make Secure caller (`EnsureCreatorShareAsync`, every path: forward, resume, Make Secure resume, inherited) | ✅ owner item 3 (Restricted wins): `RestrictedCreatorRule` — on a Restricted record a person flagged external is NOT shared to (the step counts as proven: nothing is owed, so the unconfirmed-move fallback grant never fires); named in `skippedPrincipals` as `principal_external_on_restricted`; provisioning still succeeds and the response carries `noInternalReader` + `noInternalReaderMessage` when nobody internal can open the record |
 | Provisioning undo (`RestoreCreatorShareAsync`) | n/a — puts back the pre-call state |
 | Secure-child mirror (`SecureChildShareSynchronizer` `:1753/:1759`) | n/a — writes CHILD tables (documents, events, …), never a root; mirrors the root's remaining shares |
 | `PlaybookSharingService`, `DirectThreadAccessService` | n/a — playbooks and communication threads, not roots |
@@ -111,8 +113,10 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
    and the `ClassifyEligibility` table test. The retirement of the old fail-closed `null` guard is deliberate.
 2. **Reason-code constant retained** (`UserNotInternalReasonCode`, same string): round 67 says "keep a reason code"; it
    is reachable only on Restricted + flagged external.
-3. **S5 wins over the Restricted removal** on a secure record whose only readers are external-flagged — the precedent of
-   `/unshare-user` and task 143's enforcer. Reported, not silent. ⚠️ Owner may prefer the opposite; see the report.
+3. **Restricted wins over the last-reader rule** (owner round 67 item 3, decided 2026-10-06). The remover removes an
+   external-flagged share even from a secure record's last reader and reports `no-internal-reader`; provisioning does not
+   share a Restricted record to an external-flagged creator / Make Secure caller and says so in the response. An
+   administrator (who still sees the record) shares it with an internal user.
 4. **Serialized with task 143's enforcer** (follow-up item 4): the remover takes task 143's per-record lease
    (`NoAccessShareEnforcer.RecordLockId` on `IScheduledJobLease`, renewed before every revoke) around its share read, S5
    decision and revokes; `/unshare-user` takes the same lease around its S5 check and revoke (409
@@ -130,9 +134,9 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
 | `tests/integration/auth/UnifiedAccessControl/InternalUserShareTests.cs` | the retired `[Theory]` inverted (true/null/false shared on a non-Restricted record, level + mask read back, `created`); Restricted + true → 422 `user_not_internal`, nothing written; Restricted + blank/false → shared; flags unreadable (throw / absent) → 500 `read_failed`; disabled / support / delegated-admin / application user flagged external on Restricted keep their own 422; the rule table |
 | `tests/integration/contract/Api/ExternalAccess/InternalUserShareContractTests.cs` | the retired 422 inverted to 200 created; Restricted + external → 422 `user_not_internal`; `externalNoAccess` on `/user-shares` |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessMaterializerTests.cs` | linked external/blank → shared on Standard; Restricted: external → Skipped(restricted), blank → shared; the transition (shared → Restricted → removed → Skipped(restricted) → Standard → shared again) |
-| `tests/integration/auth/UnifiedAccessControl/RestrictedExternalShareRemoverTests.cs` (new) | removal + read-back + cache key; only a stored true (blank, internal, team kept); not Restricted → no read; flags / shares / users unreadable → nothing written; unconfirmed revoke; S5 kept / removed; idempotent |
+| `tests/integration/auth/UnifiedAccessControl/RestrictedExternalShareRemoverTests.cs` (new) | removal + read-back + cache key; only a stored true (blank, internal, team kept); not Restricted → no read; flags / shares / users unreadable → nothing written; unconfirmed revoke; the last reader removed + `noInternalReader` (secure) / never on a non-secure record; external owner; the shared lease (held, not renewable, released); idempotent |
 | `tests/integration/auth/UnifiedAccessControl/AssignedAccessSyncEndpointTests.cs` | through the real filter pipeline: Restricted + external share removed and named; unconfirmed → 500 `restricted_external_incomplete` |
-| `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | a Restricted-only root's external share removed (counts); S5 kept → not ok; unconfirmed → failed run |
+| `tests/unit/Sprk.Bff.Api.Tests/Services/ExternalAccess/AssignedAccessReconciliationJobTests.cs` | a Restricted-only root's external share removed (counts); the last reader removed → `noInternalReader` 1, run ok; external owner counted, run ok; unconfirmed → failed run |
 | `tests/integration/seam/Communication/FanOutTargetingSecuritySeamTests.cs` | (h) through the real resolver |
 | `src/client/shared/Spaarke.UI.Components/src/__tests__/accessRibbon.restrictedShare.test.ts` (new) | `isShareAllowed` (field / saved value / failed read / unsaved), the on-change ribbon refresh, the summary lines |
 | `…/AccessGrantModal/__tests__/AccessGrantModal.userShare.test.tsx` | the "External user — no access" label, only on the marked row |
@@ -149,7 +153,9 @@ Unshare of a disabled external account (`Unshare_ADisabledExternalAccountsShare_
 4. **Ribbon**: `Set-AccessRibbon.ps1` dry run → `-Apply` → `-Verify` (the Share command rule rides the existing Access
    group import; same `-SecureTransitionDeployed` rule as before).
 5. **PCF**: TrackingFieldTrio 1.0.36 (the "External user — no access" label) — `npm run build:prod`, solution import.
-6. **Administrator action, after the job's first runs**: a Restricted record OWNED by a user flagged external keeps that
+6. **Administrator action, after the job's first runs**: (a) a secure Restricted record left with NO internal reader
+   (`no-internal-reader` warnings, `noInternalReader > 0` in the job result, or a provisioning response with
+   `noInternalReader: true`) must be shared with an internal user by an administrator; (b) a Restricted record OWNED by a user flagged external keeps that
    user's access by ownership — no share revoke can remove it, and the BFF never reassigns. Look for `owner-is-external`
    warnings (`[RESTRICTED-EXTERNAL]`) or `ownerIsExternal > 0` in the Assigned-To job's result, and reassign each named
    record to an internal owner (or team).

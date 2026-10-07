@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 //       reporting (N2) have nothing to apply to here, and a second entry point there would give it two reasons to change.
 //       Not inside the materializer: its invariant is the Assigned-To ledger; this rule has no subject and no ledger. It
 //       REUSES their mechanics and is called from the same two places they are (the sync route, the 5-minute job): the
-//       one share seam, the strict read and read-back, the root-set cache clear, the S5 last-reader rule, and task 149's
+//       one share seam, the strict read and read-back, the root-set cache clear, task 143's per-record lease, and task 149's
 //       child sync after a removal.
 //   (3) Cost-of-doing-nothing — a person flagged external keeps opening, editing and re-sharing a record after it is made
 //       Restricted, through the model-driven app, which only a POA revoke can stop (owner round 67 item 4).
@@ -54,17 +54,25 @@ public sealed record RestrictedExternalShareFailure(Guid? SystemUserId, string K
 /// <param name="RecordId">The record.</param>
 /// <param name="Outcome">One of <see cref="RestrictedExternalShareOutcome"/>.</param>
 /// <param name="Removed">Users flagged external whose direct share was removed and confirmed gone by read-back.</param>
-/// <param name="KeptAsLastReader">Users flagged external whose share was KEPT because removing it would leave a secure
-/// record with nobody who can open it (owner S5). Manage Access shows them as "External user — no access".</param>
 /// <param name="Failures">What could not be done.</param>
 public sealed record RestrictedExternalShareReport(
     string RecordType,
     Guid RecordId,
     string Outcome,
     IReadOnlyList<Guid> Removed,
-    IReadOnlyList<Guid> KeptAsLastReader,
     IReadOnlyList<RestrictedExternalShareFailure> Failures)
 {
+    /// <summary>
+    /// Owner round 67, item 3 (decided 2026-10-06: RESTRICTED WINS over the last-reader rule): <c>true</c> when, after this
+    /// pass, the SECURE Restricted record has no enabled internal user with a direct share that can read it — an
+    /// administrator (who still sees it) must share it with an internal user. A decision for a person, not a failure: it does
+    /// not make the pass incomplete. Kind <see cref="NoInternalReaderKind"/>.
+    /// </summary>
+    public bool NoInternalReader { get; init; }
+
+    /// <summary>The stable kind of <see cref="NoInternalReader"/> as reports and logs name it.</summary>
+    public const string NoInternalReaderKind = "no-internal-reader";
+
     /// <summary>
     /// The record's OWNING user, when that user is flagged external (<see cref="OwnerIsExternalKind"/>). Ownership confers
     /// access that no share revoke can take away (and Dataverse refuses an app-only revoke of the owner's own share,
@@ -77,8 +85,9 @@ public sealed record RestrictedExternalShareReport(
     public const string OwnerIsExternalKind = "owner-is-external";
 
     /// <summary>
-    /// Nothing could not be done: the record is not Restricted, or it was evaluated with no failure. A share KEPT by S5 and
-    /// an external OWNER are decisions, not failures (as task 143's enforcer reports S5) — callers report them on their own.
+    /// Nothing could not be done: the record is not Restricted, or it was evaluated with no failure. An external OWNER and a
+    /// record left with no internal reader are decisions for an administrator, not failures — callers report them on their
+    /// own.
     /// </summary>
     public bool Complete =>
         Outcome is RestrictedExternalShareOutcome.NotRestricted or RestrictedExternalShareOutcome.Evaluated
@@ -86,7 +95,7 @@ public sealed record RestrictedExternalShareReport(
 
     internal static RestrictedExternalShareReport Terminal(
         string recordType, Guid recordId, string outcome, RestrictedExternalShareFailure? failure = null)
-        => new(recordType, recordId, outcome, Array.Empty<Guid>(), Array.Empty<Guid>(),
+        => new(recordType, recordId, outcome, Array.Empty<Guid>(),
             failure is null ? Array.Empty<RestrictedExternalShareFailure>() : new[] { failure });
 }
 
@@ -103,13 +112,13 @@ public sealed record RestrictedExternalShareReport(
 /// there is a failure, never "removed"), and the user's impersonated root-set cache cleared under every tenant key their
 /// reads write (in a <c>finally</c>: a revoke that threw may have applied).</para>
 ///
-/// <para><b>Never the last reader of a secure record</b> (owner S5 — the rule <c>/unshare-user</c> and task 143's enforcer
-/// apply). A Restricted record that is ALSO secure is reachable only through its shares. When no enabled internal user
-/// with a readable share would remain, nothing is removed and every external-flagged sharer is reported in
-/// <see cref="RestrictedExternalShareReport.KeptAsLastReader"/>: the operator shares the record with an internal person,
-/// and the next pass removes them.</para>
+/// <para><b>Restricted wins over the last-reader rule</b> (owner round 67 item 3, decided 2026-10-06). An external-flagged
+/// share is removed even when its holder is the last person who can open a secure Restricted record. When the pass leaves
+/// such a record with no enabled internal reader it reports <see cref="RestrictedExternalShareReport.NoInternalReader"/>
+/// (<c>no-internal-reader — an administrator must share it with an internal user</c>) with a warning naming the record;
+/// administrators still see it. Not a failure.</para>
 ///
-/// <para><b>Serialized with task 143's No Access enforcer</b> per record: the shares are read, S5 decided and the revokes made
+/// <para><b>Serialized with task 143's No Access enforcer</b> per record: the shares are read, the readers counted and the revokes made
 /// under the SAME per-record lease that enforcer takes (<see cref="NoAccessShareEnforcer.RecordLockId"/> on
 /// <see cref="IScheduledJobLease"/>), renewed immediately before every revoke — so the two can never each remove "the other"
 /// last reader. A lease held elsewhere, or a lease store that cannot be reached, removes nothing and is a failure (the
@@ -186,7 +195,7 @@ public sealed class RestrictedExternalShareRemover
         if (!flags.IsRestricted)
             return RestrictedExternalShareReport.Terminal(logical, recordId, RestrictedExternalShareOutcome.NotRestricted);
 
-        // ── Task 143's per-record lease: the reads, S5 and the revokes are decided under it ──
+        // ── Task 143's per-record lease: the reads, the reader count and the revokes are decided under it ──
         var lockId = NoAccessShareEnforcer.RecordLockId(logical, recordId);
         ScheduledJobLeaseGrant grant;
         try
@@ -261,8 +270,8 @@ public sealed class RestrictedExternalShareRemover
         }
 
         _logger.LogInformation(
-            "[RESTRICTED-EXTERNAL] Restricted {Type} {RecordId}: removed {Removed}, kept as last reader {Kept}, external owner " +
-            "{Owner}, failures {Failures}.", logical, recordId, report.Removed.Count, report.KeptAsLastReader.Count,
+            "[RESTRICTED-EXTERNAL] Restricted {Type} {RecordId}: removed {Removed}, no internal reader {NoInternalReader}, " +
+            "external owner {Owner}, failures {Failures}.", logical, recordId, report.Removed.Count, report.NoInternalReader,
             report.OwnerIsExternal?.ToString() ?? "none", report.Failures.Count);
         return report;
     }
@@ -288,7 +297,7 @@ public sealed class RestrictedExternalShareRemover
 
         var userMasks = DirectUserMasks(shares);
         if (userMasks.Count == 0)
-            return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
+            return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
 
         // ── Who among them is flagged external ─────────────────────────────────
         Dictionary<Guid, InternalShareEndpoints.SystemUserRow> users;
@@ -313,7 +322,7 @@ public sealed class RestrictedExternalShareRemover
             .OrderBy(id => id)
             .ToList();
         if (external.Count == 0)
-            return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
+            return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
 
         // ── An external OWNER: ownership is not a share — reassign the record (an administrator's act) ──
         var owner = await ReadOwningUserOrNullAsync(rootType, recordId, ct).ConfigureAwait(false);
@@ -327,23 +336,13 @@ public sealed class RestrictedExternalShareRemover
             external.Remove(ownerId);
         }
 
-        // ── S5: a secure record keeps someone who can open it ──────────────────
-        if (flags.IsSecure && external.Count > 0)
-        {
-            var internalReaderRemains = userMasks.Any(p =>
-                !external.Contains(p.Key) && p.Key != externalOwner
-                && RecordShareLevels.CanRead(p.Value)
-                && users.TryGetValue(p.Key, out var u) && u.IsDisabled is false);
-            if (!internalReaderRemains)
-            {
-                _logger.LogWarning(
-                    "[RESTRICTED-EXTERNAL] Restricted secure {Type} {RecordId}: removing the {Count} external user share(s) would " +
-                    "leave nobody internal who can open it; they were KEPT (S5). Share it with an internal person first.",
-                    logical, recordId, external.Count);
-                return Evaluated(logical, recordId, Array.Empty<Guid>(), external, Array.Empty<RestrictedExternalShareFailure>())
-                    with { OwnerIsExternal = externalOwner };
-            }
-        }
+        // ── Restricted wins over the last-reader rule (owner round 67 item 3): whether anyone internal remains is REPORTED ──
+        // An enabled internal (not external-flagged) user with a readable direct share. Only a SECURE record depends on its
+        // shares; an ordinary one is reachable through its business unit.
+        var internalReaderRemains = !flags.IsSecure || userMasks.Any(p =>
+            !external.Contains(p.Key) && p.Key != externalOwner
+            && RecordShareLevels.CanRead(p.Value)
+            && users.TryGetValue(p.Key, out var u) && u.IsDisabled is false && u.IsExternal != true);
 
         // ── Remove each, confirm by read-back — the lease proven ours before every revoke ──
         var entitySet = ExternalGrantRoot.BindFor(rootType).EntitySet;
@@ -392,7 +391,20 @@ public sealed class RestrictedExternalShareRemover
             removed.Add(userId);
         }
 
-        return Evaluated(logical, recordId, removed, Array.Empty<Guid>(), failures) with { OwnerIsExternal = externalOwner };
+        var noInternalReader = !internalReaderRemains;
+        if (noInternalReader)
+        {
+            _logger.LogWarning(
+                "[RESTRICTED-EXTERNAL] {Kind}: Restricted secure {Type} {RecordId} has no internal user who can open it after the " +
+                "external users' shares were removed (Restricted wins over the last-reader rule). An administrator must share " +
+                "it with an internal user.", RestrictedExternalShareReport.NoInternalReaderKind, logical, recordId);
+        }
+
+        return Evaluated(logical, recordId, removed, failures) with
+        {
+            OwnerIsExternal = externalOwner,
+            NoInternalReader = noInternalReader,
+        };
     }
 
     /// <summary>
@@ -482,9 +494,8 @@ public sealed class RestrictedExternalShareRemover
     }
 
     private static RestrictedExternalShareReport Evaluated(
-        string logical, Guid recordId, IReadOnlyList<Guid> removed, IReadOnlyList<Guid> kept,
-        IReadOnlyList<RestrictedExternalShareFailure> failures)
-        => new(logical, recordId, RestrictedExternalShareOutcome.Evaluated, removed, kept, failures);
+        string logical, Guid recordId, IReadOnlyList<Guid> removed, IReadOnlyList<RestrictedExternalShareFailure> failures)
+        => new(logical, recordId, RestrictedExternalShareOutcome.Evaluated, removed, failures);
 
     /// <summary>The owner projection (a LOOKUP is <c>_x_value</c> in <c>$select</c> — FAILURE-MODES G-13).</summary>
     private sealed class OwnerRow

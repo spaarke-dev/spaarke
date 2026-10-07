@@ -158,6 +158,60 @@ public class ProvisionNoAccessTests : IClassFixture<ProvisionProjectTestFixture>
         }
     }
 
+    /// <summary>
+    /// Owner round 67 item 3 (decided 2026-10-06: Restricted wins over the last-reader rule): the CALLER — the person the
+    /// record is secured for — is flagged external on a Restricted record. They are NOT shared to, they are named in
+    /// skippedPrincipals with principal_external_on_restricted, and the record is still provisioned (secured, its own
+    /// container) with the response saying plainly that nobody internal can open it.
+    /// </summary>
+    [Fact]
+    public async Task Provision_ByACallerFlaggedExternal_OnARestrictedRecord_SkipsThem_AndStillProvisions_SayingNobodyInternalCanOpenIt()
+    {
+        var projectId = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.ExternalUsers.Add(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.RestrictedRecords.Add(projectId);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.OwningTeamOf(projectId).Should().Be(ProvisionProjectTestFixture.SecureOwnerTeamId, "the record is still secured");
+        _fixture.ContainerIdOf(projectId).Should().Be(ProvisionProjectTestFixture.ProvisionedContainerId);
+        _fixture.Grants.Should().NotContain(g => g.Principal.Id == ProvisionProjectTestFixture.CallerSystemUserId,
+            "a Restricted record admits no user flagged external — not even the person it is secured for");
+
+        var body = await BodyOf(response);
+        var skipped = body.GetProperty("skippedPrincipals").EnumerateArray().ToList();
+        skipped.Should().ContainSingle();
+        skipped[0].GetProperty("systemUserId").GetGuid().Should().Be(ProvisionProjectTestFixture.CallerSystemUserId);
+        skipped[0].GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalExternalOnRestricted);
+        body.GetProperty("noInternalReader").GetBoolean().Should().BeTrue();
+        body.GetProperty("noInternalReaderMessage").GetString().Should().Contain("An administrator must share it with an internal user");
+    }
+
+    /// <summary>The twin: an INTERNAL colleague named on the same Restricted call is shared, so someone internal remains.</summary>
+    [Fact]
+    public async Task Provision_ByACallerFlaggedExternal_OnARestrictedRecord_WithAnInternalColleague_ReportsAnInternalReader()
+    {
+        var projectId = Guid.NewGuid();
+        var colleague = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.SystemUsers[colleague] = (false, false);
+        _fixture.ExternalUsers.Add(ProvisionProjectTestFixture.CallerSystemUserId);
+        _fixture.RestrictedRecords.Add(projectId);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(ProvisionRoute, new { projectId, sharePrincipalIds = new[] { colleague } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().Contain(g => g.Principal.Id == colleague);
+        var body = await BodyOf(response);
+        body.GetProperty("noInternalReader").GetBoolean().Should().BeFalse();
+        body.TryGetProperty("noInternalReaderMessage", out var message).Should().BeTrue();
+        message.ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
     [Fact]
     public async Task Provision_ANamedColleagueWhoseNoAccessCheckCannotBeRead_IsSkippedToo_AndTheOthersAreStillShared()
     {

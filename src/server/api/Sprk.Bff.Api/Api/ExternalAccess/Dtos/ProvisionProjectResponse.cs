@@ -107,6 +107,18 @@ public record ProvisionProjectResponse(
     /// other records). Null for a call that did not reach the files.
     /// </summary>
     public MakeSecureFilesSummary? Files { get; init; }
+
+    /// <summary>
+    /// Task 114 (owner round 67: Restricted wins over the last-reader rule). On a Restricted record the person it would be
+    /// shared to was flagged external and NOT shared to (named in <see cref="SkippedPrincipals"/>). <c>true</c>: nobody
+    /// internal can open the record now - an administrator must share it with an internal user; <c>false</c>: someone
+    /// internal can; <c>null</c>: nobody was skipped, or it could not be read (then <see cref="NoInternalReaderMessage"/>
+    /// says so). Additive to the JSON contract.
+    /// </summary>
+    public bool? NoInternalReader { get; init; }
+
+    /// <summary>Task 114: the plain-language sentence for <see cref="NoInternalReader"/> (null when nothing needs saying).</summary>
+    public string? NoInternalReaderMessage { get; init; }
 }
 
 /// <summary>A named colleague provisioning did not share to, and why (task 143). The message names no entry or reason text.</summary>

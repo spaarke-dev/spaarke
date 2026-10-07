@@ -190,17 +190,18 @@ describe('assignedaccess_postsave.js 1.1.0 — task 114', () => {
     expect(f.context.ui.refreshRibbon).toHaveBeenCalledTimes(1);
   });
 
-  it('the summary says how many external users lost access to a Restricted record, and who was kept as last reader', () => {
+  it('the summary says how many external users lost access to a Restricted record, and when nobody internal can open it', () => {
     const { assigned } = load();
 
     const text = assigned.summarize({
       assignedAccess: { entries: [] },
       noAccess: [],
-      restrictedExternal: { outcome: 'evaluated', removed: ['u1', 'u2'], keptAsLastReader: ['u3'], failures: [] },
+      restrictedExternal: { outcome: 'evaluated', removed: ['u1', 'u2'], failures: [], noInternalReader: true },
     });
 
     expect(text).toContain('Removed access for 2 external users: this record is Restricted to internal users.');
-    expect(text).toContain('1 external user still has access: they are the only people who can open this secure record.');
+    expect(text).toContain('Nobody internal can open this record now');
+    expect(text).toContain('Ask an administrator to share it with an internal user.');
   });
 
   it('says when the record is OWNED by a user flagged external (an administrator reassigns it)', () => {
@@ -209,7 +210,7 @@ describe('assignedaccess_postsave.js 1.1.0 — task 114', () => {
     const text = assigned.summarize({
       assignedAccess: { entries: [] },
       noAccess: [],
-      restrictedExternal: { outcome: 'evaluated', removed: [], keptAsLastReader: [], failures: [], ownerIsExternal: 'u9' },
+      restrictedExternal: { outcome: 'evaluated', removed: [], failures: [], ownerIsExternal: 'u9' },
     });
 
     expect(text).toContain('owned by a user flagged as external');
@@ -224,7 +225,7 @@ describe('assignedaccess_postsave.js 1.1.0 — task 114', () => {
       assigned.summarize({
         assignedAccess: { entries: [] },
         noAccess: [],
-        restrictedExternal: { outcome: 'not-restricted', removed: [], keptAsLastReader: [], failures: [] },
+        restrictedExternal: { outcome: 'not-restricted', removed: [], failures: [], noInternalReader: false },
       })
     ).toBe('');
   });

@@ -33,8 +33,8 @@ public sealed record AssignedAccessSyncResponse(
     IReadOnlyList<NoAccessEnforcementReport> NoAccess)
 {
     /// <summary>
-    /// Task 114 (owner round 67): on a Restricted record, the shares of users flagged external that were removed (or kept
-    /// as a secure record's last reader). <c>null</c> only from a caller that did not run the rule. Additive: an older
+    /// Task 114 (owner round 67): on a Restricted record, the shares of users flagged external that were removed, and
+    /// whether that left a secure record with no internal reader or with an external owner. <c>null</c> only from a caller that did not run the rule. Additive: an older
     /// client that does not read it is unaffected.
     /// </summary>
     public RestrictedExternalShareReport? RestrictedExternal { get; init; }

@@ -76,7 +76,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // 1.5.0 - round 53: another team INSIDE the Secure Record business unit is already isolated (Make Secure hidden); the
     // caller_rights_unverifiable refusal in this script's own words. 1.6.0 - task 114 (owner round 67 amendment 4(a)):
     // isShareAllowed / isShareAllowedForSelection, the rules that hide the platform's form and grid Share commands on a
-    // Restricted record (any selected Restricted row, on a grid).
+    // Restricted record (any selected Restricted row, on a grid); the principal_external_on_restricted warning and the
+    // server's no-internal-reader sentence after Make Secure.
     ns.VERSION = "1.6.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
@@ -675,7 +676,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
             "Whether {name} may access this {record} could not be checked, so the {record} was not shared with them. You " +
             "can share it with them later from Manage Access.",
         "sdap.provision.principal_share_failed":
-            "{name} was not given access to this {record}. You can share it with them later from Manage Access."
+            "{name} was not given access to this {record}. You can share it with them later from Manage Access.",
+        // Task 114 (owner round 67, owner wording): a person flagged external on a Restricted record.
+        "sdap.provision.principal_external_on_restricted":
+            "{name} is flagged as an external user and can't be given access to a Restricted record."
     });
 
     /** Round 33 item 5: the warning for a reason code this script does not know (the code is logged as well). */
@@ -737,6 +741,10 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 return ns.describeSkippedPrincipal(person ? person.reasonCode : undefined, name, entityName);
             });
         })).then(function (lines) {
+            // Task 114: when nobody internal can open the record any more, the server says so - shown last, verbatim.
+            if (body && typeof body.noInternalReaderMessage === "string" && body.noInternalReaderMessage.trim()) {
+                lines.push(body.noInternalReaderMessage);
+            }
             alert(commandName, lines.join("\n\n"));
         });
     }

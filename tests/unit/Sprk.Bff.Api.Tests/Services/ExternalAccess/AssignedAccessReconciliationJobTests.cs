@@ -471,9 +471,12 @@ public class AssignedAccessReconciliationJobTests
         json.GetProperty("materialized").GetInt32().Should().Be(0, "a Restricted root with no Assigned column is not materialized");
     }
 
-    /// <summary>A share S5 keeps (a Restricted secure record's last reader) is reported and makes the run partial, never "ok".</summary>
+    /// <summary>
+    /// Restricted wins over the last-reader rule (owner round 67 item 3): the only reader, flagged external, is removed; the
+    /// record is counted noInternalReader for an administrator, and the run stays ok.
+    /// </summary>
     [Fact]
-    public async Task ARestrictedSecureRoot_WhoseOnlyReaderIsFlaggedExternal_KeepsTheShare_AndTheRunIsNotOk()
+    public async Task ARestrictedSecureRoot_WhoseOnlyReaderIsFlaggedExternal_LosesTheShare_IsCountedNoInternalReader_AndTheRunStaysOk()
     {
         var matter = Guid.NewGuid();
         _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
@@ -483,10 +486,10 @@ public class AssignedAccessReconciliationJobTests
 
         var result = await RunAsync();
 
-        result.Success.Should().BeFalse();
-        result.ErrorMessage.Should().Contain("KEPT-LAST-READER");
-        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().Be(1);
-        Result(result).GetProperty("keptAsLastReader").GetInt32().Should().Be(1);
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(external)).Should().BeNull();
+        Result(result).GetProperty("noInternalReader").GetInt32().Should().Be(1);
+        Result(result).GetProperty("externalSharesRemoved").GetInt32().Should().Be(1);
     }
 
     /// <summary>

@@ -710,6 +710,13 @@ public static class ProvisionProjectEndpoint
         // provisioned; both take exactly the same path from here (rollout constraint), the flagged one skipping the write.
         var alreadyFlagged = row.sprk_issecure == true;
 
+        // Task 114 (owner round 67, item 3 decided 2026-10-06: RESTRICTED WINS over the last-reader rule): on a Restricted
+        // record the person this run would share it to — the creator / Make Secure caller — is not shared to when flagged
+        // sprk_isexternal = true, exactly as a named colleague is not. A secure record left with nobody internal is then
+        // provisioned anyway (an administrator still sees it) and the response says so.
+        var creatorRule = new RestrictedCreatorRule(
+            dataverseClient, row.sprk_accesspermission == ExternalParticipationService.AccessPermissionRestricted);
+
         var recordName = row.NameFrom(root.NameColumn) ?? request.ProjectRef ?? recordId.ToString();
 
         // ── Steps 2 + 3: the Secure Record BU, its NAMED owner team, and the two invariants ──
@@ -975,7 +982,7 @@ public static class ProvisionProjectEndpoint
             // than they hold) — the share this run proves; the record's creator joins the colleague step, exactly as on the
             // forward path. Flagged or not: a Make Secure that failed after its first write is finished by the same call.
             var finish = await ResumeMakeSecureAsync(
-                dataverseClient, recordShare, callerAccessProbe!, noAccessGuard, httpContext!, root, recordId, row,
+                creatorRule, dataverseClient, recordShare, callerAccessProbe!, noAccessGuard, httpContext!, root, recordId, row,
                 ownerTeamId, alreadyFlagged, logger, traceId, ct);
 
             if (finish.Error != null)
@@ -1057,7 +1064,7 @@ public static class ProvisionProjectEndpoint
 
             // ── RESUME: ensure that person's share ──
             var resumed = await EnsureResumeCreatorShareAsync(
-                recordShare, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
+                creatorRule, recordShare, root, recordId, person.CreatorId, ownerTeamId, logger, traceId, ct);
 
             if (resumed.Error != null)
                 return resumed.Error;
@@ -1081,7 +1088,7 @@ public static class ProvisionProjectEndpoint
 
             // ── FORWARD: share-first, move, prove, compensate ──
             var forward = await MoveWithCreatorShareAsync(
-                dataverseClient, recordShare, creator, noAccessGuard, accessCacheInvalidator, relatedRoots, root, recordId, row,
+                creatorRule, dataverseClient, recordShare, creator, noAccessGuard, accessCacheInvalidator, relatedRoots, root, recordId, row,
                 ownerTeamId, keepsOwnContainer: keptContainerId is not null, sharedContainerToUnlink, makeSecure, logger,
                 traceId, ct);
 
@@ -1113,6 +1120,31 @@ public static class ProvisionProjectEndpoint
             // where their own owner change happens), on success or failure of the colleague step, before any later
             // return, and never fails provisioning: the hook does not throw and is not bound to the request's token.
             await EvictAfterOwnerChangeAsync(accessCacheInvalidator, root, recordId, traceId);
+        }
+
+        // ── Task 114 (owner round 67, item 3: Restricted wins): the person not shared to, and whether anyone internal remains ──
+        // The creator / Make Secure caller flagged external on a Restricted record was NOT shared to (above). They are named
+        // like a skipped colleague, and when nobody internal can open the record now, the response says so plainly — an
+        // administrator still sees it and shares it with an internal user. Never a failure: the record is provisioned.
+        bool? noInternalReader = null;
+        string? noInternalReaderMessage = null;
+        if (creatorRule.SkippedCreator is { } skippedCreator)
+        {
+            skippedPrincipals = skippedPrincipals
+                .Append(new ProvisionSkippedPrincipal(skippedCreator, ReasonPrincipalExternalOnRestricted,
+                    "This record is Restricted to internal users, and this person is flagged as external, so it was not " +
+                    "shared with them."))
+                .ToList();
+            noInternalReader = await NoInternalReaderAsync(dataverseClient, recordShare, root, recordId, logger, traceId, ct);
+            var label = root.DisplayLabel.ToLowerInvariant();
+            noInternalReaderMessage = noInternalReader switch
+            {
+                true => "Nobody internal can open this " + label + " now: it is Restricted, and the people it would have " +
+                        "been shared with are flagged as external. An administrator must share it with an internal user.",
+                null => "Whether anyone internal can open this " + label + " could not be confirmed. Check its Manage " +
+                        "Access, and have an administrator share it with an internal user if nobody is listed.",
+                _ => null,
+            };
         }
 
         // ── Step 8 (task 148): the record's EXISTING related records follow it into isolation ──
@@ -1183,6 +1215,8 @@ public static class ProvisionProjectEndpoint
                 FiledRecords: keptChildren.Filed)
             {
                 Files = keptChildren.Files,
+                NoInternalReader = noInternalReader,
+                NoInternalReaderMessage = noInternalReaderMessage,
             });
         }
 
@@ -1253,12 +1287,100 @@ public static class ProvisionProjectEndpoint
             FiledRecords: children.Filed)
         {
             Files = children.Files,
+            NoInternalReader = noInternalReader,
+            NoInternalReaderMessage = noInternalReaderMessage,
         });
     }
 
     // =========================================================================
     // Private helpers
     // =========================================================================
+
+    /// <summary>
+    /// Task 114 (owner round 67): the one share-eligibility rule for the person a provisioning run shares the record to
+    /// (the Restricted branch of <see cref="InternalShareEndpoints.ClassifyEligibility"/>): on a Restricted record a user
+    /// flagged <c>sprk_isexternal = true</c> is not shared to. Asked at most once per user per request (cached), so the
+    /// share-first step and the steps after the move always agree.
+    /// </summary>
+    private sealed class RestrictedCreatorRule(DataverseWebApiClient client, bool recordIsRestricted)
+    {
+        private readonly Dictionary<Guid, bool?> _answers = new();
+
+        /// <summary>The person this run did not share to (flagged external on a Restricted record), if any.</summary>
+        public Guid? SkippedCreator { get; private set; }
+
+        /// <summary><c>true</c> = not shared to; <c>false</c> = shared to; <c>null</c> = could not be read (fail closed).</summary>
+        public async Task<bool?> IsBarredAsync(Guid userId, ILogger logger, CancellationToken ct)
+        {
+            if (!recordIsRestricted)
+                return false;
+            if (_answers.TryGetValue(userId, out var known))
+                return known;
+
+            bool? answer;
+            try
+            {
+                var rows = await client.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+                    InternalShareEndpoints.SystemUserEntitySet, filter: "systemuserid eq " + userId,
+                    select: "systemuserid,sprk_isexternal", top: 1, cancellationToken: ct);
+                answer = rows.FirstOrDefault(r => r.Id == userId)?.IsExternal == true;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                logger.LogError(ex,
+                    "[PROVISION] Whether {UserId} is flagged external could not be read on a Restricted record; their share " +
+                    "is not proven.", userId);
+                answer = null;
+            }
+
+            _answers[userId] = answer;
+            if (answer == true)
+                SkippedCreator = userId;
+            return answer;
+        }
+    }
+
+    /// <summary>
+    /// Task 114: whether the record now has NO enabled internal user (not flagged external) with a direct share that can
+    /// read it — <c>null</c> when that could not be read. Display-only: it never fails provisioning.
+    /// </summary>
+    private static async Task<bool?> NoInternalReaderAsync(
+        DataverseWebApiClient dataverseClient, IDataverseRecordShareService recordShare, SecureRecordRoot root, Guid recordId,
+        ILogger logger, string traceId, CancellationToken ct)
+    {
+        try
+        {
+            var readers = (await recordShare.GetPrincipalAccessOrThrowAsync(root.LogicalName, recordId, ct))
+                .Where(s => s.Principal.Kind == DataversePrincipalKind.SystemUser && RecordShareLevels.CanRead(s.AccessRightsMask))
+                .Select(s => s.Principal.Id)
+                .Distinct()
+                .ToList();
+            foreach (var batch in readers.Chunk(InternalShareEndpoints.NameBatchSize))
+            {
+                var users = await dataverseClient.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+                    InternalShareEndpoints.SystemUserEntitySet,
+                    filter: string.Join(" or ", batch.Select(id => "systemuserid eq " + id)),
+                    select: "systemuserid,isdisabled,sprk_isexternal",
+                    top: batch.Length,
+                    cancellationToken: ct);
+                if (users.Any(u => batch.Contains(u.Id) && u.IsDisabled is false && u.IsExternal != true))
+                    return false;
+            }
+
+            logger.LogWarning(
+                "[PROVISION] Restricted {RecordType} {RecordId} was provisioned with NO internal reader (its people are flagged " +
+                "external): an administrator must share it with an internal user. TraceId={TraceId}",
+                root.WireToken, recordId, traceId);
+            return true;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[PROVISION] Whether anyone internal can open Restricted {RecordType} {RecordId} could not be read. " +
+                "TraceId={TraceId}", root.WireToken, recordId, traceId);
+            return null;
+        }
+    }
 
     /// <summary>
     /// Task 148 — a child pass that did not complete (ADR-003: never reported as success, never a bare 500). The record's own
@@ -1640,6 +1762,7 @@ public static class ProvisionProjectEndpoint
     /// The unlink is the first write, after every read: a failure of it changes nothing else.</para>
     /// </remarks>
     private static async Task<CreatorShareStep> MoveWithCreatorShareAsync(
+        RestrictedCreatorRule creatorRule,
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         ProvisioningCreator creator,
@@ -1850,7 +1973,7 @@ public static class ProvisionProjectEndpoint
         // ── Step 4.5: SHARE-FIRST ────────────────────────────────────────────
         if (preCreatorMask is { } knownPreMask)
         {
-            var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
+            var first = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
             wroteCreatorShare = first.WriteAttempted;
             creatorShareProven = first.Proven;
 
@@ -1929,7 +2052,7 @@ public static class ProvisionProjectEndpoint
             // The PATCH may have landed. Whatever happened, the creator's share must be in place (S5). It is PROVEN by
             // the same complete read every other share write on this path uses (task 133 verifier round 1) — a share
             // proven before the move is not assumed to have survived it (live gate (b)).
-            var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
+            var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
             var shareConfirmed = ensured.Proven;
             var shareIssued = ensured.Proven;
 
@@ -2020,7 +2143,7 @@ public static class ProvisionProjectEndpoint
         }
 
         // ── Step 5.5: prove the creator's share on the moved record ───────────
-        var proof = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget);
+        var proof = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, shareTarget, creatorRule);
         if (proof.Proven)
             return CreatorShareStep.Ok(creatorId);
 
@@ -2508,6 +2631,7 @@ public static class ProvisionProjectEndpoint
     /// its explicit access list. One who uses the form's Make Secure command is shared to like any caller of it.</para>
     /// </remarks>
     private static async Task<(Guid CallerId, Guid? RecordCreator, IResult? Error)> ResumeMakeSecureAsync(
+        RestrictedCreatorRule creatorRule,
         DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         CallerRecordAccessProbe callerAccessProbe,
@@ -2560,7 +2684,7 @@ public static class ProvisionProjectEndpoint
         // read above) — proven by a read (the forward path's proof; the record is already the team's, so there is no move to
         // undo).
         var ensured = await EnsureCreatorShareAsync(
-            recordShare, root, recordId, callerId, logger, ct, held => MakeSecureCallerMask(held | floor.HeldMask));
+            recordShare, root, recordId, callerId, logger, ct, held => MakeSecureCallerMask(held | floor.HeldMask), creatorRule);
         if (!ensured.Proven)
         {
             logger.LogError(
@@ -3178,6 +3302,7 @@ public static class ProvisionProjectEndpoint
     /// <see cref="ResolveResumeCreatorAsync"/> decided, proven by a read. Nothing else is written here.
     /// </summary>
     private static async Task<CreatorShareStep> EnsureResumeCreatorShareAsync(
+        RestrictedCreatorRule creatorRule,
         IDataverseRecordShareService recordShare,
         SecureRecordRoot root,
         Guid recordId,
@@ -3187,7 +3312,7 @@ public static class ProvisionProjectEndpoint
         string traceId,
         CancellationToken ct)
     {
-        var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct);
+        var ensured = await EnsureCreatorShareAsync(recordShare, root, recordId, creatorId, logger, ct, creatorRule: creatorRule);
         if (!ensured.Proven)
         {
             return CreatorShareStep.Failed(Problem(
@@ -3247,9 +3372,26 @@ public static class ProvisionProjectEndpoint
         Guid creatorId,
         ILogger logger,
         CancellationToken ct,
-        Func<int, int>? targetFor = null)
+        Func<int, int>? targetFor = null,
+        RestrictedCreatorRule? creatorRule = null)
     {
         var principal = DataversePrincipalRef.User(creatorId);
+
+        // Task 114: on a Restricted record a person flagged external is not shared to — the share is deliberately absent,
+        // which is this step's answer ("proven" that nothing is owed). A flag that cannot be read is no proof (ADR-003).
+        if (creatorRule is not null)
+        {
+            var barred = await creatorRule.IsBarredAsync(creatorId, logger, ct);
+            if (barred is null)
+                return new ShareEnsureResult(Proven: false, WriteAttempted: false);
+            if (barred == true)
+            {
+                logger.LogWarning(
+                    "[PROVISION] Restricted {RecordType} {RecordId}: {CreatorId} is flagged external, so the record is NOT " +
+                    "shared to them (owner round 67: Restricted wins over the last-reader rule).", root.WireToken, recordId, creatorId);
+                return new ShareEnsureResult(Proven: true, WriteAttempted: false);
+            }
+        }
 
         int current;
         try

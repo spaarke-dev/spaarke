@@ -231,10 +231,9 @@ Spaarke.AssignedAccess.summarize = function (response) {
             "administrator to reassign it to an internal owner.");
     }
 
-    var keptExternal = (restricted.keptAsLastReader || []).length;
-    if (keptExternal > 0) {
-        messages.push(keptExternal + " external " + (keptExternal === 1 ? "user still has" : "users still have") +
-            " access: they are the only people who can open this secure record. Share it with an internal person, then save again.");
+    if (restricted.noInternalReader) {
+        messages.push("Nobody internal can open this record now: it is Restricted and its only other readers were " +
+            "external users. Ask an administrator to share it with an internal user.");
     }
 
     return messages.join(" ");

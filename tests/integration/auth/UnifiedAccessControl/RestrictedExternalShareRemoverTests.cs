@@ -158,10 +158,15 @@ public class RestrictedExternalShareRemoverTests
             "the cache is cleared whether or not the revoke is confirmed: it may have applied");
     }
 
-    // ── S5: a secure record keeps someone who can open it ──────────────────────
+    // ── Restricted wins over the last-reader rule (owner round 67 item 3, decided 2026-10-06) ─────────────
 
+    /// <summary>
+    /// The external user is the last person who can open the secure Restricted record (a disabled internal user does not
+    /// count): their share is REMOVED anyway, and the pass reports no-internal-reader — an administrator must share it with an
+    /// internal user. A decision for a person, not a failure.
+    /// </summary>
     [Fact]
-    public async Task OnARestrictedSecureRecord_WhenOnlyExternalUsersCanOpenIt_TheirSharesAreKept_AndReported()
+    public async Task OnARestrictedSecureRecord_WhenOnlyExternalUsersCanOpenIt_TheirSharesAreRemoved_AndNoInternalReaderIsReported()
     {
         Restricted(secure: true);
         var external = _h.SystemUser(isExternal: true);
@@ -171,11 +176,24 @@ public class RestrictedExternalShareRemoverTests
 
         var report = await RunAsync();
 
-        report.Removed.Should().BeEmpty();
-        report.KeptAsLastReader.Should().Equal(external);
-        report.Complete.Should().BeTrue("S5 keeping a share is a decision, not a failure");
-        MaskOf(external).Should().Be(CollaborateMask, "a disabled internal user does not count as someone who can open it");
-        _h.Shares.Writes.Should().BeEmpty();
+        report.Removed.Should().Equal(external);
+        MaskOf(external).Should().BeNull("Restricted wins over the last-reader rule");
+        report.NoInternalReader.Should().BeTrue("a disabled internal user does not count as someone who can open it");
+        report.Complete.Should().BeTrue("no internal reader is an administrator's action, not a failure");
+        report.Failures.Should().BeEmpty();
+    }
+
+    /// <summary>On a Restricted record that is NOT secure the business unit can still open it: no-internal-reader is never reported.</summary>
+    [Fact]
+    public async Task OnARestrictedRecordThatIsNotSecure_RemovingTheOnlySharerReportsNoInternalReader_Never()
+    {
+        Restricted(secure: false);
+        Share(_h.SystemUser(isExternal: true));
+
+        var report = await RunAsync();
+
+        report.Removed.Should().ContainSingle();
+        report.NoInternalReader.Should().BeFalse();
     }
 
     /// <summary>The positive twin: an enabled internal reader remains, so the external user's share goes.</summary>
@@ -191,7 +209,7 @@ public class RestrictedExternalShareRemoverTests
         var report = await RunAsync();
 
         report.Removed.Should().Equal(external);
-        report.KeptAsLastReader.Should().BeEmpty();
+        report.NoInternalReader.Should().BeFalse("a blank-flagged enabled user with Read remains");
         MaskOf(internalReader).Should().Be(ViewOnlyMask);
     }
 
