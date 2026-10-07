@@ -7,6 +7,23 @@ This file tracks changes to the agent-procedure surface — `.claude/skills/`, `
 Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
+###### 2026-10-06 — Throughput fixes: `current-task.md` is state, not history; finding triage + round limits; seeding-proof and task-size scope (procedure-throughput-fixes-r1)
+
+Investigation into why projects went from 20–50 tasks/day (Jan–Mar) to 1–4/day found three procedure causes. Build and test cost is real, but secondary.
+
+- **`current-task.md` accumulated history.** `context-handoff` said "don't overwrite history" and its template ended in `[... rest of current-task.md content ...]`. The file therefore grew 5 KB → 483 KB in `unified-access-control-r2`, and was read at Step 0 and Step 2 of every task.
+  - `context-handoff` gains "State, not history (BINDING)": rewrite at each checkpoint, ≤10 KB target / 20 KB trigger, and a destination table for durable items (project `CLAUDE.md` "Standing directives & gotchas", notes, commit messages, `notes/handoff-history/`).
+  - `task-execute` Step 0 gains a size guard. Steps 8.5 and 11 now rewrite instead of accumulating.
+  - `current-task.template.md` updated.
+- **Review/verify loops had no stopping rule.** `code-review` hands filtering to task-execute Step 9.5, but Step 9.5 only said "fix → re-run".
+  - Step 9.5 gains "Finding triage and round limits": classes F1–F4 fix-now and K1–K4 known-limit; 2 fix rounds re-verifying the fix diff plus its direct callers and callees (affected suites re-run); 1 adversarial-verifier pass (2 for auth/security/tenant-isolation); escalate any F1 still open.
+  - This generalizes the owner's own `unified-access-control-r2` rule (rounds 56/59).
+  - `code-review` suggests a class per finding and scopes re-reviews to the fix diff plus its direct callers and callees.
+  - Root `CLAUDE.md` §8.5 "Coverage-first review" bullet extended by one sentence so it binds session-written workflow scripts too.
+- **`task-create`:** seeding proofs only for security, isolation, fail-open and data-loss guards and pure regression guards (one per guard). Task size target ≤15 KB; fix-round history goes in notes, not the POML.
+
+Unchanged by decision: BFF publish-size per-task measurement (§10.4) stays per-task. Moving it to CI would let growth accumulate unseen before it reached CI.
+
 ###### 2026-10-06 — FAILURE-MODES G-13 extended to `$filter` (unified-access-control-r2 dev live gates)
 
 `.claude/FAILURE-MODES.md` G-13: a lookup in a `$filter` must be `_<name>_value`. The section now records the No Access reader defect (every deny-list read was a 400 on dev and failed closed, which blocked secure provisioning) and the provisioning seeder case (#1318). It also records the lesson: a test double that matches on query text can't catch a wrong query, because it copies the same mistake.
