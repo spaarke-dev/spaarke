@@ -13,7 +13,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 `ci-tier1-blocking.yml` that runs on `src/client/**`, `src/solutions/**` or workflow changes, and the advisory
 DataGrid External-Host Gate, which the row was missing. The troubleshooting table gains its row. The job is an
 owner-approved (2026-10-06) CLAUDE.md §6.5 path-A exception to the workflow's "do not extend without spec
-amendment" (ci-cd-unit-test-remediation-r1 FR-A02), scoped to this one job.
+amendment" (ci-cd-unit-test-remediation-r1 FR-A02), scoped to this one job. Extended 2026-10-06 (owner-approved,
+same §6.5 path-A exception, PR #1309 round 8): `ci-router.yml` now classifies a diff as docs-only, and skips Tier 1,
+only when every changed file matches the existing documentation globs (a `dorny/paths-filter`
+`predicate-quantifier: 'every'` step), closing the hole where client code plus any `*.md` or `projects/**` file
+skipped all of Tier 1 including the Xrm capability guard.
 
 ###### 2026-10-06 — FAILURE-MODES G-13 extended to `$filter` (unified-access-control-r2 dev live gates)
 
