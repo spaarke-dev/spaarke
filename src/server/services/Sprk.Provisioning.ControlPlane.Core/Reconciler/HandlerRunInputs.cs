@@ -138,6 +138,7 @@ public static class HandlerRunInputs
                 Tenant, Subscription,
                 RunInput.Intake(IntakeParameterCatalog.EnvironmentName, required: false),
                 RunInput.Intake(IntakeParameterCatalog.ContainerTypeId),
+                RunInput.Intake(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, required: false),   // T254: optional spend limit (G37)
                 RunInput.Output(nameof(InterStepState.KeyVaultName)),
                 RunInput.Output(nameof(InterStepState.ResourceGroupName)),
                 RunInput.Output(nameof(InterStepState.AppServiceName)),

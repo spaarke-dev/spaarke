@@ -839,6 +839,18 @@ per_env_settings:
       a hard-coded dev endpoint). customer.bicep sets the same value on
       deploy; H4b keeps it on upgrades.
 
+  - key: 'AiSpendLimit__MonthlyLimitUsd'
+    per_env_source: 'from-intake-parameter:openai_monthly_limit_usd'
+    iOptionsModule: 'AnalysisServicesModule (AiSpendLimitOptions)'
+    required: false
+    notes: >-
+      Task 254 (owner G37 — "no cap, but allow for a per customer spend limit
+      if desired"). The stamp's OPTIONAL monthly Azure OpenAI spend limit in
+      USD: written only when the run carries intake `openAiMonthlyLimitUsd`;
+      absent = no limit. The BFF refuses model calls with 429 once its
+      estimate reaches it (Services/Ai/Metering/AiSpendLimit). Change or
+      remove it later with scripts/Set-AiSpendLimit.ps1 (both slots).
+
   - key: 'EmailProcessing__DefaultContainerId'
     per_env_source: 'from-h8-output:spe_container_id'
     iOptionsModule: 'EmailProcessingOptions'

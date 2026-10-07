@@ -300,6 +300,22 @@ public sealed class IntakeSchemaProfileParityTests
             "warnAndProceed was the shared-trial waiver; a dedicated stamp's overrun has none (T229)");
     }
 
+    /// <summary>
+    /// T254 (G37): the OpenAI spend limit is OPTIONAL in the schema (no limit is the default) and its bounds are the ones
+    /// POST /api/runs applies (OpenAiMonthlyLimitRule).
+    /// </summary>
+    [Fact]
+    public void T254_OpenAiMonthlyLimit_IsOptional_WithTheIntakeBounds()
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(ResolveRepoRelativePath(IntakeSchemaRelativePath)));
+        var limit = doc.RootElement.GetProperty("properties").GetProperty(Sprk.Provisioning.ControlPlane.Models.IntakeParameterCatalog.OpenAiMonthlyLimitUsd);
+
+        ReadStringArrayFromSchema("required").Should().NotContain("openAiMonthlyLimitUsd", "no limit is the default (G37)");
+        limit.GetProperty("exclusiveMinimum").GetDecimal().Should().Be(0m);
+        limit.GetProperty("maximum").GetDecimal()
+            .Should().Be(Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule.MaxLimitUsd);
+    }
+
     /// <summary>Schema property → POST /api/runs nonSecretParameters key (the skill sends <c>users</c> as <c>usersJson</c>).</summary>
     private static readonly (string SchemaKey, string ApiKey)[] OperatorKeys =
     [

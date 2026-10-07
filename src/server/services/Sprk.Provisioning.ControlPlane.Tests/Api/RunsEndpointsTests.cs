@@ -1367,6 +1367,50 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         }
     }
 
+    // T254 (G37): the OPTIONAL monthly OpenAI spend limit — absent = no limit; present must be usable.
+    [Theory]
+    [InlineData("0")]          // zero reads as "no limit" in the BFF — omit the key instead
+    [InlineData("-5")]
+    [InlineData("lots")]
+    [InlineData("5.")]
+    [InlineData("1,000")]
+    [InlineData("1000000.01")] // above the ceiling: a typo of extra digits
+    [InlineData(" ")]
+    public async Task PostRuns_AnUnusableOpenAiMonthlyLimit_Returns400(string limit)
+    {
+        var (status, body, factory) = await PostT228RunAsync("Model1", p => p["openAiMonthlyLimitUsd"] = limit);
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.BadRequest);
+            ReadProblemErrorCode(body).Should().Be("quota-openai-monthly-limit-invalid");
+            factory.Repository.CreatedRuns.Should().BeEmpty();
+        }
+    }
+
+    [Theory]
+    [InlineData("500")]
+    [InlineData("1250.75")]
+    public async Task PostRuns_AUsableOpenAiMonthlyLimit_IsStoredForH4b(string limit)
+    {
+        var (status, _, factory) = await PostT228RunAsync("Model2", p => p["openAiMonthlyLimitUsd"] = limit);
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.Accepted);
+            factory.Repository.CreatedRuns.Single().Parameters.NonSecret["openAiMonthlyLimitUsd"].Should().Be(limit);
+        }
+    }
+
+    [Fact]
+    public async Task PostRuns_WithoutAnOpenAiMonthlyLimit_IsAccepted_NoLimitIsTheDefault()
+    {
+        var (status, _, factory) = await PostT228RunAsync("Model1", p => p.Remove("openAiMonthlyLimitUsd"));
+        using (factory)
+        {
+            status.Should().Be(HttpStatusCode.Accepted);
+            factory.Repository.CreatedRuns.Single().Parameters.NonSecret.Should().NotContainKey("openAiMonthlyLimitUsd");
+        }
+    }
+
     [Fact]
     public async Task PostRuns_TheRetiredCostEnvelopePolicy_IsAnUnknownParameter()
     {

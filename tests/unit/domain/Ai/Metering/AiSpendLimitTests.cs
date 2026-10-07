@@ -123,6 +123,16 @@ public sealed class AiSpendLimitTests
     }
 
     [Fact]
+    public async Task UnbindableSettings_AreReadAsNoLimit()
+    {
+        var limit = new AiSpendLimit(new UnbindableOptionsMonitor(), _ledger, _time, NullLogger<AiSpendLimit>.Instance);
+
+        await limit.Invoking(l => l.EnsureUnderLimitAsync(CancellationToken.None).AsTask())
+            .Should().NotThrowAsync("a hand-set value that is not a number must not stop every AI call");
+        limit.Invoking(l => l.RecordUsage(1_000, 1_000)).Should().NotThrow();
+    }
+
+    [Fact]
     public void RecordUsage_NeverThrows_WhenTheStoreFails()
     {
         Limit(new ThrowingLedger()).Invoking(l => l.RecordUsage(1_000, 1_000)).Should().NotThrow();
@@ -142,6 +152,16 @@ public sealed class AiSpendLimitTests
             => throw new InvalidOperationException("store unavailable");
 
         public void Add(decimal usd, DateTimeOffset nowUtc) => throw new InvalidOperationException("store unavailable");
+    }
+
+    private sealed class UnbindableOptionsMonitor : IOptionsMonitor<AiSpendLimitOptions>
+    {
+        // What ConfigurationBinder throws for AiSpendLimit:MonthlyLimitUsd = "five hundred".
+        public AiSpendLimitOptions CurrentValue => throw new InvalidOperationException("Failed to convert configuration value");
+
+        public AiSpendLimitOptions Get(string? name) => CurrentValue;
+
+        public IDisposable? OnChange(Action<AiSpendLimitOptions, string?> listener) => null;
     }
 
     private sealed class MutableOptionsMonitor(AiSpendLimitOptions value) : IOptionsMonitor<AiSpendLimitOptions>

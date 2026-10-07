@@ -65,6 +65,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$KvVaultUri,
 
+    [Parameter(Mandatory = $false)]
+    [string]$OpenaiMonthlyLimitUsd = '',
+
     [Parameter(Mandatory = $true)]
     [string]$RedisEndpoint,
 
@@ -145,6 +148,8 @@ $settings = @(
     "SpeAdmin__KeyVaultUri=$KvVaultUri",
     "TENANT_ID=$(Format-KvRef 'TenantId')"
 )
+
+if (-not [string]::IsNullOrWhiteSpace($OpenaiMonthlyLimitUsd)) { $settings += "AiSpendLimit__MonthlyLimitUsd=$OpenaiMonthlyLimitUsd" }
 
 Write-Host ''
 Write-Host '=================================================================='

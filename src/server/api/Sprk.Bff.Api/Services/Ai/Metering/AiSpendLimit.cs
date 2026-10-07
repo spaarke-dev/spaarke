@@ -42,7 +42,7 @@ public sealed class AiSpendLimit
     /// </summary>
     public async ValueTask EnsureUnderLimitAsync(CancellationToken cancellationToken)
     {
-        if (_options.CurrentValue.EffectiveLimitUsd is not { } limit)
+        if (ReadOptions()?.EffectiveLimitUsd is not { } limit)
         {
             return;
         }
@@ -82,7 +82,11 @@ public sealed class AiSpendLimit
             return;
         }
 
-        var options = _options.CurrentValue;
+        if (ReadOptions() is not { } options)
+        {
+            return;
+        }
+
         var usd = (Math.Max(0L, inputTokens) / TokensPerMillion * options.InputUsdPer1MTokens)
                   + (Math.Max(0L, outputTokens) / TokensPerMillion * options.OutputUsdPer1MTokens);
         if (usd <= 0m)
@@ -97,6 +101,23 @@ public sealed class AiSpendLimit
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "AI spend limit: usage could not be recorded (fail-open).");
+        }
+    }
+
+    /// <summary>
+    /// The current options, or null when they cannot be bound — e.g. <c>AiSpendLimit__MonthlyLimitUsd</c> set by hand to
+    /// something that is not a number. That is logged and read as no limit: a bad setting must not stop every AI call.
+    /// </summary>
+    private AiSpendLimitOptions? ReadOptions()
+    {
+        try
+        {
+            return _options.CurrentValue;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex, "AI spend limit: the AiSpendLimit settings cannot be read; no limit is applied until they are fixed.");
+            return null;
         }
     }
 

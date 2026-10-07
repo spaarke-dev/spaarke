@@ -1275,6 +1275,15 @@ public static class RunsEndpoints
             return (cost.RejectionCode, $"nonSecretParameters: {cost.Diagnostic}");
         }
 
+        // T254: the OPTIONAL OpenAI spend limit (G37) — absent = no limit; present must be a usable limit, because H4b
+        // writes it verbatim and the BFF would read a bad value as no limit.
+        parameters.TryGetValue(IntakeParameterCatalog.OpenAiMonthlyLimitUsd, out var openAiLimit);
+        if (Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule.Validate(openAiLimit)
+            is Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitOutcome.Invalid limit)
+        {
+            return (limit.RejectionCode, $"nonSecretParameters: {limit.Diagnostic}");
+        }
+
         return null;
 
         static bool IsBlank(IDictionary<string, string> values, string key)

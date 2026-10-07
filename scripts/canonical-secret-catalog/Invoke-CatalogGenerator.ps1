@@ -164,7 +164,8 @@ $script:AllowedPerEnvSources = @(
     'from-h8-output:spe_container_id',
     'from-intake-parameter:tenant_id',
     'from-intake-parameter:container_type_id',
-    'from-intake-parameter:customer_id'
+    'from-intake-parameter:customer_id',
+    'from-intake-parameter:openai_monthly_limit_usd'
 )
 
 # ---------------------------------------------------------------------------
@@ -399,9 +400,12 @@ function Get-UniquePerEnvSources {
         script's param(...) block. `literal` sources do NOT contribute
         parameters (their value is embedded verbatim).
 
-        Returns objects: { Kind='literal' | 'from-*'; SourceKey; PsVarName }
+        Returns objects: { SourceKey; PsVarName; RawSource; Optional }
         where PsVarName is the PascalCase transform of SourceKey (e.g.
-        'kv_vault_uri' -> 'KvVaultUri', 'tenant_id' -> 'TenantId').
+        'kv_vault_uri' -> 'KvVaultUri', 'tenant_id' -> 'TenantId'), and
+        Optional (task 254) is true when EVERY entry reading the source is
+        `required: false` — H4b passes no argument for such a source when the
+        run has no value, so its parameter must not be mandatory.
     #>
     param([System.Object[]]$SortedPerEnvSettings)
 
@@ -417,10 +421,12 @@ function Get-UniquePerEnvSources {
         if ($unique.Contains($sourceKey)) { continue }
 
         $psVar = ConvertTo-PascalCase -SnakeOrKebabName $sourceKey
+        $readers = @($SortedPerEnvSettings | Where-Object { [string]$_.per_env_source -ceq $src })
         $unique[$sourceKey] = [pscustomobject]@{
             SourceKey = $sourceKey
             PsVarName = $psVar
             RawSource = $src
+            Optional  = (@($readers | Where-Object { $_.required -ne $false }).Count -eq 0)
         }
     }
     return @($unique.Values)
@@ -795,6 +801,10 @@ function New-ConfigureArtifact {
     $sourceToVar = @{}
     foreach ($s in $perEnvSources) { $sourceToVar[$s.SourceKey] = $s.PsVarName }
 
+    # Task 254: a `required: false` entry is written only when the run supplies its value (H4b skips it otherwise and
+    # passes no argument). Its source parameter is optional (default '') and its line is appended conditionally below.
+    $optionalLines = [System.Collections.Generic.List[pscustomobject]]::new()
+
     # Compose the parameter block. Fixed params (RG / AppService / VaultName /
     # IncludeSlots) plus one per unique per-env source.
     $paramLines = [System.Collections.Generic.List[string]]::new()
@@ -808,8 +818,13 @@ function New-ConfigureArtifact {
     [void]$paramLines.Add("    [string]`$VaultName,")
     foreach ($src in $perEnvSources) {
         [void]$paramLines.Add("")
-        [void]$paramLines.Add("    [Parameter(Mandatory = `$true)]")
-        [void]$paramLines.Add("    [string]`$$($src.PsVarName),")
+        if ($src.Optional) {
+            [void]$paramLines.Add("    [Parameter(Mandatory = `$false)]")
+            [void]$paramLines.Add("    [string]`$$($src.PsVarName) = '',")
+        } else {
+            [void]$paramLines.Add("    [Parameter(Mandatory = `$true)]")
+            [void]$paramLines.Add("    [string]`$$($src.PsVarName),")
+        }
     }
     [void]$paramLines.Add("")
     [void]$paramLines.Add("    [bool]`$IncludeSlots = `$true")
@@ -862,6 +877,10 @@ function New-ConfigureArtifact {
             $colon = $src.IndexOf(':')
             $sourceKey = $src.Substring($colon + 1)
             $var = $sourceToVar[$sourceKey]
+            if ($entry.required -eq $false) {
+                [void]$optionalLines.Add([pscustomobject]@{ Key = $key; Var = $var })
+                continue
+            }
             [void]$settingLines.Add([pscustomobject]@{
                 Key  = $key
                 Seq  = $settingLines.Count
@@ -933,6 +952,19 @@ function Format-KvRef {
     [void]$sb.Append(@"
 
 )
+
+"@)
+
+    # Task 254: optional per-env settings — written only when a value was supplied (sorted for determinism).
+    foreach ($opt in @($optionalLines | Sort-Object -Property Key -Culture 'en-US')) {
+        [void]$sb.Append(@"
+
+if (-not [string]::IsNullOrWhiteSpace(`$$($opt.Var))) { `$settings += "$($opt.Key)=`$$($opt.Var)" }
+
+"@)
+    }
+
+    [void]$sb.Append(@"
 
 Write-Host ''
 Write-Host '=================================================================='

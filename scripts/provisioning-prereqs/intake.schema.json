@@ -90,6 +90,12 @@
       "minimum": 0,
       "description": "Required (T229). Projected monthly Azure spend of the customer stamp in USD, for every model. An empty stamp costs about $340/month fixed before usage (2026-10-06 list prices, westus2: App Service S1 Linux $58, AI Search S1 $245, Managed Redis B0 with high availability $23, Service Bus Standard $10); add the expected OpenAI, Document Intelligence, Content Safety, Cosmos DB, storage and log volume. H0 fails the run with quota-cost-overrun (Resumable) when it exceeds the tier ceiling — there is no override; choose the tier that covers it. POST /api/runs refuses a missing or negative value (CostEnvelopeIntake)."
     },
+    "openAiMonthlyLimitUsd": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1000000,
+      "description": "OPTIONAL (T254, owner G37). Monthly Azure OpenAI spend limit of the stamp in USD. Omit it for no limit — the default; never set it to 0. When present, H4b writes AiSpendLimit__MonthlyLimitUsd on both slots and the BFF refuses model calls with 429 (Retry-After = next UTC month) once its list-price estimate reaches it. Change or remove it later with scripts/Set-AiSpendLimit.ps1. POST /api/runs refuses a value that is not a plain decimal in (0, 1000000] (OpenAiMonthlyLimitRule)."
+    },
     "skipExternalPrereqs": {
       "type": "boolean",
       "default": false,

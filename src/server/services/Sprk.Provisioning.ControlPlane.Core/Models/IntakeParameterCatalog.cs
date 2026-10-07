@@ -56,6 +56,13 @@ public static class IntakeParameterCatalog
     /// </summary>
     public const string DataverseEnvUrl = "dataverseEnvUrl";
 
+    /// <summary>
+    /// OPTIONAL monthly Azure OpenAI spend limit of the stamp in USD (task 254, owner G37). Absent = no limit (the default).
+    /// Rule: <see cref="Sprk.Provisioning.ControlPlane.Core.Models.OpenAiMonthlyLimitRule"/>. H4b writes
+    /// <c>AiSpendLimit__MonthlyLimitUsd</c> from it (PerEnvSourceCatalog <c>openai_monthly_limit_usd</c>).
+    /// </summary>
+    public const string OpenAiMonthlyLimitUsd = "openAiMonthlyLimitUsd";
+
     /// <summary>The customer stamp's environment segment — <c>customer.bicep</c> <c>environmentName</c>.</summary>
     public const string EnvironmentName = "environmentName";
 
@@ -125,6 +132,7 @@ public static class IntakeParameterCatalog
         new("region", "Primary Azure region (H0 quota probes)."),
         new(CostEnvelopeIntake.TierParameterKey, "Cost tier whose monthly ceiling H0 compares the estimate with: smb | enterprise | dedicated (budget classes for one dedicated stamp; T229). Required; validated at POST /api/runs (CostEnvelopeIntake)."),
         new(CostEnvelopeIntake.EstimatedMonthlyUsdParameterKey, "Projected monthly Azure spend of the stamp in USD (invariant decimal ≥ 0). Required; validated at POST /api/runs (CostEnvelopeIntake); H0 refuses a run whose estimate exceeds its tier ceiling (T229)."),
+        new(OpenAiMonthlyLimitUsd, "OPTIONAL monthly Azure OpenAI spend limit of the stamp in USD (task 254, owner G37). Absent = no limit (the default). Validated at POST /api/runs (OpenAiMonthlyLimitRule); H4b writes AiSpendLimit__MonthlyLimitUsd on both slots only when present. Change or remove later with scripts/Set-AiSpendLimit.ps1."),
         new("openAiLocation", "Azure OpenAI region passed to customer.bicep (H2a) and checked by H0's OpenAI quota + pin probes (default westus3)."),
         new(ContainerTypeId, "SPE container-type id for the environment (spaarke-constants.yaml). Required GUID (T228 / G19). H4b (SharePointEmbedded__ContainerTypeId setting), H8, H13; selects the owning-app credential (SpeContainerOptions.ContainerTypeOwners) for H0, H8 and T6."),
         new(IdentityPreset, "H11 identity preset: B2BGuest | NativeAccount (design.md D6). Required; validated at POST /api/runs (UserProvisioningIntake)."),

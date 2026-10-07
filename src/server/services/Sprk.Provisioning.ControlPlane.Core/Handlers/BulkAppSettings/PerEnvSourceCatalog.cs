@@ -64,6 +64,9 @@ public static class PerEnvSourceCatalog
         Output("from-h8-output:spe_container_id", HandlerIds.H8, nameof(InterStepState.SpeContainerId), r => r.InterStepState.SpeContainerId),
         Intake("from-intake-parameter:tenant_id", IntakeParameterCatalog.TenantId),
         Intake("from-intake-parameter:container_type_id", IntakeParameterCatalog.ContainerTypeId),
+        // T254: the OPTIONAL monthly OpenAI spend limit (G37) — read by a `required: false` entry, so a run without it
+        // writes nothing (no limit).
+        Intake("from-intake-parameter:openai_monthly_limit_usd", IntakeParameterCatalog.OpenAiMonthlyLimitUsd),
         // T238 (D-14): the run's own customerId — the POST /api/runs body field, validated there by
         // CustomerIdStandard. Read verbatim: no trim, no case change, no derivation (INCOMING-CUSTOMER-
         // RUNTIME-IDENTITY §1.1 — a second derivation is how two components end up with two spellings).
