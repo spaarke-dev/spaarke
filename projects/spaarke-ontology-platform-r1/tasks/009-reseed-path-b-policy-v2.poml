@@ -4,7 +4,7 @@
     <title>Re-seed POL-COMMIT-BUDGET: rename, short name, decision plan, classification-phrased v2</title>
     <phase>0 Foundations</phase>
     <gate>007, 008 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Data seeding against existing tables; the template is checked by the shipped validator.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -80,6 +80,8 @@
     <criterion testable="true">Given v1, when read, then sprk_inforceto equals v2's sprk_inforcefrom and its body, type and template are unchanged.</criterion>
     <criterion testable="true">Negative: v2's template contains no witness value (no sender, date or category name picked from a matching row) and does not state the classification as a fact.</criterion>
   </acceptance-criteria>
+
+  <completion>2026-10-07: v2 (e51906ea-62c2-f111-a05a-7c1e520a989f) published; policy renamed, short name, work type and current version set; v1 inforceto stamped; ValidateForSave passed; 0 Signals at write time; quiet-window knob omitted (024 unmerged). Record: notes/004-seed-policy-rows.md.</completion>
 
   <notes>spec.md FR-16 (amended), FR-48, FR-49, NFR-02; D-14, D-18, D-19, D-23. This is the reconciliation's proposed "008 re-seed", renumbered because 008 is now the role edits.</notes>
 

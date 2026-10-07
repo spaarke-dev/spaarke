@@ -108,3 +108,29 @@ rather than assumed from the notes.
   rows were created — that is task 005's scope.
 - No code changes — this task is pure data, confirmed against root CLAUDE.md §3 (no `.claude/` writes needed)
   and ADR-002 (no plugins; nothing here is a plugin).
+
+---
+
+## v2 re-seed (task 009) - 2026-10-07
+
+**Env**: `spaarkedev1`. Preconditions: 0 `sprk_signal` rows (counted before writing). Task 024 had not merged, so the
+quiet-window knob is omitted (the 14-day default applies); v2's body is v1's byte-for-byte as read back.
+
+**Validation (step 2)**: `PolicyVersionValidator.ValidateForSave("Existence", <v1 body>, <v2 template>)` run from a
+scratch console project against a clean worktree at HEAD `4ddcb27fb` (task 024's uncommitted edits excluded):
+`IsValid=True Reason= Errors=[]`. Scratch worktree removed afterwards.
+
+**Rows written (all read back)**
+
+| Row | GUID | Read-back values |
+|---|---|---|
+| `sprk_policyversion` v2 (new) | `e51906ea-62c2-f111-a05a-7c1e520a989f` | name `POL-COMMIT-BUDGET v2` · versionnumber 2 · ruletype Existence (100000002) · inforcefrom `2026-10-07T08:00:00` (local display; written `2026-10-07T12:00:00Z`) · inforceto null · authoredby Ralph Schroeder · shortheadline and proposedaction copied from v1 · template: "A communication on this matter was classified as a fee or scope change in the last 30 days, and no budget revision was recorded in that time." (literal, no tokens, no witness values) · decisionplan `{"actions":["send-budget-inquiry","revise-budget","approve-variance"],"nextSteps":[]}` |
+| `sprk_policy` POL-COMMIT-BUDGET | `4d204810-61bf-f111-aaaf-0022482913fc` | name "Classified fee or scope change, with no budget revision since" · shortname "Fee or scope change, no budget revision" · worktype Approve or rebudget (100000001) · currentversion = v2 · enabled **No** · priority 500 (both unchanged) · lane Decide · subjecttype Matter |
+| `sprk_policyversion` v1 (stamp only) | `42b3e716-61bf-f111-aaaf-0022482913fc` | inforceto `2026-10-07T08:00:00` = v2 inforcefrom; body, type, template unchanged (identical to the 004 values) |
+
+**For task 036**: the catalog must contain exactly the codes `send-budget-inquiry`, `revise-budget`, `approve-variance`,
+resolved in that order. The spec does not fix the JSON shape of `sprk_decisionplan`; this seed uses
+`{"actions":[...codes in order...],"nextSteps":[]}`. If 036 chooses a different shape, a new version is needed
+(plans are immutable after publish, FR-49) - cheap now with 0 Signals.
+
+**Deviations**: none from the POML.
