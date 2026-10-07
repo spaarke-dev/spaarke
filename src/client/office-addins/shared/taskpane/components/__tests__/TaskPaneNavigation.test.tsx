@@ -116,11 +116,12 @@ describe('TaskPaneNavigation', () => {
 
 // Task 096 (owner UAT round 4 item 6: "Add the send email to the main add-in bar next to 'Find'"): the Email
 // tab follows Find, and is gated on the `canEmailFromPane` CAPABILITY (Word true, Outlook false) — NFR-10.
+// Task 106 (owner UAT round 8): its label is "Send".
 describe('Email tab (task 096) — capability-gated, after Find', () => {
   const labels = (tabs: { label: string }[]) => tabs.map(t => t.label);
 
-  it('Word (canEmailFromPane true): Save · To Do · Find · Email, in that order', () => {
-    expect(labels(getAvailableTabs('word', { canEmailFromPane: true }))).toEqual(['Save', 'To Do', 'Find', 'Email']);
+  it('Word (canEmailFromPane true): Save · To Do · Find · Send, in that order', () => {
+    expect(labels(getAvailableTabs('word', { canEmailFromPane: true }))).toEqual(['Save', 'To Do', 'Find', 'Send']);
   });
 
   it('Outlook (canEmailFromPane false): tabs unchanged — no Email tab', () => {
@@ -128,8 +129,8 @@ describe('Email tab (task 096) — capability-gated, after Find', () => {
   });
 
   it('the gate is the capability, not the host: a host without the capability never gets the tab', () => {
-    expect(labels(getAvailableTabs('word', { canEmailFromPane: false }))).not.toContain('Email');
-    expect(labels(getAvailableTabs('outlook', { canEmailFromPane: true }))).toContain('Email');
+    expect(labels(getAvailableTabs('word', { canEmailFromPane: false }))).not.toContain('Send');
+    expect(labels(getAvailableTabs('outlook', { canEmailFromPane: true }))).toContain('Send');
   });
 
   it('fails closed: no capabilities supplied → no Email tab', () => {
@@ -146,7 +147,7 @@ describe('Email tab (task 096) — capability-gated, after Find', () => {
     const tabs = screen.getAllByRole('tab');
     expect(tabs).toHaveLength(4);
     const find = screen.getByRole('tab', { name: 'Find' });
-    const email = screen.getByRole('tab', { name: 'Email' });
+    const email = screen.getByRole('tab', { name: 'Send' });
     expect(tabs.indexOf(email)).toBe(3);
     expect(tabs.indexOf(find)).toBe(2);
   });
@@ -161,6 +162,49 @@ describe('Email tab (task 096) — capability-gated, after Find', () => {
       />
     );
 
-    expect(screen.queryByRole('tab', { name: /email/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('tab', { name: /send/i })).not.toBeInTheDocument();
+  });
+});
+
+// Task 106 (owner UAT round 8: "the 'send email should be in the tool bar next to Find"): Outlook's Send Email
+// is an ACTION button in the toolbar, directly after the last tab — not a tab, and absent unless supplied.
+describe('Send action (task 106) — Outlook toolbar, after Find', () => {
+  const outlookToolbar = (props: Partial<React.ComponentProps<typeof TaskPaneToolbar>> = {}) =>
+    renderWithProvider(
+      <TaskPaneToolbar
+        hostType="outlook"
+        capabilities={{ canEmailFromPane: false }}
+        isAuthenticated
+        selectedTab="save"
+        {...props}
+      />
+    );
+
+  it('renders a Send button directly after the Find tab and calls the handler', () => {
+    const onSendEmail = jest.fn();
+    outlookToolbar({ onSendEmail });
+
+    const send = screen.getByRole('button', { name: 'Send' });
+    const find = screen.getByRole('tab', { name: 'Find' });
+    // Find precedes Send in document order, and Send is not a tab.
+    expect(find.compareDocumentPosition(send) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('tab', { name: 'Send' })).not.toBeInTheDocument();
+
+    fireEvent.click(send);
+    expect(onSendEmail).toHaveBeenCalledTimes(1);
+  });
+
+  it('is absent (not disabled) when no handler is supplied — nothing to link yet', () => {
+    outlookToolbar();
+    expect(screen.queryByRole('button', { name: 'Send' })).not.toBeInTheDocument();
+  });
+
+  it('is disabled while the compose window is opening', () => {
+    const onSendEmail = jest.fn();
+    outlookToolbar({ onSendEmail, isSendingEmail: true });
+    const send = screen.getByRole('button', { name: 'Send' });
+    expect(send).toBeDisabled();
+    fireEvent.click(send);
+    expect(onSendEmail).not.toHaveBeenCalled();
   });
 });
