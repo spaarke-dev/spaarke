@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="111" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>UAT round 11 (3-6) — a document already in Spaarke opens with the green "Saved to Spaarke" box; filed → its record shown; unfiled → the record picker files it; no "Open Document" button</title>
+    <phase>6 UAT round 11 (2026-10-07)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies production `.tsx`/`.ts` in the Save flow, adds a client call to an existing BFF route, and tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Client-only; reuses an existing authorized BFF route.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>UAT11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Runs beside 110. 111 MUST NOT edit `word/commands/**` or `quickSaveHelpers.ts`. Do not edit `ci-gated-suites.txt`, TASK-INDEX or current-task.</parallel-reason>
+    <deps>—</deps>
+    <tags>frontend, office-addins, typescript, save-flow, unit-test</tags>
+  </metadata>
+
+  <prompt>Owner UAT round 11, items 3-6. Record: `projects/spaarkeai-word-add-in-r1/notes/042-uat-round11-2026-10-07.md`.</prompt>
+
+  <goal>When the open document is already in Spaarke, the Save tab says so clearly with the same green "Saved to Spaarke" box used after a save; if it is filed to a record the box and the "Filed to" card name it; if it is NOT filed, the user can pick a record and file it from the pane.</goal>
+
+  <context>
+    <background>
+      - Identity: `App.tsx` `documentIdentity` (L232-238, resolved via `resolveOpenDocumentIdentity` L330-374 → `POST /api/documents/resolve-identity`, then `applyStampPrecedence`). A URL-resolved document carries `relatedRecord`; a STAMP-ONLY resolution (e.g. after Quick Save) has `relatedRecord: null` and empty names (`documentIdentityService.ts` L286-294) — i.e. the record is UNKNOWN, not "unfiled".
+      - Save tab (`components/SaveFlow.tsx`): `renderSavedBar` (L1515-1569, green box: "Saved to Spaarke", "Filed to …"/"Not filed to a record.", View Document, Copy Link) shows only after a save this session; `renderForm` shows the locked document header (L1746-1751), `RelatedRecordCard` "Filed to" (L1762-1767; `hooks/useRelatedRecord.ts` L73-88), the picker only when NOT version mode (L1769-1792), and the footer "Open Document" (L1985-1994).
+      - Filing route (existing, no BFF change): `PUT /api/v1/documents/{id}` (`Api/DataverseDocumentsEndpoints.cs` L104-277) with `UpdateDocumentRequest` lookups `matterLookup` / `projectLookup` / `invoiceLookup` / `workAssignmentLookup` (`Spaarke.Dataverse/Models.cs` L472-487); document `write` filter + AppendTo on the new parent checked as the caller; it SETs lookups and never clears another slot. Existing client example: `src/solutions/SpaarkeAi/src/components/compose/documentAssociationWrite.ts` L74-108. The add-in already calls `GET /api/v1/documents/{id}` (`hooks/useDocumentProfile.ts` L141).
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="owner item 3">A resolved document (in Spaarke, no save this session) shows the green "Saved to Spaarke" box at the top of the Save tab — same component/styling as after a pane save — with "Filed to {record}" or "Not filed to a record yet", View Document and Copy Link (copy the session's saved URL when there is one, else the document's Spaarke record link built with `openRecordLauncher.buildOpenRecordUrl`; hide Copy Link if neither exists).</constraint>
+    <constraint source="owner items 4-5">Filed: keep the "Filed to" card with the record (and the box names it). Unfiled: replace the empty "Filed to" card with the existing record picker (`RelatedToPicker`, same entity types, search and "+ New" as a new save) plus a "File to record" button that calls `PUT /api/v1/documents/{id}` with the one matching lookup; on success the card/box show the record and the identity's `relatedRecord` is updated (no reload needed); on 403/other errors show a clear message and keep the picker.</constraint>
+    <constraint source="safety — do not double-file">Offer the picker ONLY when the pane KNOWS the document has no record. For a stamp-only identity (relatedRecord unknown) first read the document's actual record from the server (`GET /api/v1/documents/{id}` — check which lookup/name fields it returns); while unknown or if the read fails, show neither the picker nor "not filed" — show a neutral line. Never send a lookup for a document that already has one. If the GET does not return the lookups, STOP and report (do not add BFF code).</constraint>
+    <constraint source="owner item 6">Remove the footer "Open Document" button whenever the green box is shown (it already has View Document). Keep Cancel / Save (version) and "Save as new document".</constraint>
+    <constraint source="D-4/D-5">A version save still re-associates nothing; filing is only the explicit "File to record" action on an unfiled document.</constraint>
+    <constraint source="NFR-10 / ADR-021 / §11">Capability-gated as today (no hostType checks); Fluent v9; reuse `renderSavedBar`, `RelatedRecordCard`, `RelatedToPicker`, `useRelatedRecord` — extend, do not duplicate. Put the PUT call in one small service (e.g. `services/documentFilingService.ts`) with an injected fetch/token like the pane's other services.</constraint>
+    <constraint source="ADR-038">Tests: resolved+filed (box names record, card shown, no Open Document); resolved+unfiled known (box "not filed", picker + File to record → PUT body has exactly one lookup, success updates card, 403 shows message); stamp-only unknown (GET decides; failure → neutral, no picker); a fresh unsaved document unchanged; post-save states unchanged. Existing SaveFlow suites stay green (update assertions only where the owner's change requires).</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion testable="true">Opening a filed document: green box "Saved to Spaarke — Filed to {record}", "Filed to" card, no "Open Document".</criterion>
+    <criterion testable="true">Opening an unfiled (or quick-saved) document: green box "Not filed to a record yet"; picker + "File to record"; filing sends one lookup and then shows the record.</criterion>
+    <criterion testable="true">Unknown record (stamp-only, read failed): neither picker nor "not filed".</criterion>
+    <criterion testable="true">Gates: full add-in jest green; lint 0; typecheck 0 production; test-file type errors not increased.</criterion>
+  </acceptance-criteria>
+
+  <steps mode="directional">
+    <step>Read SaveFlow (render paths above), useSaveFlow, useRelatedRecord, RelatedRecordCard, RelatedToPicker, documentIdentityService, App identity wiring, useDocumentProfile's GET, and the BFF GET/PUT document handlers.</step>
+    <step>Resolve the document's record (identity or GET); filing service.</step>
+    <step>Save tab: green box for resolved docs; filed card vs picker + File to record; remove Open Document.</step>
+    <step>Tests; gates; write `projects/spaarkeai-word-add-in-r1/notes/111-already-saved-state-and-filing.md` (states table, route + authorization used, live checks).</step>
+  </steps>
+
+  <justification>
+    <existing>renderSavedBar, RelatedRecordCard, RelatedToPicker, PUT /api/v1/documents/{id}.</existing>
+    <extension>Yes — existing components shown in a new state; the existing authorized route reused; one small client service for the call.</extension>
+    <cost-of-doing-nothing>Owner UAT round 11 items 3-6: an already-saved document looks unsaved, the record it is filed to is not visible, and a quick-saved document can never be filed from the pane.</cost-of-doing-nothing>
+  </justification>
+
+  <relevant-files>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/components/RelatedRecordCard.tsx</file>
+    <file role="edit">src/client/office-addins/shared/taskpane/hooks/useRelatedRecord.ts</file>
+    <file role="new">src/client/office-addins/shared/taskpane/services/documentFilingService.ts</file>
+  </relevant-files>
+</task>

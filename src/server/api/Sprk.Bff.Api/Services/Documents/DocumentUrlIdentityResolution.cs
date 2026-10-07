@@ -12,6 +12,8 @@ namespace Sprk.Bff.Api.Services.Documents;
 /// FR-01 (spaarkeai-word-add-in-r1 task 012): which <c>sprk_document</c>, if any, does an open document's URL
 /// denote? <c>Office.context.document.url</c> → Graph <c>/shares/u!{base64url}/driveItem</c> (as the caller) →
 /// <c>driveId</c> + <c>itemId</c> → <c>sprk_document</c> via the <c>sprk_graphitemid_uk</c> alternate key.
+/// Task 112 adds the by-ID entry point (<see cref="ResolveByIdAsync"/>) for a document the pane already knows by its
+/// stamp; both entry points build the same <see cref="Resolution"/>.
 /// </summary>
 /// <remarks>
 /// <para><b>Three answers, never two.</b> Resolved; not a Spaarke document (a definitive "no" the pane treats as a
@@ -256,13 +258,75 @@ public static class DocumentUrlIdentityResolution
                 row.Id, shared.DriveId);
         }
 
-        return new Result(
-            new Resolution(
-                row.Id,
-                row.GetAttributeValue<string>(DocumentNameAttribute),
-                row.GetAttributeValue<string>(FileNameAttribute),
-                FirstRelatedRecord(row)),
-            null);
+        return new Result(ToResolution(row), null);
+    }
+
+    /// <summary>
+    /// Task 112 (UAT round 11 item 4): the identity of a <c>sprk_document</c> named by its ID — the same
+    /// <see cref="Resolution"/> <see cref="ResolveAsync"/> builds from a URL, from the same columns and the same four
+    /// direct slots, for a document the pane identified by its stamp rather than by its URL (e.g. after Quick Save).
+    /// Returns <see langword="null"/> when no row has this id; throws 503 (<c>identity_resolution_unavailable</c>) when
+    /// Dataverse cannot answer — the same "absent vs. indeterminate" split as the URL path, never a guess.
+    /// </summary>
+    /// <remarks>
+    /// Called from the <c>GET /api/documents/{documentId}/identity</c> HANDLER only, i.e. after
+    /// <c>DocumentAuthorizationFilter("read")</c> allowed the caller on this id. The read itself is app-only (the
+    /// <see cref="IGenericEntityService"/> seam, as on the URL path); it is the filter, not this read, that decides
+    /// whether the caller may learn anything about the row.
+    /// </remarks>
+    public static async Task<Resolution?> ResolveByIdAsync(
+        Guid documentId,
+        IGenericEntityService dataverse,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        Entity? row;
+        try
+        {
+            row = await dataverse.RetrieveAsync(DocumentLogicalName, documentId, LookupColumns, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // A wrapped cancellation is the caller's, not an outage (same rule as FindDocumentByGraphItemIdAsync).
+            ct.ThrowIfCancellationRequested();
+
+            if (IsByIdNotFound(ex))
+                return null;
+
+            logger.LogWarning(ex,
+                "Document identity: Dataverse could not answer for sprk_document {DocumentId}; reporting unavailable, " +
+                "NOT absent.",
+                documentId);
+            throw Unavailable("Dataverse could not be reached to identify this document. Try again.");
+        }
+
+        return row is null ? null : ToResolution(row);
+    }
+
+    /// <summary>The one place a <c>sprk_document</c> row becomes a <see cref="Resolution"/> — shared by the URL and
+    /// the id paths so the two routes cannot drift on names or slot order.</summary>
+    private static Resolution ToResolution(Entity row)
+        => new(
+            row.Id,
+            row.GetAttributeValue<string>(DocumentNameAttribute),
+            row.GetAttributeValue<string>(FileNameAttribute),
+            FirstRelatedRecord(row));
+
+    /// <summary>
+    /// Whether a BY-ID retrieve failed because the row does not exist: <c>0x80040217 ObjectDoesNotExist</c> anywhere
+    /// in the inner chain (<see cref="RecordContainerResolver.IsRecordNotFound"/>, typed on the fault code). The
+    /// alternate-key code <c>0x80060891</c> and the client's own alternate-key message do not apply to a by-id read,
+    /// so they are deliberately not matched here.
+    /// </summary>
+    private static bool IsByIdNotFound(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (RecordContainerResolver.IsRecordNotFound(current))
+                return true;
+        }
+
+        return false;
     }
 
     /// <summary>The first populated direct association slot, in <see cref="RelatedRecordAttributes"/> order.</summary>

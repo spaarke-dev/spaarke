@@ -355,3 +355,9 @@ shared/taskpane/components/__tests__/SaveFlow.buttonFeedback.test.tsx
 shared/taskpane/components/__tests__/DocumentProfileSection.resize.test.tsx
 # UAT rounds 9-10 (2026-10-07): tasks 107/108 - icon-only tabs at a normal width, labels when wide (both hosts), overflow guard, Expand right-most.
 shared/taskpane/components/__tests__/TaskPaneToolbar.fit.test.tsx
+# UAT round 11 (2026-10-07): task 110 - Quick Save progress/result dialog with the record link; task 111 - a document already in
+# Spaarke opens with the green box, filed card or the filing picker; task 112 - stamp-only identity completed by id.
+word/commands/__tests__/quickSaveDialog.test.ts
+shared/taskpane/components/__tests__/SaveFlow.alreadySaved.test.tsx
+shared/taskpane/services/__tests__/documentFilingService.test.ts
+shared/taskpane/services/__tests__/documentIdentityService.stampById.test.ts
