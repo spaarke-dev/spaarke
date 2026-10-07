@@ -489,6 +489,27 @@ public class AssignedAccessReconciliationJobTests
         Result(result).GetProperty("keptAsLastReader").GetInt32().Should().Be(1);
     }
 
+    /// <summary>
+    /// A Restricted record OWNED by a user flagged external: counted (ownerIsExternal) and logged by the remover for an
+    /// administrator to reassign — never revoked, and it does not keep the run partial (follow-up item 2).
+    /// </summary>
+    [Fact]
+    public async Task ARestrictedRootOwnedByAUserFlaggedExternal_IsCounted_AndTheRunStaysOk()
+    {
+        var matter = Guid.NewGuid();
+        _h.Store.RestrictedRoots[(ExternalGrantRootType.Matter, matter)] = true;
+        _h.Participations.Flags[matter] = new RootRecordFlags(IsSecure: false, IsRestricted: true);
+        var owner = _h.SystemUser(isExternal: true);
+        _h.Shares.Seed("sprk_matter", matter, DataversePrincipalRef.User(owner), 1);
+        _h.Grants.RootOwners[matter] = owner;
+
+        var result = await RunAsync();
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        Result(result).GetProperty("ownerIsExternal").GetInt32().Should().Be(1);
+        _h.Shares.MaskOf("sprk_matter", matter, DataversePrincipalRef.User(owner)).Should().Be(1, "ownership is never touched");
+    }
+
     /// <summary>A Restricted record's removal that cannot be confirmed fails the run (the root is incomplete).</summary>
     [Fact]
     public async Task ARestrictedRoot_WhoseExternalShareCannotBeRemoved_FailsTheRun()

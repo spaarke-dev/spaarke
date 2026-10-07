@@ -278,6 +278,15 @@ public static class ProvisionProjectEndpoint
     internal const string ReasonPrincipalNoAccessUnverifiable = "sdap.provision.principal_no_access_unverifiable";
 
     /// <summary>
+    /// unified-access-control-r2 task 114 (owner round 67): the record is Restricted (internal use only) and this named
+    /// colleague — or, on Make Secure, the record's creator — is flagged <c>sprk_isexternal = true</c>, so
+    /// <c>InternalShareEndpoints.ClassifyEligibility</c> refuses them. Skipped with a per-person warning. When the flag or the
+    /// record's Restricted state cannot be read, the colleague is skipped as <see cref="ReasonPrincipalNoAccessUnverifiable"/>
+    /// ("whether they may access it could not be checked").
+    /// </summary>
+    internal const string ReasonPrincipalExternalOnRestricted = "sdap.provision.principal_external_on_restricted";
+
+    /// <summary>
     /// Task 150 (round 33 items 1 and 5): a named colleague — or, on Make Secure, the record's creator — whose share could
     /// not be written. Reported per person in <c>skippedPrincipals</c> (never silent), the others still shared; the
     /// record stays secured and shared to the caller, who adds the person through Manage Access.
@@ -1090,7 +1099,8 @@ public static class ProvisionProjectEndpoint
         try
         {
             (additionalShared, skippedPrincipals) = await ShareToColleaguesAsync(
-                recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger, traceId, ct);
+                dataverseClient, recordShare, noAccessGuard, request, root, recordId, creatorId, recordCreatorToShare, logger,
+                traceId, ct);
         }
         finally
         {
@@ -3481,7 +3491,75 @@ public static class ProvisionProjectEndpoint
     /// (<see cref="ReasonPrincipalShareFailed"/>) — so the client tells the caller who did not get access, and the
     /// confirmation's "the person who created this record … will keep access" is never broken without saying so.</para>
     /// </remarks>
+    /// <summary>
+    /// Task 114: <paramref name="colleagues"/> without anyone a Restricted record may not be shared with
+    /// (<c>ClassifyEligibility</c> = <c>ExternalOnRestricted</c>); each one left out is added to <paramref name="skipped"/>.
+    /// </summary>
+    private static async Task<List<Guid>> WithoutExternalOnRestrictedAsync(
+        DataverseWebApiClient dataverseClient, SecureRecordRoot root, Guid recordId, List<Guid> colleagues,
+        List<ProvisionSkippedPrincipal> skipped, ILogger logger, string traceId, CancellationToken ct)
+    {
+        const string couldNotCheck =
+            "Whether this person may access this record could not be checked (whether they are flagged as external on a " +
+            "Restricted record), so it was not shared with them. Add them through Manage Access once it can be checked.";
+
+        List<InternalShareEndpoints.SystemUserRow> users;
+        bool restricted;
+        try
+        {
+            users = await dataverseClient.QueryAsync<InternalShareEndpoints.SystemUserRow>(
+                InternalShareEndpoints.SystemUserEntitySet,
+                filter: string.Join(" or ", colleagues.Select(id => $"systemuserid eq {id}")),
+                select: "systemuserid,sprk_isexternal",
+                top: colleagues.Count,
+                cancellationToken: ct);
+
+            restricted = false;
+            if (users.Any(u => colleagues.Contains(u.Id) && u.IsExternal == true))
+            {
+                var rows = await dataverseClient.QueryAsync<RootRow>(
+                    root.EntitySet, filter: $"{root.IdColumn} eq {recordId}", select: "sprk_accesspermission", top: 1,
+                    cancellationToken: ct);
+                restricted = rows.FirstOrDefault() is { } rootRow
+                    ? rootRow.sprk_accesspermission == ExternalParticipationService.AccessPermissionRestricted
+                    : throw new InvalidOperationException("The record did not come back, so whether it is Restricted is unknown.");
+            }
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogWarning(ex,
+                "[PROVISION] Whether the named colleagues of {RecordType} {RecordId} are flagged external on a Restricted record " +
+                "could not be read; none is shared. TraceId={TraceId}", root.WireToken, recordId, traceId);
+            skipped.AddRange(colleagues.Select(id => new ProvisionSkippedPrincipal(id, ReasonPrincipalNoAccessUnverifiable, couldNotCheck)));
+            return new List<Guid>();
+        }
+
+        if (!restricted)
+            return colleagues;
+
+        var kept = new List<Guid>(colleagues.Count);
+        foreach (var id in colleagues)
+        {
+            var row = users.FirstOrDefault(u => u.Id == id);
+            if (row?.IsExternal == true)
+            {
+                logger.LogWarning(
+                    "[PROVISION] Not sharing Restricted {RecordType} {RecordId} with named principal {PrincipalId}: flagged " +
+                    "external (owner round 67). TraceId={TraceId}", root.WireToken, recordId, id, traceId);
+                skipped.Add(new ProvisionSkippedPrincipal(id, ReasonPrincipalExternalOnRestricted,
+                    "This record is Restricted to internal users, and this person is flagged as external, so it was not " +
+                    "shared with them."));
+                continue;
+            }
+
+            kept.Add(id);
+        }
+
+        return kept;
+    }
+
     private static async Task<(int Shared, IReadOnlyList<ProvisionSkippedPrincipal> Skipped)> ShareToColleaguesAsync(
+        DataverseWebApiClient dataverseClient,
         IDataverseRecordShareService recordShare,
         SecureShareNoAccessGuard noAccessGuard,
         ProvisionProjectRequest request,
@@ -3542,6 +3620,13 @@ public static class ProvisionProjectEndpoint
         }
 
         colleagues = allowed;
+        if (colleagues.Count == 0)
+            return (0, skipped);
+
+        // ── Task 114 (owner round 67): the ONE share-eligibility rule — a Restricted record is never shared with a person
+        // flagged external. The flags are read for the colleagues; the record's Restricted state only when one of them is
+        // flagged. A read that fails skips the colleague (ADR-003), as an unverifiable No Access check does.
+        colleagues = await WithoutExternalOnRestrictedAsync(dataverseClient, root, recordId, colleagues, skipped, logger, traceId, ct);
         if (colleagues.Count == 0)
             return (0, skipped);
 
@@ -4029,6 +4114,10 @@ public static class ProvisionProjectEndpoint
     {
         [JsonPropertyName("sprk_issecure")]
         public bool? sprk_issecure { get; set; }
+
+        /// <summary>Task 114: Access Permission (Restricted = 100000002), read only by the colleague step's rule.</summary>
+        [JsonPropertyName("sprk_accesspermission")]
+        public int? sprk_accesspermission { get; set; }
 
         /// <summary>
         /// The container recorded on the record. Half of the marker — see <see cref="IsProvisioned"/>; never a marker

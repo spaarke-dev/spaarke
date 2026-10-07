@@ -116,6 +116,48 @@ public class ProvisionNoAccessTests : IClassFixture<ProvisionProjectTestFixture>
         skipped[0].GetProperty("message").GetString().Should().Contain("No Access list");
     }
 
+    /// <summary>
+    /// unified-access-control-r2 task 114 (owner round 67): the ONE share-eligibility rule — on a RESTRICTED record a named
+    /// colleague flagged external is skipped with its own reason code and a per-person message; a blank-flagged colleague is
+    /// shared; on a record that is NOT Restricted the same external colleague is shared.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Provision_ANamedColleagueFlaggedExternal_IsSkippedOnlyWhenTheRecordIsRestricted(bool restricted)
+    {
+        var projectId = Guid.NewGuid();
+        var external = Guid.NewGuid();
+        var blank = Guid.NewGuid();
+        _fixture.SeedProject(projectId);
+        _fixture.SystemUsers[external] = (false, false);
+        _fixture.SystemUsers[blank] = (false, false);
+        _fixture.ExternalUsers.Add(external);
+        if (restricted)
+            _fixture.RestrictedRecords.Add(projectId);
+        var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            ProvisionRoute, new { projectId, sharePrincipalIds = new[] { external, blank } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        _fixture.Grants.Should().Contain(g => g.Principal.Id == blank, "a blank sprk_isexternal is not external");
+        var skipped = (await BodyOf(response)).GetProperty("skippedPrincipals").EnumerateArray().ToList();
+        if (restricted)
+        {
+            _fixture.Grants.Should().NotContain(g => g.Principal.Id == external, "a Restricted record admits no user flagged external");
+            skipped.Should().ContainSingle();
+            skipped[0].GetProperty("systemUserId").GetGuid().Should().Be(external);
+            skipped[0].GetProperty("reasonCode").GetString().Should().Be(ProvisionProjectEndpoint.ReasonPrincipalExternalOnRestricted);
+            skipped[0].GetProperty("message").GetString().Should().Contain("Restricted");
+        }
+        else
+        {
+            _fixture.Grants.Should().Contain(g => g.Principal.Id == external, "on an ordinary record an external-flagged user is shared with");
+            skipped.Should().BeEmpty();
+        }
+    }
+
     [Fact]
     public async Task Provision_ANamedColleagueWhoseNoAccessCheckCannotBeRead_IsSkippedToo_AndTheOthersAreStillShared()
     {

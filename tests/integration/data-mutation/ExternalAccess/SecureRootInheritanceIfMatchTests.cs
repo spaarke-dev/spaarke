@@ -118,7 +118,7 @@ public class SecureRootInheritanceIfMatchTests : IClassFixture<ProvisionProjectT
             new AssignedAccessTestDoubles.Harness(Ledger).Materializer,
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     [Fact(DisplayName = "158×140: an operator's Declined marker landing before the write-ahead update refuses that update (412), and NO share is written")]

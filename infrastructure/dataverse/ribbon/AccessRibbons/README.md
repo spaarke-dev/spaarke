@@ -77,9 +77,17 @@ effective ribbon, takes the `Command` of the `Mscrm.Form.<entity>.Share` button 
 CommandDefinition, and `Merge-AccessRibbon.ps1 -ShareCommandXml` copies that definition into the RibbonDiff with the
 rule appended — every platform enable and display rule is kept, a re-run replaces the copy (idempotent), and `-Verify`
 checks the live Share command carries the rule. The dry run uses `fixtures/share-command.dry-run-sample.xml`, a
-stand-in that only exercises the transformation (never imported). Not covered: the grid/subgrid Share on selected
-records — the server removes such a share on a Restricted record anyway (the record's save, and the 5-minute
-Assigned-To job: `RestrictedExternalShareRemover`), and Manage Access labels it "External user — no access" until then.
+stand-in that only exercises the transformation (never imported).
+
+The GRID and SUBGRID Share (on selected rows) get the same treatment (task 114 follow-up): `Set-AccessRibbon.ps1 -Apply`
+reads the live ribbon (location `All`), takes the `Command` of `Mscrm.HomepageGrid.<entity>.Share` (required) and
+`Mscrm.SubGrid.<entity>.Share` (when present), and `Merge-AccessRibbon.ps1 -GridShareCommandXml` appends
+`sprk.Access.{{entity}}.ShareAllowedSelection.EnableRule` → `isShareAllowedForSelection(SelectedControlSelectedItemIds,
+SelectedEntityTypeName)`, which hides Share when ANY selected row is Restricted (one batched read; a row that does not come
+back, or a failed read, hides it). A command the form and grid buttons share is refused (one copy cannot carry both rules).
+`-Verify` checks every grid Share button present. Dry run: `fixtures/grid-share-command.dry-run-sample.xml`. The server
+still removes such a share on a Restricted record (the record's save, the 5-minute job: `RestrictedExternalShareRemover`),
+and Manage Access labels it "External user — no access" until then.
 
 ## Why a FlyoutAnchor (realisation choice)
 

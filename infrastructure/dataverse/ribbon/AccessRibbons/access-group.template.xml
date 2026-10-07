@@ -161,6 +161,18 @@
         <CrmParameter Value="PrimaryControl" />
       </CustomRule>
     </EnableRule>
+    <!-- Task 114 follow-up: appended to the PLATFORM's own GRID and SUBGRID Share command(s) (Merge-AccessRibbon.ps1
+         -GridShareCommandXml, copied from the live ribbon). A grid has no single record: hides Share when ANY selected
+         row is Restricted. -->
+    <EnableRule Id="sprk.Access.{{entity}}.ShareAllowedSelection.EnableRule">
+      <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
+      <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />
+      <CustomRule Library="$webresource:sprk_/scripts/access_ribbon.js"
+                  FunctionName="Spaarke.Access.Ribbon.isShareAllowedForSelection" Default="false">
+        <CrmParameter Value="SelectedControlSelectedItemIds" />
+        <CrmParameter Value="SelectedEntityTypeName" />
+      </CustomRule>
+    </EnableRule>
     <EnableRule Id="sprk.Access.{{entity}}.RemoveSecure.EnableRule">
       <CustomRule Library="$webresource:sprk_/scripts/bff_auth.js" FunctionName="isNaN" Default="false" />
       <CustomRule Library="$webresource:sprk_/scripts/assignedaccess_postsave.js" FunctionName="isNaN" Default="false" />

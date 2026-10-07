@@ -22,7 +22,9 @@ namespace Sprk.Bff.Api.Services.ExternalAccess;
 /// — before the materializer, as the sync route orders them — the backstop for a share made after the record became
 /// Restricted (the platform's Share dialog, which the Access ribbon hides on such records). WRITES ON, like task 143's No
 /// Access job: it only ever removes, inside its own rules, and is not the ended-assignment removal the revoke switch below
-/// governs. A share it must keep (S5: a secure record's last reader) is reported and makes the run partial.</para>
+/// governs. A share it must keep (S5: a secure record's last reader) is reported and makes the run partial. A Restricted
+/// record OWNED by a user flagged external is counted (<c>ownerIsExternal</c>) and logged as a warning naming the record —
+/// an administrator reassigns it; it does not make the run partial (ownership is not a share, and is never changed here).</para>
 ///
 /// <para><b>Posture</b> (owner answer R3 / escalation (g), as amended by round 3 R3/R4 "minutes, never hourly"):
 /// registered ENABLED, every 5 minutes, with writes ON for create, convert and renew. Its REMOVAL direction —
@@ -160,6 +162,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
         var restrictedCandidates = 0;
         var externalSharesRemoved = 0;
         var keptAsLastReader = 0;
+        var ownerIsExternal = 0;
 
         var tenant = ImpersonatedRootSetSource.DeploymentCacheTenant(_configuration);
         var cacheTenants = tenant is null ? Array.Empty<string>() : new[] { tenant };
@@ -246,6 +249,8 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                     externalSharesRemoved += report.Removed.Count;
                     writes += report.Removed.Count;
                     keptAsLastReader += report.KeptAsLastReader.Count;
+                    if (report.OwnerIsExternal is not null)
+                        ownerIsExternal++; // the remover logged the record once this run; an administrator reassigns it
                     if (!report.Complete)
                         incompleteRoots.Add(id);
                 }
@@ -359,14 +364,14 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
             "rootlessKeyUnparseable={RootlessKeyUnparseable} rootlessUnresolved={RootlessUnresolved} " +
             "rootlessDeferred={RootlessDeferred} rootlessScanFailed={RootlessScanFailed} " +
             "restrictedCandidates={RestrictedCandidates} externalSharesRemoved={ExternalSharesRemoved} " +
-            "keptAsLastReader={KeptAsLastReader} durationMs={DurationMs} " +
+            "keptAsLastReader={KeptAsLastReader} ownerIsExternal={OwnerIsExternal} durationMs={DurationMs} " +
             "attempt={Attempt} correlationId={CorrelationId}",
             status, candidates, materialized, writes, wouldRevoke, revokeOnChange, incompleteRoots.Count, denyListUnreadable,
             truncated, rotating,
             tenant is not null,
             rootless.Found, rootless.Revoked, rootless.RecordExists, rootless.KeyUnparseable, rootless.Unresolved,
             rootless.Deferred, rootless.ScanFailed,
-            restrictedCandidates, externalSharesRemoved, keptAsLastReader,
+            restrictedCandidates, externalSharesRemoved, keptAsLastReader, ownerIsExternal,
             (long)duration.TotalMilliseconds, context.Attempt, context.CorrelationId);
 
         return new JobRunResult(
@@ -393,6 +398,7 @@ public sealed class AssignedAccessReconciliationJob : IScheduledJob
                     restrictedCandidates,
                     externalSharesRemoved,
                     keptAsLastReader,
+                    ownerIsExternal,
                     attempt = context.Attempt,
                 },
                 ResultJsonOptions));

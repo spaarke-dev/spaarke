@@ -977,7 +977,8 @@ Users secure and unsecure an existing project, matter or work assignment from th
   ribbon and appends `sprk.Access.<entity>.ShareAllowed.EnableRule` (its README). Backups, both server-side: the
   record's save and the 5-minute Assigned-To job remove an external-flagged user's share on a Restricted record
   (`RestrictedExternalShareRemover`), and Manage Access labels such a share "External user — no access" until then.
-  The grid/subgrid Share on SELECTED records is not hidden by this rule; the server-side removal covers it.
+  The grid and subgrid Share on SELECTED rows is hidden when ANY selected row is Restricted (`isShareAllowedForSelection`,
+  the same import).
 
 Order (release order: round 60 item 2): the BFF (tasks 148 + 150) → the **default-team part** of task 144's migration
 (`scripts/Migrate-SecureRecordsToNamedOwnerTeam.ps1` dry run, then `-Apply`, §4.3 — a live gate before the ribbon ships,

@@ -195,6 +195,122 @@ public class RestrictedExternalShareRemoverTests
         MaskOf(internalReader).Should().Be(ViewOnlyMask);
     }
 
+    // ── An external OWNER (follow-up item 2) ───────────────────────────────────
+
+    /// <summary>
+    /// The record's OWNER is flagged external: ownership confers access no revoke removes (Dataverse refuses an app-only
+    /// revoke of the owner's own share, 0x80040223), so their share is not touched and the pass reports it once as
+    /// owner-is-external — a decision, not a failure; other external sharers are still removed. Ownership is not changed.
+    /// </summary>
+    [Fact]
+    public async Task AnExternalOwner_IsReportedOwnerIsExternal_NotRevoked_AndOtherExternalSharersAreStillRemoved()
+    {
+        Restricted();
+        var owner = _h.SystemUser(isExternal: true);
+        var other = _h.SystemUser(isExternal: true);
+        Share(owner);
+        Share(other);
+        _h.Grants.RootOwners[_matter] = owner;
+
+        var report = await RunAsync();
+
+        report.OwnerIsExternal.Should().Be(owner);
+        report.Complete.Should().BeTrue("an external owner is an administrator's action, not an unconfirmed removal");
+        report.Failures.Should().BeEmpty();
+        report.Removed.Should().Equal(other);
+        MaskOf(owner).Should().Be(CollaborateMask, "the owner's share is never revoked here");
+        _h.Shares.WriteLog.Should().NotContain(w => w.Principal == DataversePrincipalRef.User(owner));
+    }
+
+    /// <summary>The positive twin: an INTERNAL owner changes nothing — the external sharer is removed, no owner report.</summary>
+    [Fact]
+    public async Task AnInternalOwner_IsNotReported()
+    {
+        Restricted();
+        var external = _h.SystemUser(isExternal: true);
+        Share(external);
+        _h.Grants.RootOwners[_matter] = _h.SystemUser(isExternal: false);
+
+        var report = await RunAsync();
+
+        report.OwnerIsExternal.Should().BeNull();
+        report.Removed.Should().Equal(external);
+    }
+
+    // ── Serialized with task 143's enforcer (follow-up item 4) ──────────────────
+
+    /// <summary>
+    /// Another removal (task 143's No Access enforcer, /unshare-user) holds the record's per-record lease — the SAME key — so
+    /// nothing is read or removed, and the pass fails (record-busy) for the job to retry.
+    /// </summary>
+    [Fact]
+    public async Task WhileTheRecordsRemovalLeaseIsHeldElsewhere_NothingIsRemoved_AndThePassFailsRecordBusy()
+    {
+        Restricted();
+        var external = _h.SystemUser(isExternal: true);
+        Share(external);
+        var held = await _h.Lease.TryAcquireAsync(
+            NoAccessShareEnforcer.RecordLockId(MatterTable, _matter), occurrenceUtc: null, TimeSpan.FromMinutes(1),
+            CancellationToken.None);
+        held.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted);
+
+        var report = await RunAsync();
+
+        report.Failures.Should().ContainSingle().Which.Kind.Should().Be("record-busy");
+        MaskOf(external).Should().Be(CollaborateMask);
+        _h.Shares.Writes.Should().BeEmpty();
+        _h.Shares.StrictReads.Should().Be(0, "nothing is decided outside the lease");
+    }
+
+    /// <summary>The lease is renewed before every revoke; one that cannot be renewed removes nothing more (record-lock-lost).</summary>
+    [Fact]
+    public async Task WhenTheLeaseCannotBeRenewedBeforeARevoke_NothingIsRemoved_AndItIsAFailure()
+    {
+        Restricted();
+        var external = _h.SystemUser(isExternal: true);
+        Share(external);
+        _h.Lease = new NonRenewingLease();
+
+        var report = await RunAsync();
+
+        report.Removed.Should().BeEmpty();
+        report.Failures.Should().ContainSingle().Which.Kind.Should().Be("record-lock-lost");
+        MaskOf(external).Should().Be(CollaborateMask);
+    }
+
+    /// <summary>The lease is released after the pass: a second pass takes it again (never left held).</summary>
+    [Fact]
+    public async Task TheLeaseIsReleasedAfterThePass()
+    {
+        Restricted();
+        Share(_h.SystemUser(isExternal: true));
+        await RunAsync();
+
+        var again = await _h.Lease.TryAcquireAsync(
+            NoAccessShareEnforcer.RecordLockId(MatterTable, _matter), occurrenceUtc: null, TimeSpan.FromMinutes(1),
+            CancellationToken.None);
+
+        again.Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted);
+    }
+
+    /// <summary>A lease that is granted and released normally but is never renewable (it expired).</summary>
+    private sealed class NonRenewingLease : Spaarke.Scheduling.IScheduledJobLease
+    {
+        private readonly Spaarke.Scheduling.ProcessLocalScheduledJobLease _inner = new();
+
+        public bool IsDistributed => true;
+
+        public Task<Spaarke.Scheduling.ScheduledJobLeaseGrant> TryAcquireAsync(
+            string jobId, DateTimeOffset? occurrenceUtc, TimeSpan duration, CancellationToken cancellationToken)
+            => _inner.TryAcquireAsync(jobId, occurrenceUtc, duration, cancellationToken);
+
+        public Task<bool> RenewAsync(string jobId, string token, TimeSpan duration, CancellationToken cancellationToken)
+            => Task.FromResult(false);
+
+        public Task ReleaseAsync(string jobId, string token, CancellationToken cancellationToken)
+            => _inner.ReleaseAsync(jobId, token, cancellationToken);
+    }
+
     [Fact]
     public async Task ARepeatedPass_OverARecordAlreadyInLine_WritesNothing()
     {

@@ -148,7 +148,7 @@ public class SecureRootInheritanceRound39Tests : IClassFixture<ProvisionProjectT
             new AssignedAccessTestDoubles.Harness(_fixture.InheritedLedger).Materializer,
             scope.ServiceProvider.GetRequiredService<SecureChildShareSynchronizer>(),
             scope.ServiceProvider.GetRequiredService<SecureRootInheritance>(),
-            Caller(), NullLogger<Program>.Instance, CancellationToken.None);
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Caller(), NullLogger<Program>.Instance, CancellationToken.None);
     }
 
     private static (int Status, string? Code, JsonElement Body, string? Detail) Problem(IResult result)

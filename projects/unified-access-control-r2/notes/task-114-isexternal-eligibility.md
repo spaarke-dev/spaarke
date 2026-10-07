@@ -72,7 +72,9 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
   ribbon — the `Command` of the `Mscrm.Form.<entity>.Share` button, never an assumed id — and `-Verify` checks it.
   The dry run uses `fixtures/share-command.dry-run-sample.xml` (a stand-in, never imported). Dry run PASSED for all
   three entities. `assignedaccess_postsave.js` 1.1.0 refreshes the command bar when Access Permission changes. **Cost:
-  small** (one rule, one function, merge/apply/verify additions).
+  small** (one rule, one function, merge/apply/verify additions). **Follow-up:** the GRID and SUBGRID Share get
+  `ShareAllowedSelection.EnableRule` → `isShareAllowedForSelection(SelectedControlSelectedItemIds, SelectedEntityTypeName)`
+  (hidden when ANY selected row is Restricted), copied from the live ribbon (`-GridShareCommandXml`), with `-Verify`.
 - **(b) reconciliation removal** — `AssignedAccessReconciliationJob` scans Restricted roots
   (`AssignedAccessStore.ScanRestrictedRootsAsync`, `sprk_accesspermission eq 100000002`) and runs the remover on each,
   before the materializer. WRITES ON (like task 143's No Access job — it only removes); NOT behind the revoke-on-change
@@ -82,6 +84,20 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
   root's flags; `RecordUserShare.ExternalNoAccess` (additive) is true for an external-flagged user on a Restricted
   record. `AccessGrantModal` shows **"External user — no access"** (`EXTERNAL_USER_NO_ACCESS_LABEL`) for such a row,
   still revocable. TrackingFieldTrio PCF bumped 1.0.35 → 1.0.36 to ship the modal. **Cost: small**.
+
+### Follow-up — every other path that WRITES a share on a project, matter or work assignment
+
+| Path | Rule |
+|---|---|
+| `/share-user` (`InternalShareEndpoints.ShareAsync`) | ✅ `ClassifyEligibility` (amendment 1) |
+| Assigned-To materializer (`WriteShareAsync`) | ✅ `ClassifyEligibility` via the target (amendment 1); its `ModifyAccess` on an ended assignment only narrows |
+| Secure-root inheritance (`SecureChildShareSynchronizer.SyncInheritedRootAsync`, `:879/:885`) | ✅ follow-up item 1: `RestrictedExternalPrincipalsOrThrowAsync` → `ClassifyEligibility(…, rootIsRestricted: true)`; a barred sharee is `InheritedShareAction.Restricted` (never copied); `SecureRootInheritance` records a removed one `Skipped(restricted)`, restored when lifted; an unreadable answer gives nobody anything |
+| `SecureRootInheritance` `:1664` (`ModifyAccess` back to the prior mask) | n/a — narrows only |
+| Provisioning colleagues (`ProvisionProjectEndpoint.ShareToColleaguesAsync`) | ✅ follow-up item 1: `WithoutExternalOnRestrictedAsync` — an external-flagged colleague (or, on Make Secure, the record's creator) on a Restricted record is skipped `sdap.provision.principal_external_on_restricted`; an unreadable flag skips as `principal_no_access_unverifiable` |
+| Provisioning creator / Make Secure caller (`EnsureCreatorShareAsync`, the unconfirmed-move fallback grant) | ⚠️ deliberately exempt: it is the share that keeps a secure record openable (S5's floor). An external-flagged creator on a Restricted record is then the remover's S5 "kept as last reader" case — owner item 3 decides |
+| Provisioning undo (`RestoreCreatorShareAsync`) | n/a — puts back the pre-call state |
+| Secure-child mirror (`SecureChildShareSynchronizer` `:1753/:1759`) | n/a — writes CHILD tables (documents, events, …), never a root; mirrors the root's remaining shares |
+| `PlaybookSharingService`, `DirectThreadAccessService` | n/a — playbooks and communication threads, not roots |
 
 ### Amendment 5 — data step
 - `scripts/Set-ExternalFlagForB2BGuests.ps1` — dry run (default) / `-Apply` / `-Verify`; lists every systemuser whose
@@ -97,12 +113,14 @@ Share dialog shares only with licensed users. **Blank = not external, everywhere
    is reachable only on Restricted + flagged external.
 3. **S5 wins over the Restricted removal** on a secure record whose only readers are external-flagged — the precedent of
    `/unshare-user` and task 143's enforcer. Reported, not silent. ⚠️ Owner may prefer the opposite; see the report.
-4. **The remover is not serialized** against a concurrent removal by task 143's enforcer (that lock is the enforcer's
-   own; `/unshare-user` takes none) — a K-class known limit: two removals in the same instant could each leave the other's
-   last reader. Not seen as reachable in practice.
-5. **An external-flagged OWNER** of a Restricted record is not removable by a share revoke (ownership confers access;
-   Dataverse refuses an app-only revoke of the owner's own share, 0x80040223). Such a revoke is reported as
-   `revoke-not-confirmed` every run until an operator reassigns the record.
+4. **Serialized with task 143's enforcer** (follow-up item 4): the remover takes task 143's per-record lease
+   (`NoAccessShareEnforcer.RecordLockId` on `IScheduledJobLease`, renewed before every revoke) around its share read, S5
+   decision and revokes; `/unshare-user` takes the same lease around its S5 check and revoke (409
+   `sdap.access.user_share.record_busy` while another removal holds it). A held or unreachable lease removes nothing.
+5. **An external-flagged OWNER** (follow-up item 2): ownership confers access no share revoke removes (and Dataverse
+   refuses an app-only revoke of the owner's own share, 0x80040223). The remover reads `_owninguser_value`, leaves that
+   user's share alone, reports `ownerIsExternal` (kind `owner-is-external`) with a warning naming the record, and the job
+   counts it (`ownerIsExternal`) without making the run partial. Ownership is NEVER changed by the BFF.
 6. **`sprk_isexternal` must not be field-secured**: a masked value reads as blank, which is now INTERNAL (owner ruling).
 
 ## 4. Tests
@@ -131,3 +149,7 @@ Unshare of a disabled external account (`Unshare_ADisabledExternalAccountsShare_
 4. **Ribbon**: `Set-AccessRibbon.ps1` dry run → `-Apply` → `-Verify` (the Share command rule rides the existing Access
    group import; same `-SecureTransitionDeployed` rule as before).
 5. **PCF**: TrackingFieldTrio 1.0.36 (the "External user — no access" label) — `npm run build:prod`, solution import.
+6. **Administrator action, after the job's first runs**: a Restricted record OWNED by a user flagged external keeps that
+   user's access by ownership — no share revoke can remove it, and the BFF never reassigns. Look for `owner-is-external`
+   warnings (`[RESTRICTED-EXTERNAL]`) or `ownerIsExternal > 0` in the Assigned-To job's result, and reassign each named
+   record to an internal owner (or team).

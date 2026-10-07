@@ -75,7 +75,8 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
     // flagged record a team OTHER than the Secure Record Owners team owns is unfinished too (the server says which team).
     // 1.5.0 - round 53: another team INSIDE the Secure Record business unit is already isolated (Make Secure hidden); the
     // caller_rights_unverifiable refusal in this script's own words. 1.6.0 - task 114 (owner round 67 amendment 4(a)):
-    // isShareAllowed, the rule that hides the platform's Share command on a Restricted record.
+    // isShareAllowed / isShareAllowedForSelection, the rules that hide the platform's form and grid Share commands on a
+    // Restricted record (any selected Restricted row, on a grid).
     ns.VERSION = "1.6.0";
 
     var LOG = "[Access.Ribbon v" + ns.VERSION + "]";
@@ -220,6 +221,63 @@ Spaarke.Access.Ribbon = Spaarke.Access.Ribbon || {};
                 });
         } catch (error) {
             console.error(LOG, "isShareAllowed failed; Share stays hidden.", error);
+            return false;
+        }
+    };
+
+    /** Ids per selection read - keeps the OData filter far below the URL limit. */
+    var SELECTION_BATCH = 50;
+
+    /**
+     * EnableRule ADDED to the platform's own GRID and SUBGRID Share command (task 114 follow-up; Merge-AccessRibbon.ps1
+     * copies those commands from the live ribbon and appends this rule): Share is hidden when ANY selected row is
+     * Restricted. Reads the selected rows' saved sprk_accesspermission (Xrm.WebApi, batched). A row that does not come
+     * back, or a read that fails, hides Share (fail closed); nothing selected answers true (the platform's own rules keep
+     * Share off then). The server's Restricted remover is the backstop either way.
+     * @param {string[]} selectedIds - SelectedControlSelectedItemIds
+     * @param {string} entityName - SelectedEntityTypeName
+     * @returns {boolean|Promise<boolean>}
+     */
+    ns.isShareAllowedForSelection = function (selectedIds, entityName) {
+        try {
+            var ids = (selectedIds || [])
+                .map(function (id) { return String(id || "").replace(/[{}]/g, "").toLowerCase(); })
+                .filter(function (id) { return id.length > 0; });
+            if (ids.length === 0) {
+                return true;
+            }
+            if (!entityName) {
+                return false;
+            }
+
+            var idColumn = entityName + "id";
+            var batches = [];
+            for (var i = 0; i < ids.length; i += SELECTION_BATCH) {
+                batches.push(ids.slice(i, i + SELECTION_BATCH));
+            }
+
+            return Promise.all(batches.map(function (batch) {
+                var filter = batch.map(function (id) { return idColumn + " eq " + id; }).join(" or ");
+                return Promise.resolve(Xrm.WebApi.retrieveMultipleRecords(
+                    entityName, "?$select=" + idColumn + ",sprk_accesspermission&$filter=(" + filter + ")"));
+            })).then(function (results) {
+                var rows = [];
+                results.forEach(function (result) { rows = rows.concat((result && result.entities) || []); });
+                var seen = {};
+                rows.forEach(function (row) { seen[String(row[idColumn] || "").toLowerCase()] = row; });
+                for (var j = 0; j < ids.length; j++) {
+                    var row = seen[ids[j]];
+                    if (!row || row.sprk_accesspermission === ns.ACCESS_PERMISSION_RESTRICTED) {
+                        return false; // Restricted, or not readable: hidden
+                    }
+                }
+                return true;
+            }, function (error) {
+                console.warn(LOG, "The selected rows' sprk_accesspermission could not be read; Share stays hidden.", error);
+                return false;
+            });
+        } catch (error) {
+            console.error(LOG, "isShareAllowedForSelection failed; Share stays hidden.", error);
             return false;
         }
     };

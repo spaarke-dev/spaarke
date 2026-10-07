@@ -581,8 +581,8 @@ public class SecureChildShareMirrorTests
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest("project", ProjectR, user),
             _shares, _users.Client, _flags, _cache.Object, Sprk.Bff.Api.Tests.AccessControl.AssignedAccessTestDoubles.InertMaterializer(),
-            world.Synchronizer(_shares), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), Context(),
-            NullLogger<Program>.Instance, CancellationToken.None);
+            world.Synchronizer(_shares), Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(),
+            new Spaarke.Scheduling.ProcessLocalScheduledJobLease(), Context(), NullLogger<Program>.Instance, CancellationToken.None);
 
     [Fact]
     public async Task ShareUser_OnASecureRoot_SharesEveryChild_AtTheSharedLevel()

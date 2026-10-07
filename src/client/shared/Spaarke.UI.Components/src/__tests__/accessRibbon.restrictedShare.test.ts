@@ -116,6 +116,67 @@ describe('isShareAllowed — the platform Share command on a Restricted record (
   });
 });
 
+describe('isShareAllowedForSelection — the platform grid / subgrid Share command (follow-up)', () => {
+  const OTHER = 'bbbbbbbb-1111-2222-3333-444444444444';
+
+  it('hides Share when ANY selected row is Restricted, and reads the rows in ONE query', async () => {
+    const retrieveMultiple = jest.fn().mockResolvedValue({
+      entities: [
+        { sprk_matterid: RECORD_ID, sprk_accesspermission: 100000000 },
+        { sprk_matterid: OTHER, sprk_accesspermission: RESTRICTED },
+      ],
+    });
+    const { ribbon } = load();
+    win.Xrm.WebApi.retrieveMultipleRecords = retrieveMultiple;
+
+    await expect(ribbon.isShareAllowedForSelection([`{${RECORD_ID.toUpperCase()}}`, OTHER], 'sprk_matter')).resolves.toBe(false);
+    expect(retrieveMultiple).toHaveBeenCalledTimes(1);
+    expect(retrieveMultiple.mock.calls[0][0]).toBe('sprk_matter');
+    expect(retrieveMultiple.mock.calls[0][1]).toBe(
+      `?$select=sprk_matterid,sprk_accesspermission&$filter=(sprk_matterid eq ${RECORD_ID} or sprk_matterid eq ${OTHER})`
+    );
+  });
+
+  it('shows Share when no selected row is Restricted (blank = Standard)', async () => {
+    const { ribbon } = load();
+    win.Xrm.WebApi.retrieveMultipleRecords = jest.fn().mockResolvedValue({
+      entities: [
+        { sprk_matterid: RECORD_ID, sprk_accesspermission: null },
+        { sprk_matterid: OTHER, sprk_accesspermission: LIMITED },
+      ],
+    });
+
+    await expect(ribbon.isShareAllowedForSelection([RECORD_ID, OTHER], 'sprk_matter')).resolves.toBe(true);
+  });
+
+  it('a selected row that does not come back, or a failed read, hides Share (fail closed)', async () => {
+    const { ribbon } = load();
+    win.Xrm.WebApi.retrieveMultipleRecords = jest.fn().mockResolvedValue({
+      entities: [{ sprk_matterid: RECORD_ID, sprk_accesspermission: 100000000 }],
+    });
+    await expect(ribbon.isShareAllowedForSelection([RECORD_ID, OTHER], 'sprk_matter')).resolves.toBe(false);
+
+    win.Xrm.WebApi.retrieveMultipleRecords = jest.fn().mockRejectedValue(new Error('403'));
+    await expect(ribbon.isShareAllowedForSelection([RECORD_ID], 'sprk_matter')).resolves.toBe(false);
+  });
+
+  it('nothing selected answers true with no read; a large selection is read in batches of 50', async () => {
+    const { ribbon } = load();
+    const retrieveMultiple = jest.fn().mockImplementation((_entity: string, query: string) => {
+      const ids = Array.from(query.matchAll(/sprk_matterid eq ([0-9a-f-]{36})/g)).map(m => m[1]);
+      return Promise.resolve({ entities: ids.map(id => ({ sprk_matterid: id, sprk_accesspermission: 100000000 })) });
+    });
+    win.Xrm.WebApi.retrieveMultipleRecords = retrieveMultiple;
+
+    expect(ribbon.isShareAllowedForSelection([], 'sprk_matter')).toBe(true);
+    expect(retrieveMultiple).not.toHaveBeenCalled();
+
+    const many = Array.from({ length: 120 }, (_, i) => `00000000-0000-0000-0000-${String(i).padStart(12, '0')}`);
+    await expect(ribbon.isShareAllowedForSelection(many, 'sprk_matter')).resolves.toBe(true);
+    expect(retrieveMultiple).toHaveBeenCalledTimes(3);
+  });
+});
+
 describe('assignedaccess_postsave.js 1.1.0 — task 114', () => {
   it('onLoad refreshes the command bar when Access Permission changes', () => {
     const { assigned } = load();
@@ -140,6 +201,19 @@ describe('assignedaccess_postsave.js 1.1.0 — task 114', () => {
 
     expect(text).toContain('Removed access for 2 external users: this record is Restricted to internal users.');
     expect(text).toContain('1 external user still has access: they are the only people who can open this secure record.');
+  });
+
+  it('says when the record is OWNED by a user flagged external (an administrator reassigns it)', () => {
+    const { assigned } = load();
+
+    const text = assigned.summarize({
+      assignedAccess: { entries: [] },
+      noAccess: [],
+      restrictedExternal: { outcome: 'evaluated', removed: [], keptAsLastReader: [], failures: [], ownerIsExternal: 'u9' },
+    });
+
+    expect(text).toContain('owned by a user flagged as external');
+    expect(text).toContain('reassign it to an internal owner');
   });
 
   it('says nothing about it when nothing was removed or kept (and for an older response without the field)', () => {

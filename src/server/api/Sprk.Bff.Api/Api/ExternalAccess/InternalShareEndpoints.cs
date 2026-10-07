@@ -116,6 +116,12 @@ public static class InternalShareEndpoints
     internal const string ReadFailedReasonCode = "sdap.access.user_share.read_failed";
 
     /// <summary>
+    /// Task 114: another access change (task 143's No Access enforcer, the Restricted remover, another unshare) holds the
+    /// record's per-record removal lease, so nothing was removed. 409 — try again in a moment.
+    /// </summary>
+    internal const string RecordBusyReasonCode = "sdap.access.user_share.record_busy";
+
+    /// <summary>
     /// The caller's own rights on the record include nothing grantable from the requested level — or could not be
     /// established at all. You may grant only what you hold (owner decision 2026-09-16).
     /// </summary>
@@ -573,8 +579,10 @@ public static class InternalShareEndpoints
     /// <returns>
     /// 200 with <c>removed = true</c> when a share existed and is confirmed gone, or <c>removed = false</c> when the user
     /// held none (nothing was written). 400 for a missing record or user. 404 for an unknown user. 409 when the record is
-    /// secure and this user is the last one who can open it (task 139, S5). 500 when the user or the shares could not be
-    /// read (nothing was written), or when the removal could not be confirmed.
+    /// secure and this user is the last one who can open it (task 139, S5), or when another access change holds the
+    /// record's removal lease (task 114: <c>record_busy</c> — the lease task 143's enforcer and the Restricted remover
+    /// take). 500 when the user or the shares could not be read (nothing was written), or when the removal could not be
+    /// confirmed.
     /// </returns>
     internal static async Task<IResult> UnshareAsync(
         UnshareRecordWithUserRequest request,
@@ -585,6 +593,7 @@ public static class InternalShareEndpoints
         Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
         SecureChildShareSynchronizer secureChildShares,
         SecureRootInheritance relatedRoots,
+        Spaarke.Scheduling.IScheduledJobLease recordLock,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -649,6 +658,65 @@ public static class InternalShareEndpoints
                    ?? TypedResults.Ok(new UnshareRecordWithUserResponse(systemUserId, Removed: false));
         }
 
+        // ── Task 114: the S5 check and the revoke run under the per-record lease task 143's No Access enforcer and the
+        //    Restricted remover take, so concurrent removals can never each remove "the other" last reader of a secure record ──
+        var lockId = NoAccessShareEnforcer.RecordLockId(ExternalGrantRoot.LogicalNameFor(root.Type), root.Id);
+        Spaarke.Scheduling.ScheduledJobLeaseGrant grant;
+        try
+        {
+            grant = await recordLock.TryAcquireAsync(lockId, occurrenceUtc: null, NoAccessShareEnforcer.RecordLockDuration, ct);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            logger.LogError(ex,
+                "[USER-SHARE] The removal lock for {RootType} {RootId} could not be taken (caller {CallerOid}). Nothing was removed.",
+                root.Type, root.Id, callerOid);
+            return Refused(httpContext, StatusCodes.Status500InternalServerError, NotUnsharedTitle, ReadFailedReasonCode,
+                "This record's access could not be locked for the change, so no share was removed. Try again.");
+        }
+
+        if (grant.Status != Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted || grant.Token is null)
+            return Refused(httpContext, StatusCodes.Status409Conflict, NotUnsharedTitle, RecordBusyReasonCode,
+                "Another access change is under way on this record, so no share was removed. Try again in a moment.");
+
+        try
+        {
+            return await UnshareUnderLockAsync(
+                root, systemUserId, current, recordShare, dataverseClient, participations, cache, assignedAccess,
+                secureChildShares, relatedRoots, httpContext, logger, callerOid, ct);
+        }
+        finally
+        {
+            try
+            {
+                await recordLock.ReleaseAsync(lockId, grant.Token, CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // The lease expires on its own (NoAccessShareEnforcer.RecordLockDuration).
+                logger.LogWarning(ex, "[USER-SHARE] The removal lock for {RootType} {RootId} could not be released.",
+                    root.Type, root.Id);
+            }
+        }
+    }
+
+    /// <summary>The S5 check, the revoke and its read-back for <c>/unshare-user</c> — under the per-record lease.</summary>
+    private static async Task<IResult> UnshareUnderLockAsync(
+        GrantExternalAccessEndpoint.GrantRootResolution root,
+        Guid systemUserId,
+        int current,
+        IDataverseRecordShareService recordShare,
+        DataverseWebApiClient dataverseClient,
+        ExternalParticipationService participations,
+        ITenantCache cache,
+        Sprk.Bff.Api.Services.ExternalAccess.AssignedAccessMaterializer assignedAccess,
+        SecureChildShareSynchronizer secureChildShares,
+        SecureRootInheritance relatedRoots,
+        HttpContext httpContext,
+        ILogger logger,
+        string? callerOid,
+        CancellationToken ct)
+    {
         // ── S5 (owner round 3, task 139 amendment R3): a secure record always keeps someone who can see it ──
         if (RecordShareLevels.CanRead(current)
             && await LastReaderRefusalAsync(

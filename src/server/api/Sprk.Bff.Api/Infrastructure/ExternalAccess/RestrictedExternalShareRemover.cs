@@ -1,4 +1,5 @@
 using Spaarke.Dataverse;
+using Spaarke.Scheduling;
 using Sprk.Bff.Api.Api.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Services.Access;
@@ -65,8 +66,19 @@ public sealed record RestrictedExternalShareReport(
     IReadOnlyList<RestrictedExternalShareFailure> Failures)
 {
     /// <summary>
-    /// Nothing could not be done: the record is not Restricted, or it was evaluated with no failure. A share KEPT by S5 is
-    /// a decision, not a failure (as task 143's enforcer reports it) — callers report it on its own.
+    /// The record's OWNING user, when that user is flagged external (<see cref="OwnerIsExternalKind"/>). Ownership confers
+    /// access that no share revoke can take away (and Dataverse refuses an app-only revoke of the owner's own share,
+    /// 0x80040223), so their share is not touched: an administrator reassigns the record. A decision for a person, not a
+    /// failure — it does not make the pass incomplete. <c>null</c> otherwise.
+    /// </summary>
+    public Guid? OwnerIsExternal { get; init; }
+
+    /// <summary>The stable kind of <see cref="OwnerIsExternal"/> as reports and logs name it.</summary>
+    public const string OwnerIsExternalKind = "owner-is-external";
+
+    /// <summary>
+    /// Nothing could not be done: the record is not Restricted, or it was evaluated with no failure. A share KEPT by S5 and
+    /// an external OWNER are decisions, not failures (as task 143's enforcer reports S5) — callers report them on their own.
     /// </summary>
     public bool Complete =>
         Outcome is RestrictedExternalShareOutcome.NotRestricted or RestrictedExternalShareOutcome.Evaluated
@@ -95,17 +107,22 @@ public sealed record RestrictedExternalShareReport(
 /// apply). A Restricted record that is ALSO secure is reachable only through its shares. When no enabled internal user
 /// with a readable share would remain, nothing is removed and every external-flagged sharer is reported in
 /// <see cref="RestrictedExternalShareReport.KeptAsLastReader"/>: the operator shares the record with an internal person,
-/// and the next pass removes them. Not serialized against a concurrent removal by another component (task 143's per-record
-/// lock is that enforcer's own); <c>/unshare-user</c> takes no lock either.</para>
+/// and the next pass removes them.</para>
+///
+/// <para><b>Serialized with task 143's No Access enforcer</b> per record: the shares are read, S5 decided and the revokes made
+/// under the SAME per-record lease that enforcer takes (<see cref="NoAccessShareEnforcer.RecordLockId"/> on
+/// <see cref="IScheduledJobLease"/>), renewed immediately before every revoke — so the two can never each remove "the other"
+/// last reader. A lease held elsewhere, or a lease store that cannot be reached, removes nothing and is a failure (the
+/// 5-minute job retries). <c>/unshare-user</c> takes the same lease.</para>
+///
+/// <para><b>An external OWNER</b> keeps access by ownership, which no share revoke removes (and Dataverse refuses an
+/// app-only revoke of the owner's own share, 0x80040223): their share is left alone and reported once as
+/// <see cref="RestrictedExternalShareReport.OwnerIsExternal"/> — "reassign the record" — with a warning naming the record.
+/// Ownership is never changed here. When the owner cannot be read the revokes proceed, and a refused one is a failure.</para>
 ///
 /// <para><b>Its children follow.</b> After any removal, <see cref="SecureChildShareSynchronizer.SyncRootAsync"/> mirrors
 /// the record's remaining shares onto its secure children at once (a no-op for an ordinary record); a fan-out that could
 /// not finish is a failure (<c>children-incomplete</c>) — the 2-minute reconcile completes it.</para>
-///
-/// <para><b>Not removable here, and why.</b> Access that is not a direct share — the record's OWNER (Dataverse refuses an
-/// app-only revoke of the owner's own share, 0x80040223, and ownership confers access regardless), a team share, a role —
-/// stays. A revoke Dataverse refuses is reported as a failure naming the user, so the run is never "complete" while such
-/// access remains.</para>
 ///
 /// <para><b>Fails closed</b> (ADR-003): flags that cannot be read, shares that cannot be read, or users whose flag cannot
 /// be read remove nothing and are reported. Nothing here ever grants.</para>
@@ -117,14 +134,19 @@ public sealed class RestrictedExternalShareRemover
     private readonly DataverseWebApiClient _dataverse;
     private readonly ITenantCache _cache;
     private readonly SecureChildShareSynchronizer _secureChildShares;
+    private readonly IScheduledJobLease _recordLock;
     private readonly ILogger<RestrictedExternalShareRemover> _logger;
 
+    /// <param name="recordLock">The atomic lease task 143's enforcer serializes its per-record removals on (the scheduler's
+    /// lease store reused as a keyed mutex under <c>no-access-enforce:{table}:{id}</c> — never a job's dispatch key). The
+    /// same project-scoped §6.5 path-A exception (design.md §9, task 143 r2) covers this second user of it.</param>
     public RestrictedExternalShareRemover(
         ExternalParticipationService participations,
         IDataverseRecordShareService recordShare,
         DataverseWebApiClient dataverse,
         ITenantCache cache,
         SecureChildShareSynchronizer secureChildShares,
+        IScheduledJobLease recordLock,
         ILogger<RestrictedExternalShareRemover> logger)
     {
         _participations = participations ?? throw new ArgumentNullException(nameof(participations));
@@ -132,6 +154,7 @@ public sealed class RestrictedExternalShareRemover
         _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _secureChildShares = secureChildShares ?? throw new ArgumentNullException(nameof(secureChildShares));
+        _recordLock = recordLock ?? throw new ArgumentNullException(nameof(recordLock));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -163,6 +186,91 @@ public sealed class RestrictedExternalShareRemover
         if (!flags.IsRestricted)
             return RestrictedExternalShareReport.Terminal(logical, recordId, RestrictedExternalShareOutcome.NotRestricted);
 
+        // ── Task 143's per-record lease: the reads, S5 and the revokes are decided under it ──
+        var lockId = NoAccessShareEnforcer.RecordLockId(logical, recordId);
+        ScheduledJobLeaseGrant grant;
+        try
+        {
+            grant = await _recordLock.TryAcquireAsync(lockId, occurrenceUtc: null, NoAccessShareEnforcer.RecordLockDuration, ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[RESTRICTED-EXTERNAL] The removal lock for {Type} {RecordId} could not be taken.", logical, recordId);
+            return RestrictedExternalShareReport.Terminal(logical, recordId, RestrictedExternalShareOutcome.Failed,
+                new RestrictedExternalShareFailure(null, "record-lock-unavailable",
+                    "External users' access to this Restricted record was not checked: the lock that keeps a record from " +
+                    "losing its last reader could not be taken. Try again."));
+        }
+
+        if (grant.Status != ScheduledJobLeaseStatus.Granted || grant.Token is null)
+        {
+            return RestrictedExternalShareReport.Terminal(logical, recordId, RestrictedExternalShareOutcome.Failed,
+                new RestrictedExternalShareFailure(null, "record-busy",
+                    "External users' access to this Restricted record was not checked: another access change is under way on " +
+                    "it. Try again in a moment; the 5-minute safety net retries too."));
+        }
+
+        RestrictedExternalShareReport report;
+        try
+        {
+            report = await RemoveUnderLockAsync(rootType, logical, recordId, flags, (lockId, grant.Token), cacheTenants, ct)
+                .ConfigureAwait(false);
+        }
+        finally
+        {
+            try
+            {
+                await _recordLock.ReleaseAsync(lockId, grant.Token, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // The lease expires on its own (NoAccessShareEnforcer.RecordLockDuration).
+                _logger.LogWarning(ex, "[RESTRICTED-EXTERNAL] The removal lock for {Type} {RecordId} could not be released.",
+                    logical, recordId);
+            }
+        }
+
+        // ── Task 149: the record's secure children follow at once (outside the lease: no share of the root is decided) ──
+        if (report.Removed.Count > 0)
+        {
+            SecureChildShareSyncResult children;
+            try
+            {
+                children = await _secureChildShares.SyncRootAsync(logical, recordId, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                _logger.LogError(ex, "[RESTRICTED-EXTERNAL] The children of {Type} {RecordId} could not be updated.", logical, recordId);
+                children = SecureChildShareSyncResult.Failed("the children could not be updated");
+            }
+
+            if (!children.IsComplete)
+            {
+                _logger.LogWarning(
+                    "[RESTRICTED-EXTERNAL] {Type} {RecordId}: external users' shares removed, but its children are {Status} " +
+                    "({Detail}).", logical, recordId, children.Status, children.Detail);
+                report = report with
+                {
+                    Failures = report.Failures.Append(new RestrictedExternalShareFailure(null, "children-incomplete",
+                        "External users' access to this Restricted record was removed, but not every related record (documents, " +
+                        "events, to-dos, communications) could be updated yet. The scheduled safety net finishes it within a few " +
+                        "minutes.")).ToList(),
+                };
+            }
+        }
+
+        _logger.LogInformation(
+            "[RESTRICTED-EXTERNAL] Restricted {Type} {RecordId}: removed {Removed}, kept as last reader {Kept}, external owner " +
+            "{Owner}, failures {Failures}.", logical, recordId, report.Removed.Count, report.KeptAsLastReader.Count,
+            report.OwnerIsExternal?.ToString() ?? "none", report.Failures.Count);
+        return report;
+    }
+
+    private async Task<RestrictedExternalShareReport> RemoveUnderLockAsync(
+        ExternalGrantRootType rootType, string logical, Guid recordId, RootRecordFlags flags,
+        (string Id, string Token) recordLock, IReadOnlyCollection<string> cacheTenants, CancellationToken ct)
+    {
         // ── Its direct user shares, from the STRICT read ───────────────────────
         IReadOnlyList<DataversePrincipalAccess> shares;
         try
@@ -207,11 +315,23 @@ public sealed class RestrictedExternalShareRemover
         if (external.Count == 0)
             return Evaluated(logical, recordId, Array.Empty<Guid>(), Array.Empty<Guid>(), Array.Empty<RestrictedExternalShareFailure>());
 
+        // ── An external OWNER: ownership is not a share — reassign the record (an administrator's act) ──
+        var owner = await ReadOwningUserOrNullAsync(rootType, recordId, ct).ConfigureAwait(false);
+        Guid? externalOwner = owner is { } o && external.Contains(o) ? o : null;
+        if (externalOwner is { } ownerId)
+        {
+            _logger.LogWarning(
+                "[RESTRICTED-EXTERNAL] {Kind}: Restricted {Type} {RecordId} is OWNED by {UserId}, who is flagged external. " +
+                "Ownership confers access no share revoke can remove — reassign the record to an internal owner.",
+                RestrictedExternalShareReport.OwnerIsExternalKind, logical, recordId, ownerId);
+            external.Remove(ownerId);
+        }
+
         // ── S5: a secure record keeps someone who can open it ──────────────────
-        if (flags.IsSecure)
+        if (flags.IsSecure && external.Count > 0)
         {
             var internalReaderRemains = userMasks.Any(p =>
-                !external.Contains(p.Key)
+                !external.Contains(p.Key) && p.Key != externalOwner
                 && RecordShareLevels.CanRead(p.Value)
                 && users.TryGetValue(p.Key, out var u) && u.IsDisabled is false);
             if (!internalReaderRemains)
@@ -220,16 +340,20 @@ public sealed class RestrictedExternalShareRemover
                     "[RESTRICTED-EXTERNAL] Restricted secure {Type} {RecordId}: removing the {Count} external user share(s) would " +
                     "leave nobody internal who can open it; they were KEPT (S5). Share it with an internal person first.",
                     logical, recordId, external.Count);
-                return Evaluated(logical, recordId, Array.Empty<Guid>(), external, Array.Empty<RestrictedExternalShareFailure>());
+                return Evaluated(logical, recordId, Array.Empty<Guid>(), external, Array.Empty<RestrictedExternalShareFailure>())
+                    with { OwnerIsExternal = externalOwner };
             }
         }
 
-        // ── Remove each, confirm by read-back ──────────────────────────────────
+        // ── Remove each, confirm by read-back — the lease proven ours before every revoke ──
         var entitySet = ExternalGrantRoot.BindFor(rootType).EntitySet;
         var removed = new List<Guid>();
         var failures = new List<RestrictedExternalShareFailure>();
         foreach (var userId in external)
         {
+            if (!await RenewLockAsync(recordLock, logical, recordId, userId, failures, ct).ConfigureAwait(false))
+                break; // nothing more is removed without the lease
+
             var principal = DataversePrincipalRef.User(userId);
             int? remaining = null;
             Exception? failure = null;
@@ -268,35 +392,55 @@ public sealed class RestrictedExternalShareRemover
             removed.Add(userId);
         }
 
-        // ── Task 149: the record's secure children follow at once ──────────────
-        if (removed.Count > 0)
-        {
-            SecureChildShareSyncResult children;
-            try
-            {
-                children = await _secureChildShares.SyncRootAsync(logical, recordId, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (!ct.IsCancellationRequested)
-            {
-                _logger.LogError(ex, "[RESTRICTED-EXTERNAL] The children of {Type} {RecordId} could not be updated.", logical, recordId);
-                children = SecureChildShareSyncResult.Failed("the children could not be updated");
-            }
+        return Evaluated(logical, recordId, removed, Array.Empty<Guid>(), failures) with { OwnerIsExternal = externalOwner };
+    }
 
-            if (!children.IsComplete)
-            {
-                _logger.LogWarning(
-                    "[RESTRICTED-EXTERNAL] {Type} {RecordId}: external users' shares removed, but its children are {Status} " +
-                    "({Detail}).", logical, recordId, children.Status, children.Detail);
-                failures.Add(new RestrictedExternalShareFailure(null, "children-incomplete",
-                    "External users' access to this Restricted record was removed, but not every related record (documents, " +
-                    "events, to-dos, communications) could be updated yet. The scheduled safety net finishes it within a few minutes."));
-            }
+    /// <summary>
+    /// Renews the lease immediately before a revoke (task 143 r2's rule): <c>false</c>, with a failure recorded, when it is no
+    /// longer ours or cannot be renewed.
+    /// </summary>
+    private async Task<bool> RenewLockAsync(
+        (string Id, string Token) recordLock, string logical, Guid recordId, Guid userId,
+        List<RestrictedExternalShareFailure> failures, CancellationToken ct)
+    {
+        try
+        {
+            if (await _recordLock.RenewAsync(recordLock.Id, recordLock.Token, NoAccessShareEnforcer.RecordLockDuration, ct)
+                    .ConfigureAwait(false))
+                return true;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogError(ex, "[RESTRICTED-EXTERNAL] The removal lock for {Type} {RecordId} could not be renewed.", logical, recordId);
         }
 
-        _logger.LogInformation(
-            "[RESTRICTED-EXTERNAL] Restricted {Type} {RecordId}: {External} external user share(s); removed {Removed}, " +
-            "failures {Failures}.", logical, recordId, external.Count, removed.Count, failures.Count);
-        return Evaluated(logical, recordId, removed, Array.Empty<Guid>(), failures);
+        failures.Add(new RestrictedExternalShareFailure(userId, "record-lock-lost",
+            "Not every external user's access to this Restricted record was removed: the hold on the record could not be " +
+            "kept. The 5-minute safety net finishes it."));
+        return false;
+    }
+
+    /// <summary>The record's OWNING user, or <c>null</c> when it is team-owned or the owner cannot be read (logged).</summary>
+    private async Task<Guid?> ReadOwningUserOrNullAsync(ExternalGrantRootType rootType, Guid recordId, CancellationToken ct)
+    {
+        var logical = ExternalGrantRoot.LogicalNameFor(rootType);
+        try
+        {
+            var rows = await _dataverse.QueryAsync<OwnerRow>(
+                ExternalGrantRoot.BindFor(rootType).EntitySet,
+                filter: $"{logical}id eq {recordId}",
+                select: "_owninguser_value",
+                top: 1,
+                cancellationToken: ct).ConfigureAwait(false);
+            return rows.FirstOrDefault()?.OwningUser is { } user && user != Guid.Empty ? user : null;
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex,
+                "[RESTRICTED-EXTERNAL] The owner of {Type} {RecordId} could not be read; external users' shares are removed " +
+                "regardless (a refused owner revoke is reported).", logical, recordId);
+            return null;
+        }
     }
 
     /// <summary>Each system user's DIRECT share mask (rows OR-ed; a zero mask carries no direct rights and is left out).</summary>
@@ -341,4 +485,11 @@ public sealed class RestrictedExternalShareRemover
         string logical, Guid recordId, IReadOnlyList<Guid> removed, IReadOnlyList<Guid> kept,
         IReadOnlyList<RestrictedExternalShareFailure> failures)
         => new(logical, recordId, RestrictedExternalShareOutcome.Evaluated, removed, kept, failures);
+
+    /// <summary>The owner projection (a LOOKUP is <c>_x_value</c> in <c>$select</c> — FAILURE-MODES G-13).</summary>
+    private sealed class OwnerRow
+    {
+        [System.Text.Json.Serialization.JsonPropertyName("_owninguser_value")]
+        public Guid? OwningUser { get; set; }
+    }
 }

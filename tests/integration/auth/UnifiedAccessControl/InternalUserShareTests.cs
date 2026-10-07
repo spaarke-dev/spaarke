@@ -948,6 +948,26 @@ public class InternalUserShareTests
         _shares.MaskOf(MatterTable, MatterId, User(UserId)).Should().BeNull();
     }
 
+    /// <summary>
+    /// Task 114: /unshare-user takes the per-record removal lease task 143's No Access enforcer and the Restricted remover take
+    /// — while another removal holds it, nothing is removed (409 record_busy) — and releases it afterwards.
+    /// </summary>
+    [Fact]
+    public async Task Unshare_WhileTheRecordsRemovalLeaseIsHeldElsewhere_Is409RecordBusy_AndRemovesNothing()
+    {
+        _shares.Seed(MatterTable, MatterId, User(UserId), CollaborateMask);
+        var lockId = NoAccessShareEnforcer.RecordLockId(MatterTable, MatterId);
+        var held = await _lease.TryAcquireAsync(lockId, occurrenceUtc: null, TimeSpan.FromMinutes(1), CancellationToken.None);
+
+        ProblemOf(await Unshare(UserId)).Should().Be((409, InternalShareEndpoints.RecordBusyReasonCode));
+        _shares.Writes.Should().BeEmpty();
+
+        await _lease.ReleaseAsync(lockId, held.Token!, CancellationToken.None);
+        OkBody<UnshareRecordWithUserResponse>(await Unshare(UserId)).Removed.Should().BeTrue();
+        (await _lease.TryAcquireAsync(lockId, occurrenceUtc: null, TimeSpan.FromMinutes(1), CancellationToken.None))
+            .Status.Should().Be(Spaarke.Scheduling.ScheduledJobLeaseStatus.Granted, "the unshare released the lease");
+    }
+
     [Fact]
     public async Task Unshare_WithAnUnknownUser_Is404AndWritesNothing()
     {
@@ -1331,8 +1351,11 @@ public class InternalUserShareTests
         InternalShareEndpoints.UnshareAsync(
             new UnshareRecordWithUserRequest(recordType, MatterId, systemUserId),
             _shares, _users.Client, _flags, _cache.Object, AssignedAccess, _children.Synchronizer(_shares),
-            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), AuthenticatedContext(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.SecureRootFilingGateFixtures.InheritanceOverNothing(), _lease, AuthenticatedContext(),
             NullLogger<Program>.Instance, CancellationToken.None);
+
+    /// <summary>Task 114: the per-record removal lease /unshare-user takes (task 143's enforcer and the Restricted remover share it).</summary>
+    private readonly Spaarke.Scheduling.IScheduledJobLease _lease = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
 
     private Task<IResult> List(string? recordType = "matter") =>
         InternalShareEndpoints.ListAsync(

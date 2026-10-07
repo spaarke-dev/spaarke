@@ -506,6 +506,12 @@ internal static class AssignedAccessTestDoubles
         {
         }
 
+        /// <summary>
+        /// Task 114: the OWNING user of a project / matter / work assignment, answered to a root read by id
+        /// (<c>_owninguser_value</c>) — the Restricted remover's external-owner check. A root not listed comes back team-owned.
+        /// </summary>
+        public ConcurrentDictionary<Guid, Guid> RootOwners { get; } = new();
+
         /// <summary>System users the share routes can read (eligible internal people unless seeded otherwise).</summary>
         public ConcurrentDictionary<Guid, Sprk.Bff.Api.Api.ExternalAccess.InternalShareEndpoints.SystemUserRow> SystemUsers { get; } = new();
 
@@ -593,6 +599,10 @@ internal static class AssignedAccessTestDoubles
                 "systemusers" => SystemUsers.Values
                     .Where(u => filter is not null && filter.Contains($"systemuserid eq {u.Id}", StringComparison.OrdinalIgnoreCase))
                     .ToList(),
+                "sprk_projects" or "sprk_matters" or "sprk_workassignments" => RootOwners
+                    .Where(kv => filter is not null && filter.Contains(kv.Key.ToString(), StringComparison.OrdinalIgnoreCase))
+                    .Select(kv => new Dictionary<string, object?> { ["_owninguser_value"] = kv.Value })
+                    .ToList<object>(),
                 _ => throw new InvalidOperationException($"Unexpected query of {entitySetName} through the grant table."),
             };
 
@@ -835,8 +845,11 @@ internal static class AssignedAccessTestDoubles
         /// (<see cref="GrantTable.SystemUsers"/>), cache and child synchronizer.
         /// </summary>
         public RestrictedExternalShareRemover RestrictedRemover => new(
-            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children,
+            Participations, SharesOverride ?? Shares, Grants, Cache.Mock.Object, Children, Lease,
             NullLogger<RestrictedExternalShareRemover>.Instance);
+
+        /// <summary>Task 114: the per-record removal lease the remover shares with task 143's enforcer and /unshare-user.</summary>
+        public Spaarke.Scheduling.IScheduledJobLease Lease { get; set; } = new Spaarke.Scheduling.ProcessLocalScheduledJobLease();
 
         /// <summary>
         /// Task 114: a system user the share routes and the Restricted remover read (an enabled person; the flag as given —

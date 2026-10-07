@@ -226,6 +226,11 @@ Spaarke.AssignedAccess.summarize = function (response) {
             ": this record is Restricted to internal users.");
     }
 
+    if (restricted.ownerIsExternal) {
+        messages.push("This record is owned by a user flagged as external, who keeps access as its owner: ask an " +
+            "administrator to reassign it to an internal owner.");
+    }
+
     var keptExternal = (restricted.keptAsLastReader || []).length;
     if (keptExternal > 0) {
         messages.push(keptExternal + " external " + (keptExternal === 1 ? "user still has" : "users still have") +
