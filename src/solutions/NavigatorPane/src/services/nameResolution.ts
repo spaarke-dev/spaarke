@@ -25,7 +25,7 @@
  */
 
 import type { XrmContext, XrmUtility } from '@spaarke/ui-components';
-import { cleanGuid } from '@spaarke/ui-components';
+import { cleanGuid, getXrm } from '@spaarke/ui-components';
 
 // `xrmContext.ts`'s `XrmUtility` (task 010) does not declare `getEntityMetadata`
 // — narrowed locally + cast at the boundary, mirroring the identical pattern in
@@ -38,18 +38,35 @@ interface XrmUtilityWithEntityMetadata {
   ) => Promise<{ PrimaryNameAttribute?: string }>;
 }
 
+/** A `Utility` that may answer `getEntityMetadata` (the metadata source). */
+export type MetadataUtility = XrmUtility & XrmUtilityWithEntityMetadata;
+
+/**
+ * The default metadata source: the nearest frame whose Xrm has `getEntityMetadata`,
+ * looked up separately from the WebApi frame because metadata is optional here
+ * (callers fall back to a label) — task 081 round 5.
+ */
+export function metadataUtilityFromHost(): MetadataUtility | undefined {
+  return getXrm('metadata')?.Utility as MetadataUtility | undefined;
+}
+
 /**
  * Resolve a record's primary-name value via `getEntityMetadata`
  * (`PrimaryNameAttribute`) + a scoped `retrieveRecord`. Returns `null` on any
  * failure or when the resolved name is blank.
+ *
+ * @param metadataUtility - where `getEntityMetadata` comes from. Defaults to the
+ *   host walk ({@link metadataUtilityFromHost}); a caller that injects its own
+ *   `xrm` can inject the matching metadata source too (task 081 round 6, R5-8).
  */
 export async function resolveRecordName(
   xrm: XrmContext | undefined,
   entityLogicalName: string,
-  entityId: string
+  entityId: string,
+  metadataUtility: MetadataUtility | undefined = metadataUtilityFromHost()
 ): Promise<string | null> {
   if (!xrm?.WebApi) return null;
-  const utility = xrm.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
+  const utility = metadataUtility;
   if (!utility?.getEntityMetadata) return null;
 
   try {

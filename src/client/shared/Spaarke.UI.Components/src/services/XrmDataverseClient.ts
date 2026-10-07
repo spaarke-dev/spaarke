@@ -28,6 +28,7 @@ import type {
   OptionSetOption,
   FetchMultipleResult,
 } from './IDataverseClient';
+import { getXrm } from '../utils/xrmContext';
 
 /**
  * Minimal shape of `Xrm.WebApi` we need. Kept local rather than importing the
@@ -70,10 +71,15 @@ interface XrmLike {
   Utility?: XrmUtilityLike;
 }
 
+/** Whether `utility` can answer `getEntityMetadata` (the 'metadata' capability). */
+function hasEntityMetadata(utility: unknown): utility is XrmUtilityLike {
+  return typeof (utility as { getEntityMetadata?: unknown } | undefined)?.getEntityMetadata === 'function';
+}
+
 const XRM_MISSING_MESSAGE = 'XrmDataverseClient requires Xrm context. Use BffDataverseClient outside MDA.';
 
 /**
- * Resolve the Xrm object from `window` or `window.parent` (Custom Page iframe case).
+ * Resolve the Xrm object via the shared cross-frame `getXrm()` walker.
  *
  * Throws with a clear, actionable error if Xrm is unavailable so devs in Storybook
  * or other non-MDA contexts see the problem at construction / first call instead
@@ -82,28 +88,13 @@ const XRM_MISSING_MESSAGE = 'XrmDataverseClient requires Xrm context. Use BffDat
  * @internal
  */
 function resolveXrm(): XrmLike {
-  // Try window.Xrm first (model-driven app top frame).
-  try {
-    const windowXrm = (window as any).Xrm;
-    if (windowXrm?.WebApi) {
-      return windowXrm as XrmLike;
-    }
-  } catch {
-    // Defensive — if window itself is undefined (SSR), fall through.
+  // Shared cross-frame walker (task 081 / C-8): window -> parent -> top, first
+  // frame whose `Xrm.WebApi` is present. This previously hand-rolled a
+  // window -> parent walk (no top); the throw-on-missing contract is unchanged.
+  const xrm = getXrm();
+  if (xrm?.WebApi) {
+    return xrm as XrmLike;
   }
-
-  // Try window.parent.Xrm (Custom Page in dialog/iframe — parent has Xrm, we don't).
-  try {
-    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
-      const parentXrm = (window.parent as any).Xrm;
-      if (parentXrm?.WebApi) {
-        return parentXrm as XrmLike;
-      }
-    }
-  } catch {
-    // Cross-origin access denied — expected in some iframe configurations.
-  }
-
   throw new Error(XRM_MISSING_MESSAGE);
 }
 
@@ -588,15 +579,17 @@ export class XrmDataverseClient implements IDataverseClient {
     entityName: string,
     attributes?: readonly string[]
   ): Promise<EntityMetadata> {
-    const xrm = this.getXrm();
-    if (!xrm.Utility) {
+    // Metadata needs Xrm.Utility.getEntityMetadata: the nearest frame that has it
+    // (task 081 rounds 4-5), narrowed by a type guard rather than a double cast.
+    const utility = getXrm('metadata')?.Utility;
+    if (!hasEntityMetadata(utility)) {
       throw new Error(`XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`);
     }
 
     const legacyMeta =
       attributes && attributes.length > 0
-        ? await xrm.Utility.getEntityMetadata(entityName, [...attributes])
-        : await xrm.Utility.getEntityMetadata(entityName);
+        ? await utility.getEntityMetadata(entityName, [...attributes])
+        : await utility.getEntityMetadata(entityName);
 
     return projectEntityMetadata(legacyMeta);
   }

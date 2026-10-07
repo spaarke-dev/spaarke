@@ -30,6 +30,8 @@ import {
 // truth. React-free module; relative-source import matches this file's own
 // AiSummaryPopover precedent above.
 import { OOB_MODAL_SIZES } from '../../../../shared/Spaarke.UI.Components/src/utils/adapters/oobModalSizes';
+// The one shared Xrm lookup (task 081 / C-8); React-free module, same relative-source precedent.
+import { getXrm } from '../../../../shared/Spaarke.UI.Components/src/utils/xrmContext';
 
 // React 18/19 types-version drift workaround: see CardChrome.tsx for rationale.
 const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
@@ -385,10 +387,12 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       return;
     }
 
-    // Resolve Xrm across frames — PCF controls run in an iframe; parent frame's
-    // Xrm is required for navigateTo (same resolution `handleExpandClick` uses).
+    // Resolve Xrm across frames with the shared walker (task 081 / C-8). The
+    // former parent-first read existed because a child frame's Xrm can lack
+    // Navigation.navigateTo; the 'navigation' capability skips such a frame,
+    // so the window-first order rule (see getXrm) gives the same answer.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window.parent as any)?.Xrm || (window as any).Xrm;
+    const xrm: any = getXrm('navigation');
     if (!xrm?.Navigation?.navigateTo) {
       logger.warn('VisualHostRoot', 'Xrm.Navigation not available for create wizard');
       dispatchToast(
@@ -601,10 +605,11 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
       return;
     }
 
-    // Resolve Xrm from multiple scopes — PCF controls run in iframes and
-    // custom page navigation may require the parent frame's Xrm object.
+    // Resolve Xrm with the shared walker and the 'navigation' capability
+    // (task 081 / C-8) — see the create-wizard handler above for why the
+    // former parent-first read is no longer needed.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window.parent as any)?.Xrm || (window as any).Xrm;
+    const xrm: any = getXrm('navigation');
 
     if (!xrm?.Navigation?.navigateTo) {
       logger.warn('VisualHostRoot', 'Xrm.Navigation not available');
@@ -612,8 +617,8 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
     }
 
     logger.info('VisualHostRoot', 'Xrm source', {
-      fromParent: !!(window.parent as any)?.Xrm,
-      fromWindow: !!(window as any).Xrm,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      fromWindow: xrm === (window as any).Xrm,
     });
 
     const viewId = chartDefinition.sprk_baseviewid;
@@ -773,8 +778,10 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
   const handleViewListClick = useCallback(() => {
     if (!chartDefinition?.sprk_viewlisttabname) return;
 
+    // Nearest frame with Xrm.Page (shared walker, task 081 round 4) — this read
+    // window.Xrm only.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm;
+    const xrm: any = getXrm('page');
     const tabName = chartDefinition.sprk_viewlisttabname;
 
     logger.info('VisualHostRoot', 'View List click - navigating to tab', {

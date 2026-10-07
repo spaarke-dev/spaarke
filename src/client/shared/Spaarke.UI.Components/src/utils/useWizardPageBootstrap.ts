@@ -24,6 +24,7 @@ import { createXrmUploadService } from './adapters/xrmUploadServiceAdapter';
 import { createXrmNavigationService } from './adapters/xrmNavigationServiceAdapter';
 import { resolveRuntimeConfig, initAuth, authenticatedFetch } from '@spaarke/auth';
 import { cleanGuid } from './guid';
+import { getXrm } from './xrmContext';
 import type { AssociationResult } from '../components/AssociateToStep/types';
 import {
   readHandoffFromUrl,
@@ -174,8 +175,9 @@ export function useWizardPageBootstrap(logPrefix: string): IWizardPageBootstrap 
   const lockAssociation = initialAssociation !== undefined;
 
   const resolveSpeContainerId = React.useCallback(async (): Promise<string> => {
+    // Shared cross-frame walker (task 081 / C-8).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm: any = (window as any).Xrm ?? (window.parent as any)?.Xrm ?? (window.top as any)?.Xrm;
+    const xrm: any = getXrm(['webApi', 'utility']);
     if (!xrm?.WebApi?.retrieveRecord) throw new Error('Xrm.WebApi not available');
     const userId = cleanGuid(xrm.Utility.getGlobalContext().userSettings.userId);
     const user = await xrm.WebApi.retrieveRecord('systemuser', userId, '?$select=_businessunitid_value');

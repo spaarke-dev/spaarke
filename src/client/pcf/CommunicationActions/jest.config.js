@@ -19,6 +19,14 @@ module.exports = {
     // dist/ build required).
     '^@spaarke/communication-components/logic/actions$':
       '<rootDir>/../../shared/Spaarke.Communication.Components/src/logic/actions/index.ts',
+    // task 081 (C-8): `launchCreate.ts` now has a VALUE import of `getXrm`
+    // from `@spaarke/ui-components` (previously had none). The real
+    // package's `dist/index.js` is ESM (`export *`), which this config's
+    // `.tsx?`-only `transform` does not cover inside `node_modules` — map
+    // to a test-local stand-in that maps each used export to its real TS
+    // source module and THROWS for any un-mapped export (never undefined).
+    // See `test-mocks/spaarke-ui-components.js`.
+    '^@spaarke/ui-components$': '<rootDir>/test-mocks/spaarke-ui-components.js',
   },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],
   transform: {

@@ -11,6 +11,7 @@
 // `useForceSimulation`/`d3-force` (ESM-only, breaks ts-jest without extra
 // transform config). oobModalSizes.ts has zero other dependencies.
 import { OOB_MODAL_SIZES } from '@spaarke/ui-components/utils/adapters/oobModalSizes';
+import { getXrm } from '@spaarke/ui-components/utils/xrmContext';
 import type { SearchDomain } from '../types';
 
 // =============================================
@@ -38,8 +39,8 @@ export function openEntityRecord(recordId: string, domain: SearchDomain): void {
   const entityName = DOMAIN_TO_ENTITY[domain];
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window as any).Xrm as typeof Xrm | undefined;
+    // Shared cross-frame walker (task 081 / C-8).
+    const xrm = getXrm('navigation') as unknown as typeof Xrm | undefined;
     if (!xrm?.Navigation?.navigateTo) {
       console.warn('[EntityRecordDialog] Xrm.Navigation not available — cannot open record dialog.');
       return;

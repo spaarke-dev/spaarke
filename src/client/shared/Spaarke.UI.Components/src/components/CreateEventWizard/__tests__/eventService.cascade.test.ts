@@ -82,6 +82,8 @@ function makeDataService(
  */
 function stubXrmUser(userId: string | null) {
   (window as unknown as { Xrm: unknown }).Xrm = {
+    // `WebApi` is required by the shared `getXrm()` walker (task 081 / C-8).
+    WebApi: {},
     Utility: {
       getGlobalContext: () => ({
         userSettings: { userId: userId },

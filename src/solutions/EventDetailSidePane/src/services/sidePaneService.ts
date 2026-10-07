@@ -7,7 +7,7 @@
  * @see design.md - Event Detail Side Pane specification
  */
 
-import { OOB_MODAL_SIZES } from '@spaarke/ui-components';
+import { OOB_MODAL_SIZES, getXrm } from '@spaarke/ui-components';
 
 /**
  * Xrm.App.sidePanes type definition (subset needed)
@@ -24,54 +24,27 @@ interface IXrmNavigation {
 }
 
 /**
- * Get the Xrm.App.sidePanes object from window context
+ * Get Xrm.App.sidePanes: the shared cross-frame walker (task 081 / C-8) with
+ * the 'sidePanes' capability, so the nearest frame exposing App.sidePanes
+ * wins (was a parent-first parent/window read; see `getXrm` for the order rule).
  */
 function getXrmSidePanes(): IXrmSidePanes | null {
-  try {
-    // Try window.parent.Xrm first (Custom Page in iframe)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.App?.sidePanes) {
-      return parentXrm.App.sidePanes as IXrmSidePanes;
-    }
-
-    // Try window.Xrm
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.App?.sidePanes) {
-      return windowXrm.App.sidePanes as IXrmSidePanes;
-    }
-
+  const sidePanes = getXrm('sidePanes')?.App?.sidePanes;
+  if (!sidePanes) {
     console.warn("[SidePaneService] Xrm.App.sidePanes not available");
     return null;
-  } catch (error) {
-    console.error("[SidePaneService] Error accessing Xrm.App.sidePanes:", error);
-    return null;
   }
+  return sidePanes as unknown as IXrmSidePanes;
 }
 
 /**
- * Get the Xrm.Navigation object from window context
+ * Get Xrm.Navigation from the nearest frame whose Navigation has `openUrl`
+ * (shared cross-frame walker, task 081 / C-8).
  */
 function getXrmNavigation(): IXrmNavigation | null {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const parentXrm = (window.parent as any)?.Xrm;
-    if (parentXrm?.Navigation) {
-      return parentXrm.Navigation as IXrmNavigation;
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const windowXrm = (window as any)?.Xrm;
-    if (windowXrm?.Navigation) {
-      return windowXrm.Navigation as IXrmNavigation;
-    }
-
-    return null;
-  } catch (error) {
-    console.error("[SidePaneService] Error accessing Xrm.Navigation:", error);
-    return null;
-  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const navigation = getXrm((x: any) => typeof x.Navigation?.openUrl === 'function')?.Navigation;
+  return navigation ? (navigation as unknown as IXrmNavigation) : null;
 }
 
 /**
@@ -124,8 +97,10 @@ const EVENT_MODAL_FORM_ID = "90d2eff7-6703-f111-8407-7ced8d1dc988";
  */
 export function openEventRecord(eventId: string): void {
   try {
+    // Shared cross-frame walker (task 081 / C-8): nearest frame that can
+    // navigateTo, else the nearest that can openForm (the fallback below).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const xrm = (window.parent as any)?.Xrm ?? (window as any)?.Xrm;
+    const xrm: any = getXrm('navigation') ?? getXrm('openForm');
 
     if (!xrm?.Navigation?.navigateTo) {
       console.warn("[SidePaneService] Xrm.Navigation.navigateTo not available, falling back to openForm");

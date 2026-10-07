@@ -47,6 +47,18 @@ Investigation into why projects went from 20–50 tasks/day (Jan–Mar) to 1–4
 
 Unchanged by decision: BFF publish-size per-task measurement (§10.4) stays per-task. Moving it to CI would let growth accumulate unseen before it reached CI.
 
+###### 2026-10-06 — Blocking Tier 1 Xrm Capability Guard + router docs-only fix; ci-cd skill updated (ontology task 081 rounds 7–8, PR #1309)
+
+`.claude/skills/ci-cd/SKILL.md`: the Tier 1 row adds `Xrm Capability Guard (getXrm AST scan)`, a BLOCKING job in
+`ci-tier1-blocking.yml` that runs on `src/client/**`, `src/solutions/**` or workflow changes, and the advisory
+DataGrid External-Host Gate, which the row was missing. The troubleshooting table gains its row. The job is an
+owner-approved (2026-10-06) CLAUDE.md §6.5 path-A exception to the workflow's "do not extend without spec
+amendment" (ci-cd-unit-test-remediation-r1 FR-A02), scoped to this one job. Extended 2026-10-06 (owner-approved,
+same §6.5 path-A exception, PR #1309 round 8): `ci-router.yml` now classifies a diff as docs-only, and skips Tier 1,
+only when every changed file matches the existing documentation globs (a `dorny/paths-filter`
+`predicate-quantifier: 'every'` step), closing the hole where client code plus any `*.md` or `projects/**` file
+skipped all of Tier 1 including the Xrm capability guard.
+
 ###### 2026-10-06 — FAILURE-MODES G-13 extended to `$filter` (unified-access-control-r2 dev live gates)
 
 `.claude/FAILURE-MODES.md` G-13: a lookup in a `$filter` must be `_<name>_value`. The section now records the No Access reader defect (every deny-list read was a 400 on dev and failed closed, which blocked secure provisioning) and the provisioning seeder case (#1318). It also records the lesson: a test double that matches on query text can't catch a wrong query, because it copies the same mistake.

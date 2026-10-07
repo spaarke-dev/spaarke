@@ -34,7 +34,7 @@ import type {
   ILookupValue,
   FieldChangeCallback,
 } from "../../../types/FormConfig";
-import { getXrm } from "../../../utils/xrmAccess";
+import { getXrmWithWebApiAnd } from "../../../utils/xrmAccess";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -92,7 +92,7 @@ const useStyles = makeStyles({
 async function openLookupDialog(
   targets: string[]
 ): Promise<ILookupValue | null> {
-  const xrm = getXrm();
+  const xrm = getXrmWithWebApiAnd('lookupObjects');
   if (!xrm?.Utility?.lookupObjects) {
     console.error("[LookupField] Xrm.Utility.lookupObjects not available");
     return null;

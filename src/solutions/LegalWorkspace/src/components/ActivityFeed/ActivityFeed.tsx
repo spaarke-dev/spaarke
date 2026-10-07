@@ -36,6 +36,7 @@ import { ArrowClockwiseRegular } from "@fluentui/react-icons";
 import { FilterBar } from "./FilterBar";
 import { ActivityFeedList } from "./ActivityFeedList";
 import { ActivityFeedEmptyState } from "./EmptyState";
+import { isFeedEventOverdue } from "./feedDueAccent";
 import { useEvents, sortEvents } from "../../hooks/useEvents";
 import { useActivityFeedFilters } from "../../hooks/useActivityFeedFilters";
 import { EventFilterCategory } from "../../types/enums";
@@ -78,8 +79,9 @@ export { LazyAISummaryDialog, AISummaryFallback };
 
 // ---------------------------------------------------------------------------
 // Client-side filter predicates
-// These mirror queryHelpers.buildEventCategoryFilter for offline filtering
-// against the locally cached All-filter event list.
+// Offline filtering against the locally cached All-filter event list. Most
+// mirror queryHelpers.buildEventCategoryFilter; Overdue uses the feed's
+// local-day rule (isFeedEventOverdue), not the server's UTC-midnight filter.
 // ---------------------------------------------------------------------------
 
 function applyClientFilter(
@@ -87,9 +89,6 @@ function applyClientFilter(
   filter: EventFilterCategory
 ): IEvent[] {
   if (filter === EventFilterCategory.All) return events;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
 
   return events.filter((event) => {
     const type = (event.eventTypeName ?? "").toLowerCase();
@@ -99,10 +98,9 @@ function applyClientFilter(
       case EventFilterCategory.HighPriority:
         return priorityScore > 70;
 
-      case EventFilterCategory.Overdue: {
-        if (!event.sprk_duedate) return false;
-        return new Date(event.sprk_duedate) < today;
-      }
+      case EventFilterCategory.Overdue:
+        // Same rule as the card accent and the badge count (task 081 round 4).
+        return isFeedEventOverdue(event.sprk_duedate);
 
       case EventFilterCategory.Alerts:
         return type === "notification" || type === "status change" || type === "reminder";

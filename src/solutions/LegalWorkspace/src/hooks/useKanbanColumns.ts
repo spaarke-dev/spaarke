@@ -22,6 +22,7 @@ import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { ITodo } from '../types/entities';
 import type { TodoColumn } from '../types/enums';
 import type { IKanbanColumn } from '@spaarke/ui-components';
+import { parseDueDate, daysBetweenLocalMidnight } from '@spaarke/ui-components';
 import type { IWebApi } from '../types/xrm';
 
 // ---------------------------------------------------------------------------
@@ -95,14 +96,12 @@ function assignColumnByScore(
   _todayThreshold: number,
   _tomorrowThreshold: number
 ): TodoColumn {
-  if (!todo.sprk_duedate) return 'Future';
-  const due = new Date(todo.sprk_duedate);
-  if (isNaN(due.getTime())) return 'Future';
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
-  const msPerDay = 24 * 60 * 60 * 1000;
-  const diffDays = Math.round((dueDay.getTime() - today.getTime()) / msPerDay);
+  // DateOnly `sprk_duedate` parses as LOCAL midnight (shared `parseDueDate` —
+  // `new Date("YYYY-MM-DD")` is UTC midnight, a day early in US zones) and the
+  // day difference is the shared calendar-day helper (U5) — task 081.
+  const due = parseDueDate(todo.sprk_duedate);
+  if (!due) return 'Future';
+  const diffDays = daysBetweenLocalMidnight(new Date(), due);
   if (diffDays <= 0) return 'Today';
   if (diffDays === 1) return 'Tomorrow';
   return 'Future';

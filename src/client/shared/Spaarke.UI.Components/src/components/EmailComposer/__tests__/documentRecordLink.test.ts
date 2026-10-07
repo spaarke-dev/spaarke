@@ -10,7 +10,11 @@
 import { buildSpaarkeRecordLink, createXrmEmailComposeHandlers } from '../createXrmEmailComposeHandlers';
 
 const mockGetXrm = jest.fn();
-jest.mock('../../../services/xrmGlobal', () => ({ getXrm: () => mockGetXrm() }));
+// Task 081 replaced `services/xrmGlobal` with the one shared lookup in `utils/xrmContext` (merge of master into #1309).
+jest.mock('../../../utils/xrmContext', () => ({
+  ...jest.requireActual('../../../utils/xrmContext'),
+  getXrm: () => mockGetXrm(),
+}));
 // The upload path is not under test; stubbing it keeps this suite off the SDAP client package graph.
 jest.mock('../../../services/EntityCreationService', () => ({ EntityCreationService: class {} }));
 

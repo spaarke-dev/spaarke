@@ -74,7 +74,7 @@ export interface UseMyAssistantResult {
 
 function defaultDisplayName(): string | undefined {
   try {
-    const xrm = getXrm();
+    const xrm = getXrm('utility');
     return xrm?.Utility?.getGlobalContext().userSettings.userName;
   } catch {
     return undefined;

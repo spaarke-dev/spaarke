@@ -41,6 +41,10 @@ import { navigateToEntityRecordSurfaceAsync } from '../wizardLaunchers';
 // ---------------------------------------------------------------------------
 
 interface StubXrm {
+  // `WebApi` is required by the shared `getXrm()` walker that
+  // `resolveXrmNavigation` now delegates to (task 081 / C-8) — the real host
+  // shape always carries it alongside `Navigation`.
+  WebApi: Record<string, unknown>;
   Navigation: {
     navigateTo: jest.Mock;
   };
@@ -48,7 +52,7 @@ interface StubXrm {
 
 function installXrmStub(resolveValue: unknown): StubXrm['Navigation']['navigateTo'] {
   const navigateTo = jest.fn().mockResolvedValue(resolveValue);
-  (window as unknown as { Xrm?: StubXrm }).Xrm = { Navigation: { navigateTo } };
+  (window as unknown as { Xrm?: StubXrm }).Xrm = { WebApi: {}, Navigation: { navigateTo } };
   return navigateTo;
 }
 
@@ -134,7 +138,7 @@ describe('navigateToEntityRecordSurfaceAsync', () => {
 
     it('returns launched+cancelled when navigateTo rejects (dialog error)', async () => {
       const navigateTo = jest.fn().mockRejectedValue(new Error('dialog error'));
-      (window as unknown as { Xrm?: StubXrm }).Xrm = { Navigation: { navigateTo } };
+      (window as unknown as { Xrm?: StubXrm }).Xrm = { WebApi: {}, Navigation: { navigateTo } };
 
       const outcome = await navigateToEntityRecordSurfaceAsync({
         entityName: 'sprk_todo',

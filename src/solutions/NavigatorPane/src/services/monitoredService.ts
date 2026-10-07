@@ -114,8 +114,10 @@ function formatEntityFallbackLabel(entityLogicalName: string): string {
  * Never throws — a missing/failed lookup returns `null`, and the caller falls
  * back to {@link formatEntityFallbackLabel}.
  */
-async function resolvePrimaryNameField(xrm: XrmContext, entityLogicalName: string): Promise<string | null> {
-  const utility = xrm.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
+async function resolvePrimaryNameField(entityLogicalName: string): Promise<string | null> {
+  // getEntityMetadata is optional here (callers fall back to a label): ask for the
+  // nearest frame that has it, separately from the WebApi frame (task 081 round 5).
+  const utility = getXrm('metadata')?.Utility as (XrmUtility & XrmUtilityWithEntityMetadata) | undefined;
   if (!utility?.getEntityMetadata) return null;
   try {
     const meta = await utility.getEntityMetadata(entityLogicalName);
@@ -144,7 +146,7 @@ async function listMonitoredForEntity(
 
   try {
     const idField = `${entityLogicalName}id`;
-    const primaryNameField = await resolvePrimaryNameField(xrm, entityLogicalName);
+    const primaryNameField = await resolvePrimaryNameField(entityLogicalName);
     const selectFields = [idField, ...(primaryNameField ? [primaryNameField] : [])];
     const query =
       `?$select=${selectFields.join(',')}` +
@@ -191,7 +193,7 @@ async function listMonitoredForEntity(
  * shows nothing) even though it no longer appears in the query filter.
  */
 export async function listMonitoredByMe(options: ListMonitoredByMeOptions = {}): Promise<MonitoredItem[]> {
-  const xrm = getXrm();
+  const xrm = getXrm(['webApi', 'utility']);
   const ownerId = xrm?.Utility?.getGlobalContext?.()?.userSettings?.userId;
   if (!xrm?.WebApi || !ownerId) return [];
 
