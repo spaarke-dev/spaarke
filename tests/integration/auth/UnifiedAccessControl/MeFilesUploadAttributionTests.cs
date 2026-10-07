@@ -40,7 +40,7 @@ public class MeFilesUploadAttributionTests : IClassFixture<MeFilesUploadAttribut
         _host.Recorded.Clear();
     }
 
-    [Fact(DisplayName = "Attach fix (K3): /me/files records the created item for the caller, in the caller's tenant and the drive it landed in")]
+    [Fact(DisplayName = "Attach fix (K3, F1): /me/files records the created item for the caller, in the caller's tenant and drive — from the LONG-FORM claims production delivers")]
     public async Task MeFiles_RecordsTheItemForTheCaller()
     {
         var response = await _host.Client().PutAsync("/api/obo/me/files/notes.txt", new ByteArrayContent([1]));
@@ -100,8 +100,14 @@ public class MeFilesUploadAttributionTests : IClassFixture<MeFilesUploadAttribut
         {
             protected override Task<AuthenticateResult> HandleAuthenticateAsync()
             {
+                // ONLY the long-form claim types (verifier F1, 2026-10-07): the BFF keeps inbound claim-type mapping ON,
+                // so in production "oid" / "tid" arrive as these. A short-form-only read records no binding.
                 var identity = new ClaimsIdentity(
-                    [new Claim("oid", TestSessionOwner.Oid), new Claim("tid", TenantId)], SchemeName);
+                    [
+                        new Claim(Sprk.Bff.Api.Infrastructure.Authentication.CallerResolution.ObjectIdSchemaClaim, TestSessionOwner.Oid),
+                        new Claim(Sprk.Bff.Api.Infrastructure.Authentication.TenantResolution.TenantIdSchemaClaim, TenantId),
+                    ],
+                    SchemeName);
                 return Task.FromResult(AuthenticateResult.Success(new AuthenticationTicket(new ClaimsPrincipal(identity), SchemeName)));
             }
         }

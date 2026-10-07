@@ -942,7 +942,7 @@ public static class DataverseDocumentsEndpoints
         {
             var result = await relocator.AttachFileAsync(
                 documentId, CallerResolution.ResolveObjectId(context.User), request.DriveId, request.ItemId, ct,
-                callerTenantId: context.User.FindFirst("tid")?.Value);
+                callerTenantId: Sprk.Bff.Api.Infrastructure.Authentication.TenantResolution.ResolveTenantId(context.User));
 
             if (result.Outcome == Sprk.Bff.Api.Services.Documents.PointerAttachOutcome.Attached)
             {

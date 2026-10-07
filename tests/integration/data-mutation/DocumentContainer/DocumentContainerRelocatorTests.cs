@@ -602,11 +602,15 @@ public class DocumentContainerRelocatorTests
         world.Updates.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Verifier F1 scenario 1: A opened a session for the name and never uploaded; B uploads + attaches it; A then attaching B's item is REFUSED")]
-    public async Task F1_AnotherUsersAttachedItem_AtTheSessionPath_IsRefused()
+    // Verifier F1 (2026-10-07) — the attack WAS: a binding recorded for a session's PATH before any item existed, matched
+    // later by whatever item stood at that path. The upload-session route records nothing now (pinned at the ROUTE by
+    // RecordKeyedUploadRouteChildRecordTests.UploadSession_RecordsNothing); what the attach must guarantee is that the
+    // ONLY thing that admits a BFF-uploaded item is an item binding naming the caller. These two pin that, for the two
+    // states the old attack exploited.
+
+    [Fact(DisplayName = "Verifier F1: after ANOTHER user's item binding was consumed by their attach, the caller cannot attach that item — nothing else admits it")]
+    public async Task ABffItem_WhoseOnlyBindingWasAnotherUsersAndIsConsumed_IsRefused()
     {
-        // The upload SESSION records nothing (there is no path binding any more). B's small PUT recorded B's ITEM binding;
-        // B's attach consumed it. A has no binding for this item, so A cannot attach it through any route.
         var world = AttachWorld();
         var rig = new Rig(world);
         await rig.Attribution.RecordItemAsync(Tenant, OtherUser, CustomerA1Container, Item);
@@ -616,15 +620,14 @@ public class DocumentContainerRelocatorTests
         world.Updates.Should().BeEmpty();
     }
 
-    [Fact(DisplayName = "Verifier F1 scenario 2: no binding survives a failed session open, so an existing app-only item at that path is REFUSED")]
-    public async Task F1_AnExistingAppOnlyItemAtAPath_IsRefused()
+    [Fact(DisplayName = "Verifier F1: an app-only item that NO upload bound to anyone (another BFF writer's, or one a session created) cannot be attached")]
+    public async Task ABffItem_WithNoBindingAtAll_IsRefused()
     {
-        // A's session open was refused by Graph (409) — nothing was recorded for A. The item at that path was written by
-        // another BFF writer that records no item binding. A cannot attach it.
         var world = AttachWorld();
         var rig = new Rig(world);
 
-        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader);
+        (await Attach(rig)).Outcome.Should().Be(PointerAttachOutcome.NotTheUploader,
+            "the document's own creator, holding Write, still cannot attach an app-only file nobody's upload bound to them");
         world.Updates.Should().BeEmpty();
     }
 

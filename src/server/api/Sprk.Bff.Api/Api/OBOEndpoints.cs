@@ -654,7 +654,9 @@ public static class OBOEndpoints
         HttpContext ctx, ILogger logger, CancellationToken ct)
     {
         var caller = CallerResolution.ResolveObjectId(ctx.User);
-        var tenant = ctx.User.FindFirst("tid")?.Value;
+        // Both claim forms: the BFF keeps inbound claim-type mapping ON, so in production "tid" arrives as
+        // http://schemas.microsoft.com/identity/claims/tenantid (and "oid" as its objectidentifier twin — CallerResolution).
+        var tenant = Sprk.Bff.Api.Infrastructure.Authentication.TenantResolution.ResolveTenantId(ctx.User);
         try
         {
             if (string.IsNullOrWhiteSpace(caller) || string.IsNullOrWhiteSpace(tenant))
